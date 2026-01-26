@@ -10,24 +10,41 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     
     const response = await axios.get(monitor.url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Upgrade-Insecure-Requests': '1',
+        'Referer': 'https://www.google.com/'
       },
-      timeout: 10000
+      timeout: 30000,
+      maxRedirects: 5,
+      validateStatus: (status) => true 
     });
 
+    console.log(`Response status for ${monitor.url}: ${response.status}`);
+
     const $ = cheerio.load(response.data);
+    
+    // Debug: Log indicators of blocking
+    if (response.status === 403 || response.status === 429 || response.data.includes("Cloudflare") || response.data.includes("Access Denied")) {
+      console.warn(`Access restricted for ${monitor.url} (Status ${response.status})`);
+      return { changed: false, currentValue: monitor.currentValue };
+    }
+
     const element = $(monitor.selector);
     let newValue: string | null = null;
 
     if (element.length > 0) {
       // Try to get text, or value if it's an input
-      newValue = element.text().trim() || element.val() as string || null;
+      newValue = element.first().text().trim() || element.first().val() as string || null;
+      console.log(`Successfully scraped value for monitor ${monitor.id}: "${newValue}"`);
     } else {
-      console.warn(`Selector ${monitor.selector} not found on ${monitor.url}`);
+      console.warn(`Selector "${monitor.selector}" not found on ${monitor.url}. Page content length: ${response.data.length}`);
+      // Log some of the page to help the user debug
+      console.log("Available IDs on page:", Array.from(new Set(response.data.match(/id="[^"]+"/g))).slice(0, 10));
       newValue = null; 
-      // Option: treat "not found" as a change? or just null? 
-      // For now, if selector is invalid, we might get null. 
-      // If previously it was "Something", and now "null", that is a change.
     }
 
     const oldValue = monitor.currentValue;
