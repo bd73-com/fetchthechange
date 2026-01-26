@@ -1,30 +1,17 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import { type Monitor } from "@shared/schema";
 import { authStorage } from "../replit_integrations/auth/storage";
 
-// Create transporter
-// If no env vars, it will fail to send but we catch errors.
-// Replit doesn't provide SMTP by default, user must provide.
-// Or we can use a built-in Replit email service if available (none standard yet besides external connectors).
-
 export async function sendNotificationEmail(monitor: Monitor, oldValue: string | null, newValue: string | null) {
-  if (!process.env.SMTP_HOST) {
-    console.log("SMTP_HOST not set. Skipping email.");
+  if (!process.env.RESEND_API_KEY) {
+    console.log("RESEND_API_KEY not set. Skipping email.");
     console.log(`[MOCK EMAIL] To: User of Monitor ${monitor.id}`);
     console.log(`[MOCK EMAIL] Subject: Change detected on ${monitor.name}`);
     console.log(`[MOCK EMAIL] Body: Value changed from "${oldValue}" to "${newValue}"`);
     return;
   }
 
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    secure: process.env.SMTP_SECURE === "true",
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
+  const resend = new Resend(process.env.RESEND_API_KEY);
 
   try {
     const user = await authStorage.getUser(monitor.userId);
@@ -33,8 +20,8 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
       return;
     }
 
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || '"Web Monitor" <noreply@example.com>',
+    await resend.emails.send({
+      from: process.env.RESEND_FROM || 'onboarding@resend.dev',
       to: user.email,
       subject: `Change detected: ${monitor.name}`,
       text: `
@@ -61,8 +48,8 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
         <p><a href="https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co">View Dashboard</a></p>
       `
     });
-    console.log(`Email sent to ${user.email} for monitor ${monitor.id}`);
+    console.log(`Email sent to ${user.email} for monitor ${monitor.id} via Resend`);
   } catch (error) {
-    console.error("Error sending email:", error);
+    console.error("Error sending email via Resend:", error);
   }
 }
