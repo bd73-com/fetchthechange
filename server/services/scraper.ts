@@ -25,6 +25,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
 
     console.log(`Response status for ${monitor.url}: ${response.status}`);
 
+    // If we're getting a small response or bot detection, the page might be dynamic
+    if (response.data.length < 5000 || response.data.includes("id=\"root\"") || response.data.includes("id=\"__next\"")) {
+      console.log(`Page ${monitor.url} looks dynamic (React/Next.js). Cheerio might fail if content is JS-rendered.`);
+    }
+
     const $ = cheerio.load(response.data);
     
     // Debug: Log indicators of blocking
