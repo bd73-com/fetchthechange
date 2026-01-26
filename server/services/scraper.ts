@@ -8,82 +8,101 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
   try {
     console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
     
+    // Attempt scraping with more advanced headers to bypass some static protections
     const response = await axios.get(monitor.url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.google.com/',
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
-        'Upgrade-Insecure-Requests': '1',
-        'Referer': 'https://www.google.com/'
+        'Upgrade-Insecure-Requests': '1'
       },
       timeout: 30000,
-      maxRedirects: 5,
-      validateStatus: (status) => true 
+      validateStatus: () => true
     });
 
     console.log(`Response status for ${monitor.url}: ${response.status}`);
 
-    // If we're getting a small response or bot detection, the page might be dynamic
-    if (response.data.length < 5000 || response.data.includes("id=\"root\"") || response.data.includes("id=\"__next\"")) {
-      console.log(`Page ${monitor.url} looks dynamic (React/Next.js). Cheerio might fail if content is JS-rendered.`);
-    }
-
     const $ = cheerio.load(response.data);
     
-    // Debug: Log indicators of blocking
+    // Check for common blocking indicators
     if (response.status === 403 || response.status === 429 || response.data.includes("Cloudflare") || response.data.includes("Access Denied")) {
-      console.warn(`Access restricted for ${monitor.url} (Status ${response.status})`);
+      console.warn(`Access restricted for ${monitor.url} (Status ${response.status}). Potential bot detection.`);
       return { changed: false, currentValue: monitor.currentValue };
     }
 
-    const element = $(monitor.selector);
     let newValue: string | null = null;
 
+    // Primary: Use the selector
+    const element = $(monitor.selector);
     if (element.length > 0) {
-      // Try to get text, or value if it's an input
       newValue = element.first().text().trim() || element.first().val() as string || null;
-      console.log(`Successfully scraped value for monitor ${monitor.id}: "${newValue}"`);
-    } else {
-      console.warn(`Selector "${monitor.selector}" not found on ${monitor.url}. Page content length: ${response.data.length}`);
-      // Log some of the page to help the user debug
-      console.log("Available IDs on page:", Array.from(new Set(response.data.match(/id="[^"]+"/g))).slice(0, 10));
-      newValue = null; 
+      if (newValue) console.log(`Found value via selector for monitor ${monitor.id}: "${newValue}"`);
+    }
+
+    // Fallback 1: JSON-LD (Common for e-commerce)
+    if (!newValue) {
+      const scripts = $('script[type="application/ld+json"]');
+      scripts.each((_, el) => {
+        try {
+          const data = JSON.parse($(el).html() || "");
+          const items = Array.isArray(data) ? data : [data];
+          for (const item of items) {
+            const val = item.offers?.price || item.price || item.name || item.headline;
+            if (val) {
+              newValue = String(val);
+              console.log(`Found value in JSON-LD for monitor ${monitor.id}: "${newValue}"`);
+              return false; // break each
+            }
+          }
+        } catch (e) {}
+        return !newValue;
+      });
+    }
+
+    // Fallback 2: Meta Tags
+    if (!newValue) {
+      newValue = $('meta[property="og:price:amount"]').attr('content') || 
+                 $('meta[name="twitter:data1"]').attr('content') ||
+                 $('meta[property="og:title"]').attr('content') || null;
+      if (newValue) console.log(`Found value in meta tags for monitor ${monitor.id}: "${newValue}"`);
+    }
+
+    // Fallback 3: preload_data (Jomashop specific)
+    if (!newValue && response.data.includes('id="preload_data"')) {
+      try {
+        const preloadScript = $('#preload_data').html();
+        if (preloadScript) {
+           const data = JSON.parse(preloadScript);
+           if (data?.product?.final_price) {
+             newValue = String(data.product.final_price);
+             console.log(`Found value in preload_data for monitor ${monitor.id}: "${newValue}"`);
+           }
+        }
+      } catch (e) {}
     }
 
     const oldValue = monitor.currentValue;
-    const changed = newValue !== oldValue;
+    const changed = newValue !== null && newValue !== oldValue;
+
+    if (newValue === null) {
+      console.warn(`Scraping failed to find any value for monitor ${monitor.id}. Page content length: ${response.data.length}`);
+    }
 
     // Update last checked
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
-      currentValue: newValue ?? undefined // Drizzle handling of null/undefined
+      currentValue: newValue ?? (oldValue || undefined)
     });
 
     if (changed) {
       console.log(`Change detected for monitor ${monitor.id}! Old: ${oldValue}, New: ${newValue}`);
-      
-      // Record change
       await storage.addMonitorChange(monitor.id, oldValue, newValue);
-      
-      // Update last changed timestamp
-      await storage.updateMonitor(monitor.id, {
-        lastChanged: new Date()
-      });
+      await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
 
-      // Send email if enabled
       if (monitor.emailEnabled) {
-        // We need to fetch the user email to send the notification
-        // This requires accessing the auth storage or joining tables.
-        // For simplicity, we'll implement a helper or assume storage can do it.
-        // Let's implement getUserEmail in storage or just query here.
-        // Actually, storage.getMonitor doesn't return user email.
-        // I should add a method to get user by id or include it.
-        // I will use db directly here to get user email, or import authStorage.
-        // But authStorage is in another file. 
-        // I'll assume we can get it.
-        
         await sendNotificationEmail(monitor, oldValue, newValue);
       }
     }
