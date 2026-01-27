@@ -61,7 +61,10 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     let newValue: string | null = null;
 
     // Strategy 1: The user-defined CSS Selector
-    const element = $(monitor.selector);
+    const selector = monitor.selector.trim();
+    const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
+    const element = $(isClassName ? `.${selector}` : selector);
+    
     if (element.length > 0) {
       // Try text, then val, then title attribute, then content, then data-price
       newValue = element.first().text().trim() || 
@@ -74,7 +77,14 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     }
 
     // Strategy 2: Common Product Schema (JSON-LD)
-    if (!newValue) {
+    // If we only found the title, we should keep looking for the price
+    const isTitleOnly = newValue && (
+      newValue === $('title').text().trim() || 
+      newValue === $('meta[property="og:title"]').attr('content') ||
+      newValue.length > 50 // Titles are usually longer than prices
+    );
+
+    if (!newValue || isTitleOnly) {
       $('script[type="application/ld+json"]').each((_, el) => {
         try {
           const content = $(el).html();
