@@ -75,7 +75,7 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <LayoutDashboard className="h-6 w-6 text-primary" />
-            <h1 className="text-xl font-display font-bold">ChangeMonitor</h1>
+            <h1 className="text-xl font-display font-bold">FetchTheChange</h1>
           </div>
           
           <div className="flex items-center gap-4">
