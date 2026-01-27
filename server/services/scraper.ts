@@ -63,11 +63,12 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     // Strategy 1: The user-defined CSS Selector
     const element = $(monitor.selector);
     if (element.length > 0) {
-      // Try text, then val, then title attribute, then content
+      // Try text, then val, then title attribute, then content, then data-price
       newValue = element.first().text().trim() || 
                  element.first().val() as string || 
                  element.first().attr('title') || 
                  element.first().attr('content') ||
+                 element.first().attr('data-price') ||
                  null;
       if (newValue) console.log(`Found value via selector: "${newValue}"`);
     }
@@ -86,7 +87,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
                         item.offers?.[0]?.price || 
                         item.offers?.availability || 
                         item.price || 
-                        item.name;
+                        item.name ||
+                        (item['@type'] === 'Offer' ? item.price : null);
             if (val) {
               newValue = String(val);
               console.log(`Found value via JSON-LD: "${newValue}"`);
@@ -95,6 +97,23 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
           }
         } catch (e) {}
         return !newValue;
+      });
+    }
+
+    // Strategy 2.5: Look for price in any script tag (common for SPAs)
+    if (!newValue) {
+      $('script').each((_, el) => {
+        const content = $(el).html();
+        if (!content) return true;
+        
+        // Look for "price":1234 or "price":"1234"
+        const match = content.match(/"price"\s*:\s*"?([0-9.,]+)"?/i);
+        if (match && match[1]) {
+          newValue = match[1];
+          console.log(`Found value via regex in script: "${newValue}"`);
+          return false;
+        }
+        return true;
       });
     }
 
