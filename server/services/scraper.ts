@@ -30,7 +30,26 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
       console.warn(`Fetch failed with status ${response.status}`);
     }
 
-    const html = await response.text();
+    // Strategy 4: Fallback to a proxy or simpler request if needed
+    // In this environment, we can't easily change global maxHeaderSize for fetch/undici
+    // but we can try to use axios with a specific configuration if fetch fails
+    // However, let's try to improve the fetch call first by reducing requested headers
+    // and potentially using a different dispatcher if we were in a full node env.
+    // Since we are limited, we will try to catch the header overflow and return a helpful message.
+    
+    let html = "";
+    try {
+      html = await response.text();
+    } catch (e: any) {
+      if (e.code === 'UND_ERR_HEADERS_OVERFLOW') {
+        console.error("Header overflow detected. Site sent too much data in headers.");
+        // Fallback: If we can't get the HTML, we can't scrape.
+        // We'll return a special value to indicate the failure reason to the user indirectly
+        return { changed: false, currentValue: "Error: Site blocked request (Header Overflow)" };
+      }
+      throw e;
+    }
+    
     const $ = cheerio.load(html);
     
     let newValue: string | null = null;
