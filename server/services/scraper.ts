@@ -62,42 +62,52 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
 
     // Strategy 1: The user-defined CSS Selector
     const selector = monitor.selector.trim();
+    // Prioritize direct classes if common patterns
     const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
-    const element = $(isClassName ? `.${selector}` : selector);
+    const effectiveSelector = isClassName ? `.${selector}` : selector;
     
-    if (element.length > 0) {
-      // Try text, then val, then title attribute, then content, then data-price
-      newValue = element.first().text().trim() || 
-                 element.first().val() as string || 
-                 element.first().attr('title') || 
-                 element.first().attr('content') ||
-                 element.first().attr('data-price') ||
-                 null;
-      
-      if (newValue) {
-        console.log(`Found value via selector: "${newValue}"`);
-        // If the selector matched something that looks exactly like the product title, 
-        // we should try to look for price-specific children.
-        const pageTitle = $('title').text().trim();
-        const ogTitle = $('meta[property="og:title"]').attr('content');
-        if (newValue === pageTitle || newValue === ogTitle || newValue.includes("Breitling Superocean 44")) {
-           // Look for anything that looks like a price inside this element
-           const pricePattern = /\$[0-9,.]+/;
-           const text = element.text();
-           const match = text.match(pricePattern);
-           if (match) {
-             newValue = match[0];
-             console.log(`Extracted price from selector text via regex: "${newValue}"`);
-           } else {
-             const priceChild = element.find('.now-price, [data-price], .price, .product-price, [itemprop="price"]').first();
-             if (priceChild.length > 0) {
-               const childValue = priceChild.text().trim() || priceChild.attr('content');
-               if (childValue) {
-                 newValue = childValue;
-                 console.log(`Found more specific price child: "${newValue}"`);
-               }
+    // Specifically handle Jomashop now-price which is often deeply nested or duplicated
+    if (monitor.url.includes('jomashop.com') && (selector.includes('now-price') || selector.includes('price'))) {
+      const jomaPrice = $('.now-price').first().text().trim() || 
+                        $('.price').first().text().trim() ||
+                        $('[itemprop="price"]').attr('content');
+      if (jomaPrice && jomaPrice.includes('$')) {
+        newValue = jomaPrice;
+        console.log(`Found Jomashop price via specific override: "${newValue}"`);
+      }
+    }
+
+    if (!newValue) {
+      const element = $(effectiveSelector);
+      if (element.length > 0) {
+        // Try to find a child price first to avoid capturing title if selector is too broad
+        const priceInElement = element.find('.now-price, .price, [itemprop="price"], .product-price').first();
+        if (priceInElement.length > 0) {
+          newValue = priceInElement.text().trim() || priceInElement.attr('content');
+        }
+
+        if (!newValue) {
+          newValue = element.first().text().trim() || 
+                     element.first().val() as string || 
+                     element.first().attr('title') || 
+                     element.first().attr('content') ||
+                     element.first().attr('data-price') ||
+                     null;
+        }
+        
+        if (newValue) {
+          console.log(`Found value via selector: "${newValue}"`);
+          // Verification: If it looks like a title, we try regex extraction
+          const pageTitle = $('title').text().trim();
+          const ogTitle = $('meta[property="og:title"]').attr('content');
+          if (newValue === pageTitle || newValue === ogTitle || newValue.length > 100) {
+             const pricePattern = /\$[0-9,.]+/;
+             const match = element.text().match(pricePattern);
+             if (match) {
+               newValue = match[0];
+               console.log(`Extracted price from text via regex: "${newValue}"`);
              }
-           }
+          }
         }
       }
     }
@@ -139,14 +149,32 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
 
     // Strategy 2.5: Look for price in any script tag
     if (!newValue || isTitleOnly) {
+      console.log("Checking all script tags for price patterns...");
       $('script').each((_, el) => {
         const content = $(el).html();
         if (!content) return true;
-        const match = content.match(/"price"\s*:\s*"?([0-9.,]+)"?/i);
-        if (match && match[1]) {
-          newValue = match[1];
-          console.log(`Found value via regex in script: "${newValue}"`);
-          return false;
+        
+        // Jomashop and others often have a huge state object
+        // We look for patterns like "price":3200 or "final_price":3200
+        const patterns = [
+          /"price"\s*:\s*"?([0-9.,]+)"?/i,
+          /"final_price"\s*:\s*"?([0-9.,]+)"?/i,
+          /"value"\s*:\s*([0-9.,]+)/i,
+          /price\s*=\s*"?([0-9.,]+)"?/i
+        ];
+
+        for (const pattern of patterns) {
+          const match = content.match(pattern);
+          if (match && match[1]) {
+            // Verify it's not a tiny number or huge number that's unlikely to be a price
+            const val = match[1].replace(/,/g, '');
+            const num = parseFloat(val);
+            if (!isNaN(num) && num > 1 && num < 1000000) {
+              newValue = `$${match[1]}`;
+              console.log(`Found value via regex in script (${pattern}): "${newValue}"`);
+              return false;
+            }
+          }
         }
         return true;
       });
