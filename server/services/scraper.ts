@@ -1,4 +1,3 @@
-import axios from "axios";
 import * as cheerio from "cheerio";
 import { storage } from "../storage";
 import { sendNotificationEmail } from "./email";
@@ -8,22 +7,30 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
   try {
     console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
     
-    // Using a more robust User-Agent and common headers to avoid simple bot detection
-    const response = await axios.get(monitor.url, {
+    // Using native fetch which is more resilient to "Header Overflow" than axios
+    const response = await fetch(monitor.url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.google.com/',
         'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache'
+        'Pragma': 'no-cache',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1'
       },
-      timeout: 15000,
-      validateStatus: (status) => status < 500
+      signal: AbortSignal.timeout(20000)
     });
 
     console.log(`Response status for ${monitor.url}: ${response.status}`);
-    const html = response.data;
+    
+    if (!response.ok && response.status !== 403) {
+      console.warn(`Fetch failed with status ${response.status}`);
+    }
+
+    const html = await response.text();
     const $ = cheerio.load(html);
     
     let newValue: string | null = null;
@@ -31,7 +38,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     // Strategy 1: The user-defined CSS Selector
     const element = $(monitor.selector);
     if (element.length > 0) {
-      newValue = element.first().text().trim() || element.first().attr('value') || null;
+      // Try text, then val, then title attribute
+      newValue = element.first().text().trim() || 
+                 element.first().val() as string || 
+                 element.first().attr('title') || 
+                 null;
       if (newValue) console.log(`Found value via selector: "${newValue}"`);
     }
 
@@ -39,11 +50,17 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     if (!newValue) {
       $('script[type="application/ld+json"]').each((_, el) => {
         try {
-          const data = JSON.parse($(el).html() || "");
+          const content = $(el).html();
+          if (!content) return true;
+          const data = JSON.parse(content);
           const items = Array.isArray(data) ? data : [data];
           for (const item of items) {
-            // Looking for price, availability, or title
-            const val = item.offers?.price || item.offers?.[0]?.price || item.price || item.name;
+            // Expanded search for price or inventory status
+            const val = item.offers?.price || 
+                        item.offers?.[0]?.price || 
+                        item.offers?.availability || 
+                        item.price || 
+                        item.name;
             if (val) {
               newValue = String(val);
               console.log(`Found value via JSON-LD: "${newValue}"`);
@@ -55,19 +72,20 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
       });
     }
 
-    // Strategy 3: Meta Tags (og:price:amount, og:title, etc.)
+    // Strategy 3: Meta Tags & Title
     if (!newValue) {
       newValue = $('meta[property="og:price:amount"]').attr('content') || 
                  $('meta[name="twitter:data1"]').attr('content') ||
                  $('meta[property="og:title"]').attr('content') ||
-                 $('title').text().trim() || null;
-      if (newValue) console.log(`Found value via Meta tags: "${newValue}"`);
+                 $('title').text().trim() || 
+                 null;
+      if (newValue) console.log(`Found value via Meta/Title: "${newValue}"`);
     }
 
     const oldValue = monitor.currentValue;
     const changed = newValue !== null && newValue !== oldValue;
 
-    // Always update last checked
+    // Update the monitor in storage regardless of change
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
       currentValue: newValue ?? (oldValue || undefined)
