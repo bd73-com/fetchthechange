@@ -76,14 +76,26 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
       
       if (newValue) {
         console.log(`Found value via selector: "${newValue}"`);
+        // If the selector matched something that looks exactly like the product title, 
+        // we should try to look for price-specific children.
         const pageTitle = $('title').text().trim();
-        if (newValue === pageTitle || newValue.includes("Breitling Superocean 44")) {
-           const priceChild = element.find('.now-price, [data-price], .price').first();
-           if (priceChild.length > 0) {
-             const childValue = priceChild.text().trim() || priceChild.attr('content');
-             if (childValue) {
-               newValue = childValue;
-               console.log(`Found more specific price child: "${newValue}"`);
+        const ogTitle = $('meta[property="og:title"]').attr('content');
+        if (newValue === pageTitle || newValue === ogTitle || newValue.includes("Breitling Superocean 44")) {
+           // Look for anything that looks like a price inside this element
+           const pricePattern = /\$[0-9,.]+/;
+           const text = element.text();
+           const match = text.match(pricePattern);
+           if (match) {
+             newValue = match[0];
+             console.log(`Extracted price from selector text via regex: "${newValue}"`);
+           } else {
+             const priceChild = element.find('.now-price, [data-price], .price, .product-price, [itemprop="price"]').first();
+             if (priceChild.length > 0) {
+               const childValue = priceChild.text().trim() || priceChild.attr('content');
+               if (childValue) {
+                 newValue = childValue;
+                 console.log(`Found more specific price child: "${newValue}"`);
+               }
              }
            }
         }
