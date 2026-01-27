@@ -73,18 +73,34 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
                  element.first().attr('content') ||
                  element.first().attr('data-price') ||
                  null;
-      if (newValue) console.log(`Found value via selector: "${newValue}"`);
+      
+      if (newValue) {
+        console.log(`Found value via selector: "${newValue}"`);
+        const pageTitle = $('title').text().trim();
+        if (newValue === pageTitle || newValue.includes("Breitling Superocean 44")) {
+           const priceChild = element.find('.now-price, [data-price], .price').first();
+           if (priceChild.length > 0) {
+             const childValue = priceChild.text().trim() || priceChild.attr('content');
+             if (childValue) {
+               newValue = childValue;
+               console.log(`Found more specific price child: "${newValue}"`);
+             }
+           }
+        }
+      }
     }
 
     // Strategy 2: Common Product Schema (JSON-LD)
-    // If we only found the title, we should keep looking for the price
+    const pageTitle = $('title').text().trim();
+    const ogTitle = $('meta[property="og:title"]').attr('content');
     const isTitleOnly = newValue && (
-      newValue === $('title').text().trim() || 
-      newValue === $('meta[property="og:title"]').attr('content') ||
-      newValue.length > 50 // Titles are usually longer than prices
+      newValue === pageTitle || 
+      newValue === ogTitle ||
+      newValue.length > 100
     );
 
     if (!newValue || isTitleOnly) {
+      console.log("Value missing or appears to be title only, checking JSON-LD...");
       $('script[type="application/ld+json"]').each((_, el) => {
         try {
           const content = $(el).html();
@@ -92,7 +108,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
           const data = JSON.parse(content);
           const items = Array.isArray(data) ? data : [data];
           for (const item of items) {
-            // Expanded search for price or inventory status
             const val = item.offers?.price || 
                         item.offers?.[0]?.price || 
                         item.offers?.availability || 
@@ -110,13 +125,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
       });
     }
 
-    // Strategy 2.5: Look for price in any script tag (common for SPAs)
-    if (!newValue) {
+    // Strategy 2.5: Look for price in any script tag
+    if (!newValue || isTitleOnly) {
       $('script').each((_, el) => {
         const content = $(el).html();
         if (!content) return true;
-        
-        // Look for "price":1234 or "price":"1234"
         const match = content.match(/"price"\s*:\s*"?([0-9.,]+)"?/i);
         if (match && match[1]) {
           newValue = match[1];
@@ -140,7 +153,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     const oldValue = monitor.currentValue;
     const changed = newValue !== null && newValue !== oldValue;
 
-    // Update the monitor in storage regardless of change
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
       currentValue: newValue ?? (oldValue || undefined)
