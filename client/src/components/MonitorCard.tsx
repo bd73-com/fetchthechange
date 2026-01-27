@@ -1,12 +1,17 @@
 import { Link } from "wouter";
 import { formatDistanceToNow } from "date-fns";
-import { type Monitor } from "@shared/schema";
+import { type Monitor, insertMonitorSchema } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Clock, ExternalLink, Activity, ArrowRight, Bell } from "lucide-react";
+import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X } from "lucide-react";
 import { useUpdateMonitor } from "@/hooks/use-monitors";
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 
 interface MonitorCardProps {
   monitor: Monitor;
@@ -14,13 +19,100 @@ interface MonitorCardProps {
 
 export function MonitorCard({ monitor }: MonitorCardProps) {
   const { mutate: update } = useUpdateMonitor();
+  const [isEditing, setIsEditing] = useState(false);
+
+  const form = useForm({
+    resolver: zodResolver(insertMonitorSchema),
+    defaultValues: {
+      name: monitor.name,
+      url: monitor.url,
+      selector: monitor.selector,
+      frequency: monitor.frequency,
+      emailEnabled: monitor.emailEnabled,
+      active: monitor.active,
+    },
+  });
 
   const toggleActive = (active: boolean) => {
     update({ id: monitor.id, active });
   };
 
+  const onSubmit = (data: any) => {
+    update({ id: monitor.id, ...data }, {
+      onSuccess: () => setIsEditing(false)
+    });
+  };
+
+  if (isEditing) {
+    return (
+      <Card className="overflow-hidden border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle>Edit Monitor</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="url"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>URL</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="selector"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Selector</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              <div className="flex gap-2 justify-end pt-4">
+                <Button type="button" variant="outline" size="sm" onClick={() => setIsEditing(false)}>
+                  <X className="h-4 w-4 mr-2" /> Cancel
+                </Button>
+                <Button type="submit" size="sm">
+                  <Check className="h-4 w-4 mr-2" /> Save
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="card-hover overflow-hidden border-border/50 bg-card/50 backdrop-blur-sm">
+    <Card className="card-hover overflow-hidden border-border/50 bg-card/50 backdrop-blur-sm relative group">
+      <Button 
+        variant="ghost" 
+        size="icon" 
+        className="absolute top-2 right-12 opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={() => setIsEditing(true)}
+      >
+        <Edit2 className="h-4 w-4" />
+      </Button>
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
         <div className="space-y-1">
           <CardTitle className="text-xl font-semibold line-clamp-1" title={monitor.name}>

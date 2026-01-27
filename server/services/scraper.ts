@@ -4,35 +4,54 @@ import { storage } from "../storage";
 import { sendNotificationEmail } from "./email";
 import { type Monitor } from "@shared/schema";
 
+async function fetchWithPuppeteer(url: string): Promise<string> {
+  const puppeteer = await import("puppeteer-core");
+  const browser = await puppeteer.launch({
+    executablePath: "/usr/bin/google-chrome-stable",
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    const content = await page.content();
+    return content;
+  } finally {
+    await browser.close();
+  }
+}
+
 export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean, currentValue: string | null }> {
   try {
     console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
     
-    // Attempt scraping with more advanced headers to bypass some static protections
-    const response = await axios.get(monitor.url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.google.com/',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-        'Upgrade-Insecure-Requests': '1'
-      },
-      timeout: 30000,
-      validateStatus: () => true
-    });
+    let html: string;
+    let status = 200;
 
-    console.log(`Response status for ${monitor.url}: ${response.status}`);
-
-    const $ = cheerio.load(response.data);
-    
-    // Check for common blocking indicators
-    if (response.status === 403 || response.status === 429 || response.data.includes("Cloudflare") || response.data.includes("Access Denied")) {
-      console.warn(`Access restricted for ${monitor.url} (Status ${response.status}). Potential bot detection.`);
-      return { changed: false, currentValue: monitor.currentValue };
+    try {
+      const response = await axios.get(monitor.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://www.google.com/',
+        },
+        timeout: 10000,
+        validateStatus: () => true
+      });
+      html = response.data;
+      status = response.status;
+      
+      if (status !== 200 || html.includes("Cloudflare") || html.length < 5000) {
+        console.log(`Axios failed or blocked for ${monitor.url} (${status}). Trying Puppeteer...`);
+        html = await fetchWithPuppeteer(monitor.url);
+      }
+    } catch (err) {
+      console.log(`Axios error for ${monitor.url}, trying Puppeteer...`);
+      html = await fetchWithPuppeteer(monitor.url);
     }
 
+    const $ = cheerio.load(html);
     let newValue: string | null = null;
 
     // Primary: Use the selector
@@ -54,7 +73,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
             if (val) {
               newValue = String(val);
               console.log(`Found value in JSON-LD for monitor ${monitor.id}: "${newValue}"`);
-              return false; // break each
+              return false;
             }
           }
         } catch (e) {}
@@ -70,28 +89,13 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
       if (newValue) console.log(`Found value in meta tags for monitor ${monitor.id}: "${newValue}"`);
     }
 
-    // Fallback 3: preload_data (Jomashop specific)
-    if (!newValue && response.data.includes('id="preload_data"')) {
-      try {
-        const preloadScript = $('#preload_data').html();
-        if (preloadScript) {
-           const data = JSON.parse(preloadScript);
-           if (data?.product?.final_price) {
-             newValue = String(data.product.final_price);
-             console.log(`Found value in preload_data for monitor ${monitor.id}: "${newValue}"`);
-           }
-        }
-      } catch (e) {}
-    }
-
     const oldValue = monitor.currentValue;
     const changed = newValue !== null && newValue !== oldValue;
 
     if (newValue === null) {
-      console.warn(`Scraping failed to find any value for monitor ${monitor.id}. Page content length: ${response.data.length}`);
+      console.warn(`Scraping failed to find any value for monitor ${monitor.id}. Page content length: ${html.length}`);
     }
 
-    // Update last checked
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
       currentValue: newValue ?? (oldValue || undefined)
