@@ -1,17 +1,44 @@
 import { useAuth } from "@/hooks/use-auth";
-import { useMonitors } from "@/hooks/use-monitors";
+import { useMonitors, useCheckMonitor } from "@/hooks/use-monitors";
 import { CreateMonitorDialog } from "@/components/CreateMonitorDialog";
 import { MonitorCard } from "@/components/MonitorCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { LogOut, LayoutDashboard, RefreshCw } from "lucide-react";
+import { LogOut, LayoutDashboard, RefreshCw, Loader2 } from "lucide-react";
 import { Link } from "wouter";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const { data: monitors, isLoading, error, refetch } = useMonitors();
+  const { mutate: checkMonitor, isPending: isChecking } = useCheckMonitor();
+  const { toast } = useToast();
 
-  if (isLoading) {
+  const handleRefresh = async () => {
+    console.log("Refreshing monitors...");
+    // First refetch the list
+    await refetch();
+    
+    if (!monitors || monitors.length === 0) {
+      toast({ title: "No monitors", description: "Create a monitor first to refresh data." });
+      return;
+    }
+    
+    // Refresh all active monitors in parallel
+    const activeMonitors = monitors.filter(m => m.active);
+    if (activeMonitors.length === 0) {
+      toast({ title: "No active monitors", description: "Please activate your monitors to refresh them." });
+      return;
+    }
+
+    toast({ title: "Refreshing...", description: `Checking ${activeMonitors.length} active monitors for changes.` });
+    
+    activeMonitors.forEach(m => {
+      checkMonitor(m.id);
+    });
+  };
+
+  if (isLoading && !monitors) {
     return (
       <div className="min-h-screen bg-background p-6 lg:p-10">
         <div className="max-w-7xl mx-auto space-y-8">
@@ -76,14 +103,16 @@ export default function Dashboard() {
             <Button 
               variant="outline" 
               size="icon" 
-              onClick={() => {
-                console.log("Refreshing monitors...");
-                refetch();
-              }} 
-              title="Refresh list"
+              onClick={handleRefresh}
+              disabled={isLoading || isChecking}
+              title="Refresh all active monitors"
               data-testid="button-refresh"
             >
-               <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+               {isLoading || isChecking ? (
+                 <Loader2 className="h-4 w-4 animate-spin" />
+               ) : (
+                 <RefreshCw className="h-4 w-4" />
+               )}
             </Button>
             <CreateMonitorDialog />
           </div>
