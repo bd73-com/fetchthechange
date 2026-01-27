@@ -12,7 +12,7 @@ export default function AuthPage() {
         
         <div className="relative z-10">
           <h1 className="text-2xl font-display font-bold flex items-center gap-2">
-            <Zap className="h-6 w-6" /> ChangeMonitor
+            <Zap className="h-6 w-6" /> FetchTheChange
           </h1>
         </div>
 
@@ -41,7 +41,7 @@ export default function AuthPage() {
         </div>
 
         <div className="relative z-10 text-sm opacity-60">
-          &copy; {new Date().getFullYear()} ChangeMonitor. All rights reserved.
+          &copy; {new Date().getFullYear()} FetchTheChange. All rights reserved.
         </div>
       </div>
 
@@ -50,7 +50,7 @@ export default function AuthPage() {
         <div className="w-full max-w-md space-y-8">
           <div className="lg:hidden text-center mb-8">
             <h1 className="text-2xl font-bold text-primary flex items-center justify-center gap-2">
-               <Zap className="h-6 w-6" /> ChangeMonitor
+               <Zap className="h-6 w-6" /> FetchTheChange
             </h1>
           </div>
 
