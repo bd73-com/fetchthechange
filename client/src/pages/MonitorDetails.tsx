@@ -93,7 +93,6 @@ export default function MonitorDetails() {
 
   return (
     <div className="min-h-screen bg-background pb-12">
-      {/* Header */}
       <header className="border-b bg-card/50 backdrop-blur-md sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center gap-4">
           <Link href="/">
@@ -237,139 +236,137 @@ export default function MonitorDetails() {
             </CardContent>
           </Card>
         ) : (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <Card className="col-span-2">
-                <CardHeader>
-                  <CardTitle>Configuration</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <span className="text-sm text-muted-foreground">Target URL</span>
-                      <a 
-                        href={monitor.url} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-primary hover:underline font-medium break-all"
-                      >
-                        {monitor.url}
-                        <ExternalLink className="h-3 w-3 flex-shrink-0" />
-                      </a>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-sm text-muted-foreground">CSS Selector</span>
-                      <code className="block bg-secondary px-2 py-1 rounded text-sm font-mono w-fit">
-                        {monitor.selector}
-                      </code>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-sm text-muted-foreground">Check Frequency</span>
-                      <p className="font-medium capitalize">{monitor.frequency}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-sm text-muted-foreground">Notifications</span>
-                      <p className="font-medium">
-                        {monitor.emailEnabled ? "Email alerts enabled" : "No alerts"}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Stats</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-primary/10 rounded-lg">
-                      <Clock className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Last Checked</p>
-                      <p className="font-medium">
-                        {monitor.lastChecked 
-                          ? format(new Date(monitor.lastChecked), "PPp")
-                          : "Never checked"}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-amber-500/10 rounded-lg">
-                      <Calendar className="h-5 w-5 text-amber-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Last Change Detected</p>
-                      <p className="font-medium">
-                        {monitor.lastChanged 
-                          ? format(new Date(monitor.lastChanged), "PPp")
-                          : "No changes detected"}
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card className="col-span-2">
               <CardHeader>
-                <CardTitle>Current Value</CardTitle>
-                <CardDescription>The latest content captured from the page.</CardDescription>
+                <CardTitle>Configuration</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="bg-secondary/30 p-4 rounded-lg font-mono text-sm whitespace-pre-wrap break-words max-h-60 overflow-y-auto border border-border">
-                  {monitor.currentValue || <span className="text-muted-foreground italic">No data captured yet. Click "Check Now" to fetch content.</span>}
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <span className="text-sm text-muted-foreground">Target URL</span>
+                    <a 
+                      href={monitor.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-primary hover:underline font-medium break-all"
+                    >
+                      {monitor.url}
+                      <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                    </a>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-sm text-muted-foreground">CSS Selector</span>
+                    <code className="block bg-secondary px-2 py-1 rounded text-sm font-mono w-fit">
+                      {monitor.selector}
+                    </code>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-sm text-muted-foreground">Check Frequency</span>
+                    <p className="font-medium capitalize">{monitor.frequency}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-sm text-muted-foreground">Notifications</span>
+                    <p className="font-medium">
+                      {monitor.emailEnabled ? "Email alerts enabled" : "No alerts"}
+                    </p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Change History</CardTitle>
-                <CardDescription>A log of all detected changes for this monitor.</CardDescription>
+                <CardTitle>Stats</CardTitle>
               </CardHeader>
-              <CardContent>
-                {loadingHistory ? (
-                  <div className="space-y-2">
-                    {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+              <CardContent className="space-y-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-primary/10 rounded-lg">
+                    <Clock className="h-5 w-5 text-primary" />
                   </div>
-                ) : !history || history.length === 0 ? (
-                  <div className="text-center py-10 text-muted-foreground">
-                    No changes recorded yet.
+                  <div>
+                    <p className="text-sm text-muted-foreground">Last Checked</p>
+                    <p className="font-medium">
+                      {monitor.lastChecked 
+                        ? format(new Date(monitor.lastChecked), "PPp")
+                        : "Never checked"}
+                    </p>
                   </div>
-                ) : (
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[180px]">Date Detected</TableHead>
-                          <TableHead>Previous Value</TableHead>
-                          <TableHead>New Value</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {history.map((change) => (
-                          <TableRow key={change.id}>
-                            <TableCell className="font-medium whitespace-nowrap">
-                              {format(new Date(change.detectedAt), "MMM d, yyyy HH:mm")}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs text-muted-foreground max-w-[300px] truncate" title={change.oldValue || ""}>
-                              {change.oldValue || <span className="italic">null</span>}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs max-w-[300px] truncate" title={change.newValue || ""}>
-                              {change.newValue}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-amber-500/10 rounded-lg">
+                    <Calendar className="h-5 w-5 text-amber-600" />
                   </div>
-                )}
+                  <div>
+                    <p className="text-sm text-muted-foreground">Last Change Detected</p>
+                    <p className="font-medium">
+                      {monitor.lastChanged 
+                        ? format(new Date(monitor.lastChanged), "PPp")
+                        : "No changes detected"}
+                    </p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
-          </>
+          </div>
         )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Current Value</CardTitle>
+            <CardDescription>The latest content captured from the page.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="bg-secondary/30 p-4 rounded-lg font-mono text-sm whitespace-pre-wrap break-words max-h-60 overflow-y-auto border border-border">
+              {monitor.currentValue || <span className="text-muted-foreground italic">No data captured yet. Click "Check Now" to fetch content.</span>}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Change History</CardTitle>
+            <CardDescription>A log of all detected changes for this monitor.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loadingHistory ? (
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+              </div>
+            ) : !history || history.length === 0 ? (
+              <div className="text-center py-10 text-muted-foreground">
+                No changes recorded yet.
+              </div>
+            ) : (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[180px]">Date Detected</TableHead>
+                      <TableHead>Previous Value</TableHead>
+                      <TableHead>New Value</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {history.map((change) => (
+                      <TableRow key={change.id}>
+                        <TableCell className="font-medium whitespace-nowrap">
+                          {format(new Date(change.detectedAt), "MMM d, yyyy HH:mm")}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground max-w-[300px] truncate" title={change.oldValue || ""}>
+                          {change.oldValue || <span className="italic">null</span>}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs max-w-[300px] truncate" title={change.newValue || ""}>
+                          {change.newValue}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </main>
     </div>
   );
