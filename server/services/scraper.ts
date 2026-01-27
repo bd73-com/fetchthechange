@@ -2,54 +2,60 @@ import * as cheerio from "cheerio";
 import { storage } from "../storage";
 import { sendNotificationEmail } from "./email";
 import { type Monitor } from "@shared/schema";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
+
+async function fetchWithCurl(url: string): Promise<string> {
+  try {
+    // curl handles large headers better than Node.js fetch
+    // -L follows redirects, -s is silent, -m is timeout
+    const { stdout } = await execAsync(`curl -L -s -m 15 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" "${url}"`);
+    return stdout;
+  } catch (error) {
+    console.error(`Curl fallback failed:`, error);
+    throw error;
+  }
+}
 
 export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean, currentValue: string | null }> {
   try {
     console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
     
-    // Using native fetch which is more resilient to "Header Overflow" than axios
-    const response = await fetch(monitor.url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Upgrade-Insecure-Requests': '1'
-      },
-      signal: AbortSignal.timeout(20000)
-    });
-
-    console.log(`Response status for ${monitor.url}: ${response.status}`);
-    
-    if (!response.ok && response.status !== 403) {
-      console.warn(`Fetch failed with status ${response.status}`);
-    }
-
-    // Strategy 4: Fallback to a proxy or simpler request if needed
-    // In this environment, we can't easily change global maxHeaderSize for fetch/undici
-    // but we can try to use axios with a specific configuration if fetch fails
-    // However, let's try to improve the fetch call first by reducing requested headers
-    // and potentially using a different dispatcher if we were in a full node env.
-    // Since we are limited, we will try to catch the header overflow and return a helpful message.
-    
     let html = "";
     try {
+      const response = await fetch(monitor.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Upgrade-Insecure-Requests': '1'
+        },
+        signal: AbortSignal.timeout(20000)
+      });
+
+      console.log(`Response status for ${monitor.url}: ${response.status}`);
       html = await response.text();
     } catch (e: any) {
-      if (e.code === 'UND_ERR_HEADERS_OVERFLOW') {
-        console.error("Header overflow detected. Site sent too much data in headers.");
-        // Fallback: If we can't get the HTML, we can't scrape.
-        // We'll return a special value to indicate the failure reason to the user indirectly
-        return { changed: false, currentValue: "Error: Site blocked request (Header Overflow)" };
+      if (e.code === 'UND_ERR_HEADERS_OVERFLOW' || (e.cause && e.cause.code === 'UND_ERR_HEADERS_OVERFLOW')) {
+        console.log(`Header overflow for ${monitor.id}, falling back to curl...`);
+        html = await fetchWithCurl(monitor.url);
+      } else {
+        throw e;
       }
-      throw e;
     }
-    
+
+    if (!html) {
+      return { changed: false, currentValue: null };
+    }
+
     const $ = cheerio.load(html);
     
     let newValue: string | null = null;
@@ -57,10 +63,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     // Strategy 1: The user-defined CSS Selector
     const element = $(monitor.selector);
     if (element.length > 0) {
-      // Try text, then val, then title attribute
+      // Try text, then val, then title attribute, then content
       newValue = element.first().text().trim() || 
                  element.first().val() as string || 
                  element.first().attr('title') || 
+                 element.first().attr('content') ||
                  null;
       if (newValue) console.log(`Found value via selector: "${newValue}"`);
     }
