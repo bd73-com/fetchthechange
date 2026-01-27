@@ -59,7 +59,7 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
                   <FormItem>
                     <FormLabel>Name</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} data-testid="input-name" />
                     </FormControl>
                   </FormItem>
                 )}
@@ -71,7 +71,7 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
                   <FormItem>
                     <FormLabel>URL</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} data-testid="input-url" />
                     </FormControl>
                   </FormItem>
                 )}
@@ -83,16 +83,55 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
                   <FormItem>
                     <FormLabel>Selector</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input {...field} data-testid="input-selector" />
                     </FormControl>
                   </FormItem>
                 )}
               />
+              <FormField
+                control={form.control}
+                name="frequency"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Frequency</FormLabel>
+                    <FormControl>
+                      <select 
+                        {...field} 
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                        data-testid="select-frequency"
+                      >
+                        <option value="daily">Daily</option>
+                        <option value="hourly">Hourly</option>
+                      </select>
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              <div className="flex items-center justify-between py-2">
+                <FormField
+                  control={form.control}
+                  name="emailEnabled"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm w-full">
+                      <div className="space-y-0.5">
+                        <FormLabel>Email Notifications</FormLabel>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          data-testid="switch-email"
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              </div>
               <div className="flex gap-2 justify-end pt-4">
-                <Button type="button" variant="outline" size="sm" onClick={() => setIsEditing(false)}>
+                <Button type="button" variant="outline" size="sm" onClick={() => setIsEditing(false)} data-testid="button-cancel">
                   <X className="h-4 w-4 mr-2" /> Cancel
                 </Button>
-                <Button type="submit" size="sm">
+                <Button type="submit" size="sm" data-testid="button-save">
                   <Check className="h-4 w-4 mr-2" /> Save
                 </Button>
               </div>
