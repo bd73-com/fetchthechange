@@ -73,8 +73,17 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => refetch()} title="Refresh list">
-               <RefreshCw className="h-4 w-4" />
+            <Button 
+              variant="outline" 
+              size="icon" 
+              onClick={() => {
+                console.log("Refreshing monitors...");
+                refetch();
+              }} 
+              title="Refresh list"
+              data-testid="button-refresh"
+            >
+               <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             </Button>
             <CreateMonitorDialog />
           </div>
