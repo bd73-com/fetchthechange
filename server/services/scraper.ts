@@ -65,13 +65,25 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
       console.log("Applying Jomashop-specific scraping logic...");
       
       // 1. Try regex on raw HTML for price patterns (highest reliability for dynamic sites)
-      const rawPriceMatch = html.match(/"final_price"\s*:\s*([0-9.]+)/i) || 
-                           html.match(/"price"\s*:\s*([0-9.]+)/i) ||
-                           html.match(/"amount"\s*:\s*([0-9.]+)/i);
-      
-      if (rawPriceMatch && rawPriceMatch[1]) {
-        newValue = `$${rawPriceMatch[1]}`;
-        console.log(`Found Jomashop price via raw HTML regex: "${newValue}"`);
+      // Jomashop often has "price":"3200.00" or "final_price":3200
+      const patterns = [
+        /"final_price"\s*:\s*([0-9.]+)/i,
+        /"price"\s*:\s*"?([0-9.]+)"?/i,
+        /"amount"\s*:\s*"?([0-9.]+)"?/i,
+        /price\s*=\s*"?([0-9.]+)"?/i
+      ];
+
+      for (const pattern of patterns) {
+        const match = html.match(pattern);
+        if (match && match[1]) {
+          const val = match[1];
+          // Basic validation: must be a number and not a version string or something
+          if (!isNaN(parseFloat(val)) && val.length < 10) {
+            newValue = `$${val}`;
+            console.log(`Found Jomashop price via raw HTML regex (${pattern}): "${newValue}"`);
+            break;
+          }
+        }
       }
 
       // 2. Try JSON-LD Product Schema
@@ -81,12 +93,14 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
           try {
             const content = $(el).html();
             if (!content) return;
-            const data = JSON.parse(content);
+            // Clean up potentially malformed JSON (Jomashop sometimes has trailing commas)
+            const cleaned = content.replace(/,\s*([\]}])/g, '$1');
+            const data = JSON.parse(cleaned);
             const items = Array.isArray(data) ? data : [data];
             for (const item of items) {
               const offers = item.offers;
               const price = offers?.price || item.price;
-              if (price && !isNaN(parseFloat(price))) {
+              if (price && !isNaN(parseFloat(price.toString()))) {
                 newValue = `$${price}`;
                 console.log(`Found Jomashop price via JSON-LD: "${newValue}"`);
                 return false;
@@ -97,13 +111,21 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
         });
       }
 
-      // 3. Try stricter selector check
+      // 3. Try stricter selector check - looking for specific currency symbol next to numbers
       if (!newValue) {
-        const jomaPrice = $('.now-price').first().text().trim() || $('.price').first().text().trim();
-        if (jomaPrice && jomaPrice.includes('$') && jomaPrice.length < 12) {
-          newValue = jomaPrice;
-          console.log(`Found Jomashop price via class: "${newValue}"`);
-        }
+        $('*').each((_, el) => {
+          const text = $(el).text().trim();
+          // Look for patterns like $3,200.00 but avoid long texts (titles)
+          if (text.startsWith('$') && text.length < 15) {
+            const priceOnly = text.match(/^\$[0-9,.]+/);
+            if (priceOnly) {
+              newValue = priceOnly[0];
+              console.log(`Found Jomashop price via deep search: "${newValue}"`);
+              return false;
+            }
+          }
+          return true;
+        });
       }
     }
 
