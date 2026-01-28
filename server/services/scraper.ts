@@ -64,54 +64,51 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     if (monitor.url.includes('jomashop.com')) {
       console.log("Applying Jomashop-specific scraping logic...");
       
-      // 1. Check for specific scripts that Jomashop uses for product state
-      $('script').each((_, el) => {
-        const content = $(el).html();
-        if (!content || !content.includes('price')) return true;
-        
-        // Match specific patterns in Jomashop's state objects
-        const match = content.match(/"final_price"\s*:\s*([0-9.]+)/i) || 
-                      content.match(/"price"\s*:\s*"?([0-9.]+)"?/i) ||
-                      content.match(/"current_price"\s*:\s*([0-9.]+)/i);
-        
-        if (match && match[1]) {
-          const val = match[1];
-          if (!isNaN(parseFloat(val)) && val.length < 10 && parseFloat(val) > 1) {
-            newValue = `$${val}`;
-            console.log(`Found Jomashop price via state script: "${newValue}"`);
-            return false;
-          }
-        }
-        return true;
-      });
+      // 1. Scan metadata for raw price values (harder to obfuscate)
+      const metaPrice = $('meta[property="product:price:amount"]').attr('content') || 
+                        $('meta[property="og:price:amount"]').attr('content') ||
+                        $('meta[name="twitter:data1"]').attr('content');
+      
+      if (metaPrice && !isNaN(parseFloat(metaPrice))) {
+        newValue = `$${parseFloat(metaPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        console.log(`Found Jomashop price via Meta: "${newValue}"`);
+      }
 
-      // 2. Scan all elements for text that looks like a watch price ($1,000.00 style)
+      // 2. Scan scripts for the raw final_price or price value
       if (!newValue) {
-        $('*').each((_, el) => {
-          const text = $(el).text().trim();
-          // Jomashop price usually has $ and is relatively short
-          if (text.length < 15 && text.includes('$')) {
-            const priceMatch = text.match(/\$[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?/);
-            if (priceMatch) {
-              const numVal = parseFloat(priceMatch[0].replace(/[$,]/g, ''));
-              // Exclude MSRP/Retail if we can (usually higher) or just take first reasonable
-              if (numVal > 100 && numVal < 100000) {
-                newValue = priceMatch[0];
-                console.log(`Found Jomashop price via text search: "${newValue}"`);
-                return false;
-              }
+        $('script').each((_, el) => {
+          const content = $(el).html();
+          if (!content || (!content.includes('price') && !content.includes('final_price'))) return true;
+          
+          const match = content.match(/"final_price"\s*:\s*([0-9.]+)/i) || 
+                        content.match(/"price"\s*:\s*"?([0-9.]+)"?/i);
+          
+          if (match && match[1]) {
+            const num = parseFloat(match[1]);
+            if (num > 100 && num < 100000) {
+              newValue = `$${num.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+              console.log(`Found Jomashop price via script state: "${newValue}"`);
+              return false;
             }
           }
           return true;
         });
       }
 
-      // 3. Last resort: check meta tags explicitly
+      // 3. Last resort: scan elements for "$X,XXX.XX" patterns
       if (!newValue) {
-        newValue = $('meta[property="og:price:amount"]').attr('content') || 
-                   $('meta[itemprop="price"]').attr('content') ||
-                   $('meta[name="twitter:data1"]').attr('content');
-        if (newValue && !newValue.includes('$')) newValue = `$${newValue}`;
+        $('*').each((_, el) => {
+          const text = $(el).text().trim();
+          if (text.length < 15 && text.startsWith('$')) {
+            const match = text.match(/^\$[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?$/);
+            if (match) {
+              newValue = match[0];
+              console.log(`Found Jomashop price via text scan: "${newValue}"`);
+              return false;
+            }
+          }
+          return true;
+        });
       }
     }
 
