@@ -312,13 +312,37 @@ export default function MonitorDetails() {
         )}
 
         <Card>
-          <CardHeader>
-            <CardTitle>Current Value</CardTitle>
-            <CardDescription>The latest content captured from the page.</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <div>
+              <CardTitle>Values</CardTitle>
+              <CardDescription>Current and previous content captured from the page.</CardDescription>
+            </div>
           </CardHeader>
-          <CardContent>
-            <div className="bg-secondary/30 p-4 rounded-lg font-mono text-sm whitespace-pre-wrap break-words max-h-60 overflow-y-auto border border-border">
-              {monitor.currentValue || <span className="text-muted-foreground italic">No data captured yet. Click "Check Now" to fetch content.</span>}
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Current Value</p>
+                  <Badge variant="outline" className="font-mono text-[10px]">Latest</Badge>
+                </div>
+                <div className="bg-primary/5 p-4 rounded-xl font-mono text-sm whitespace-pre-wrap break-words border border-primary/10 shadow-sm min-h-[100px]">
+                  {monitor.currentValue || <span className="text-muted-foreground italic">No data captured yet.</span>}
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Previous Value</p>
+                  <Badge variant="secondary" className="font-mono text-[10px]">Last Change</Badge>
+                </div>
+                <div className="bg-muted/30 p-4 rounded-xl font-mono text-sm whitespace-pre-wrap break-words border border-border/50 italic text-muted-foreground min-h-[100px]">
+                  {history && history.length > 0 ? (
+                    history[0].oldValue || "Initial value"
+                  ) : (
+                    <span className="italic">No previous history recorded.</span>
+                  )}
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
