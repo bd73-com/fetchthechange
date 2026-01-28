@@ -191,8 +191,21 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
         </div>
         
         <div className="pt-2">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground bg-secondary/50 p-2 rounded-md font-mono border border-border/50">
-             <span className="font-bold">Selector:</span> {monitor.selector}
+          <div className="flex flex-col gap-1.5 bg-secondary/30 p-3 rounded-lg border border-border/50 font-mono">
+             <div className="flex items-center justify-between">
+               <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Current Value</span>
+               <span className="text-xs font-bold text-primary truncate max-w-[150px]" title={monitor.currentValue || "No value detected"}>
+                 {monitor.currentValue || "---"}
+               </span>
+             </div>
+             {monitor.lastChanged && (
+               <div className="flex items-center justify-between border-t border-border/20 pt-1.5 mt-0.5">
+                 <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Previous</span>
+                 <span className="text-xs text-muted-foreground italic truncate max-w-[150px]">
+                   (Check history for details)
+                 </span>
+               </div>
+             )}
           </div>
         </div>
       </CardContent>
