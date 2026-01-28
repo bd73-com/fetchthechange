@@ -64,40 +64,53 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     if (monitor.url.includes('jomashop.com')) {
       console.log("Applying Jomashop-specific scraping logic...");
       
-      // 1. Target the exact structure shown in the user's screenshot
-      // .now-price > span
-      const exactMatch = $('.now-price span').first().text().trim();
-      if (exactMatch && exactMatch.startsWith('$') && exactMatch.length < 15) {
-        newValue = exactMatch;
-        console.log(`Found Jomashop price via exact screenshot match: "${newValue}"`);
+      // 1. Check for Anti-Bot / JS Challenge screens
+      if ($('title').text().includes('Just a moment') || $('h1').text().includes('Checking your browser')) {
+        console.warn("Jomashop: Detected Cloudflare/Anti-bot challenge screen.");
       }
 
-      // 2. Fallback to metadata if visual element fails
+      // 2. Target the exact structure shown in the user's screenshot
+      // Use more robust selector that doesn't care about whitespace or nesting
+      const priceElement = $('.now-price, [class*="now-price"]').first();
+      if (priceElement.length > 0) {
+        const text = priceElement.text().trim();
+        const match = text.match(/\$[0-9,.]+/);
+        if (match) {
+          newValue = match[0];
+          console.log(`Found Jomashop price via screenshot path: "${newValue}"`);
+        }
+      }
+
+      // 3. Fallback to Meta Tags (often contains the clean price even if DOM is obfuscated)
       if (!newValue) {
         const metaPrice = $('meta[property="product:price:amount"]').attr('content') || 
                           $('meta[property="og:price:amount"]').attr('content') ||
-                          $('meta[itemprop="price"]').attr('content');
+                          $('meta[itemprop="price"]').attr('content') ||
+                          $('[itemprop="price"]').attr('content');
         
         if (metaPrice && !isNaN(parseFloat(metaPrice))) {
-          newValue = `$${parseFloat(metaPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+          const formatted = parseFloat(metaPrice).toLocaleString('en-US', { minimumFractionDigits: 2 });
+          newValue = `$${formatted}`;
           console.log(`Found Jomashop price via Meta: "${newValue}"`);
         }
       }
 
-      // 3. Scan scripts for the raw final_price or price value
+      // 4. Scan scripts for raw data (State objects)
       if (!newValue) {
         $('script').each((_, el) => {
           const content = $(el).html();
-          if (!content || (!content.includes('price') && !content.includes('final_price'))) return true;
+          if (!content || !content.includes('price')) return true;
           
+          // Jomashop often uses "final_price", "price", or "current_price" in a large JSON blob
           const match = content.match(/"final_price"\s*:\s*([0-9.]+)/i) || 
-                        content.match(/"price"\s*:\s*"?([0-9.]+)"?/i);
+                        content.match(/"price"\s*:\s*"?([0-9.]+)"?/i) ||
+                        content.match(/"priceValue"\s*:\s*([0-9.]+)/i);
           
           if (match && match[1]) {
             const num = parseFloat(match[1]);
             if (num > 100) {
               newValue = `$${num.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-              console.log(`Found Jomashop price via script state: "${newValue}"`);
+              console.log(`Found Jomashop price via script: "${newValue}"`);
               return false;
             }
           }
