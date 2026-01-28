@@ -64,17 +64,27 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     if (monitor.url.includes('jomashop.com')) {
       console.log("Applying Jomashop-specific scraping logic...");
       
-      // 1. Scan metadata for raw price values (harder to obfuscate)
-      const metaPrice = $('meta[property="product:price:amount"]').attr('content') || 
-                        $('meta[property="og:price:amount"]').attr('content') ||
-                        $('meta[name="twitter:data1"]').attr('content');
-      
-      if (metaPrice && !isNaN(parseFloat(metaPrice))) {
-        newValue = `$${parseFloat(metaPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-        console.log(`Found Jomashop price via Meta: "${newValue}"`);
+      // 1. Target the exact structure shown in the user's screenshot
+      // .now-price > span
+      const exactMatch = $('.now-price span').first().text().trim();
+      if (exactMatch && exactMatch.startsWith('$') && exactMatch.length < 15) {
+        newValue = exactMatch;
+        console.log(`Found Jomashop price via exact screenshot match: "${newValue}"`);
       }
 
-      // 2. Scan scripts for the raw final_price or price value
+      // 2. Fallback to metadata if visual element fails
+      if (!newValue) {
+        const metaPrice = $('meta[property="product:price:amount"]').attr('content') || 
+                          $('meta[property="og:price:amount"]').attr('content') ||
+                          $('meta[itemprop="price"]').attr('content');
+        
+        if (metaPrice && !isNaN(parseFloat(metaPrice))) {
+          newValue = `$${parseFloat(metaPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+          console.log(`Found Jomashop price via Meta: "${newValue}"`);
+        }
+      }
+
+      // 3. Scan scripts for the raw final_price or price value
       if (!newValue) {
         $('script').each((_, el) => {
           const content = $(el).html();
@@ -85,25 +95,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
           
           if (match && match[1]) {
             const num = parseFloat(match[1]);
-            if (num > 100 && num < 100000) {
+            if (num > 100) {
               newValue = `$${num.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
               console.log(`Found Jomashop price via script state: "${newValue}"`);
-              return false;
-            }
-          }
-          return true;
-        });
-      }
-
-      // 3. Last resort: scan elements for "$X,XXX.XX" patterns
-      if (!newValue) {
-        $('*').each((_, el) => {
-          const text = $(el).text().trim();
-          if (text.length < 15 && text.startsWith('$')) {
-            const match = text.match(/^\$[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?$/);
-            if (match) {
-              newValue = match[0];
-              console.log(`Found Jomashop price via text scan: "${newValue}"`);
               return false;
             }
           }
