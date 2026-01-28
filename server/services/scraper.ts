@@ -64,54 +64,54 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     if (monitor.url.includes('jomashop.com')) {
       console.log("Applying Jomashop-specific scraping logic...");
       
-      // 1. Check for price patterns in raw HTML text (most robust for anti-bot)
-      // Look for strings like "$3,200.00" or "$3200"
-      const priceRegex = /\$[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?/g;
-      const matches = html.match(priceRegex);
-      if (matches) {
-        // Find the one that's most likely the main price (usually not the first one, which might be MSRP)
-        // Jomashop often has "Our Price", "Retail", etc.
-        // We'll take the first one that looks like a realistic watch price and isn't the title
-        for (const m of matches) {
-           const val = m.replace(/[$,]/g, '');
-           const num = parseFloat(val);
-           if (num > 500 && num < 50000) { // Realistic range for these watches
-             newValue = m;
-             console.log(`Found Jomashop price via raw text regex: "${newValue}"`);
-             break;
-           }
-        }
-      }
-
-      // 2. Try regex on raw HTML for structured keys
-      if (!newValue) {
-        const patterns = [
-          /"final_price"\s*:\s*([0-9.]+)/i,
-          /"price"\s*:\s*"?([0-9.]+)"?/i,
-          /"amount"\s*:\s*"?([0-9.]+)"?/i
-        ];
-
-        for (const pattern of patterns) {
-          const match = html.match(pattern);
-          if (match && match[1]) {
-            newValue = `$${match[1]}`;
-            console.log(`Found Jomashop price via structured regex (${pattern}): "${newValue}"`);
-            break;
+      // 1. Check for specific scripts that Jomashop uses for product state
+      $('script').each((_, el) => {
+        const content = $(el).html();
+        if (!content || !content.includes('price')) return true;
+        
+        // Match specific patterns in Jomashop's state objects
+        const match = content.match(/"final_price"\s*:\s*([0-9.]+)/i) || 
+                      content.match(/"price"\s*:\s*"?([0-9.]+)"?/i) ||
+                      content.match(/"current_price"\s*:\s*([0-9.]+)/i);
+        
+        if (match && match[1]) {
+          const val = match[1];
+          if (!isNaN(parseFloat(val)) && val.length < 10 && parseFloat(val) > 1) {
+            newValue = `$${val}`;
+            console.log(`Found Jomashop price via state script: "${newValue}"`);
+            return false;
           }
         }
+        return true;
+      });
+
+      // 2. Scan all elements for text that looks like a watch price ($1,000.00 style)
+      if (!newValue) {
+        $('*').each((_, el) => {
+          const text = $(el).text().trim();
+          // Jomashop price usually has $ and is relatively short
+          if (text.length < 15 && text.includes('$')) {
+            const priceMatch = text.match(/\$[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?/);
+            if (priceMatch) {
+              const numVal = parseFloat(priceMatch[0].replace(/[$,]/g, ''));
+              // Exclude MSRP/Retail if we can (usually higher) or just take first reasonable
+              if (numVal > 100 && numVal < 100000) {
+                newValue = priceMatch[0];
+                console.log(`Found Jomashop price via text search: "${newValue}"`);
+                return false;
+              }
+            }
+          }
+          return true;
+        });
       }
 
-      // 3. Fallback to specific Jomashop known selectors
+      // 3. Last resort: check meta tags explicitly
       if (!newValue) {
-        const jomaSelectors = ['.now-price', '.price', '.product-price', '[itemprop="price"]'];
-        for (const s of jomaSelectors) {
-          const text = $(s).first().text().trim();
-          if (text && text.includes('$') && text.length < 15) {
-            newValue = text;
-            console.log(`Found Jomashop price via selector ${s}: "${newValue}"`);
-            break;
-          }
-        }
+        newValue = $('meta[property="og:price:amount"]').attr('content') || 
+                   $('meta[itemprop="price"]').attr('content') ||
+                   $('meta[name="twitter:data1"]').attr('content');
+        if (newValue && !newValue.includes('$')) newValue = `$${newValue}`;
       }
     }
 
