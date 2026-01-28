@@ -60,27 +60,71 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     
     let newValue: string | null = null;
 
-    // Strategy 1: The user-defined CSS Selector
-    const selector = monitor.selector.trim();
-    // Prioritize direct classes if common patterns
-    const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
-    const effectiveSelector = isClassName ? `.${selector}` : selector;
-    
-    // Specifically handle Jomashop now-price which is often deeply nested or duplicated
-    if (monitor.url.includes('jomashop.com') && (selector.includes('now-price') || selector.includes('price'))) {
-      const jomaPrice = $('.now-price').first().text().trim() || 
-                        $('.price').first().text().trim() ||
-                        $('[itemprop="price"]').attr('content');
-      if (jomaPrice && jomaPrice.includes('$')) {
-        newValue = jomaPrice;
-        console.log(`Found Jomashop price via specific override: "${newValue}"`);
+    // Strategy 1: Specific overrides for high-value targets
+    if (monitor.url.includes('jomashop.com')) {
+      console.log("Applying Jomashop-specific scraping logic...");
+      
+      // 1. Try JSON-LD Product Schema (Jomashop usually has this)
+      const scripts = $('script[type="application/ld+json"]');
+      scripts.each((_, el) => {
+        try {
+          const content = $(el).html();
+          if (!content) return;
+          const data = JSON.parse(content);
+          
+          // Schema can be an object or an array of objects
+          const items = Array.isArray(data) ? data : [data];
+          for (const item of items) {
+            if (item['@type'] === 'Product' || item['@type'] === 'Offer') {
+              const price = item.offers?.price || item.price;
+              const currency = item.offers?.priceCurrency || item.priceCurrency || '$';
+              if (price) {
+                newValue = `${currency === 'USD' || currency === '$' ? '$' : currency}${price}`;
+                console.log(`Found Jomashop price via JSON-LD: "${newValue}"`);
+                return false;
+              }
+            }
+          }
+        } catch (e) {}
+        return !newValue;
+      });
+
+      // 2. Try specific price class with stricter check
+      if (!newValue) {
+        const jomaPrice = $('.now-price').first().text().trim();
+        if (jomaPrice && jomaPrice.includes('$') && jomaPrice.length < 15) {
+          newValue = jomaPrice;
+          console.log(`Found Jomashop price via .now-price: "${newValue}"`);
+        }
+      }
+
+      // 3. Try searching for price in common script patterns
+      if (!newValue) {
+        $('script').each((_, el) => {
+          const content = $(el).html();
+          if (!content) return true;
+          // Look for final_price or special_price in Jomashop's state
+          const match = content.match(/"final_price"\s*:\s*([0-9.]+)/i) || 
+                        content.match(/"price"\s*:\s*([0-9.]+)/i);
+          if (match && match[1]) {
+            newValue = `$${match[1]}`;
+            console.log(`Found Jomashop price via regex in script: "${newValue}"`);
+            return false;
+          }
+          return true;
+        });
       }
     }
 
     if (!newValue) {
+      // Original selector logic...
+      const selector = monitor.selector.trim();
+      const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
+      const effectiveSelector = isClassName ? `.${selector}` : selector;
       const element = $(effectiveSelector);
+      
       if (element.length > 0) {
-        // Try to find a child price first to avoid capturing title if selector is too broad
+        // Try to find a child price first
         const priceInElement = element.find('.now-price, .price, [itemprop="price"], .product-price').first();
         if (priceInElement.length > 0) {
           newValue = priceInElement.text().trim() || priceInElement.attr('content');
@@ -97,10 +141,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
         
         if (newValue) {
           console.log(`Found value via selector: "${newValue}"`);
-          // Verification: If it looks like a title, we try regex extraction
           const pageTitle = $('title').text().trim();
           const ogTitle = $('meta[property="og:title"]').attr('content');
-          if (newValue === pageTitle || newValue === ogTitle || newValue.length > 100) {
+          if (newValue === pageTitle || newValue === ogTitle || newValue.length > 80) {
              const pricePattern = /\$[0-9,.]+/;
              const match = element.text().match(pricePattern);
              if (match) {
