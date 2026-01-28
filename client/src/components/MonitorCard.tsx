@@ -193,7 +193,7 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
         <div className="pt-2">
           <div className="flex flex-col gap-1.5 bg-secondary/30 p-3 rounded-lg border border-border/50 font-mono">
              <div className="flex items-center justify-between">
-               <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Current Value</span>
+               <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Current</span>
                <span className="text-xs font-bold text-primary truncate max-w-[150px]" title={monitor.currentValue || "No value detected"}>
                  {monitor.currentValue || "---"}
                </span>
