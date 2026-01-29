@@ -44,6 +44,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={() => <ProtectedRoute component={Dashboard} />} />
+      <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/monitors/:id" component={() => <ProtectedRoute component={MonitorDetails} />} />
       {/* Fallback to 404 */}
       <Route component={NotFound} />
