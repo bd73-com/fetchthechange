@@ -1,0 +1,98 @@
+/api/monitors/:id/suggest-selectors is not useful yet: it returns only html and body, and the sample text is the cookie consent text ("We value your privacy"). That means the endpoint is running suggestions before the consent overlay is dismissed / before the final content is visible, and it also likely fails on exact text matching because price text may be split across spans.
+
+Please improve /suggest-selectors strictly and generically (no inference, no domain logic):
+
+1) Reuse the same rendered pipeline as /check
+
+In the suggest-selectors endpoint:
+
+Use the same Browserless render + consent dismissal helper as the scraper
+
+After consent dismissal, wait:
+
+await page.waitForTimeout(1200)
+
+await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {})
+
+Then compute suggestions on the post-consent DOM.
+Add logs:
+
+[Suggest] consentClicked=true/false
+
+[Suggest] pageTitle=...
+
+[Suggest] bodyStartsWith=... (first 120 chars)
+
+2) Robust expectedText matching (handles split nodes)
+
+Accept expectedText and match using normalization:
+
+Normalize both expectedText and candidate text:
+
+lowercase
+
+remove whitespace
+
+remove commas
+
+remove currency symbols $€£
+Example: "$3,200.00" -> "3200.00"
+Then treat a candidate as match if:
+
+normalizedCandidate includes normalizedExpected OR
+
+if expectedText length >= 4, also allow matching on the digits-only version (e.g. "3200")
+
+Implementation approach:
+
+Iterate candidates using Playwright:
+
+Prefer: page.locator("text=/\\d/") is too broad; instead scan elements under main, #main, [role=main], body
+
+Use page.locator("body *") but limit by:
+
+only elements with innerText length between 1 and 200
+
+and visible (isVisible())
+
+and not script/style/noscript
+
+Stop after you find e.g. 30 matches and score/rank them.
+
+3) Generate stable selectors
+
+For each matched element, generate a selector with this priority:
+
+[data-testid="..."], [data-test="..."], [data-qa="..."]
+
+[itemprop="..."]
+
+#id (only if id length < 50 and not obviously random)
+
+tag + 1-2 stable class names (avoid hashed classes)
+
+scoped under a stable parent if available (main, #main, [role=main])
+Never return just html or body as a suggestion.
+
+Return JSON:
+
+{
+  "currentSelector": { "selector": "...", "count": 0, "valid": false },
+  "suggestions": [
+    { "selector": "...", "count": 1, "sampleText": "..." }
+  ]
+}
+
+4) If expectedText provided but zero matches found
+
+Return suggestions: [] and add:
+
+debug: { "note": "No element matched expectedText after normalization", "pageTitle": "...", "consentClicked": true/false }
+(still no inference)
+
+After this change, rerun:
+
+expectedText "$3,200.00"
+
+and also expectedText "3200"
+and confirm we get real element-level selectors, not html/body.

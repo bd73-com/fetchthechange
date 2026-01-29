@@ -326,6 +326,98 @@ export async function checkMonitor(monitor: Monitor): Promise<{
 }
 
 /**
+ * Normalize text for matching: lowercase, remove whitespace/commas/currency symbols.
+ */
+function normalizeTextForMatch(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[\s,]+/g, '')
+    .replace(/[$€£¥₹]/g, '');
+}
+
+/**
+ * Extract digits-only version for fallback matching.
+ */
+function extractDigits(text: string): string {
+  return text.replace(/[^\d.]/g, '');
+}
+
+/**
+ * Check if candidate text matches expected text using normalized comparison.
+ */
+function textMatches(candidateText: string, expectedText: string): boolean {
+  const normCandidate = normalizeTextForMatch(candidateText);
+  const normExpected = normalizeTextForMatch(expectedText);
+  
+  // Direct include match
+  if (normCandidate.includes(normExpected)) return true;
+  
+  // Digits-only fallback for longer expected text
+  if (expectedText.length >= 4) {
+    const digitsExpected = extractDigits(expectedText);
+    const digitsCandidate = extractDigits(candidateText);
+    if (digitsExpected.length >= 3 && digitsCandidate.includes(digitsExpected)) return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Generate a stable selector for an element.
+ */
+function generateStableSelector(node: Element): string | null {
+  const tag = node.tagName.toLowerCase();
+  
+  // Skip html and body
+  if (tag === 'html' || tag === 'body') return null;
+  
+  // Priority 1: data-testid, data-test, data-qa
+  const dataTestId = node.getAttribute('data-testid');
+  if (dataTestId) return `[data-testid="${dataTestId}"]`;
+  
+  const dataTest = node.getAttribute('data-test');
+  if (dataTest) return `[data-test="${dataTest}"]`;
+  
+  const dataQa = node.getAttribute('data-qa');
+  if (dataQa) return `[data-qa="${dataQa}"]`;
+  
+  // Priority 2: itemprop
+  const itemProp = node.getAttribute('itemprop');
+  if (itemProp) return `[itemprop="${itemProp}"]`;
+  
+  // Priority 3: stable ID
+  const id = node.id;
+  if (id && id.length < 50 && !id.match(/\d{6,}/) && !id.match(/^(react|ember|vue)/i)) {
+    return `#${id}`;
+  }
+  
+  // Priority 4: tag + stable classes
+  const classes = Array.from(node.classList)
+    .filter(c => 
+      c.length > 1 && 
+      c.length < 40 && 
+      !c.match(/\d{5,}/) &&
+      !c.match(/^(active|hover|focus|selected|open|closed|hidden|visible)/i) &&
+      !c.match(/^(js-|_)/))
+    .slice(0, 2);
+  
+  if (classes.length > 0) {
+    // Try to scope under main/article if available
+    const parent = node.closest('main, #main, [role="main"], article, #content');
+    const prefix = parent ? (parent.id ? `#${parent.id} ` : 'main ') : '';
+    return `${prefix}${tag}.${classes.join('.')}`;
+  }
+  
+  // Priority 5: tag with aria-label
+  const ariaLabel = node.getAttribute('aria-label');
+  if (ariaLabel && ariaLabel.length < 50) {
+    return `${tag}[aria-label="${ariaLabel}"]`;
+  }
+  
+  return null;
+}
+
+/**
  * Discover selector suggestions for a given page.
  */
 export async function discoverSelectors(
@@ -335,6 +427,7 @@ export async function discoverSelectors(
 ): Promise<{
   currentSelector: { selector: string; count: number; valid: boolean };
   suggestions: SelectorSuggestion[];
+  debug?: { note: string; pageTitle: string; consentClicked: boolean };
 }> {
   const token = process.env.BROWSERLESS_TOKEN;
   if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
@@ -354,9 +447,19 @@ export async function discoverSelectors(
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
     
-    await tryDismissConsent(page);
+    // Dismiss consent and wait for content
+    const consentClicked = await tryDismissConsent(page);
     await page.waitForTimeout(1200);
     await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+    
+    // Logging
+    const pageTitle = await page.title();
+    const bodyText = await page.locator('body').innerText({ timeout: 2000 }).catch(() => "");
+    const bodyStartsWith = bodyText.substring(0, 120).replace(/\s+/g, ' ').trim();
+    
+    console.log(`[Suggest] consentClicked=${consentClicked}`);
+    console.log(`[Suggest] pageTitle=${pageTitle}`);
+    console.log(`[Suggest] bodyStartsWith=${bodyStartsWith}`);
 
     // Check current selector validity
     const trimmedSelector = currentSelector.trim();
@@ -367,80 +470,226 @@ export async function discoverSelectors(
     const currentValid = currentCount > 0;
 
     const suggestions: SelectorSuggestion[] = [];
+    const seen = new Set<string>();
 
-    // If expectedText is provided, find elements containing that text
     if (expectedText) {
-      const normalizedExpected = expectedText.toLowerCase().trim();
-      
-      // Find all elements and filter by text content
-      const elements = await page.locator('*').all();
-      const seen = new Set<string>();
-      
-      for (const el of elements.slice(0, 500)) { // Limit to first 500 elements for performance
-        try {
-          const text = await el.innerText({ timeout: 100 }).catch(() => "");
-          if (!text.toLowerCase().includes(normalizedExpected)) continue;
+      // Scan visible elements and compute selectors using raw JS string to avoid bundler issues
+      const scanScript = `
+        (function() {
+          var results = [];
           
-          // Generate selector for this element
-          const selector = await el.evaluate((node: Element) => {
-            // Prefer data attributes
-            const dataTestId = node.getAttribute('data-testid');
-            if (dataTestId) return `[data-testid="${dataTestId}"]`;
+          function computeSelector(node) {
+            var tag = node.tagName.toLowerCase();
+            if (tag === 'html' || tag === 'body') return null;
             
-            const dataTest = node.getAttribute('data-test');
-            if (dataTest) return `[data-test="${dataTest}"]`;
+            var dataTestId = node.getAttribute('data-testid');
+            if (dataTestId) return '[data-testid="' + dataTestId + '"]';
             
-            const dataQa = node.getAttribute('data-qa');
-            if (dataQa) return `[data-qa="${dataQa}"]`;
+            var dataTest = node.getAttribute('data-test');
+            if (dataTest) return '[data-test="' + dataTest + '"]';
             
-            const itemProp = node.getAttribute('itemprop');
-            if (itemProp) return `[itemprop="${itemProp}"]`;
+            var dataQa = node.getAttribute('data-qa');
+            if (dataQa) return '[data-qa="' + dataQa + '"]';
             
-            const ariaLabel = node.getAttribute('aria-label');
-            if (ariaLabel && ariaLabel.length < 50) return `[aria-label="${ariaLabel}"]`;
+            var itemProp = node.getAttribute('itemprop');
+            if (itemProp) return '[itemprop="' + itemProp + '"]';
             
-            // Use id if stable-looking
-            const id = node.id;
-            if (id && !id.match(/\d{5,}/) && !id.includes('react') && !id.includes('ember')) {
-              return `#${id}`;
+            var id = node.id;
+            if (id && id.length < 50 && !/\\d{6,}/.test(id) && !/^(react|ember|vue)/i.test(id)) {
+              return '#' + id;
             }
             
-            // Build class-based selector
-            const tag = node.tagName.toLowerCase();
-            const classes = Array.from(node.classList)
-              .filter(c => !c.match(/\d{4,}/) && c.length < 30 && !c.includes('active') && !c.includes('hover'))
-              .slice(0, 2);
+            var classList = node.classList;
+            var classes = [];
+            for (var i = 0; i < classList.length && classes.length < 2; i++) {
+              var c = classList[i];
+              if (c.length > 1 && c.length < 40 && 
+                  !/\\d{5,}/.test(c) &&
+                  !/^(active|hover|focus|selected|open|closed|hidden|visible)/i.test(c) &&
+                  !/^(js-|_)/.test(c)) {
+                classes.push(c);
+              }
+            }
             
             if (classes.length > 0) {
-              return `${tag}.${classes.join('.')}`;
+              var parent = node.closest('main, #main, [role="main"], article, #content');
+              var prefix = parent ? (parent.id ? '#' + parent.id + ' ' : 'main ') : '';
+              return prefix + tag + '.' + classes.join('.');
             }
             
-            return tag;
-          });
+            var ariaLabel = node.getAttribute('aria-label');
+            if (ariaLabel && ariaLabel.length < 50) {
+              return tag + '[aria-label="' + ariaLabel + '"]';
+            }
+            
+            return null;
+          }
           
-          if (seen.has(selector)) continue;
-          seen.add(selector);
+          var walker = document.createTreeWalker(
+            document.body,
+            NodeFilter.SHOW_ELEMENT,
+            {
+              acceptNode: function(node) {
+                var tag = node.tagName.toLowerCase();
+                if (['script', 'style', 'noscript', 'html', 'body'].indexOf(tag) !== -1) {
+                  return NodeFilter.FILTER_SKIP;
+                }
+                return NodeFilter.FILTER_ACCEPT;
+              }
+            }
+          );
           
-          // Verify selector matches and get count
+          var count = 0;
+          var current = walker.nextNode();
+          while (current && count < 300) {
+            var el = current;
+            var text = el.innerText || '';
+            if (text.length >= 1 && text.length <= 200) {
+              var rect = el.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                var selector = computeSelector(el);
+                if (selector) {
+                  results.push({ text: text, selector: selector });
+                  count++;
+                }
+              }
+            }
+            current = walker.nextNode();
+          }
+          return results;
+        })()
+      `;
+      const candidatesWithSelectors: Array<{text: string; selector: string | null}> = await page.evaluate(scanScript);
+      
+      // Filter by text match
+      for (const { text, selector } of candidatesWithSelectors) {
+        if (!textMatches(text, expectedText)) continue;
+        if (!selector || seen.has(selector)) continue;
+        
+        try {
+          // Verify selector count
           const count = await page.locator(selector).count();
           if (count === 0) continue;
           
+          seen.add(selector);
           const sampleText = text.substring(0, 80).replace(/\s+/g, ' ').trim();
-          
           suggestions.push({ selector, count, sampleText });
           
           if (suggestions.length >= 10) break;
-        } catch (e) {
-          // Skip elements that can't be processed
+        } catch (e) {}
+      }
+      
+      // If no matches found, try attribute-based scanning
+      if (suggestions.length === 0) {
+        const stableAttrSelectors = [
+          '[data-testid]', '[data-test]', '[data-qa]', '[itemprop]',
+          '[aria-label]', '.price', '[data-price]', '.product-price'
+        ];
+        
+        for (const baseSelector of stableAttrSelectors) {
+          try {
+            // Get elements with their selectors using raw JS string to avoid bundler issues
+            const attrScanScript = `
+              (function() {
+                var results = [];
+                var elements = document.querySelectorAll('${baseSelector.replace(/'/g, "\\'")}');
+                
+                function computeSelector(node) {
+                  var tag = node.tagName.toLowerCase();
+                  if (tag === 'html' || tag === 'body') return null;
+                  
+                  var dataTestId = node.getAttribute('data-testid');
+                  if (dataTestId) return '[data-testid="' + dataTestId + '"]';
+                  
+                  var dataTest = node.getAttribute('data-test');
+                  if (dataTest) return '[data-test="' + dataTest + '"]';
+                  
+                  var dataQa = node.getAttribute('data-qa');
+                  if (dataQa) return '[data-qa="' + dataQa + '"]';
+                  
+                  var itemProp = node.getAttribute('itemprop');
+                  if (itemProp) return '[itemprop="' + itemProp + '"]';
+                  
+                  var id = node.id;
+                  if (id && id.length < 50 && !/\\d{6,}/.test(id) && !/^(react|ember|vue)/i.test(id)) {
+                    return '#' + id;
+                  }
+                  
+                  var classList = node.classList;
+                  var classes = [];
+                  for (var i = 0; i < classList.length && classes.length < 2; i++) {
+                    var c = classList[i];
+                    if (c.length > 1 && c.length < 40 && 
+                        !/\\d{5,}/.test(c) &&
+                        !/^(active|hover|focus|selected|open|closed|hidden|visible)/i.test(c) &&
+                        !/^(js-|_)/.test(c)) {
+                      classes.push(c);
+                    }
+                  }
+                  
+                  if (classes.length > 0) {
+                    var parent = node.closest('main, #main, [role="main"], article, #content');
+                    var prefix = parent ? (parent.id ? '#' + parent.id + ' ' : 'main ') : '';
+                    return prefix + tag + '.' + classes.join('.');
+                  }
+                  
+                  var ariaLabel = node.getAttribute('aria-label');
+                  if (ariaLabel && ariaLabel.length < 50) {
+                    return tag + '[aria-label="' + ariaLabel + '"]';
+                  }
+                  
+                  return null;
+                }
+                
+                for (var i = 0; i < Math.min(elements.length, 20); i++) {
+                  var el = elements[i];
+                  var text = el.innerText || '';
+                  var selector = computeSelector(el);
+                  if (selector) {
+                    results.push({ text: text, selector: selector });
+                  }
+                }
+                return results;
+              })()
+            `;
+            const attrCandidates: Array<{text: string; selector: string | null}> = await page.evaluate(attrScanScript);
+            
+            for (const { text, selector } of attrCandidates) {
+              if (!text || !textMatches(text, expectedText)) continue;
+              if (!selector || seen.has(selector)) continue;
+              
+              const count = await page.locator(selector).count();
+              if (count === 0) continue;
+              
+              seen.add(selector);
+              const sampleText = text.substring(0, 80).replace(/\s+/g, ' ').trim();
+              suggestions.push({ selector, count, sampleText });
+              
+              if (suggestions.length >= 10) break;
+            }
+          } catch (e) {}
+          if (suggestions.length >= 10) break;
         }
       }
+      
+      // Return debug info if no matches found
+      if (suggestions.length === 0) {
+        return {
+          currentSelector: { selector: currentSelector, count: currentCount, valid: currentValid },
+          suggestions: [],
+          debug: {
+            note: "No element matched expectedText after normalization",
+            pageTitle,
+            consentClicked
+          }
+        };
+      }
     } else {
-      // No expected text - suggest common price/value selectors
+      // No expected text - suggest common price/value selectors that exist
       const commonSelectors = [
-        '.price', '.price-now', '.product-price', '[data-price]',
-        '.amount', '.value', '.cost', '.total',
-        '[itemprop="price"]', '[data-testid*="price"]',
-        '.sale-price', '.current-price', '.final-price'
+        '[itemprop="price"]', '[data-testid*="price"]', '[data-price]',
+        '.price', '.price-now', '.product-price', '.sale-price', 
+        '.current-price', '.final-price', '.amount', '.value'
       ];
       
       for (const selector of commonSelectors) {
@@ -451,7 +700,10 @@ export async function discoverSelectors(
           const text = await page.locator(selector).first().innerText({ timeout: 500 }).catch(() => "");
           const sampleText = text.substring(0, 80).replace(/\s+/g, ' ').trim();
           
-          suggestions.push({ selector, count, sampleText });
+          if (!seen.has(selector)) {
+            seen.add(selector);
+            suggestions.push({ selector, count, sampleText });
+          }
           
           if (suggestions.length >= 10) break;
         } catch (e) {}
@@ -459,11 +711,7 @@ export async function discoverSelectors(
     }
 
     return {
-      currentSelector: {
-        selector: currentSelector,
-        count: currentCount,
-        valid: currentValid
-      },
+      currentSelector: { selector: currentSelector, count: currentCount, valid: currentValid },
       suggestions
     };
   } finally {
