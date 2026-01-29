@@ -2,19 +2,45 @@ import { useAuth } from "@/hooks/use-auth";
 import { useMonitors, useCheckMonitor } from "@/hooks/use-monitors";
 import { CreateMonitorDialog } from "@/components/CreateMonitorDialog";
 import { MonitorCard } from "@/components/MonitorCard";
+import { UpgradeDialog } from "@/components/UpgradeDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { LogOut, LayoutDashboard, RefreshCw, Loader2 } from "lucide-react";
+import { LogOut, LayoutDashboard, RefreshCw, Loader2, Sparkles } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
+import { useEffect } from "react";
+import { useSearch } from "wouter";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const { data: monitors, isLoading, error, refetch } = useMonitors();
   const { mutate: checkMonitor, isPending: isChecking } = useCheckMonitor();
   const { toast } = useToast();
+  const searchString = useSearch();
+
+  // Handle checkout success/cancel from Stripe redirect
+  useEffect(() => {
+    const params = new URLSearchParams(searchString);
+    const checkoutStatus = params.get("checkout");
+    
+    if (checkoutStatus === "success") {
+      toast({
+        title: "Subscription activated!",
+        description: "Thank you for upgrading. Your new plan is now active.",
+      });
+      // Clear the query param
+      window.history.replaceState({}, "", "/dashboard");
+    } else if (checkoutStatus === "cancelled") {
+      toast({
+        variant: "destructive",
+        title: "Checkout cancelled",
+        description: "You can upgrade anytime from your dashboard.",
+      });
+      window.history.replaceState({}, "", "/dashboard");
+    }
+  }, [searchString, toast]);
 
   const handleRefresh = async () => {
     console.log("Refreshing monitors...");
@@ -110,17 +136,28 @@ export default function Dashboard() {
               const count = monitors?.length ?? 0;
               const isAtLimit = count >= limit;
               return (
-                <div className="flex items-center gap-2 mt-2">
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <Badge variant={tier === "free" ? "secondary" : "default"} className="capitalize">
                     {tier} Plan
                   </Badge>
                   <span className={`text-sm ${isAtLimit ? "text-destructive" : "text-muted-foreground"}`}>
                     {count} / {limit === Infinity ? "Unlimited" : limit} monitors used
                   </span>
-                  {isAtLimit && (
-                    <span className="text-sm text-destructive font-medium">
-                      (limit reached)
-                    </span>
+                  {isAtLimit && tier !== "power" && (
+                    <UpgradeDialog currentTier={tier}>
+                      <Button variant="outline" size="sm" className="text-primary border-primary">
+                        <Sparkles className="w-3 h-3 mr-1" />
+                        Upgrade for more
+                      </Button>
+                    </UpgradeDialog>
+                  )}
+                  {tier !== "power" && !isAtLimit && (
+                    <UpgradeDialog currentTier={tier}>
+                      <Button variant="ghost" size="sm" className="text-muted-foreground">
+                        <Sparkles className="w-3 h-3 mr-1" />
+                        Upgrade
+                      </Button>
+                    </UpgradeDialog>
                   )}
                 </div>
               );

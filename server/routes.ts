@@ -352,6 +352,21 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Price ID is required" });
       }
 
+      // Validate priceId belongs to a known subscription product (prevent plan spoofing)
+      const validPrice = await db.execute(sql`
+        SELECT pr.id, p.metadata 
+        FROM stripe.prices pr
+        JOIN stripe.products p ON pr.product = p.id
+        WHERE pr.id = ${priceId} 
+          AND pr.active = true 
+          AND p.active = true
+          AND (p.metadata->>'tier' IN ('pro', 'power') OR p.name ILIKE '%pro%' OR p.name ILIKE '%power%')
+      `);
+
+      if (validPrice.rows.length === 0) {
+        return res.status(400).json({ message: "Invalid plan selected" });
+      }
+
       const user = await authStorage.getUser(userId);
       if (!user?.email) {
         return res.status(400).json({ message: "User email is required for checkout" });
