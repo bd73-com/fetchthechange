@@ -1,4 +1,4 @@
-import { checkMonitor as scraperCheckMonitor, extractWithBrowserless } from "./services/scraper";
+import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, getRenderedDomSnapshot, detectPageBlockReason } from "./services/scraper";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -6,6 +6,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { startScheduler } from "./services/scheduler";
+import * as cheerio from "cheerio";
 
 // ------------------------------------------------------------------
 // 1. CHECK MONITOR FUNCTION
@@ -77,6 +78,36 @@ export async function registerRoutes(
     }
   });
 
+  // Selector Debug Mode Endpoint
+  app.post("/api/monitors/:id/debug", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const monitor = await storage.getMonitor(id);
+      if (!monitor) return res.status(404).json({ message: "Not found" });
+      if (monitor.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
+
+      const snapshot = await getRenderedDomSnapshot(monitor.url);
+      const $ = cheerio.load(snapshot.htmlSnippet);
+      const isClassName = !monitor.selector.startsWith('.') && !monitor.selector.startsWith('#') && !monitor.selector.includes(' ');
+      const effectiveSelector = isClassName ? `.${monitor.selector}` : monitor.selector;
+      const count = $(effectiveSelector).length;
+      const block = detectPageBlockReason(snapshot.htmlSnippet);
+
+      res.json({
+        selector: monitor.selector,
+        selectorMatches: count,
+        blocked: block.blocked,
+        blockReason: block.reason || null,
+        pageTitle: snapshot.title,
+        finalUrl: snapshot.finalUrl,
+        htmlSnippet: snapshot.htmlSnippet
+      });
+    } catch (error: any) {
+      console.error("[Debug] Selector debug endpoint error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Monitors API
 
   app.get(api.monitors.list.path, isAuthenticated, async (req: any, res) => {
@@ -98,9 +129,6 @@ export async function registerRoutes(
       const monitor = await storage.createMonitor({
         ...input,
         userId: req.user.claims.sub,
-        active: input.active ?? true,
-        emailEnabled: input.emailEnabled ?? true,
-        frequency: input.frequency ?? "daily",
       });
 
       // We don't await this so the UI returns immediately
