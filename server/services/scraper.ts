@@ -49,7 +49,6 @@ function detectPageBlockReason(html: string, $: cheerio.CheerioAPI): { blocked: 
     }
   }
 
-  // Check for common challenge elements
   const challengeMarkers = ['[id*="captcha"]', '[class*="captcha"]', '[id*="challenge"]', '[class*="challenge"]', '[class*="cf-"]', '.turnstile', '.h-captcha', '.g-recaptcha'];
   for (const marker of challengeMarkers) {
     if ($(marker).length > 0) {
@@ -58,6 +57,115 @@ function detectPageBlockReason(html: string, $: cheerio.CheerioAPI): { blocked: 
   }
 
   return { blocked: false };
+}
+
+/**
+ * Extracts value from HTML using a generic approach.
+ * Returns null for title/name matches if it's a selector-based monitor.
+ */
+function extractValueFromHtml(html: string, monitor: Monitor): string | null {
+  const $ = cheerio.load(html);
+  let value: string | null = null;
+  const selector = monitor.selector.trim();
+
+  // 1. Selector-based extraction
+  const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
+  const effectiveSelector = isClassName ? `.${selector}` : selector;
+  const elements = $(effectiveSelector);
+  
+  console.log(`[Scraper] Selector "${selector}" matches: ${elements.length}`);
+
+  if (elements.length > 0) {
+    const rawValue = elements.first().text() || elements.first().attr('content') || "";
+    const normalized = normalizeValue(rawValue);
+    
+    if (normalized.length > 50) {
+      value = extractFirstPrice(normalized);
+    } else {
+      value = normalized || null;
+    }
+  }
+
+  // 2. Generic fallbacks (price-focused) if selector fails
+  if (!value) {
+    // Strategy A: JSON-LD
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const content = $(el).html();
+        if (!content) return true;
+        const data = JSON.parse(content);
+        const items = Array.isArray(data) ? data : [data];
+        for (const item of items) {
+          const val = item.offers?.price || item.offers?.[0]?.price || item.price;
+          if (val) {
+            value = normalizeValue(String(val));
+            return false;
+          }
+        }
+      } catch (e) {}
+      return !value;
+    });
+
+    // Strategy B: Price Scripts
+    if (!value) {
+      $('script').each((_, el) => {
+        const content = $(el).html();
+        if (!content || !content.includes('price')) return true;
+        const match = content.match(/"(?:final_)?price"\s*:\s*"?([0-9.,]+)"?/i);
+        if (match) {
+          value = match[1];
+          return false;
+        }
+        return true;
+      });
+    }
+
+    // Strategy C: Price Meta Tags
+    if (!value) {
+      value = $('meta[property$="price:amount"]').attr('content') || 
+              $('meta[name$="price:amount"]').attr('content') ||
+              $('meta[itemprop="price"]').attr('content') || null;
+    }
+    
+    if (value) {
+      value = normalizeValue(value);
+      if (!value.includes('$') && !value.includes('€') && !value.includes('£')) {
+         value = `$${value}`; 
+      }
+    }
+  }
+
+  return value;
+}
+
+/**
+ * Retries fetch using Browserless if token is present.
+ */
+async function fetchRenderedHtmlWithBrowserless(url: string): Promise<string> {
+  const token = process.env.BROWSERLESS_TOKEN;
+  if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
+
+  console.log(`[Scraper] Using Browserless JS rendering for: ${url}`);
+  
+  let browser;
+  try {
+    const { chromium } = await import("playwright-core");
+    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`, {
+      timeout: 30000
+    });
+    
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    
+    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
+    const content = await page.content();
+    return content;
+  } catch (error) {
+    console.error(`[Scraper] Browserless failed:`, error);
+    throw error;
+  } finally {
+    if (browser) await browser.close();
+  }
 }
 
 async function fetchWithCurl(url: string): Promise<string> {
@@ -71,36 +179,8 @@ async function fetchWithCurl(url: string): Promise<string> {
 }
 
 /**
- * Some sites require JS rendering; when configured with BROWSERLESS_TOKEN we retry using a remote headless browser.
- */
-async function fetchRenderedHtml(url: string): Promise<string> {
-  const token = process.env.BROWSERLESS_TOKEN;
-  if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
-
-  console.log(`[Scraper] Using Browserless JS rendering fallback for: ${url}`);
-  
-  let browser;
-  try {
-    const { chromium } = await import("playwright-core");
-    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`);
-    
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
-    const content = await page.content();
-    return content;
-  } catch (error) {
-    console.error(`[Scraper] Browserless fallback failed:`, error);
-    throw error;
-  } finally {
-    if (browser) await browser.close();
-  }
-}
-
-/**
  * Main monitor check function.
- * For selector-based monitors, do not fall back to page title; detect block/interstitial pages and return null.
+ * Some sites require JS rendering; when configured with BROWSERLESS_TOKEN we retry using a remote headless browser.
  */
 export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean, currentValue: string | null }> {
   try {
@@ -136,100 +216,27 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
 
     if (!html) return { changed: false, currentValue: null };
 
-    const performExtraction = ($: cheerio.CheerioAPI, selector: string) => {
-      let extracted: string | null = null;
-      const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
-      const effectiveSelector = isClassName ? `.${selector}` : selector;
-      const elements = $(effectiveSelector);
-      
-      console.log(`Selector "${selector}" matches: ${elements.length}`);
-
-      if (elements.length > 0) {
-        const rawValue = elements.first().text() || elements.first().attr('content') || "";
-        const normalized = normalizeValue(rawValue);
-        
-        if (normalized.length > 50) {
-          extracted = extractFirstPrice(normalized);
-        } else {
-          extracted = normalized || null;
-        }
-      }
-
-      if (!extracted) {
-        // Strategy A: JSON-LD
-        $('script[type="application/ld+json"]').each((_, el) => {
-          try {
-            const content = $(el).html();
-            if (!content) return true;
-            const data = JSON.parse(content);
-            const items = Array.isArray(data) ? data : [data];
-            for (const item of items) {
-              const val = item.offers?.price || item.offers?.[0]?.price || item.price;
-              if (val) {
-                extracted = normalizeValue(String(val));
-                return false;
-              }
-            }
-          } catch (e) {}
-          return !extracted;
-        });
-
-        // Strategy B: Price Scripts
-        if (!extracted) {
-          $('script').each((_, el) => {
-            const content = $(el).html();
-            if (!content || !content.includes('price')) return true;
-            const match = content.match(/"(?:final_)?price"\s*:\s*"?([0-9.,]+)"?/i);
-            if (match) {
-              extracted = match[1];
-              return false;
-            }
-            return true;
-          });
-        }
-
-        // Strategy C: Price Meta Tags
-        if (!extracted) {
-          extracted = $('meta[property$="price:amount"]').attr('content') || 
-                     $('meta[name$="price:amount"]').attr('content') ||
-                     $('meta[itemprop="price"]').attr('content') || null;
-        }
-        
-        if (extracted) {
-          extracted = normalizeValue(extracted);
-          if (!extracted.includes('$') && !extracted.includes('€') && !extracted.includes('£')) {
-             extracted = `$${extracted}`; 
-          }
-        }
-      }
-      return extracted;
-    };
-
     let $ = cheerio.load(html);
+    let newValue = extractValueFromHtml(html, monitor);
     let block = detectPageBlockReason(html, $);
-    let newValue: string | null = null;
-    const selector = monitor.selector.trim();
 
-    newValue = performExtraction($, selector);
-
-    // If initial fetch failed to get a value or hit a block page, try Browserless fallback
+    // If JS rendering is needed (no value or blocked) and token is present, retry with Browserless
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
       console.log(`[Scraper] Monitor ${monitor.id} needs JS rendering. Retrying with Browserless...`);
       try {
-        const renderedHtml = await fetchRenderedHtml(monitor.url);
+        const renderedHtml = await fetchRenderedHtmlWithBrowserless(monitor.url);
         if (renderedHtml) {
-          const $rendered = cheerio.load(renderedHtml);
-          const renderedValue = performExtraction($rendered, selector);
+          const renderedValue = extractValueFromHtml(renderedHtml, monitor);
           if (renderedValue) {
             newValue = renderedValue;
             console.log(`[Scraper] Successfully extracted value after JS rendering: ${newValue}`);
           }
         }
-      } catch (fallbackError) {
-        console.error(`[Scraper] JS rendering fallback failed for monitor ${monitor.id}:`, fallbackError);
+      } catch (err) {
+        console.error(`[Scraper] Browserless fallback failed for ${monitor.id}:`, err);
       }
     } else if (!newValue && block.blocked) {
-      console.warn(`Blocked page detected for monitor ${monitor.id}: ${block.reason} (Title: "${$("title").text().substring(0, 120)}")`);
+      console.warn(`Blocked page detected for monitor ${monitor.id}: ${block.reason}`);
       return { changed: false, currentValue: null };
     }
 
