@@ -1,4 +1,4 @@
-import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, getRenderedDomSnapshot, detectPageBlockReason } from "./services/scraper";
+import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPageBlockReason } from "./services/scraper";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -69,8 +69,7 @@ export async function registerRoutes(
         urlAfter: result.urlAfter,
         title: result.title,
         selectorCount: result.selectorCount,
-        extractedValue: result.value,
-        debugFiles: result.debugFiles
+        extractedValue: result.value
       });
     } catch (error: any) {
       console.error("[Debug] Browserless endpoint error:", error);
