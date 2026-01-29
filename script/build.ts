@@ -58,6 +58,9 @@ async function buildAll() {
     minify: true,
     external: externals,
     logLevel: "info",
+    logOverride: {
+      "require-resolve-not-external": "silent",
+    },
   });
 }
 
