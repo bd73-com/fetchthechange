@@ -65,6 +65,18 @@ The application includes a UI tool to help users fix broken selectors:
   6. System automatically runs check and shows result
 - **Backend**: `POST /api/monitors/:id/suggest-selectors` uses Browserless to scan pages
 
+### Tier System
+The application enforces monitor limits based on user subscription tier:
+- **Free**: 5 monitors (default for new users)
+- **Pro**: 100 monitors
+- **Power**: Unlimited monitors
+
+Enforcement:
+- **Backend**: Create monitor endpoint checks user tier and current count before allowing creation
+- **Frontend**: Dashboard shows tier badge and usage (e.g., "3 / 5 monitors used")
+- **Config**: Tier limits defined in `shared/models/auth.ts` via TIER_LIMITS constant
+- **Database**: `users.tier` column with default "free"
+
 ### Email Notifications
 - **Provider**: Resend API
 - **Trigger**: When a monitor detects a value change
