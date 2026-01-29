@@ -366,7 +366,7 @@ export default function LandingPage() {
               </div>
               <CardHeader>
                 <CardTitle className="text-2xl">Pro</CardTitle>
-                <p className="text-4xl font-display font-bold">TBD<span className="text-lg text-muted-foreground font-normal">/month</span></p>
+                <p className="text-4xl font-display font-bold">$9<span className="text-lg text-muted-foreground font-normal">/month</span></p>
                 <p className="text-muted-foreground">For serious monitoring needs</p>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -388,20 +388,17 @@ export default function LandingPage() {
                     <span>Priority JS rendering</span>
                   </div>
                 </div>
-                <Button className="w-full mt-6" size="lg" variant="outline" disabled>
-                  Coming Soon
+                <Button className="w-full mt-6" size="lg" asChild>
+                  <a href="/api/login">Get Started</a>
                 </Button>
               </CardContent>
             </Card>
 
             {/* Power tier */}
             <Card className="relative">
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <Badge variant="secondary" className="px-4 py-1">Coming Soon</Badge>
-              </div>
               <CardHeader>
                 <CardTitle className="text-2xl">Power</CardTitle>
-                <p className="text-4xl font-display font-bold">TBD<span className="text-lg text-muted-foreground font-normal">/month</span></p>
+                <p className="text-4xl font-display font-bold">$29<span className="text-lg text-muted-foreground font-normal">/month</span></p>
                 <p className="text-muted-foreground">For power users & teams</p>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -427,8 +424,8 @@ export default function LandingPage() {
                     <span>Priority support</span>
                   </div>
                 </div>
-                <Button className="w-full mt-6" size="lg" variant="outline" disabled>
-                  Coming Soon
+                <Button className="w-full mt-6" size="lg" variant="outline" asChild>
+                  <a href="/api/login">Get Started</a>
                 </Button>
               </CardContent>
             </Card>
