@@ -25,7 +25,7 @@ export class DatabaseStorage implements IStorage {
     return monitor;
   }
 
-  async createMonitor(insertMonitor: InsertMonitor): Promise<Monitor> {
+  async createMonitor(insertMonitor: any): Promise<Monitor> {
     const [monitor] = await db.insert(monitors).values(insertMonitor).returning();
     return monitor;
   }
