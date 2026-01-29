@@ -61,7 +61,6 @@ function detectPageBlockReason(html: string, $: cheerio.CheerioAPI): { blocked: 
 
 /**
  * Extracts value from HTML using a generic approach.
- * Returns null for title/name matches if it's a selector-based monitor.
  */
 function extractValueFromHtml(html: string, monitor: Monitor): string | null {
   const $ = cheerio.load(html);
@@ -73,22 +72,21 @@ function extractValueFromHtml(html: string, monitor: Monitor): string | null {
   const effectiveSelector = isClassName ? `.${selector}` : selector;
   const elements = $(effectiveSelector);
   
-  console.log(`[Scraper] Selector "${selector}" matches: ${elements.length}`);
+  console.log(`[Scraper] Selector "${selector}" matches in static/rendered html: ${elements.length}`);
 
   if (elements.length > 0) {
     const rawValue = elements.first().text() || elements.first().attr('content') || "";
     const normalized = normalizeValue(rawValue);
     
-    if (normalized.length > 50) {
+    if (normalized.length > 80) {
       value = extractFirstPrice(normalized);
     } else {
       value = normalized || null;
     }
   }
 
-  // 2. Generic fallbacks (price-focused) if selector fails
+  // 2. Generic fallbacks if selector fails
   if (!value) {
-    // Strategy A: JSON-LD
     $('script[type="application/ld+json"]').each((_, el) => {
       try {
         const content = $(el).html();
@@ -106,7 +104,6 @@ function extractValueFromHtml(html: string, monitor: Monitor): string | null {
       return !value;
     });
 
-    // Strategy B: Price Scripts
     if (!value) {
       $('script').each((_, el) => {
         const content = $(el).html();
@@ -120,7 +117,6 @@ function extractValueFromHtml(html: string, monitor: Monitor): string | null {
       });
     }
 
-    // Strategy C: Price Meta Tags
     if (!value) {
       value = $('meta[property$="price:amount"]').attr('content') || 
               $('meta[name$="price:amount"]').attr('content') ||
@@ -139,9 +135,9 @@ function extractValueFromHtml(html: string, monitor: Monitor): string | null {
 }
 
 /**
- * Retries fetch using Browserless if token is present.
+ * Retries extraction using Browserless to read the selector directly in the browser.
  */
-async function fetchRenderedHtmlWithBrowserless(url: string): Promise<string> {
+async function extractWithBrowserless(url: string, selector: string): Promise<string | null> {
   const token = process.env.BROWSERLESS_TOKEN;
   if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
 
@@ -154,12 +150,31 @@ async function fetchRenderedHtmlWithBrowserless(url: string): Promise<string> {
       timeout: 30000
     });
     
-    const context = await browser.newContext();
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      locale: "en-US"
+    });
     const page = await context.newPage();
     
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
-    const content = await page.content();
-    return content;
+    console.log(`[Scraper] Browserless navigating to ${url}...`);
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => console.log("[Scraper] Network idle timeout (proceeding anyway)"));
+    
+    console.log(`[Scraper] Page loaded: ${page.url()} | Title: ${await page.title()}`);
+    
+    const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
+    const effectiveSelector = isClassName ? `.${selector}` : selector;
+    
+    const locator = page.locator(effectiveSelector).first();
+    const count = await page.locator(effectiveSelector).count();
+    console.log(`[Scraper] Browserless selector matches: ${count}`);
+
+    if (count > 0) {
+      const text = await locator.innerText();
+      return normalizeValue(text);
+    }
+    
+    return null;
   } catch (error) {
     console.error(`[Scraper] Browserless failed:`, error);
     throw error;
@@ -180,11 +195,11 @@ async function fetchWithCurl(url: string): Promise<string> {
 
 /**
  * Main monitor check function.
- * Some sites require JS rendering; when configured with BROWSERLESS_TOKEN we retry using a remote headless browser.
  */
 export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean, currentValue: string | null }> {
   try {
     console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
+    console.log(`BROWSERLESS enabled: ${!!process.env.BROWSERLESS_TOKEN}`);
     
     let html = "";
     try {
@@ -195,19 +210,13 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
           'Accept-Language': 'en-US,en;q=0.9',
           'Cache-Control': 'no-cache',
           'Pragma': 'no-cache',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
           'Upgrade-Insecure-Requests': '1'
         },
         signal: AbortSignal.timeout(20000)
       });
-
-      console.log(`Response status for ${monitor.url}: ${response.status}`);
       html = await response.text();
     } catch (e: any) {
       if (e.code === 'UND_ERR_HEADERS_OVERFLOW' || (e.cause && e.cause.code === 'UND_ERR_HEADERS_OVERFLOW')) {
-        console.log(`Header overflow for ${monitor.id}, falling back to curl...`);
         html = await fetchWithCurl(monitor.url);
       } else {
         throw e;
@@ -219,28 +228,35 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     let $ = cheerio.load(html);
     let newValue = extractValueFromHtml(html, monitor);
     let block = detectPageBlockReason(html, $);
+    
+    console.log(`blocked detected: ${block.blocked}${block.blocked ? ` reason=${block.reason}` : ""}`);
 
-    // If JS rendering is needed (no value or blocked) and token is present, retry with Browserless
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
-      console.log(`[Scraper] Monitor ${monitor.id} needs JS rendering. Retrying with Browserless...`);
+      console.log(`[Scraper] Retrying with JS rendering via Browserless...`);
       try {
-        const renderedHtml = await fetchRenderedHtmlWithBrowserless(monitor.url);
-        if (renderedHtml) {
-          const renderedValue = extractValueFromHtml(renderedHtml, monitor);
-          if (renderedValue) {
-            newValue = renderedValue;
-            console.log(`[Scraper] Successfully extracted value after JS rendering: ${newValue}`);
-          }
+        const renderedValue = await extractWithBrowserless(monitor.url, monitor.selector);
+        if (renderedValue) {
+          newValue = renderedValue;
         }
       } catch (err) {
-        console.error(`[Scraper] Browserless fallback failed for ${monitor.id}:`, err);
+        console.error(`[Scraper] Browserless fallback failed:`, err);
       }
-    } else if (!newValue && block.blocked) {
-      console.warn(`Blocked page detected for monitor ${monitor.id}: ${block.reason}`);
-      return { changed: false, currentValue: null };
     }
 
     const oldValue = monitor.currentValue;
+    const pageTitle = $("title").text().trim();
+    const ogTitle = $('meta[property="og:title"]').attr('content');
+    
+    // If the scrape fails or returns a title-like value, and we had an old title-like value, clear it.
+    const isTitleLike = (val: string | null) => val && (val.length > 80 || val === pageTitle || val === ogTitle);
+    
+    if (!newValue || isTitleLike(newValue)) {
+      if (isTitleLike(oldValue)) {
+        console.log(`[Scraper] Old value was title-like, clearing to prevent garbage sticking.`);
+        newValue = null;
+      }
+    }
+
     const changed = newValue !== null && newValue !== oldValue;
 
     await storage.updateMonitor(monitor.id, {
