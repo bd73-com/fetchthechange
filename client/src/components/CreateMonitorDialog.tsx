@@ -25,7 +25,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2, HelpCircle } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export function CreateMonitorDialog() {
   const [open, setOpen] = useState(false);
@@ -100,7 +105,25 @@ export function CreateMonitorDialog() {
               name="selector"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>CSS Selector</FormLabel>
+                  <FormLabel className="flex items-center gap-1">
+                    CSS Selector
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="h-4 w-4 text-muted-foreground cursor-help" data-testid="icon-selector-help" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs" side="top">
+                        <p className="font-medium mb-1">What is a CSS Selector?</p>
+                        <p className="text-sm mb-2">A CSS selector identifies the specific element on the page you want to monitor.</p>
+                        <p className="font-medium mb-1">How to get it:</p>
+                        <ol className="text-sm list-decimal list-inside space-y-1">
+                          <li>Right-click on the element you want to track</li>
+                          <li>Select "Inspect" to open developer tools</li>
+                          <li>Right-click the highlighted HTML element</li>
+                          <li>Choose "Copy" → "Copy selector"</li>
+                        </ol>
+                      </TooltipContent>
+                    </Tooltip>
+                  </FormLabel>
                   <FormControl>
                     <Input placeholder=".price-tag or #main-content" {...field} />
                   </FormControl>
