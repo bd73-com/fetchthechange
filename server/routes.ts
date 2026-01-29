@@ -17,13 +17,18 @@ async function checkMonitor(monitor: any) {
     // Use the robust scraper service instead of broken Playwright setup
     const result = await scraperCheckMonitor(monitor);
 
-    if (!result || result.currentValue === null) {
+    if (!result) {
       throw new Error("Could not fetch value from page");
     }
 
+    // If the scraper returned null, it means it's a known failure (like a block page)
+    // We should return a clean success response indicating no value was found
+    // rather than throwing a 500 error.
+    const finalValue = result.currentValue ?? "Blocked/Unavailable";
+
     return {
       changed: result.changed,
-      currentValue: result.currentValue,
+      currentValue: finalValue,
       previousValue: monitor.currentValue || null
     };
 
