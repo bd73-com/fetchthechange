@@ -57,7 +57,7 @@ export function CreateMonitorDialog() {
       <DialogTrigger asChild>
         <Button className="gap-2 shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all">
           <Plus className="h-4 w-4" />
-          Add Monitor
+          Add Page
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px]">
