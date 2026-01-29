@@ -5,6 +5,8 @@ import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
+import { authStorage } from "./replit_integrations/auth/storage";
+import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
 
@@ -197,10 +199,29 @@ export async function registerRoutes(
 
   app.post(api.monitors.create.path, isAuthenticated, async (req: any, res) => {
     try {
+      const userId = req.user.claims.sub;
+      
+      // Check tier limits
+      const user = await authStorage.getUser(userId);
+      const tier = (user?.tier || "free") as UserTier;
+      const limit = TIER_LIMITS[tier] ?? TIER_LIMITS.free;
+      const currentCount = await storage.getMonitorCount(userId);
+      
+      if (currentCount >= limit) {
+        const limitStr = limit === Infinity ? "unlimited" : String(limit);
+        return res.status(403).json({ 
+          message: `You've reached your ${tier} plan limit of ${limitStr} monitors. Upgrade to add more.`,
+          code: "TIER_LIMIT_REACHED",
+          tier,
+          limit: limit === Infinity ? -1 : limit,
+          currentCount
+        });
+      }
+      
       const input = api.monitors.create.input.parse(req.body);
       const monitor = await storage.createMonitor({
         ...input,
-        userId: req.user.claims.sub,
+        userId,
       } as any);
 
       // We don't await this so the UI returns immediately

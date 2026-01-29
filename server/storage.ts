@@ -5,6 +5,7 @@ import { eq, desc, and, or, isNull, sql } from "drizzle-orm";
 export interface IStorage {
   getMonitors(userId: string): Promise<Monitor[]>;
   getMonitor(id: number): Promise<Monitor | undefined>;
+  getMonitorCount(userId: string): Promise<number>;
   createMonitor(monitor: InsertMonitor): Promise<Monitor>;
   updateMonitor(id: number, updates: any): Promise<Monitor>;
   deleteMonitor(id: number): Promise<void>;
@@ -23,6 +24,13 @@ export class DatabaseStorage implements IStorage {
   async getMonitor(id: number): Promise<Monitor | undefined> {
     const [monitor] = await db.select().from(monitors).where(eq(monitors.id, id));
     return monitor;
+  }
+
+  async getMonitorCount(userId: string): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` })
+      .from(monitors)
+      .where(eq(monitors.userId, userId));
+    return Number(result[0]?.count ?? 0);
   }
 
   async createMonitor(insertMonitor: any): Promise<Monitor> {
