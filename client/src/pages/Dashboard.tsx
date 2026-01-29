@@ -76,6 +76,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2">
             <LayoutDashboard className="h-6 w-6 text-primary" />
             <h1 className="text-xl font-display font-bold">FetchTheChange</h1>
+            <span className="hidden md:inline text-sm text-muted-foreground">- Reliable change monitoring for the modern web</span>
           </div>
           
           <div className="flex items-center gap-4">

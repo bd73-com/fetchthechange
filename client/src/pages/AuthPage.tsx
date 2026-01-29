@@ -14,6 +14,7 @@ export default function AuthPage() {
           <h1 className="text-2xl font-display font-bold flex items-center gap-2">
             <Zap className="h-6 w-6" /> FetchTheChange
           </h1>
+          <p className="text-sm opacity-80 mt-1">Reliable change monitoring for the modern web</p>
         </div>
 
         <div className="relative z-10 max-w-lg space-y-8">
