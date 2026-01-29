@@ -323,20 +323,22 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-display font-bold mb-4">Pricing</h2>
+            <p className="text-lg text-muted-foreground">Simple, transparent pricing for everyone.</p>
           </div>
           
-          <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
+          <div className="grid md:grid-cols-3 gap-6">
             {/* Free tier */}
             <Card className="relative">
               <CardHeader>
                 <CardTitle className="text-2xl">Free</CardTitle>
                 <p className="text-4xl font-display font-bold">$0<span className="text-lg text-muted-foreground font-normal">/month</span></p>
+                <p className="text-muted-foreground">Perfect for getting started</p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-3">
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Monitor up to <strong>5 pages</strong></span>
+                    <span>Up to <strong>5 pages</strong></span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
@@ -346,6 +348,10 @@ export default function LandingPage() {
                     <CheckCircle2 className="h-5 w-5 text-primary" />
                     <span>Full change history</span>
                   </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                    <span>Daily checks</span>
+                  </div>
                 </div>
                 <Button className="w-full mt-6" size="lg" asChild>
                   <a href="/api/login">Get Started Free</a>
@@ -354,31 +360,71 @@ export default function LandingPage() {
             </Card>
 
             {/* Pro tier */}
-            <Card className="relative border-primary/50">
+            <Card className="relative border-primary shadow-lg shadow-primary/10">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <Badge className="px-4 py-1">Coming Soon</Badge>
+                <Badge className="px-4 py-1">Most Popular</Badge>
               </div>
               <CardHeader>
                 <CardTitle className="text-2xl">Pro</CardTitle>
                 <p className="text-4xl font-display font-bold">TBD<span className="text-lg text-muted-foreground font-normal">/month</span></p>
+                <p className="text-muted-foreground">For serious monitoring needs</p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-3">
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Unlimited monitors</span>
+                    <span>Up to <strong>100 pages</strong></span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Faster checks</span>
+                    <span>Everything in Free</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                    <span>Hourly checks</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
                     <span>Priority JS rendering</span>
                   </div>
+                </div>
+                <Button className="w-full mt-6" size="lg" variant="outline" disabled>
+                  Coming Soon
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Power tier */}
+            <Card className="relative">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                <Badge variant="secondary" className="px-4 py-1">Coming Soon</Badge>
+              </div>
+              <CardHeader>
+                <CardTitle className="text-2xl">Power</CardTitle>
+                <p className="text-4xl font-display font-bold">TBD<span className="text-lg text-muted-foreground font-normal">/month</span></p>
+                <p className="text-muted-foreground">For power users & teams</p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                    <span><strong>Unlimited</strong> pages</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                    <span>Everything in Pro</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                    <span>Faster check intervals</span>
+                  </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
                     <span>Advanced notifications</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                    <span>Priority support</span>
                   </div>
                 </div>
                 <Button className="w-full mt-6" size="lg" variant="outline" disabled>
