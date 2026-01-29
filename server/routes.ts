@@ -1,17 +1,113 @@
+import { chromium } from "playwright";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
-import { checkMonitor } from "./services/scraper";
 import { startScheduler } from "./services/scheduler";
 
+// ------------------------------------------------------------------
+// 1. SCRAPER FUNCTION (Playwright)
+// ------------------------------------------------------------------
+async function scrapeJomashop(url: string) {
+  console.log(`[Scraper] Starting browser for: ${url}`);
+
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
+
+  try {
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    });
+
+    const page = await context.newPage();
+
+    console.log(`[Scraper] Navigating to ${url}...`);
+    await page.goto(url);
+
+    // Wait up to 15s for the price to render
+    try {
+        console.log("[Scraper] Waiting for .price-now selector...");
+        await page.waitForSelector(".price-now", { timeout: 15000 });
+
+        const price = await page.innerText(".price-now");
+        const cleanPrice = price.trim();
+
+        console.log(`[Scraper] Success! Found: ${cleanPrice}`);
+        return cleanPrice;
+    } catch (e) {
+        console.log("[Scraper] Price selector not found.");
+        return null; 
+    }
+
+  } catch (error) {
+    console.error("[Scraper] Critical Error:", error);
+    return null;
+  } finally {
+    await browser.close();
+  }
+}
+
+// ------------------------------------------------------------------
+// 2. CHECK MONITOR FUNCTION
+// ------------------------------------------------------------------
+async function checkMonitor(monitor: any) {
+  try {
+    console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
+
+    // Get the new value
+    const value = await scrapeJomashop(monitor.url);
+
+    if (!value) {
+        throw new Error("Could not fetch price from Jomashop");
+    }
+
+    const hasChanged = value !== monitor.lastValue;
+
+    // Update Database
+    await storage.updateMonitor(monitor.id, {
+        lastCheck: new Date(),
+        lastValue: value,
+    });
+
+    // Create Ping Record
+    // (Wrapped in try/catch in case createPing is missing from your storage interface)
+    try {
+        if (storage.createPing) {
+            await storage.createPing({
+                monitorId: monitor.id,
+                value: value,
+                timestamp: new Date()
+            });
+        }
+    } catch (err) {
+        console.warn("Could not save ping history:", err);
+    }
+
+    // --- FIX: Return the exact shape Zod expects ---
+    return {
+        changed: hasChanged,
+        currentValue: value,
+        previousValue: monitor.lastValue || null
+    };
+
+  } catch (error) {
+    console.error("Error in checkMonitor:", error);
+    throw error;
+  }
+}
+
+// ------------------------------------------------------------------
+// 3. ROUTE REGISTRATION
+// ------------------------------------------------------------------
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  
+
   // Setup Auth
   await setupAuth(app);
   registerAuthRoutes(app);
@@ -20,7 +116,7 @@ export async function registerRoutes(
   startScheduler();
 
   // Monitors API
-  
+
   app.get(api.monitors.list.path, isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     const monitors = await storage.getMonitors(userId);
@@ -44,10 +140,10 @@ export async function registerRoutes(
         emailEnabled: input.emailEnabled ?? true,
         frequency: input.frequency ?? "daily",
       });
-      
-      // Initial check (async)
-      checkMonitor(monitor);
-      
+
+      // We don't await this so the UI returns immediately
+      checkMonitor(monitor).catch(console.error);
+
       res.status(201).json(monitor);
     } catch (err) {
       if (err instanceof z.ZodError) {
