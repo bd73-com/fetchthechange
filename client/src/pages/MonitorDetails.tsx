@@ -15,7 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, RefreshCw, Trash2, ExternalLink, Calendar, Clock, Loader2, Edit2, X, Check } from "lucide-react";
+import { ArrowLeft, RefreshCw, Trash2, ExternalLink, Calendar, Clock, Loader2, Edit2, X, Check, AlertTriangle } from "lucide-react";
+import { FixSelectorModal } from "@/components/FixSelectorModal";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -256,10 +257,21 @@ export default function MonitorDetails() {
                     </a>
                   </div>
                   <div className="space-y-1">
-                    <span className="text-sm text-muted-foreground">CSS Selector</span>
-                    <code className="block bg-secondary px-2 py-1 rounded text-sm font-mono w-fit">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">CSS Selector</span>
+                      {monitor.lastStatus && monitor.lastStatus !== "ok" && (
+                        <Badge variant="destructive" className="text-xs">
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          {monitor.lastStatus === "selector_missing" ? "Not found" : monitor.lastStatus}
+                        </Badge>
+                      )}
+                    </div>
+                    <code className="block bg-secondary px-2 py-1 rounded text-sm font-mono w-fit break-all max-w-full">
                       {monitor.selector}
                     </code>
+                    <div className="pt-2">
+                      <FixSelectorModal monitor={monitor} />
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <span className="text-sm text-muted-foreground">Check Frequency</span>

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, buildUrl, type InsertMonitor } from "@shared/routes";
+import { api, buildUrl } from "@shared/routes";
+import { type InsertMonitor } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 
 // GET /api/monitors
@@ -156,6 +157,71 @@ export function useCheckMonitor() {
     },
     onError: (err) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+// POST /api/monitors/:id/check (silent version for fix selector flow)
+export function useCheckMonitorSilent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const url = buildUrl(api.monitors.check.path, { id });
+      const res = await fetch(url, {
+        method: api.monitors.check.method,
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to check monitor");
+      return api.monitors.check.responses[200].parse(await res.json());
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.monitors.get.path, id] });
+      queryClient.invalidateQueries({ queryKey: [api.monitors.history.path, id] });
+    },
+  });
+}
+
+// POST /api/monitors/:id/suggest-selectors
+export function useSuggestSelectors() {
+  return useMutation({
+    mutationFn: async ({ id, expectedText }: { id: number; expectedText?: string }) => {
+      const url = buildUrl(api.monitors.suggestSelectors.path, { id });
+      const res = await fetch(url, {
+        method: api.monitors.suggestSelectors.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedText }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to get selector suggestions");
+      }
+      return api.monitors.suggestSelectors.responses[200].parse(await res.json());
+    },
+  });
+}
+
+// PATCH /api/monitors/:id (silent version for fix selector flow)
+export function useUpdateMonitorSilent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, ...updates }: { id: number } & Partial<InsertMonitor>) => {
+      const url = buildUrl(api.monitors.update.path, { id });
+      const res = await fetch(url, {
+        method: api.monitors.update.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to update monitor");
+      return api.monitors.update.responses[200].parse(await res.json());
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.monitors.get.path, variables.id] });
     },
   });
 }

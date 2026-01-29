@@ -165,7 +165,9 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
         </div>
         <div className="flex items-center gap-2">
            {monitor.emailEnabled && (
-             <Bell className="h-4 w-4 text-primary opacity-50" title="Email alerts enabled" />
+             <span title="Email alerts enabled">
+               <Bell className="h-4 w-4 text-primary opacity-50" />
+             </span>
            )}
           <Switch checked={monitor.active} onCheckedChange={toggleActive} />
         </div>

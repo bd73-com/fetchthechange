@@ -53,6 +53,18 @@ The scraper (`server/services/scraper.ts`) is the core feature with these capabi
   - `monitors` - User's webpage monitors (url, selector, frequency, currentValue, lastStatus, lastError)
   - `monitor_changes` - Historical record of detected changes (only created for successful extractions)
 
+### Fix Selector Tool
+The application includes a UI tool to help users fix broken selectors:
+- **Location**: Monitor detail page, under CSS Selector section
+- **Flow**:
+  1. User clicks "Fix selector" button
+  2. Modal opens with optional "expected text" input
+  3. User clicks "Suggest" to scan page for matching selectors
+  4. Suggestions display selector, sample text, and match count
+  5. User clicks "Use this selector" to apply
+  6. System automatically runs check and shows result
+- **Backend**: `POST /api/monitors/:id/suggest-selectors` uses Browserless to scan pages
+
 ### Email Notifications
 - **Provider**: Resend API
 - **Trigger**: When a monitor detects a value change
