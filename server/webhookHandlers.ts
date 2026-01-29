@@ -14,14 +14,14 @@ export class WebhookHandlers {
     }
 
     const sync = await getStripeSync();
+    
+    // StripeSync.processWebhook validates signature internally before processing
+    // This ensures only verified events are ingested into the database
     await sync.processWebhook(payload, signature);
 
-    const stripe = await getUncachableStripeClient();
-    const event = stripe.webhooks.constructEvent(
-      payload,
-      signature,
-      (await sync.getWebhookSecret())
-    );
+    // Parse event for our custom business logic (tier updates)
+    // We use JSON.parse since signature was already verified by StripeSync
+    const event = JSON.parse(payload.toString());
 
     await WebhookHandlers.handleStripeEvent(event);
   }
@@ -55,9 +55,29 @@ export class WebhookHandlers {
       return;
     }
 
+    // For inactive subscriptions, downgrade to free
+    if (status !== 'active' && status !== 'trialing') {
+      await authStorage.updateUser(user.id, {
+        tier: 'free',
+        stripeSubscriptionId: subscription.id,
+      });
+      console.log(`[Stripe] User ${user.id} subscription inactive, set to free tier`);
+      return;
+    }
+
+    // Guard: if no priceId available, log warning and skip tier update
+    if (!priceId) {
+      console.warn(`[Stripe] No priceId found for subscription ${subscription.id}, skipping tier update`);
+      // Still update subscription ID but don't change tier
+      await authStorage.updateUser(user.id, {
+        stripeSubscriptionId: subscription.id,
+      });
+      return;
+    }
+
     let newTier: UserTier = 'free';
     
-    if (status === 'active' || status === 'trialing') {
+    try {
       const stripe = await getUncachableStripeClient();
       const price = await stripe.prices.retrieve(priceId, { expand: ['product'] });
       const product = price.product as any;
@@ -68,7 +88,16 @@ export class WebhookHandlers {
         newTier = 'power';
       } else if (product.name?.toLowerCase().includes('pro')) {
         newTier = 'pro';
+      } else {
+        console.warn(`[Stripe] Could not determine tier for product ${product.id}, defaulting to free`);
       }
+    } catch (error: any) {
+      console.error(`[Stripe] Error retrieving price ${priceId}:`, error.message);
+      // Don't update tier if we can't determine it
+      await authStorage.updateUser(user.id, {
+        stripeSubscriptionId: subscription.id,
+      });
+      return;
     }
 
     await authStorage.updateUser(user.id, {

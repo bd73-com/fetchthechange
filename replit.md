@@ -68,14 +68,28 @@ The application includes a UI tool to help users fix broken selectors:
 ### Tier System
 The application enforces monitor limits based on user subscription tier:
 - **Free**: 5 monitors (default for new users)
-- **Pro**: 100 monitors
-- **Power**: Unlimited monitors
+- **Pro**: 100 monitors ($9/month)
+- **Power**: Unlimited monitors ($29/month)
 
 Enforcement:
 - **Backend**: Create monitor endpoint checks user tier and current count before allowing creation
 - **Frontend**: Dashboard shows tier badge and usage (e.g., "3 / 5 monitors used")
 - **Config**: Tier limits defined in `shared/models/auth.ts` via TIER_LIMITS constant
 - **Database**: `users.tier` column with default "free"
+
+### Stripe Payment Integration
+Subscription payments are handled via Stripe integration:
+- **Client**: `server/stripeClient.ts` - Fetches credentials from Replit connection API
+- **Webhook Handler**: `server/webhookHandlers.ts` - Processes subscription events to update user tier
+- **Routes**: 
+  - `GET /api/stripe/config` - Returns publishable key for frontend
+  - `GET /api/stripe/plans` - Lists available subscription plans from database
+  - `POST /api/stripe/checkout` - Creates Stripe checkout session (validates priceId)
+  - `GET /api/stripe/subscription` - Returns user's current subscription
+  - `POST /api/stripe/portal` - Creates customer portal session for subscription management
+- **Schema**: `stripe.*` tables managed by stripe-replit-sync package
+- **Seed Script**: `scripts/seed-stripe-products.ts` - Creates Pro and Power products in Stripe
+- **UI**: `UpgradeDialog` component shows plans and handles checkout flow
 
 ### Email Notifications
 - **Provider**: Resend API
