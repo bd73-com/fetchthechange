@@ -1,0 +1,84 @@
+We are in strict selector mode (generic monitoring, no value inference).
+The engine is now correct and reports selector_missing. Next we need a generic debug + selector discovery feature so users can fix their selectors.
+
+Please implement:
+
+1) Debug endpoint
+
+Add authenticated endpoint:
+POST /api/monitors/:id/debug
+
+Response JSON must include:
+
+{
+  "url": "...",
+  "selector": "...",
+  "static": { "blocked": false, "selectorCount": 0 },
+  "rendered": { "used": true, "blocked": false, "selectorCount": 0, "finalUrl": "...", "title": "..." }
+}
+
+
+Do not store anything to DB.
+
+2) Selector discovery endpoint (generic)
+
+Add authenticated endpoint:
+POST /api/monitors/:id/suggest-selectors
+
+Request body:
+
+{ "expectedText": "optional string" }
+
+
+Behavior:
+
+Load the page in rendered mode (Browserless + consent dismissal).
+
+If the current selector matches elements, return those as “valid”.
+
+If it doesn’t match, generate a list of 5–10 selector suggestions based on stable attributes:
+
+Prefer: data-testid, data-test, data-qa, itemprop, aria-label, ids
+
+Avoid: deep nth-child(...) chains
+
+Prefer short selectors scoped under a stable parent
+
+If expectedText is provided:
+
+Find elements whose visible text includes expectedText (case-insensitive)
+
+For each such element, generate a suggested selector for that element
+
+Each suggestion should include:
+
+{
+  "selector": "...",
+  "count": 1,
+  "sampleText": "first 80 chars of matched element text"
+}
+
+
+Important constraints:
+
+This is selector suggestion only. Do not return an inferred “value”.
+
+Do not auto-update the monitor selector.
+
+Do not change monitor currentValue/history in this endpoint.
+
+Implement selector generation using Playwright element handles:
+
+Use element.evaluate(...) to read attributes and build a good selector.
+
+If data-testid exists, selector should be [data-testid="..."].
+
+Else if id exists and is stable, use #id.
+
+Else build using tag + one or two classes + optional parent scoping.
+
+Keep it generic and deterministic.
+
+After implementation, I should be able to call /api/monitors/3/suggest-selectors with:
+{ "expectedText": "$3,200.00" }
+and get a list of candidate selectors that match the price element on the rendered page.
