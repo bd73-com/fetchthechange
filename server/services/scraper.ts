@@ -138,36 +138,55 @@ function extractValueFromHtml(html: string, monitor: Monitor): string | null {
  */
 async function tryDismissConsent(page: any): Promise<boolean> {
   console.log("[Scraper] Attempting to dismiss cookie consent...");
+  
+  const selectors = [
+    '#onetrust-accept-btn-handler',
+    '.onetrust-accept-btn-handler',
+    'button#onetrust-accept-btn-handler',
+    'button[aria-label*="accept" i]',
+    'button:has-text("Accept All")',
+    'button:has-text("Accept all")',
+    'button:has-text("I Agree")',
+    'button:has-text("Agree")',
+    'button:has-text("OK")'
+  ];
+
+  async function attemptClick(context: any, isFrame = false): Promise<boolean> {
+    for (const selector of selectors) {
+      try {
+        const loc = context.locator(selector);
+        if (await loc.count() > 0) {
+          console.log(`[Scraper] Clicking consent ${isFrame ? "in iframe" : "on main page"} matching: ${selector}`);
+          await loc.first().click({ timeout: 2000, force: true });
+          return true;
+        }
+      } catch (e) {}
+    }
+    return false;
+  }
+
   try {
-    const acceptPatterns = [/accept/i, /agree/i, /ok/i, /allow/i, /got it/i];
-    
-    // Try role-based first
-    for (const pattern of acceptPatterns) {
-      const button = page.getByRole("button", { name: pattern });
-      if (await button.count() > 0) {
-        console.log(`[Scraper] Clicking consent button matching: ${pattern}`);
-        await button.first().click({ timeout: 2000 });
-        return true;
-      }
+    // 1. Try main page first
+    if (await attemptClick(page)) return true;
+
+    // 2. Try iframes
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      if (await attemptClick(frame, true)) return true;
     }
 
-    // Try common selectors
-    const selectors = [
-      '#onetrust-accept-btn-handler', '.onetrust-accept-btn-handler',
-      '[aria-label*="accept" i]', '[id*="accept" i]', '[class*="accept" i]',
-      '[data-testid*="accept" i]', '[id*="cookie-accept" i]', '.cookie-accept'
-    ];
-    
-    for (const selector of selectors) {
-      const loc = page.locator(selector);
-      if (await loc.count() > 0) {
-        console.log(`[Scraper] Clicking consent selector: ${selector}`);
-        await loc.first().click({ timeout: 2000 });
+    // 3. Last resort getByRole
+    try {
+      const btn = page.getByRole("button", { name: /accept|agree|allow|ok|consent/i }).first();
+      if (await btn.count() > 0) {
+        console.log("[Scraper] Clicking consent via getByRole last resort");
+        await btn.click({ timeout: 2000, force: true });
         return true;
       }
-    }
+    } catch (e) {}
+
   } catch (err) {
-    console.warn("[Scraper] Consent dismissal attempt failed or timed out.");
+    console.warn("[Scraper] Consent dismissal attempt failed.");
   }
   return false;
 }
@@ -216,19 +235,17 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
     console.log(`[Scraper] consent clicked: ${consentClicked}`);
 
     if (consentClicked) {
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(1200);
       await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
     }
 
+    await page.waitForSelector(effectiveSelector, { timeout: 10000 }).catch(() => {});
     const countAfter = await page.locator(effectiveSelector).count();
-    console.log(`[Scraper] selectorCount after consent: ${countAfter}`);
-
-    await page.waitForSelector(effectiveSelector, { timeout: 5000 }).catch(() => {});
+    console.log(`[Scraper] selectorCount after consent/wait: ${countAfter}`);
     
     const urlAfter = page.url();
     const title = await page.title();
     const status = response?.status();
-    const bodyText = (await page.locator("body").innerText()).substring(0, 200).trim();
     
     console.log(`[Scraper] page.url() after goto: ${urlAfter}`);
     console.log(`[Scraper] response.status(): ${status}`);
@@ -252,8 +269,8 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
         debugFiles.push("/tmp/browserless-preview.html");
       }
 
-      // Fallback selector search (price patterns) - Fixed Regex
-      const priceMatches = content.match(/\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g);
+      // Fallback selector search (price patterns) - Stricter Regex
+      const priceMatches = content.match(/\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})/g);
       if (priceMatches) {
         console.log(`[Scraper] Debug Price Fallback Matches: ${priceMatches.slice(0, 3).join(", ")}`);
       }
@@ -349,10 +366,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     
     const isTitleLike = (val: string | null) => val && (val.length > 80 || val === pageTitle || val === ogTitle);
     
+    // Hard clearing of garbage values
     if (!newValue || isTitleLike(newValue)) {
       if (isTitleLike(oldValue)) {
         console.log(`[Scraper] Old value was title-like, clearing to prevent garbage sticking.`);
-        newValue = null;
+        newValue = null; // This will trigger updateMonitor with currentValue: null
       }
     }
 
@@ -360,7 +378,12 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
 
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
-      currentValue: newValue ?? (oldValue || undefined)
+      // Actually persist the clearing: if newValue is null and we decided to clear, we pass null
+      // Existing logic was using ?? (oldValue || undefined) which kept old garbage.
+      // We only want to keep the old value if the scrape just failed but the old value was GOOD.
+      currentValue: newValue === null 
+        ? (isTitleLike(oldValue) ? null : (oldValue || null)) 
+        : newValue
     });
 
     if (changed) {
