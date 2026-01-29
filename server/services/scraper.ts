@@ -7,10 +7,61 @@ import { promisify } from "util";
 
 const execAsync = promisify(exec);
 
+/**
+ * Normalizes values by trimming, collapsing spaces, and removing invisible characters.
+ */
+function normalizeValue(raw: string): string {
+  return raw.replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Extracts the first price-like string with currency symbols and numeric formats.
+ */
+function extractFirstPrice(text: string): string | null {
+  const priceRegex = /([$€£¥]\s?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?|\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?\s?[$€£¥])/;
+  const match = text.match(priceRegex);
+  return match ? match[0] : null;
+}
+
+/**
+ * Detects if the page is a block/interstitial based on common patterns.
+ */
+function detectPageBlockReason(html: string, $: cheerio.CheerioAPI): { blocked: boolean; reason?: string } {
+  const title = $("title").text().substring(0, 120);
+  const bodyText = $("body").text().toLowerCase();
+
+  const blockPatterns = [
+    { pattern: /enable javascript/i, reason: "JavaScript required" },
+    { pattern: /please enable cookies/i, reason: "Cookies required" },
+    { pattern: /access denied/i, reason: "Access denied" },
+    { pattern: /verify you are a human/i, reason: "Human verification (Captcha)" },
+    { pattern: /checking your browser/i, reason: "Browser check (Cloudflare)" },
+    { pattern: /just a moment/i, reason: "Interstitial/Challenge" },
+    { pattern: /unusual traffic/i, reason: "Rate limited" },
+    { pattern: /captcha/i, reason: "Captcha detected" }
+  ];
+
+  for (const { pattern, reason } of blockPatterns) {
+    if (pattern.test(title) || pattern.test(bodyText)) {
+      return { blocked: true, reason: `${reason} (Matched: "${pattern.source}")` };
+    }
+  }
+
+  // Check for common challenge elements
+  const challengeMarkers = ['[id*="captcha"]', '[class*="captcha"]', '[id*="challenge"]', '[class*="challenge"]', '[class*="cf-"]', '.turnstile', '.h-captcha', '.g-recaptcha'];
+  for (const marker of challengeMarkers) {
+    if ($(marker).length > 0) {
+      return { blocked: true, reason: `Challenge element detected: ${marker}` };
+    }
+  }
+
+  return { blocked: false };
+}
+
 async function fetchWithCurl(url: string): Promise<string> {
   try {
-    // curl handles large headers better than Node.js fetch
-    // -L follows redirects, -s is silent, -m is timeout
     const { stdout } = await execAsync(`curl -L -s -m 15 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" "${url}"`);
     return stdout;
   } catch (error) {
@@ -19,6 +70,10 @@ async function fetchWithCurl(url: string): Promise<string> {
   }
 }
 
+/**
+ * Main monitor check function.
+ * For selector-based monitors, do not fall back to page title; detect block/interstitial pages and return null.
+ */
 export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean, currentValue: string | null }> {
   try {
     console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
@@ -35,7 +90,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
           'Sec-Fetch-Dest': 'document',
           'Sec-Fetch-Mode': 'navigate',
           'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1',
           'Upgrade-Insecure-Requests': '1'
         },
         signal: AbortSignal.timeout(20000)
@@ -52,127 +106,42 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
       }
     }
 
-    if (!html) {
-      return { changed: false, currentValue: null };
-    }
+    if (!html) return { changed: false, currentValue: null };
 
     const $ = cheerio.load(html);
-    
+    const block = detectPageBlockReason(html, $);
     let newValue: string | null = null;
+    const selector = monitor.selector.trim();
 
-    // Strategy 1: Specific overrides for high-value targets
-    if (monitor.url.includes('jomashop.com')) {
-      console.log("Applying Jomashop-specific scraping logic...");
+    // 1. Selector-based extraction
+    const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
+    const effectiveSelector = isClassName ? `.${selector}` : selector;
+    const elements = $(effectiveSelector);
+    
+    console.log(`Selector "${selector}" matches: ${elements.length}`);
+
+    if (elements.length > 0) {
+      const rawValue = elements.first().text() || elements.first().attr('content') || "";
+      const normalized = normalizeValue(rawValue);
       
-      // 1. Check for Anti-Bot / JS Challenge / JavaScript requirement screens
-      const bodyText = $('body').text();
-      if (
-        $('title').text().includes('Just a moment') || 
-        $('h1').text().includes('Checking your browser') ||
-        bodyText.includes('To continue using Jomashop.com') ||
-        bodyText.includes('enable JavaScript')
-      ) {
-        console.warn("Jomashop: Detected JavaScript requirement or Anti-bot challenge screen.");
+      // If result is long, try to find a price inside it
+      if (normalized.length > 50) {
+        newValue = extractFirstPrice(normalized);
+      } else {
+        newValue = normalized || null;
+      }
+    }
+
+    // 2. Handling Failure or Blocks
+    if (!newValue) {
+      if (block.blocked) {
+        console.warn(`Blocked page detected for monitor ${monitor.id}: ${block.reason} (Title: "${$("title").text().substring(0, 120)}")`);
         return { changed: false, currentValue: null };
       }
 
-      // 2. Target the exact structure shown in the user's screenshot
-      // Use more robust selector that doesn't care about whitespace or nesting
-      const priceElement = $('.now-price, [class*="now-price"]').first();
-      if (priceElement.length > 0) {
-        const text = priceElement.text().trim();
-        const match = text.match(/\$[0-9,.]+/);
-        if (match) {
-          newValue = match[0];
-          console.log(`Found Jomashop price via screenshot path: "${newValue}"`);
-        }
-      }
+      console.log("Selector failed, attempting safe price fallbacks (no title fallback)...");
 
-      // 3. Fallback to Meta Tags (often contains the clean price even if DOM is obfuscated)
-      if (!newValue) {
-        const metaPrice = $('meta[property="product:price:amount"]').attr('content') || 
-                          $('meta[property="og:price:amount"]').attr('content') ||
-                          $('meta[itemprop="price"]').attr('content') ||
-                          $('[itemprop="price"]').attr('content');
-        
-        if (metaPrice && !isNaN(parseFloat(metaPrice))) {
-          const formatted = parseFloat(metaPrice).toLocaleString('en-US', { minimumFractionDigits: 2 });
-          newValue = `$${formatted}`;
-          console.log(`Found Jomashop price via Meta: "${newValue}"`);
-        }
-      }
-
-      // 4. Scan scripts for raw data (State objects)
-      if (!newValue) {
-        $('script').each((_, el) => {
-          const content = $(el).html();
-          if (!content || !content.includes('price')) return true;
-          
-          // Jomashop often uses "final_price", "price", or "current_price" in a large JSON blob
-          const match = content.match(/"final_price"\s*:\s*([0-9.]+)/i) || 
-                        content.match(/"price"\s*:\s*"?([0-9.]+)"?/i) ||
-                        content.match(/"priceValue"\s*:\s*([0-9.]+)/i);
-          
-          if (match && match[1]) {
-            const num = parseFloat(match[1]);
-            if (num > 100) {
-              newValue = `$${num.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-              newValue = `$${num.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-              console.log(`Found Jomashop price via script: "${newValue}"`);
-              return false;
-            }
-          }
-          return true;
-        });
-      }
-    }
-
-    if (!newValue) {
-      // Original selector logic...
-      const selector = monitor.selector.trim();
-      const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
-      const effectiveSelector = isClassName ? `.${selector}` : selector;
-      const element = $(effectiveSelector);
-      
-      if (element.length > 0) {
-        // Try to find a child price first
-        const priceInElement = element.find('.now-price, .price, [itemprop="price"], .product-price').first();
-        if (priceInElement.length > 0) {
-          newValue = priceInElement.text().trim() || priceInElement.attr('content');
-        }
-
-        if (!newValue) {
-          newValue = element.first().text().trim() || 
-                     element.first().val() as string || 
-                     element.first().attr('title') || 
-                     element.first().attr('content') ||
-                     element.first().attr('data-price') ||
-                     null;
-        }
-        
-        if (newValue) {
-          console.log(`Found value via selector: "${newValue}"`);
-          const pageTitle = $('title').text().trim();
-          const ogTitle = $('meta[property="og:title"]').attr('content');
-          // If the extracted value is just the title, try to find a price pattern inside it
-          if (newValue === pageTitle || newValue === ogTitle || newValue.length > 80) {
-             const pricePattern = /\$[0-9,.]+/;
-             const match = element.text().match(pricePattern);
-             if (match) {
-               newValue = match[0];
-               console.log(`Extracted price from text via regex: "${newValue}"`);
-             } else {
-               // If no price pattern found in the "title-like" value, reset it
-               newValue = null;
-             }
-          }
-        }
-      }
-    }
-
-    // Strategy 2: Common Product Schema (JSON-LD)
-    if (!newValue) {
-      console.log("Value missing, checking JSON-LD...");
+      // Strategy A: JSON-LD
       $('script[type="application/ld+json"]').each((_, el) => {
         try {
           const content = $(el).html();
@@ -180,63 +149,42 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
           const data = JSON.parse(content);
           const items = Array.isArray(data) ? data : [data];
           for (const item of items) {
-            const val = item.offers?.price || 
-                        item.offers?.[0]?.price || 
-                        item.offers?.availability || 
-                        item.price || 
-                        (item['@type'] === 'Offer' ? item.price : null);
+            const val = item.offers?.price || item.offers?.[0]?.price || item.price;
             if (val) {
-              newValue = String(val);
-              console.log(`Found value via JSON-LD: "${newValue}"`);
+              newValue = normalizeValue(String(val));
               return false;
             }
           }
         } catch (e) {}
         return !newValue;
       });
-    }
 
-    // Strategy 2.5: Look for price in any script tag
-    if (!newValue) {
-      console.log("Checking all script tags for price patterns...");
-      $('script').each((_, el) => {
-        const content = $(el).html();
-        if (!content) return true;
-        
-        const patterns = [
-          /"price"\s*:\s*"?([0-9.,]+)"?/i,
-          /"final_price"\s*:\s*"?([0-9.,]+)"?/i,
-          /"value"\s*:\s*([0-9.,]+)/i,
-          /price\s*=\s*"?([0-9.,]+)"?/i
-        ];
-
-        for (const pattern of patterns) {
-          const match = content.match(pattern);
-          if (match && match[1]) {
-            const val = match[1].replace(/,/g, '');
-            const num = parseFloat(val);
-            if (!isNaN(num) && num > 1 && num < 1000000) {
-              newValue = `$${match[1]}`;
-              console.log(`Found value via regex in script (${pattern}): "${newValue}"`);
-              return false;
-            }
+      // Strategy B: Price Scripts
+      if (!newValue) {
+        $('script').each((_, el) => {
+          const content = $(el).html();
+          if (!content || !content.includes('price')) return true;
+          const match = content.match(/"(?:final_)?price"\s*:\s*"?([0-9.,]+)"?/i);
+          if (match) {
+            newValue = match[1];
+            return false;
           }
-        }
-        return true;
-      });
-    }
+          return true;
+        });
+      }
 
-    // Strategy 3: Meta Tags (ONLY price-related)
-    if (!newValue) {
-      newValue = $('meta[property="og:price:amount"]').attr('content') || 
-                 $('meta[name="product:price:amount"]').attr('content') ||
-                 $('meta[itemprop="price"]').attr('content') ||
-                 null;
+      // Strategy C: Price Meta Tags
+      if (!newValue) {
+        newValue = $('meta[property$="price:amount"]').attr('content') || 
+                   $('meta[name$="price:amount"]').attr('content') ||
+                   $('meta[itemprop="price"]').attr('content') || null;
+      }
+      
       if (newValue) {
-        if (!isNaN(parseFloat(newValue)) && !newValue.includes('$')) {
-          newValue = `$${parseFloat(newValue).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        newValue = normalizeValue(newValue);
+        if (!newValue.includes('$') && !newValue.includes('€') && !newValue.includes('£')) {
+           newValue = `$${newValue}`; // Assume USD if symbol missing from meta
         }
-        console.log(`Found value via Price Meta: "${newValue}"`);
       }
     }
 
