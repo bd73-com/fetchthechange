@@ -86,21 +86,50 @@ export async function registerRoutes(
       if (!monitor) return res.status(404).json({ message: "Not found" });
       if (monitor.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
 
-      const snapshot = await getRenderedDomSnapshot(monitor.url);
-      const $ = cheerio.load(snapshot.htmlSnippet);
-      const isClassName = !monitor.selector.startsWith('.') && !monitor.selector.startsWith('#') && !monitor.selector.includes(' ');
-      const effectiveSelector = isClassName ? `.${monitor.selector}` : monitor.selector;
-      const count = $(effectiveSelector).length;
-      const block = detectPageBlockReason(snapshot.htmlSnippet);
+      // Static Phase
+      let staticHtml = "";
+      try {
+        const response = await fetch(monitor.url, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36' },
+          signal: AbortSignal.timeout(15000)
+        });
+        staticHtml = await response.text();
+      } catch (e) {}
+      
+      const staticBlock = staticHtml ? detectPageBlockReason(staticHtml) : { blocked: true, reason: "Fetch failed" };
+      const $static = cheerio.load(staticHtml || "");
+      const trimmedSelector = monitor.selector.trim();
+      const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
+      const effectiveSelector = isClassName ? `.${trimmedSelector}` : trimmedSelector;
+      const staticCount = $static(effectiveSelector).length;
+
+      // Rendered Phase
+      let rendered: any = { used: false };
+      if (process.env.BROWSERLESS_TOKEN) {
+        try {
+          const result = await extractWithBrowserless(monitor.url, monitor.selector);
+          rendered = {
+            used: true,
+            blocked: result.blocked,
+            reason: result.reason || null,
+            selectorCount: result.selectorCount,
+            finalUrl: result.urlAfter,
+            title: result.title
+          };
+        } catch (e: any) {
+          rendered = { used: true, blocked: true, reason: e.message };
+        }
+      }
 
       res.json({
+        url: monitor.url,
         selector: monitor.selector,
-        selectorMatches: count,
-        blocked: block.blocked,
-        blockReason: block.reason || null,
-        pageTitle: snapshot.title,
-        finalUrl: snapshot.finalUrl,
-        htmlSnippet: snapshot.htmlSnippet
+        static: {
+          blocked: staticBlock.blocked,
+          reason: staticBlock.reason || null,
+          selectorCount: staticCount
+        },
+        rendered
       });
     } catch (error: any) {
       console.error("[Debug] Selector debug endpoint error:", error);

@@ -18,15 +18,6 @@ function normalizeValue(raw: string): string {
 }
 
 /**
- * Extracts the first price-like string with currency symbols and numeric formats.
- */
-function extractFirstPrice(text: string): string | null {
-  const priceRegex = /([$€£¥]\s?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?|\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})\s?[$€£¥])/;
-  const match = text.match(priceRegex);
-  return match ? match[0] : null;
-}
-
-/**
  * Detects if the page is a block/interstitial based on common patterns.
  */
 export function detectPageBlockReason(html: string): { blocked: boolean; reason?: string } {
@@ -64,11 +55,11 @@ export function detectPageBlockReason(html: string): { blocked: boolean; reason?
 /**
  * Extracts value from HTML using a generic approach.
  */
-function extractValueFromHtml(html: string, monitor: Monitor): string | null {
+function extractValueFromHtml(html: string, selector: string): string | null {
   const $ = cheerio.load(html);
-  const selector = monitor.selector.trim();
-  const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
-  const effectiveSelector = isClassName ? `.${selector}` : selector;
+  const trimmedSelector = selector.trim();
+  const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
+  const effectiveSelector = isClassName ? `.${trimmedSelector}` : trimmedSelector;
   const elements = $(effectiveSelector);
   
   if (elements.length > 0) {
@@ -123,38 +114,6 @@ async function tryDismissConsent(page: any): Promise<boolean> {
 }
 
 /**
- * Captured rendered DOM snapshot for debugging.
- */
-export async function getRenderedDomSnapshot(url: string): Promise<{
-  finalUrl: string;
-  title: string;
-  htmlSnippet: string;
-}> {
-  const token = process.env.BROWSERLESS_TOKEN;
-  if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
-
-  let browser;
-  try {
-    const { chromium } = await import("playwright-core");
-    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`);
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await tryDismissConsent(page);
-    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
-
-    const content = await page.content();
-    return {
-      finalUrl: page.url(),
-      title: await page.title(),
-      htmlSnippet: content.substring(0, 3000)
-    };
-  } finally {
-    if (browser) await browser.close();
-  }
-}
-
-/**
  * Retries extraction using Browserless.
  */
 export async function extractWithBrowserless(url: string, selector: string): Promise<{ 
@@ -162,10 +121,10 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
   urlAfter: string, 
   title: string, 
   selectorCount: number,
-  debugFiles: string[] 
+  blocked: boolean,
+  reason?: string
 }> {
   const token = process.env.BROWSERLESS_TOKEN;
-  const debugFiles: string[] = [];
   if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
 
   let browser;
@@ -180,34 +139,37 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
       locale: "en-US"
     });
     const page = await context.newPage();
-    const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    
-    const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
-    const effectiveSelector = isClassName ? `.${selector}` : selector;
     
     await tryDismissConsent(page);
     await page.waitForTimeout(1200);
     await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
 
-    await page.waitForSelector(effectiveSelector, { timeout: 10000 }).catch(() => {});
-    const countAfter = await page.locator(effectiveSelector).count();
+    const content = await page.content();
+    const block = detectPageBlockReason(content);
     
-    const urlAfter = page.url();
-    const title = await page.title();
+    const trimmedSelector = selector.trim();
+    const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
+    const effectiveSelector = isClassName ? `.${trimmedSelector}` : trimmedSelector;
+
+    await page.waitForSelector(effectiveSelector, { timeout: 5000 }).catch(() => {});
+    const count = await page.locator(effectiveSelector).count();
     
-    if (countAfter > 0) {
+    let value: string | null = null;
+    if (count > 0) {
       const text = await page.locator(effectiveSelector).first().innerText();
-      return { 
-        value: normalizeValue(text), 
-        urlAfter, 
-        title, 
-        selectorCount: countAfter,
-        debugFiles 
-      };
+      value = normalizeValue(text);
     }
     
-    return { value: null, urlAfter, title, selectorCount: countAfter, debugFiles };
+    return { 
+      value, 
+      urlAfter: page.url(), 
+      title: await page.title(), 
+      selectorCount: count,
+      blocked: block.blocked,
+      reason: block.reason
+    };
   } catch (error) {
     console.error(`[Scraper] Browserless failed:`, error);
     throw error;
@@ -256,40 +218,51 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
 
     if (!html) return { changed: false, currentValue: null };
 
-    let newValue = extractValueFromHtml(html, monitor);
+    // Stage: Static
+    let newValue = extractValueFromHtml(html, monitor.selector);
     let block = detectPageBlockReason(html);
-    
+    console.log(`stage=static selectorCount=${newValue ? 1 : 0} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
+
+    // Fallback to Rendered if static failed or blocked
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
       try {
         const result = await extractWithBrowserless(monitor.url, monitor.selector);
         newValue = result.value;
-        block = detectPageBlockReason(await fs.readFile("/tmp/browserless-debug.html", "utf-8").catch(() => html));
-      } catch (err) {}
-    }
-
-    if (!newValue) {
-      const isClassName = !monitor.selector.startsWith('.') && !monitor.selector.startsWith('#') && !monitor.selector.includes(' ');
-      const effectiveSelector = isClassName ? `.${monitor.selector}` : monitor.selector;
-      console.log(`Extraction failed: selector=${monitor.selector}, count=0, blocked=${block.blocked}${block.blocked ? `, reason=${block.reason}` : ""}`);
-    }
-
-    const oldValue = monitor.currentValue;
-    const changed = newValue !== null && newValue !== oldValue;
-
-    await storage.updateMonitor(monitor.id, {
-      lastChecked: new Date(),
-      currentValue: newValue ?? (oldValue || null)
-    } as any);
-
-    if (changed) {
-      await storage.addMonitorChange(monitor.id, oldValue, newValue);
-      await storage.updateMonitor(monitor.id, { lastChanged: new Date() } as any);
-      if (monitor.emailEnabled) {
-        await sendNotificationEmail(monitor, oldValue, newValue);
+        block = { blocked: result.blocked, reason: result.reason };
+        console.log(`stage=rendered selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
+      } catch (err) {
+        console.error(`[Scraper] Browserless fallback failed:`, err);
       }
     }
 
-    return { changed, currentValue: newValue };
+    const oldValue = monitor.currentValue;
+    
+    // Determine final status
+    let finalValue: string | null = newValue;
+    if (!newValue) {
+      if (block.blocked) {
+        finalValue = "Blocked/Unavailable";
+      } else {
+        finalValue = null; // Selector missing
+      }
+    }
+
+    const changed = finalValue !== oldValue;
+
+    await storage.updateMonitor(monitor.id, {
+      lastChecked: new Date(),
+      currentValue: finalValue
+    } as any);
+
+    if (changed) {
+      await storage.addMonitorChange(monitor.id, oldValue, finalValue);
+      await storage.updateMonitor(monitor.id, { lastChanged: new Date() } as any);
+      if (monitor.emailEnabled && finalValue !== "Blocked/Unavailable") {
+        await sendNotificationEmail(monitor, oldValue, finalValue);
+      }
+    }
+
+    return { changed, currentValue: finalValue };
   } catch (error) {
     console.error(`Scraping error for monitor ${monitor.id}:`, error);
     return { changed: false, currentValue: null };
