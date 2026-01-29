@@ -17,6 +17,8 @@ export const monitors = pgTable("monitors", {
   lastChecked: timestamp("last_checked"),
   lastChanged: timestamp("last_changed"),
   currentValue: text("current_value"),
+  lastStatus: text("last_status").default("ok").notNull(), // 'ok', 'blocked', 'selector_missing', 'error'
+  lastError: text("last_error"),
   active: boolean("active").default(true).notNull(),
   emailEnabled: boolean("email_enabled").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

@@ -22,8 +22,15 @@ function normalizeValue(raw: string): string {
  */
 export function detectPageBlockReason(html: string): { blocked: boolean; reason?: string } {
   const $ = cheerio.load(html);
+  
+  // Clone and remove non-visible/noise content to avoid false positives (like noscript)
+  const $clean = $.load($.html());
+  $clean("script, style, noscript, iframe, link, meta").remove();
+  const visibleText = $clean("body").text().replace(/\s+/g, " ").trim();
+  const visibleTextLower = visibleText.toLowerCase();
+  const visibleTextLength = visibleText.length;
+  
   const title = $("title").text().substring(0, 120);
-  const bodyText = $("body").text().toLowerCase();
 
   const blockPatterns = [
     { pattern: /enable javascript/i, reason: "JavaScript required" },
@@ -37,8 +44,17 @@ export function detectPageBlockReason(html: string): { blocked: boolean; reason?
   ];
 
   for (const { pattern, reason } of blockPatterns) {
-    if (pattern.test(title) || pattern.test(bodyText)) {
-      return { blocked: true, reason: `${reason} (Matched: "${pattern.source}")` };
+    if (pattern.test(title)) {
+      return { blocked: true, reason: `${reason} (Matched in title: "${pattern.source}")` };
+    }
+    
+    if (pattern.test(visibleTextLower)) {
+      // Special logic for "enable javascript" to avoid false positives
+      if (reason === "JavaScript required") {
+        const isSuspicious = visibleTextLength < 4000 || (visibleTextLower.split(pattern).length - 1) > 2;
+        if (!isSuspicious) continue;
+      }
+      return { blocked: true, reason: `${reason} (Matched in visible text, length=${visibleTextLength})` };
     }
   }
 
@@ -239,30 +255,46 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     
     // Determine final status
     let finalValue: string | null = newValue;
+    let finalStatus: "ok" | "blocked" | "selector_missing" | "error" = "ok";
+    let finalError: string | null = null;
+
     if (!newValue) {
       if (block.blocked) {
-        finalValue = "Blocked/Unavailable";
+        finalValue = null;
+        finalStatus = "blocked";
+        finalError = block.reason || "Blocked";
       } else {
-        finalValue = null; // Selector missing
+        finalValue = null;
+        finalStatus = "selector_missing";
+        finalError = "Selector not found";
       }
     }
 
-    const changed = finalValue !== oldValue;
+    // Only detect changes if status is OK
+    const changed = finalStatus === "ok" && finalValue !== oldValue;
 
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
-      currentValue: finalValue
+      currentValue: finalStatus === "ok" ? finalValue : (oldValue || null),
+      lastStatus: finalStatus,
+      lastError: finalError
     } as any);
 
     if (changed) {
       await storage.addMonitorChange(monitor.id, oldValue, finalValue);
       await storage.updateMonitor(monitor.id, { lastChanged: new Date() } as any);
-      if (monitor.emailEnabled && finalValue !== "Blocked/Unavailable") {
+      if (monitor.emailEnabled) {
         await sendNotificationEmail(monitor, oldValue, finalValue);
       }
     }
 
-    return { changed, currentValue: finalValue };
+    return { 
+      changed, 
+      currentValue: finalStatus === "ok" ? finalValue : null,
+      previousValue: oldValue,
+      status: finalStatus,
+      error: finalError
+    };
   } catch (error) {
     console.error(`Scraping error for monitor ${monitor.id}:`, error);
     return { changed: false, currentValue: null };
