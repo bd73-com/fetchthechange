@@ -1,0 +1,78 @@
+Prompt to Replit
+
+We are keeping the app strictly generic and selector-based (no inference).
+Current issue: detectPageBlockReason is producing false positives on the rendered Browserless page (it flags “enable javascript” even when JS is enabled, likely from <noscript>).
+Also, we must not store "Blocked/Unavailable" as the monitored value, because it creates false “change” events. Blocked/unavailable is a status, not the extracted value.
+
+Please implement these fixes:
+
+1) Make block detection robust (avoid <noscript> false positives)
+
+Update detectPageBlockReason(html, $) to:
+
+Remove/ignore <noscript> content when evaluating “enable javascript” patterns:
+
+Use a clone of cheerio root and clone("noscript").remove() (or equivalent) before text extraction.
+
+Base detection primarily on visible body text (after removing noscript, script, style):
+
+const visibleText = $("body").clone().find("script,style,noscript").remove().end().text()
+
+Only treat “enable JavaScript” as blocked if:
+
+It appears in the visible text AND
+
+visible text length is relatively small (e.g. < 4000 chars) OR the phrase frequency is high OR the page lacks typical content (no product/article/main content nodes).
+
+Keep existing strong signals as blockers:
+
+captcha/challenge markers (cf-, turnstile, recaptcha, hcaptcha, “checking your browser”, “access denied”, “verify you are human”).
+
+Add logging in rendered stage:
+
+visibleTextLength and which rule triggered the block.
+
+2) Separate monitor VALUE from monitor STATUS (do not store Blocked/Unavailable as value)
+
+Introduce a new field in monitor storage (or reuse existing structure if available):
+
+lastError (string | null) and/or lastStatus ("ok" | "blocked" | "selector_missing" | "error")
+
+Update behavior:
+
+If blocked:
+
+store currentValue: null
+
+store lastStatus: "blocked" and lastError: <reason>
+
+do NOT create a “value changed” history entry
+
+If selector missing (not blocked):
+
+store currentValue: null
+
+store lastStatus: "selector_missing" and lastError: "Selector not found"
+
+do NOT create a “value changed” history entry
+
+If extracted successfully:
+
+store currentValue: <value>
+
+store lastStatus: "ok" and lastError: null
+
+change detection is based only on extracted values
+
+Update /api/monitors/:id/check response to include:
+
+{ currentValue, previousValue, status, error }
+where currentValue is null on blocked/missing, and status explains why.
+
+Keep everything generic; no domain-specific logic.
+
+After this change, rerun monitor check. We should see:
+
+rendered stage no longer incorrectly blocked due to <noscript>
+
+currentValue remains null when blocked, and no “changed” history entry is created for blocked status.
