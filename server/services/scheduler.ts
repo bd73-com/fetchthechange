@@ -2,8 +2,11 @@ import cron from "node-cron";
 import { storage } from "../storage";
 import { checkMonitor } from "./scraper";
 
-export function startScheduler() {
+export async function startScheduler() {
   console.log("Starting scheduler...");
+  
+  // One-time cleanup of polluted values from legacy data
+  await storage.cleanupPollutedValues();
 
   // Run every minute to check if we need to process anything
   // This is a simple implementation. For production, maybe use a proper queue.

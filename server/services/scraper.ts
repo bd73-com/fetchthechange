@@ -287,7 +287,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
 
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
-      currentValue: finalStatus === "ok" ? finalValue : (oldValue || null),
+      currentValue: finalStatus === "ok" ? finalValue : null,
       lastStatus: finalStatus,
       lastError: finalError
     } as any);

@@ -1,6 +1,6 @@
 import { monitors, monitorChanges, type Monitor, type InsertMonitor, type MonitorChange } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, or, isNull, sql } from "drizzle-orm";
 
 export interface IStorage {
   getMonitors(userId: string): Promise<Monitor[]>;
@@ -58,6 +58,40 @@ export class DatabaseStorage implements IStorage {
 
   async getAllActiveMonitors(): Promise<Monitor[]> {
     return await db.select().from(monitors).where(eq(monitors.active, true));
+  }
+
+  async cleanupPollutedValues(): Promise<number> {
+    let cleanedCount = 0;
+    
+    // Clean polluted monitor currentValues
+    const pollutedMonitors = await db.select().from(monitors).where(
+      eq(monitors.currentValue, "Blocked/Unavailable")
+    );
+    
+    for (const m of pollutedMonitors) {
+      await db.update(monitors).set({ currentValue: null }).where(eq(monitors.id, m.id));
+      cleanedCount++;
+      console.log(`[Cleanup] Reset polluted currentValue for monitor ${m.id}: "${m.name}"`);
+    }
+    
+    // Clean polluted history entries with "Blocked/Unavailable"
+    const pollutedHistory = await db.select().from(monitorChanges).where(
+      or(
+        eq(monitorChanges.oldValue, "Blocked/Unavailable"),
+        eq(monitorChanges.newValue, "Blocked/Unavailable")
+      )
+    );
+    
+    for (const h of pollutedHistory) {
+      await db.delete(monitorChanges).where(eq(monitorChanges.id, h.id));
+      cleanedCount++;
+      console.log(`[Cleanup] Deleted polluted history entry ${h.id} for monitor ${h.monitorId}`);
+    }
+    
+    if (cleanedCount > 0) {
+      console.log(`[Cleanup] Cleaned ${cleanedCount} polluted records total`);
+    }
+    return cleanedCount;
   }
 }
 
