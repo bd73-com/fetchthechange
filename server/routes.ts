@@ -75,9 +75,11 @@ export async function registerRoutes(
   });
 
   // Selector Debug Mode Endpoint
+  // Example: curl -X POST http://localhost:5000/api/monitors/3/debug -H "Cookie: connect.sid=..."
   app.post("/api/monitors/:id/debug", isAuthenticated, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
+      console.log(`[Debug] monitorId=${id}`);
       const monitor = await storage.getMonitor(id);
       if (!monitor) return res.status(404).json({ message: "Not found" });
       if (monitor.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
@@ -134,21 +136,24 @@ export async function registerRoutes(
   });
 
   // Selector suggestion endpoint
+  // Example: curl -X POST http://localhost:5000/api/monitors/3/suggest-selectors -H "Cookie: connect.sid=..." -H "Content-Type: application/json" -d '{"expectedText":"$3,200.00"}'
   app.post("/api/monitors/:id/suggest-selectors", isAuthenticated, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
+      const { expectedText } = req.body || {};
+      console.log(`[Suggest] monitorId=${id} expectedText=${expectedText || "(none)"}`);
+      
       const monitor = await storage.getMonitor(id);
       if (!monitor) return res.status(404).json({ message: "Not found" });
       if (monitor.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
-
-      const { expectedText } = req.body || {};
       
       if (!process.env.BROWSERLESS_TOKEN) {
         return res.status(400).json({ message: "BROWSERLESS_TOKEN not configured" });
       }
 
-      const suggestions = await discoverSelectors(monitor.url, monitor.selector, expectedText);
-      res.json(suggestions);
+      const result = await discoverSelectors(monitor.url, monitor.selector, expectedText);
+      console.log(`[Suggest] monitorId=${id} suggestions=${result.suggestions.length}`);
+      res.json(result);
     } catch (error: any) {
       console.error("[Suggest] Selector suggestion error:", error);
       res.status(500).json({ message: error.message });
