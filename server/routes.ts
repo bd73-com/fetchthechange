@@ -129,7 +129,7 @@ export async function registerRoutes(
       const monitor = await storage.createMonitor({
         ...input,
         userId: req.user.claims.sub,
-      });
+      } as any);
 
       // We don't await this so the UI returns immediately
       checkMonitor(monitor).catch(console.error);

@@ -279,11 +279,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
       currentValue: newValue ?? (oldValue || null)
-    });
+    } as any);
 
     if (changed) {
       await storage.addMonitorChange(monitor.id, oldValue, newValue);
-      await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
+      await storage.updateMonitor(monitor.id, { lastChanged: new Date() } as any);
       if (monitor.emailEnabled) {
         await sendNotificationEmail(monitor, oldValue, newValue);
       }
