@@ -54,7 +54,7 @@ export async function registerRoutes(
   startScheduler();
 
   // Debug Browserless Endpoint
-  app.post("/api/debug/browserless", async (req: any, res) => {
+  app.post("/api/debug/browserless", isAuthenticated, async (req: any, res) => {
     try {
       const { url, selector } = req.body;
       if (!url || !selector) {
