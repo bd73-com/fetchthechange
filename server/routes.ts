@@ -1,4 +1,4 @@
-import { checkMonitor as scraperCheckMonitor } from "./services/scraper";
+import { checkMonitor as scraperCheckMonitor, extractWithBrowserless } from "./services/scraper";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -52,6 +52,30 @@ export async function registerRoutes(
 
   // Start Scheduler
   startScheduler();
+
+  // Debug Browserless Endpoint
+  app.post("/api/debug/browserless", isAuthenticated, async (req: any, res) => {
+    try {
+      const { url, selector } = req.body;
+      if (!url || !selector) {
+        return res.status(400).json({ message: "URL and Selector are required" });
+      }
+
+      console.log(`[Debug] Running Browserless extraction for: ${url}`);
+      const result = await extractWithBrowserless(url, selector);
+      
+      res.json({
+        urlAfter: result.urlAfter,
+        title: result.title,
+        selectorCount: result.selectorCount,
+        extractedValue: result.value,
+        debugFiles: result.debugFiles
+      });
+    } catch (error: any) {
+      console.error("[Debug] Browserless endpoint error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
 
   // Monitors API
 
