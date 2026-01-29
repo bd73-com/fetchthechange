@@ -1,0 +1,133 @@
+# FetchTheChange
+
+**Monitor any web value. Get alerted when it changes.**
+
+FetchTheChange is a reliable website change-monitoring tool that works even on modern, JavaScript-heavy sites where most trackers fail.
+
+Whether you're tracking prices, availability, numbers, text, or status messages — FetchTheChange watches exactly what *you* care about and tells you when it changes.
+
+---
+
+## Who is this for?
+
+### For non-technical users
+
+You don’t need to know how websites work.
+
+* Pick a page
+* Click the element you care about
+* Get notified when it changes
+
+FetchTheChange guides you if something breaks — no silent failures, no confusing alerts.
+
+---
+
+### For technical & power users
+
+FetchTheChange gives you full control when you need it:
+
+* CSS-selector based monitoring
+* JavaScript-rendered pages supported
+* Deterministic extraction (no screenshot noise)
+* Transparent failure states
+* Fix-it-yourself selector recovery
+
+If a site changes its structure, you’ll know *why* — and how to fix it.
+
+---
+
+## What can you monitor?
+
+FetchTheChange is **not just a price tracker**.
+
+You can monitor:
+
+* Prices
+* Availability
+* Text changes
+* Numbers & metrics
+* Status messages
+* Regulatory wording
+* Product launches
+* Competitor pages
+
+If it appears on a webpage, FetchTheChange can watch it.
+
+---
+
+## Why FetchTheChange?
+
+Most monitoring tools:
+
+* Break silently
+* Miss JavaScript-rendered content
+* Send false alerts
+* Hide what went wrong
+
+FetchTheChange does the opposite.
+
+### Built for reliability
+
+* Works on modern JS websites
+* Handles cookie banners & dynamic loading
+* Shows you exactly what was found (or not)
+
+### Built for clarity
+
+* Clear "selector missing" errors
+* Visual selector suggestions
+* Full change history
+
+### Built for trust
+
+* No black-box diffs
+* No guessing
+* No surprise failures
+
+---
+
+## How it works
+
+1. Add a page URL
+2. Select what you want to monitor
+3. Choose how often to check
+4. Get notified when it changes
+
+That’s it.
+
+If the page structure changes, FetchTheChange helps you fix it — instead of silently failing.
+
+---
+
+## Pricing
+
+### Free
+
+* Monitor up to **5 pages**
+* Email alerts
+* Full change history
+
+### Pro *(coming soon)*
+
+* Unlimited monitors
+* Faster checks
+* Priority JS rendering
+* Advanced notifications
+
+---
+
+## Built for people who care about accuracy
+
+FetchTheChange is for people who:
+
+* Rely on accurate data
+* Get frustrated by broken trackers
+* Want transparency instead of guesswork
+
+If that’s you — welcome.
+
+---
+
+**Start tracking changes that actually matter.**
+
+FetchTheChange
