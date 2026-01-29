@@ -207,7 +207,13 @@ async function fetchWithCurl(url: string): Promise<string> {
 /**
  * Main monitor check function.
  */
-export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean, currentValue: string | null }> {
+export async function checkMonitor(monitor: Monitor): Promise<{ 
+  changed: boolean; 
+  currentValue: string | null;
+  previousValue: string | null | undefined;
+  status: "ok" | "blocked" | "selector_missing" | "error";
+  error: string | null;
+}> {
   try {
     console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
     
@@ -232,7 +238,13 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
       }
     }
 
-    if (!html) return { changed: false, currentValue: null };
+    if (!html) return { 
+      changed: false, 
+      currentValue: null, 
+      previousValue: monitor.currentValue, 
+      status: "error" as const, 
+      error: "Failed to fetch page" 
+    };
 
     // Stage: Static
     let newValue = extractValueFromHtml(html, monitor.selector);
@@ -297,6 +309,12 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     };
   } catch (error) {
     console.error(`Scraping error for monitor ${monitor.id}:`, error);
-    return { changed: false, currentValue: null };
+    return { 
+      changed: false, 
+      currentValue: null,
+      previousValue: monitor.currentValue,
+      status: "error" as const,
+      error: error instanceof Error ? error.message : "Unknown error"
+    };
   }
 }

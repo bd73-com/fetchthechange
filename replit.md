@@ -29,10 +29,20 @@ Preferred communication style: Simple, everyday language.
 The scraper (`server/services/scraper.ts`) is the core feature with these capabilities:
 - **Primary Method**: Cheerio for HTML parsing of simple pages
 - **Fallback Method**: Browserless (headless Chrome) for JavaScript-rendered content
-- **Anti-Bot Detection**: Detects interstitial pages (Cloudflare challenges, captcha, etc.)
-- **Cookie Consent Handling**: Generic dismissal of OneTrust and common consent banners
-- **Price Extraction**: Specialized regex patterns for extracting prices in multiple currencies
+- **Anti-Bot Detection**: Detects interstitial pages (Cloudflare challenges, captcha, etc.) with robust visible-text analysis that ignores noscript/script/style content to avoid false positives
+- **Cookie Consent Handling**: Generic dismissal of OneTrust and common consent banners (supports iframe detection)
+- **Status Tracking**: Monitors track status separately from value (ok, blocked, selector_missing, error)
 - **Value Normalization**: Handles invisible characters and whitespace normalization
+
+### Scraping Pipeline
+1. Fetch static HTML via fetch/curl
+2. Extract value using CSS selector
+3. If selector found → return value (status: ok)
+4. If selector not found OR blocked detected:
+   - With BROWSERLESS_TOKEN → render via headless Chrome with consent dismissal
+   - Re-check block detection on rendered DOM
+   - Retry selector extraction
+5. Final status determines outcome (blocked vs selector_missing vs ok)
 
 ### Data Storage
 - **Database**: PostgreSQL via Drizzle ORM
@@ -40,8 +50,8 @@ The scraper (`server/services/scraper.ts`) is the core feature with these capabi
 - **Key Tables**:
   - `users` - Replit Auth user data
   - `sessions` - Session storage for auth
-  - `monitors` - User's webpage monitors (url, selector, frequency, current value)
-  - `monitor_changes` - Historical record of detected changes
+  - `monitors` - User's webpage monitors (url, selector, frequency, currentValue, lastStatus, lastError)
+  - `monitor_changes` - Historical record of detected changes (only created for successful extractions)
 
 ### Email Notifications
 - **Provider**: Resend API
