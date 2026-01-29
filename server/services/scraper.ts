@@ -64,9 +64,16 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     if (monitor.url.includes('jomashop.com')) {
       console.log("Applying Jomashop-specific scraping logic...");
       
-      // 1. Check for Anti-Bot / JS Challenge screens
-      if ($('title').text().includes('Just a moment') || $('h1').text().includes('Checking your browser')) {
-        console.warn("Jomashop: Detected Cloudflare/Anti-bot challenge screen.");
+      // 1. Check for Anti-Bot / JS Challenge / JavaScript requirement screens
+      const bodyText = $('body').text();
+      if (
+        $('title').text().includes('Just a moment') || 
+        $('h1').text().includes('Checking your browser') ||
+        bodyText.includes('To continue using Jomashop.com') ||
+        bodyText.includes('enable JavaScript')
+      ) {
+        console.warn("Jomashop: Detected JavaScript requirement or Anti-bot challenge screen.");
+        return { changed: false, currentValue: null };
       }
 
       // 2. Target the exact structure shown in the user's screenshot
@@ -110,6 +117,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
             const num = parseFloat(match[1]);
             if (num > 100) {
               newValue = `$${num.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+              newValue = `$${num.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
               console.log(`Found Jomashop price via script: "${newValue}"`);
               return false;
             }
@@ -146,12 +154,16 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
           console.log(`Found value via selector: "${newValue}"`);
           const pageTitle = $('title').text().trim();
           const ogTitle = $('meta[property="og:title"]').attr('content');
+          // If the extracted value is just the title, try to find a price pattern inside it
           if (newValue === pageTitle || newValue === ogTitle || newValue.length > 80) {
              const pricePattern = /\$[0-9,.]+/;
              const match = element.text().match(pricePattern);
              if (match) {
                newValue = match[0];
                console.log(`Extracted price from text via regex: "${newValue}"`);
+             } else {
+               // If no price pattern found in the "title-like" value, reset it
+               newValue = null;
              }
           }
         }
@@ -159,16 +171,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     }
 
     // Strategy 2: Common Product Schema (JSON-LD)
-    const pageTitle = $('title').text().trim();
-    const ogTitle = $('meta[property="og:title"]').attr('content');
-    const isTitleOnly = newValue && (
-      newValue === pageTitle || 
-      newValue === ogTitle ||
-      newValue.length > 100
-    );
-
-    if (!newValue || isTitleOnly) {
-      console.log("Value missing or appears to be title only, checking JSON-LD...");
+    if (!newValue) {
+      console.log("Value missing, checking JSON-LD...");
       $('script[type="application/ld+json"]').each((_, el) => {
         try {
           const content = $(el).html();
@@ -180,7 +184,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
                         item.offers?.[0]?.price || 
                         item.offers?.availability || 
                         item.price || 
-                        item.name ||
                         (item['@type'] === 'Offer' ? item.price : null);
             if (val) {
               newValue = String(val);
@@ -194,14 +197,12 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     }
 
     // Strategy 2.5: Look for price in any script tag
-    if (!newValue || isTitleOnly) {
+    if (!newValue) {
       console.log("Checking all script tags for price patterns...");
       $('script').each((_, el) => {
         const content = $(el).html();
         if (!content) return true;
         
-        // Jomashop and others often have a huge state object
-        // We look for patterns like "price":3200 or "final_price":3200
         const patterns = [
           /"price"\s*:\s*"?([0-9.,]+)"?/i,
           /"final_price"\s*:\s*"?([0-9.,]+)"?/i,
@@ -212,7 +213,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
         for (const pattern of patterns) {
           const match = content.match(pattern);
           if (match && match[1]) {
-            // Verify it's not a tiny number or huge number that's unlikely to be a price
             const val = match[1].replace(/,/g, '');
             const num = parseFloat(val);
             if (!isNaN(num) && num > 1 && num < 1000000) {
@@ -226,14 +226,18 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
       });
     }
 
-    // Strategy 3: Meta Tags & Title
+    // Strategy 3: Meta Tags (ONLY price-related)
     if (!newValue) {
       newValue = $('meta[property="og:price:amount"]').attr('content') || 
-                 $('meta[name="twitter:data1"]').attr('content') ||
-                 $('meta[property="og:title"]').attr('content') ||
-                 $('title').text().trim() || 
+                 $('meta[name="product:price:amount"]').attr('content') ||
+                 $('meta[itemprop="price"]').attr('content') ||
                  null;
-      if (newValue) console.log(`Found value via Meta/Title: "${newValue}"`);
+      if (newValue) {
+        if (!isNaN(parseFloat(newValue)) && !newValue.includes('$')) {
+          newValue = `$${parseFloat(newValue).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        }
+        console.log(`Found value via Price Meta: "${newValue}"`);
+      }
     }
 
     const oldValue = monitor.currentValue;
