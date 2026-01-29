@@ -78,7 +78,33 @@ export const api = {
       method: 'POST' as const,
       path: '/api/monitors/:id/check',
       responses: {
-        200: z.object({ changed: z.boolean(), currentValue: z.string().nullable() }),
+        200: z.object({ 
+          changed: z.boolean(), 
+          currentValue: z.string().nullable(),
+          status: z.string().optional(),
+          error: z.string().nullable().optional(),
+        }),
+        404: errorSchemas.notFound,
+        401: errorSchemas.unauthorized,
+      }
+    },
+    suggestSelectors: {
+      method: 'POST' as const,
+      path: '/api/monitors/:id/suggest-selectors',
+      input: z.object({ expectedText: z.string().optional() }),
+      responses: {
+        200: z.object({
+          currentSelector: z.object({
+            selector: z.string(),
+            count: z.number(),
+            valid: z.boolean(),
+          }),
+          suggestions: z.array(z.object({
+            selector: z.string(),
+            count: z.number(),
+            sampleText: z.string(),
+          })),
+        }),
         404: errorSchemas.notFound,
         401: errorSchemas.unauthorized,
       }
