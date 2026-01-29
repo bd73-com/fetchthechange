@@ -4,6 +4,7 @@ import { sendNotificationEmail } from "./email";
 import { type Monitor } from "@shared/schema";
 import { exec } from "child_process";
 import { promisify } from "util";
+import fs from "fs/promises";
 
 const execAsync = promisify(exec);
 
@@ -67,7 +68,6 @@ function extractValueFromHtml(html: string, monitor: Monitor): string | null {
   let value: string | null = null;
   const selector = monitor.selector.trim();
 
-  // 1. Selector-based extraction
   const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
   const effectiveSelector = isClassName ? `.${selector}` : selector;
   const elements = $(effectiveSelector);
@@ -85,7 +85,6 @@ function extractValueFromHtml(html: string, monitor: Monitor): string | null {
     }
   }
 
-  // 2. Generic fallbacks if selector fails
   if (!value) {
     $('script[type="application/ld+json"]').each((_, el) => {
       try {
@@ -135,13 +134,21 @@ function extractValueFromHtml(html: string, monitor: Monitor): string | null {
 }
 
 /**
- * Retries extraction using Browserless to read the selector directly in the browser.
+ * Retries extraction using Browserless with deep diagnostics.
  */
-async function extractWithBrowserless(url: string, selector: string): Promise<string | null> {
+export async function extractWithBrowserless(url: string, selector: string): Promise<{ 
+  value: string | null, 
+  urlAfter: string, 
+  title: string, 
+  selectorCount: number,
+  debugFiles: string[] 
+}> {
   const token = process.env.BROWSERLESS_TOKEN;
+  const debugFiles: string[] = [];
   if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
 
   console.log(`[Scraper] Using Browserless JS rendering for: ${url}`);
+  console.log(`[Scraper] BROWSERLESS_TOKEN present: true`);
   
   let browser;
   try {
@@ -157,24 +164,64 @@ async function extractWithBrowserless(url: string, selector: string): Promise<st
     const page = await context.newPage();
     
     console.log(`[Scraper] Browserless navigating to ${url}...`);
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => console.log("[Scraper] Network idle timeout (proceeding anyway)"));
     
-    console.log(`[Scraper] Page loaded: ${page.url()} | Title: ${await page.title()}`);
+    const urlAfter = page.url();
+    const title = await page.title();
+    const status = response?.status();
+    const bodyText = (await page.locator("body").innerText()).substring(0, 200).trim();
+    
+    console.log(`[Scraper] page.url() after goto: ${urlAfter}`);
+    console.log(`[Scraper] response.status(): ${status}`);
+    console.log(`[Scraper] await page.title(): ${title}`);
+    console.log(`[Scraper] first 200 chars of body: ${bodyText}`);
     
     const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
     const effectiveSelector = isClassName ? `.${selector}` : selector;
     
-    const locator = page.locator(effectiveSelector).first();
     const count = await page.locator(effectiveSelector).count();
-    console.log(`[Scraper] Browserless selector matches: ${count}`);
+    console.log(`[Scraper] count of elements for selector "${selector}": ${count}`);
+
+    // Evidence Capture
+    try {
+      await page.screenshot({ path: "/tmp/browserless-debug.png", fullPage: true });
+      debugFiles.push("/tmp/browserless-debug.png");
+      
+      const content = await page.content();
+      await fs.writeFile("/tmp/browserless-debug.html", content);
+      debugFiles.push("/tmp/browserless-debug.html");
+
+      if (count > 0) {
+        const outerHTML = await page.locator(effectiveSelector).first().evaluate(el => el.outerHTML);
+        await fs.writeFile("/tmp/browserless-selector.html", outerHTML);
+        debugFiles.push("/tmp/browserless-selector.html");
+      } else {
+        await fs.writeFile("/tmp/browserless-preview.html", content.substring(0, 2000));
+        debugFiles.push("/tmp/browserless-preview.html");
+      }
+
+      // Fallback selector search (price patterns)
+      const priceMatches = content.match(/\$[0-9,.]+/g);
+      if (priceMatches) {
+        console.log(`[Scraper] Debug Price Fallback Matches: ${priceMatches.slice(0, 3).join(", ")}`);
+      }
+    } catch (debugErr) {
+      console.error("[Scraper] Debug capture failed:", debugErr);
+    }
 
     if (count > 0) {
-      const text = await locator.innerText();
-      return normalizeValue(text);
+      const text = await page.locator(effectiveSelector).first().innerText();
+      return { 
+        value: normalizeValue(text), 
+        urlAfter, 
+        title, 
+        selectorCount: count,
+        debugFiles 
+      };
     }
     
-    return null;
+    return { value: null, urlAfter, title, selectorCount: count, debugFiles };
   } catch (error) {
     console.error(`[Scraper] Browserless failed:`, error);
     throw error;
@@ -234,9 +281,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
       console.log(`[Scraper] Retrying with JS rendering via Browserless...`);
       try {
-        const renderedValue = await extractWithBrowserless(monitor.url, monitor.selector);
-        if (renderedValue) {
-          newValue = renderedValue;
+        const result = await extractWithBrowserless(monitor.url, monitor.selector);
+        if (result.value) {
+          newValue = result.value;
         }
       } catch (err) {
         console.error(`[Scraper] Browserless fallback failed:`, err);
@@ -247,7 +294,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
     const pageTitle = $("title").text().trim();
     const ogTitle = $('meta[property="og:title"]').attr('content');
     
-    // If the scrape fails or returns a title-like value, and we had an old title-like value, clear it.
     const isTitleLike = (val: string | null) => val && (val.length > 80 || val === pageTitle || val === ogTitle);
     
     if (!newValue || isTitleLike(newValue)) {
