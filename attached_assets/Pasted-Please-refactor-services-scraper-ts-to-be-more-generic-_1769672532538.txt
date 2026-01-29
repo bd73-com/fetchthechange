@@ -1,0 +1,41 @@
+Please refactor services/scraper.ts to be more generic and robust for sites where the requested selector is not present because the response is a JavaScript-required / anti-bot interstitial page (like the Jomashop case).
+
+Requirements:
+
+Add a generic function detectPageBlockReason(html: string, $: cheerio.CheerioAPI): { blocked: boolean; reason?: string } that detects common “not the real page” scenarios, without hardcoding a specific domain:
+
+Page text contains phrases like “enable JavaScript”, “please enable cookies”, “access denied”, “verify you are a human”, “checking your browser”, “just a moment”, “unusual traffic”, “captcha”.
+
+<title> matches common interstitial patterns like “Just a moment…”, “Access denied”, “Attention Required”.
+
+Presence of typical challenge markers (e.g. elements with ids/classes containing captcha, challenge, cf-, turnstile, recaptcha, hcaptcha).
+
+When a monitor has a selector and the selector is not found:
+
+Call detectPageBlockReason.
+
+If blocked, return { changed: false, currentValue: null } and log Blocked page detected: <reason>.
+
+If not blocked, continue with safe fallback strategies (price meta tags, JSON-LD offers.price, script price patterns), but do not return title/name for selector-based monitors.
+
+Improve extraction quality for price-like values generically:
+
+Add a helper normalizeValue(raw: string): string that trims whitespace, collapses repeated spaces, and removes invisible characters.
+
+Add extractFirstPrice(text: string): string | null supporting currencies like $, €, £, and formats with commas/decimals (e.g. $3,200.00, €1.234,56).
+
+If the selector returns a long string, try extractFirstPrice from that string before giving up.
+
+Add debug logging that helps identify failures:
+
+Log whether selector existed, and how many matches.
+
+If blocked, log the first 120 chars of the <title> and the matched reason keyword.
+
+Do NOT store the entire HTML or any huge content.
+
+Keep current behavior working for existing monitors. This is a refactor, not a redesign. Ensure TypeScript types remain correct and the function still returns { changed, currentValue }.
+
+Deliver the code changes only in services/scraper.ts and keep them readable (small helper functions, minimal duplication).
+
+After implementation, add a brief comment describing the behavior: “For selector-based monitors, do not fall back to page title; detect block/interstitial pages and return null.”
