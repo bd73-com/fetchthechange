@@ -58,9 +58,12 @@ export function useCreateMonitor() {
       });
       
       if (!res.ok) {
+        const errorData = await res.json();
+        if (res.status === 403 && errorData.code === "TIER_LIMIT_REACHED") {
+          throw new Error(errorData.message);
+        }
         if (res.status === 400) {
-          const error = api.monitors.create.responses[400].parse(await res.json());
-          throw new Error(error.message);
+          throw new Error(errorData.message);
         }
         throw new Error("Failed to create monitor");
       }

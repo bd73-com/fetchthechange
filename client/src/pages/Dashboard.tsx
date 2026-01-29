@@ -3,10 +3,12 @@ import { useMonitors, useCheckMonitor } from "@/hooks/use-monitors";
 import { CreateMonitorDialog } from "@/components/CreateMonitorDialog";
 import { MonitorCard } from "@/components/MonitorCard";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LogOut, LayoutDashboard, RefreshCw, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -96,9 +98,33 @@ export default function Dashboard() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
-            <p className="text-muted-foreground mt-1">
-              Manage your monitored pages and track detected changes.
-            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-muted-foreground">
+                Manage your monitored pages and track detected changes.
+              </p>
+            </div>
+            {/* Tier usage info */}
+            {(() => {
+              const tier = ((user as any)?.tier || "free") as UserTier;
+              const limit = TIER_LIMITS[tier] ?? TIER_LIMITS.free;
+              const count = monitors?.length ?? 0;
+              const isAtLimit = count >= limit;
+              return (
+                <div className="flex items-center gap-2 mt-2">
+                  <Badge variant={tier === "free" ? "secondary" : "default"} className="capitalize">
+                    {tier} Plan
+                  </Badge>
+                  <span className={`text-sm ${isAtLimit ? "text-destructive" : "text-muted-foreground"}`}>
+                    {count} / {limit === Infinity ? "Unlimited" : limit} monitors used
+                  </span>
+                  {isAtLimit && (
+                    <span className="text-sm text-destructive font-medium">
+                      (limit reached)
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           <div className="flex items-center gap-2">
             <Button 
