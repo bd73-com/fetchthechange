@@ -298,19 +298,33 @@ export async function registerRoutes(
   // Get available subscription plans from Stripe
   app.get("/api/stripe/plans", async (req, res) => {
     try {
+      // Use window function to get only the most recent product for each tier
+      // This handles the case where old products from a previous Stripe account exist
       const result = await db.execute(sql`
+        WITH ranked_products AS (
+          SELECT 
+            p.id,
+            p.name,
+            p.description,
+            p.metadata,
+            p.created,
+            ROW_NUMBER() OVER (PARTITION BY p.metadata->>'tier' ORDER BY p.created DESC) as rn
+          FROM stripe.products p
+          WHERE p.active = true
+            AND p.metadata->>'tier' IS NOT NULL
+        )
         SELECT 
-          p.id as product_id,
-          p.name as product_name,
-          p.description as product_description,
-          p.metadata as product_metadata,
+          rp.id as product_id,
+          rp.name as product_name,
+          rp.description as product_description,
+          rp.metadata as product_metadata,
           pr.id as price_id,
           pr.unit_amount,
           pr.currency,
           pr.recurring
-        FROM stripe.products p
-        LEFT JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true
-        WHERE p.active = true
+        FROM ranked_products rp
+        LEFT JOIN stripe.prices pr ON pr.product = rp.id AND pr.active = true
+        WHERE rp.rn = 1
         ORDER BY pr.unit_amount ASC
       `);
 
