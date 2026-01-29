@@ -111,7 +111,7 @@ export function CreateMonitorDialog() {
                       <TooltipTrigger asChild>
                         <HelpCircle className="h-4 w-4 text-muted-foreground cursor-help" data-testid="icon-selector-help" />
                       </TooltipTrigger>
-                      <TooltipContent className="max-w-xs" side="top">
+                      <TooltipContent className="max-w-xs bg-popover border border-border shadow-lg" side="top">
                         <p className="font-medium mb-1">What is a CSS Selector?</p>
                         <p className="text-sm mb-2">A CSS selector identifies the specific element on the page you want to monitor.</p>
                         <p className="font-medium mb-1">How to get it:</p>
