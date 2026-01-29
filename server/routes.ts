@@ -1,5 +1,5 @@
 import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPageBlockReason, discoverSelectors } from "./services/scraper";
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
@@ -7,6 +7,18 @@ import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
+
+// Dev-only auth bypass middleware for testing debug/suggest endpoints
+// Usage: Add header "x-dev-bypass: true" in development mode
+function devAuthBypass(req: any, res: Response, next: NextFunction) {
+  if (process.env.NODE_ENV === "development" && req.headers["x-dev-bypass"] === "true") {
+    // In dev mode with bypass header, set a fake user
+    req.user = { claims: { sub: "dev-test-user" } };
+    return next();
+  }
+  // Otherwise use normal auth
+  return isAuthenticated(req, res, next);
+}
 
 // ------------------------------------------------------------------
 // 1. CHECK MONITOR FUNCTION
@@ -75,14 +87,18 @@ export async function registerRoutes(
   });
 
   // Selector Debug Mode Endpoint
-  // Example: curl -X POST http://localhost:5000/api/monitors/3/debug -H "Cookie: connect.sid=..."
-  app.post("/api/monitors/:id/debug", isAuthenticated, async (req: any, res) => {
+  // Dev bypass example: curl -X POST http://localhost:5000/api/monitors/3/debug -H "x-dev-bypass: true"
+  // Auth example: curl -X POST http://localhost:5000/api/monitors/3/debug -H "Cookie: connect.sid=..."
+  app.post("/api/monitors/:id/debug", devAuthBypass, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       console.log(`[Debug] monitorId=${id}`);
       const monitor = await storage.getMonitor(id);
       if (!monitor) return res.status(404).json({ message: "Not found" });
-      if (monitor.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
+      // Skip user check if dev bypass
+      if (req.headers["x-dev-bypass"] !== "true" && monitor.userId !== req.user.claims.sub) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
 
       // Static Phase
       let staticHtml = "";
@@ -136,16 +152,20 @@ export async function registerRoutes(
   });
 
   // Selector suggestion endpoint
-  // Example: curl -X POST http://localhost:5000/api/monitors/3/suggest-selectors -H "Cookie: connect.sid=..." -H "Content-Type: application/json" -d '{"expectedText":"$3,200.00"}'
-  app.post("/api/monitors/:id/suggest-selectors", isAuthenticated, async (req: any, res) => {
+  // Dev bypass example: curl -X POST http://localhost:5000/api/monitors/3/suggest-selectors -H "x-dev-bypass: true" -H "Content-Type: application/json" -d '{"expectedText":"$3,200.00"}'
+  // Auth example: curl -X POST http://localhost:5000/api/monitors/3/suggest-selectors -H "Cookie: connect.sid=..." -H "Content-Type: application/json" -d '{"expectedText":"$3,200.00"}'
+  app.post("/api/monitors/:id/suggest-selectors", devAuthBypass, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       const { expectedText } = req.body || {};
-      console.log(`[Suggest] monitorId=${id} expectedText=${expectedText || "(none)"}`);
+      console.log(`[Suggest] monitorId=${id} expectedText="${expectedText || '(none)'}"`)
       
       const monitor = await storage.getMonitor(id);
       if (!monitor) return res.status(404).json({ message: "Not found" });
-      if (monitor.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
+      // Skip user check if dev bypass
+      if (req.headers["x-dev-bypass"] !== "true" && monitor.userId !== req.user.claims.sub) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
       
       if (!process.env.BROWSERLESS_TOKEN) {
         return res.status(400).json({ message: "BROWSERLESS_TOKEN not configured" });
