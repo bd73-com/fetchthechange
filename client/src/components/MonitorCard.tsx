@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X } from "lucide-react";
-import { useUpdateMonitor } from "@/hooks/use-monitors";
+import { useUpdateMonitor, useMonitorHistory } from "@/hooks/use-monitors";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { useForm } from "react-hook-form";
@@ -19,7 +19,11 @@ interface MonitorCardProps {
 
 export function MonitorCard({ monitor }: MonitorCardProps) {
   const { mutate: update } = useUpdateMonitor();
+  const { data: history } = useMonitorHistory(monitor.id);
   const [isEditing, setIsEditing] = useState(false);
+
+  const lastChange = history?.[0];
+  const previousValue = lastChange?.oldValue;
 
   const form = useForm({
     resolver: zodResolver(insertMonitorSchema),
@@ -201,8 +205,8 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
              {monitor.lastChanged && (
                <div className="flex items-center justify-between border-t border-border/20 pt-1.5 mt-0.5">
                  <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Previous</span>
-                 <span className="text-xs text-muted-foreground italic truncate max-w-[150px]">
-                   (Check history for details)
+                 <span className="text-xs text-muted-foreground truncate max-w-[150px]" title={previousValue || "No previous value"}>
+                   {previousValue || "---"}
                  </span>
                </div>
              )}
