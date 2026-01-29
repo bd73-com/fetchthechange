@@ -43,7 +43,13 @@ export function UpgradeDialog({ currentTier, children }: UpgradeDialogProps) {
     },
     onSuccess: (data) => {
       if (data.url) {
-        window.location.href = data.url;
+        // Open Stripe checkout in a new tab to avoid Replit webview restrictions
+        window.open(data.url, "_blank");
+        setOpen(false);
+        toast({
+          title: "Checkout opened",
+          description: "Complete your payment in the new tab. The page will refresh when done.",
+        });
       }
     },
     onError: (error: any) => {
