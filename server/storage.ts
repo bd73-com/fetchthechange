@@ -6,7 +6,7 @@ export interface IStorage {
   getMonitors(userId: string): Promise<Monitor[]>;
   getMonitor(id: number): Promise<Monitor | undefined>;
   createMonitor(monitor: InsertMonitor): Promise<Monitor>;
-  updateMonitor(id: number, updates: Partial<InsertMonitor>): Promise<Monitor>;
+  updateMonitor(id: number, updates: any): Promise<Monitor>;
   deleteMonitor(id: number): Promise<void>;
   
   getMonitorChanges(monitorId: number): Promise<MonitorChange[]>;

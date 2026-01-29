@@ -29,7 +29,8 @@ function extractFirstPrice(text: string): string | null {
 /**
  * Detects if the page is a block/interstitial based on common patterns.
  */
-function detectPageBlockReason(html: string, $: cheerio.CheerioAPI): { blocked: boolean; reason?: string } {
+export function detectPageBlockReason(html: string): { blocked: boolean; reason?: string } {
+  const $ = cheerio.load(html);
   const title = $("title").text().substring(0, 120);
   const bodyText = $("body").text().toLowerCase();
 
@@ -65,80 +66,22 @@ function detectPageBlockReason(html: string, $: cheerio.CheerioAPI): { blocked: 
  */
 function extractValueFromHtml(html: string, monitor: Monitor): string | null {
   const $ = cheerio.load(html);
-  let value: string | null = null;
   const selector = monitor.selector.trim();
-
   const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
   const effectiveSelector = isClassName ? `.${selector}` : selector;
   const elements = $(effectiveSelector);
   
-  console.log(`[Scraper] Selector "${selector}" matches in static/rendered html: ${elements.length}`);
-
   if (elements.length > 0) {
     const rawValue = elements.first().text() || elements.first().attr('content') || "";
-    const normalized = normalizeValue(rawValue);
-    
-    if (normalized.length > 80) {
-      value = extractFirstPrice(normalized);
-    } else {
-      value = normalized || null;
-    }
+    return normalizeValue(rawValue) || null;
   }
-
-  if (!value) {
-    $('script[type="application/ld+json"]').each((_, el) => {
-      try {
-        const content = $(el).html();
-        if (!content) return true;
-        const data = JSON.parse(content);
-        const items = Array.isArray(data) ? data : [data];
-        for (const item of items) {
-          const val = item.offers?.price || item.offers?.[0]?.price || item.price;
-          if (val) {
-            value = normalizeValue(String(val));
-            return false;
-          }
-        }
-      } catch (e) {}
-      return !value;
-    });
-
-    if (!value) {
-      $('script').each((_, el) => {
-        const content = $(el).html();
-        if (!content || !content.includes('price')) return true;
-        const match = content.match(/"(?:final_)?price"\s*:\s*"?([0-9.,]+)"?/i);
-        if (match) {
-          value = match[1];
-          return false;
-        }
-        return true;
-      });
-    }
-
-    if (!value) {
-      value = $('meta[property$="price:amount"]').attr('content') || 
-              $('meta[name$="price:amount"]').attr('content') ||
-              $('meta[itemprop="price"]').attr('content') || null;
-    }
-    
-    if (value) {
-      value = normalizeValue(value);
-      if (!value.includes('$') && !value.includes('€') && !value.includes('£')) {
-         value = `$${value}`; 
-      }
-    }
-  }
-
-  return value;
+  return null;
 }
 
 /**
  * Attempts to dismiss cookie consent banners generically.
  */
 async function tryDismissConsent(page: any): Promise<boolean> {
-  console.log("[Scraper] Attempting to dismiss cookie consent...");
-  
   const selectors = [
     '#onetrust-accept-btn-handler',
     '.onetrust-accept-btn-handler',
@@ -151,12 +94,11 @@ async function tryDismissConsent(page: any): Promise<boolean> {
     'button:has-text("OK")'
   ];
 
-  async function attemptClick(context: any, isFrame = false): Promise<boolean> {
+  async function attemptClick(context: any): Promise<boolean> {
     for (const selector of selectors) {
       try {
         const loc = context.locator(selector);
         if (await loc.count() > 0) {
-          console.log(`[Scraper] Clicking consent ${isFrame ? "in iframe" : "on main page"} matching: ${selector}`);
           await loc.first().click({ timeout: 2000, force: true });
           return true;
         }
@@ -166,33 +108,54 @@ async function tryDismissConsent(page: any): Promise<boolean> {
   }
 
   try {
-    // 1. Try main page first
     if (await attemptClick(page)) return true;
-
-    // 2. Try iframes
     for (const frame of page.frames()) {
       if (frame === page.mainFrame()) continue;
-      if (await attemptClick(frame, true)) return true;
+      if (await attemptClick(frame)) return true;
     }
-
-    // 3. Last resort getByRole
-    try {
-      const btn = page.getByRole("button", { name: /accept|agree|allow|ok|consent/i }).first();
-      if (await btn.count() > 0) {
-        console.log("[Scraper] Clicking consent via getByRole last resort");
-        await btn.click({ timeout: 2000, force: true });
-        return true;
-      }
-    } catch (e) {}
-
-  } catch (err) {
-    console.warn("[Scraper] Consent dismissal attempt failed.");
-  }
+    const btn = page.getByRole("button", { name: /accept|agree|allow|ok|consent/i }).first();
+    if (await btn.count() > 0) {
+      await btn.click({ timeout: 2000, force: true });
+      return true;
+    }
+  } catch (err) {}
   return false;
 }
 
 /**
- * Retries extraction using Browserless with deep diagnostics.
+ * Captured rendered DOM snapshot for debugging.
+ */
+export async function getRenderedDomSnapshot(url: string): Promise<{
+  finalUrl: string;
+  title: string;
+  htmlSnippet: string;
+}> {
+  const token = process.env.BROWSERLESS_TOKEN;
+  if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
+
+  let browser;
+  try {
+    const { chromium } = await import("playwright-core");
+    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`);
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await tryDismissConsent(page);
+    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+
+    const content = await page.content();
+    return {
+      finalUrl: page.url(),
+      title: await page.title(),
+      htmlSnippet: content.substring(0, 3000)
+    };
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
+/**
+ * Retries extraction using Browserless.
  */
 export async function extractWithBrowserless(url: string, selector: string): Promise<{ 
   value: string | null, 
@@ -205,9 +168,6 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
   const debugFiles: string[] = [];
   if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
 
-  console.log(`[Scraper] Using Browserless JS rendering for: ${url}`);
-  console.log(`[Scraper] BROWSERLESS_TOKEN present: true`);
-  
   let browser;
   try {
     const { chromium } = await import("playwright-core");
@@ -220,70 +180,26 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
       locale: "en-US"
     });
     const page = await context.newPage();
-    
-    console.log(`[Scraper] Browserless navigating to ${url}...`);
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
     
     const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
     const effectiveSelector = isClassName ? `.${selector}` : selector;
     
-    let countBefore = await page.locator(effectiveSelector).count();
-    console.log(`[Scraper] Selector count before consent handling: ${countBefore}`);
-
-    const consentClicked = await tryDismissConsent(page);
-    console.log(`[Scraper] consent clicked: ${consentClicked}`);
-
-    if (consentClicked) {
-      await page.waitForTimeout(1200);
-      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-    }
+    await tryDismissConsent(page);
+    await page.waitForTimeout(1200);
+    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
 
     await page.waitForSelector(effectiveSelector, { timeout: 10000 }).catch(() => {});
     const countAfter = await page.locator(effectiveSelector).count();
-    console.log(`[Scraper] selectorCount after consent/wait: ${countAfter}`);
     
     const urlAfter = page.url();
     const title = await page.title();
-    const status = response?.status();
     
-    console.log(`[Scraper] page.url() after goto: ${urlAfter}`);
-    console.log(`[Scraper] response.status(): ${status}`);
-    console.log(`[Scraper] await page.title(): ${title}`);
-    
-    // Evidence Capture
-    try {
-      await page.screenshot({ path: "/tmp/browserless-debug.png", fullPage: true });
-      debugFiles.push("/tmp/browserless-debug.png");
-      
-      const content = await page.content();
-      await fs.writeFile("/tmp/browserless-debug.html", content);
-      debugFiles.push("/tmp/browserless-debug.html");
-
-      if (countAfter > 0) {
-        const outerHTML = await page.locator(effectiveSelector).first().evaluate(el => el.outerHTML);
-        await fs.writeFile("/tmp/browserless-selector.html", outerHTML);
-        debugFiles.push("/tmp/browserless-selector.html");
-      } else {
-        await fs.writeFile("/tmp/browserless-preview.html", content.substring(0, 2000));
-        debugFiles.push("/tmp/browserless-preview.html");
-      }
-
-      // Fallback selector search (price patterns) - Stricter Regex
-      const priceMatches = content.match(/\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})/g);
-      if (priceMatches) {
-        console.log(`[Scraper] Debug Price Fallback Matches: ${priceMatches.slice(0, 3).join(", ")}`);
-      }
-    } catch (debugErr) {
-      console.error("[Scraper] Debug capture failed:", debugErr);
-    }
-
     if (countAfter > 0) {
       const text = await page.locator(effectiveSelector).first().innerText();
-      const extracted = normalizeValue(text);
-      console.log(`[Scraper] extracted value if found: ${extracted}`);
       return { 
-        value: extracted, 
+        value: normalizeValue(text), 
         urlAfter, 
         title, 
         selectorCount: countAfter,
@@ -316,7 +232,6 @@ async function fetchWithCurl(url: string): Promise<string> {
 export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean, currentValue: string | null }> {
   try {
     console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
-    console.log(`BROWSERLESS enabled: ${!!process.env.BROWSERLESS_TOKEN}`);
     
     let html = "";
     try {
@@ -326,7 +241,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
           'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
           'Upgrade-Insecure-Requests': '1'
         },
         signal: AbortSignal.timeout(20000)
@@ -342,62 +256,40 @@ export async function checkMonitor(monitor: Monitor): Promise<{ changed: boolean
 
     if (!html) return { changed: false, currentValue: null };
 
-    let $ = cheerio.load(html);
     let newValue = extractValueFromHtml(html, monitor);
-    let block = detectPageBlockReason(html, $);
+    let block = detectPageBlockReason(html);
     
-    console.log(`blocked detected: ${block.blocked}${block.blocked ? ` reason=${block.reason}` : ""}`);
-
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
-      console.log(`[Scraper] Retrying with JS rendering via Browserless...`);
       try {
         const result = await extractWithBrowserless(monitor.url, monitor.selector);
-        if (result.value) {
-          newValue = result.value;
-        }
-      } catch (err) {
-        console.error(`[Scraper] Browserless fallback failed:`, err);
-      }
+        newValue = result.value;
+        block = detectPageBlockReason(await fs.readFile("/tmp/browserless-debug.html", "utf-8").catch(() => html));
+      } catch (err) {}
+    }
+
+    if (!newValue) {
+      const isClassName = !monitor.selector.startsWith('.') && !monitor.selector.startsWith('#') && !monitor.selector.includes(' ');
+      const effectiveSelector = isClassName ? `.${monitor.selector}` : monitor.selector;
+      console.log(`Extraction failed: selector=${monitor.selector}, count=0, blocked=${block.blocked}${block.blocked ? `, reason=${block.reason}` : ""}`);
     }
 
     const oldValue = monitor.currentValue;
-    const pageTitle = $("title").text().trim();
-    const ogTitle = $('meta[property="og:title"]').attr('content');
-    
-    const isTitleLike = (val: string | null) => val && (val.length > 80 || val === pageTitle || val === ogTitle);
-    
-    // Hard clearing of garbage values
-    if (!newValue || isTitleLike(newValue)) {
-      if (isTitleLike(oldValue)) {
-        console.log(`[Scraper] Old value was title-like, clearing to prevent garbage sticking.`);
-        newValue = null; // This will trigger updateMonitor with currentValue: null
-      }
-    }
-
     const changed = newValue !== null && newValue !== oldValue;
 
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
-      // Actually persist the clearing: if newValue is null and we decided to clear, we pass null
-      // Existing logic was using ?? (oldValue || undefined) which kept old garbage.
-      // We only want to keep the old value if the scrape just failed but the old value was GOOD.
-      currentValue: newValue === null 
-        ? (isTitleLike(oldValue) ? null : (oldValue || null)) 
-        : newValue
+      currentValue: newValue ?? (oldValue || null)
     });
 
     if (changed) {
-      console.log(`Change detected for monitor ${monitor.id}!`);
       await storage.addMonitorChange(monitor.id, oldValue, newValue);
       await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
-
       if (monitor.emailEnabled) {
         await sendNotificationEmail(monitor, oldValue, newValue);
       }
     }
 
     return { changed, currentValue: newValue };
-
   } catch (error) {
     console.error(`Scraping error for monitor ${monitor.id}:`, error);
     return { changed: false, currentValue: null };
