@@ -21,7 +21,7 @@ function normalizeValue(raw: string): string {
  * Extracts the first price-like string with currency symbols and numeric formats.
  */
 function extractFirstPrice(text: string): string | null {
-  const priceRegex = /([$€£¥]\s?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?|\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?\s?[$€£¥])/;
+  const priceRegex = /([$€£¥]\s?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?|\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})\s?[$€£¥])/;
   const match = text.match(priceRegex);
   return match ? match[0] : null;
 }
@@ -134,6 +134,45 @@ function extractValueFromHtml(html: string, monitor: Monitor): string | null {
 }
 
 /**
+ * Attempts to dismiss cookie consent banners generically.
+ */
+async function tryDismissConsent(page: any): Promise<boolean> {
+  console.log("[Scraper] Attempting to dismiss cookie consent...");
+  try {
+    const acceptPatterns = [/accept/i, /agree/i, /ok/i, /allow/i, /got it/i];
+    
+    // Try role-based first
+    for (const pattern of acceptPatterns) {
+      const button = page.getByRole("button", { name: pattern });
+      if (await button.count() > 0) {
+        console.log(`[Scraper] Clicking consent button matching: ${pattern}`);
+        await button.first().click({ timeout: 2000 });
+        return true;
+      }
+    }
+
+    // Try common selectors
+    const selectors = [
+      '#onetrust-accept-btn-handler', '.onetrust-accept-btn-handler',
+      '[aria-label*="accept" i]', '[id*="accept" i]', '[class*="accept" i]',
+      '[data-testid*="accept" i]', '[id*="cookie-accept" i]', '.cookie-accept'
+    ];
+    
+    for (const selector of selectors) {
+      const loc = page.locator(selector);
+      if (await loc.count() > 0) {
+        console.log(`[Scraper] Clicking consent selector: ${selector}`);
+        await loc.first().click({ timeout: 2000 });
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn("[Scraper] Consent dismissal attempt failed or timed out.");
+  }
+  return false;
+}
+
+/**
  * Retries extraction using Browserless with deep diagnostics.
  */
 export async function extractWithBrowserless(url: string, selector: string): Promise<{ 
@@ -165,7 +204,26 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
     
     console.log(`[Scraper] Browserless navigating to ${url}...`);
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => console.log("[Scraper] Network idle timeout (proceeding anyway)"));
+    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    
+    const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
+    const effectiveSelector = isClassName ? `.${selector}` : selector;
+    
+    let countBefore = await page.locator(effectiveSelector).count();
+    console.log(`[Scraper] Selector count before consent handling: ${countBefore}`);
+
+    const consentClicked = await tryDismissConsent(page);
+    console.log(`[Scraper] consent clicked: ${consentClicked}`);
+
+    if (consentClicked) {
+      await page.waitForTimeout(1000);
+      await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+    }
+
+    const countAfter = await page.locator(effectiveSelector).count();
+    console.log(`[Scraper] selectorCount after consent: ${countAfter}`);
+
+    await page.waitForSelector(effectiveSelector, { timeout: 5000 }).catch(() => {});
     
     const urlAfter = page.url();
     const title = await page.title();
@@ -175,14 +233,7 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
     console.log(`[Scraper] page.url() after goto: ${urlAfter}`);
     console.log(`[Scraper] response.status(): ${status}`);
     console.log(`[Scraper] await page.title(): ${title}`);
-    console.log(`[Scraper] first 200 chars of body: ${bodyText}`);
     
-    const isClassName = !selector.startsWith('.') && !selector.startsWith('#') && !selector.includes(' ');
-    const effectiveSelector = isClassName ? `.${selector}` : selector;
-    
-    const count = await page.locator(effectiveSelector).count();
-    console.log(`[Scraper] count of elements for selector "${selector}": ${count}`);
-
     // Evidence Capture
     try {
       await page.screenshot({ path: "/tmp/browserless-debug.png", fullPage: true });
@@ -192,7 +243,7 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
       await fs.writeFile("/tmp/browserless-debug.html", content);
       debugFiles.push("/tmp/browserless-debug.html");
 
-      if (count > 0) {
+      if (countAfter > 0) {
         const outerHTML = await page.locator(effectiveSelector).first().evaluate(el => el.outerHTML);
         await fs.writeFile("/tmp/browserless-selector.html", outerHTML);
         debugFiles.push("/tmp/browserless-selector.html");
@@ -201,8 +252,8 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
         debugFiles.push("/tmp/browserless-preview.html");
       }
 
-      // Fallback selector search (price patterns)
-      const priceMatches = content.match(/\$[0-9,.]+/g);
+      // Fallback selector search (price patterns) - Fixed Regex
+      const priceMatches = content.match(/\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g);
       if (priceMatches) {
         console.log(`[Scraper] Debug Price Fallback Matches: ${priceMatches.slice(0, 3).join(", ")}`);
       }
@@ -210,18 +261,20 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
       console.error("[Scraper] Debug capture failed:", debugErr);
     }
 
-    if (count > 0) {
+    if (countAfter > 0) {
       const text = await page.locator(effectiveSelector).first().innerText();
+      const extracted = normalizeValue(text);
+      console.log(`[Scraper] extracted value if found: ${extracted}`);
       return { 
-        value: normalizeValue(text), 
+        value: extracted, 
         urlAfter, 
         title, 
-        selectorCount: count,
+        selectorCount: countAfter,
         debugFiles 
       };
     }
     
-    return { value: null, urlAfter, title, selectorCount: count, debugFiles };
+    return { value: null, urlAfter, title, selectorCount: countAfter, debugFiles };
   } catch (error) {
     console.error(`[Scraper] Browserless failed:`, error);
     throw error;
