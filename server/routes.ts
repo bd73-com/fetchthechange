@@ -1,4 +1,4 @@
-import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPageBlockReason } from "./services/scraper";
+import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPageBlockReason, discoverSelectors } from "./services/scraper";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -129,6 +129,28 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("[Debug] Selector debug endpoint error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Selector suggestion endpoint
+  app.post("/api/monitors/:id/suggest-selectors", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const monitor = await storage.getMonitor(id);
+      if (!monitor) return res.status(404).json({ message: "Not found" });
+      if (monitor.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
+
+      const { expectedText } = req.body || {};
+      
+      if (!process.env.BROWSERLESS_TOKEN) {
+        return res.status(400).json({ message: "BROWSERLESS_TOKEN not configured" });
+      }
+
+      const suggestions = await discoverSelectors(monitor.url, monitor.selector, expectedText);
+      res.json(suggestions);
+    } catch (error: any) {
+      console.error("[Suggest] Selector suggestion error:", error);
       res.status(500).json({ message: error.message });
     }
   });
