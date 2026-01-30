@@ -12,6 +12,7 @@ import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
+import { sendNotificationEmail } from "./services/email";
 
 // Dev-only auth bypass middleware for testing debug/suggest endpoints
 // Usage: Add header "x-dev-bypass: true" in development mode
@@ -88,6 +89,61 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[Debug] Browserless endpoint error:", error);
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Test Email Endpoint - verifies Resend email delivery
+  app.get("/api/test-email", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      
+      if (!user || !user.email) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "No email address found for your account" 
+        });
+      }
+
+      // Create a mock monitor for the test email
+      const testMonitor = {
+        id: 0,
+        userId: userId,
+        name: "Test Monitor",
+        url: "https://example.com/test-page",
+        selector: "div.test-selector",
+        frequency: "daily" as const,
+        lastChecked: new Date(),
+        lastChanged: new Date(),
+        currentValue: "New Test Value",
+        lastStatus: "ok" as const,
+        lastError: null,
+        active: true,
+        emailEnabled: true,
+        createdAt: new Date()
+      };
+
+      console.log(`[Test Email] Sending test email to ${user.email}`);
+      await sendNotificationEmail(testMonitor, "Old Test Value", "New Test Value");
+      
+      res.json({ 
+        success: true, 
+        message: `Test email sent to ${user.email}. Please check your inbox (and spam folder).`,
+        details: {
+          to: user.email,
+          from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+          apiKeyConfigured: !!process.env.RESEND_API_KEY
+        }
+      });
+    } catch (error: any) {
+      console.error("[Test Email] Error:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: error.message,
+        details: {
+          apiKeyConfigured: !!process.env.RESEND_API_KEY
+        }
+      });
     }
   });
 
