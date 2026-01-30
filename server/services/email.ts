@@ -2,26 +2,35 @@ import { Resend } from "resend";
 import { type Monitor } from "@shared/schema";
 import { authStorage } from "../replit_integrations/auth/storage";
 
-export async function sendNotificationEmail(monitor: Monitor, oldValue: string | null, newValue: string | null) {
+export interface EmailResult {
+  success: boolean;
+  id?: string;
+  error?: string;
+  to?: string;
+  from?: string;
+}
+
+export async function sendNotificationEmail(monitor: Monitor, oldValue: string | null, newValue: string | null): Promise<EmailResult> {
   if (!process.env.RESEND_API_KEY) {
     console.log("RESEND_API_KEY not set. Skipping email.");
     console.log(`[MOCK EMAIL] To: User of Monitor ${monitor.id}`);
     console.log(`[MOCK EMAIL] Subject: Change detected on ${monitor.name}`);
     console.log(`[MOCK EMAIL] Body: Value changed from "${oldValue}" to "${newValue}"`);
-    return;
+    return { success: false, error: "RESEND_API_KEY not configured" };
   }
 
   const resend = new Resend(process.env.RESEND_API_KEY);
+  const fromAddress = process.env.RESEND_FROM || 'onboarding@resend.dev';
 
   try {
     const user = await authStorage.getUser(monitor.userId);
     if (!user || !user.email) {
       console.log(`User ${monitor.userId} has no email. Skipping.`);
-      return;
+      return { success: false, error: "User has no email address" };
     }
 
-    await resend.emails.send({
-      from: process.env.RESEND_FROM || 'onboarding@resend.dev',
+    const response = await resend.emails.send({
+      from: fromAddress,
       to: user.email,
       subject: `Change detected: ${monitor.name}`,
       text: `
@@ -45,11 +54,21 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
         <p><strong>New Value:</strong></p>
         <pre>${newValue}</pre>
         <hr/>
-        <p><a href="https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co">View Dashboard</a></p>
+        <p><a href="https://fetch-the-change.replit.app">View Dashboard</a></p>
       `
     });
-    console.log(`Email sent to ${user.email} for monitor ${monitor.id} via Resend`);
-  } catch (error) {
-    console.error("Error sending email via Resend:", error);
+    
+    console.log(`[Email] Resend response:`, JSON.stringify(response));
+    
+    if (response.error) {
+      console.error(`[Email] Resend error:`, response.error);
+      return { success: false, error: response.error.message, to: user.email, from: fromAddress };
+    }
+    
+    console.log(`[Email] Sent to ${user.email} for monitor ${monitor.id}, id: ${response.data?.id}`);
+    return { success: true, id: response.data?.id, to: user.email, from: fromAddress };
+  } catch (error: any) {
+    console.error("[Email] Error sending via Resend:", error);
+    return { success: false, error: error.message };
   }
 }

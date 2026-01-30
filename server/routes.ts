@@ -124,17 +124,31 @@ export async function registerRoutes(
       };
 
       console.log(`[Test Email] Sending test email to ${user.email}`);
-      await sendNotificationEmail(testMonitor, "Old Test Value", "New Test Value");
+      const result = await sendNotificationEmail(testMonitor, "Old Test Value", "New Test Value");
       
-      res.json({ 
-        success: true, 
-        message: `Test email sent to ${user.email}. Please check your inbox (and spam folder).`,
-        details: {
-          to: user.email,
-          from: process.env.RESEND_FROM || 'onboarding@resend.dev',
-          apiKeyConfigured: !!process.env.RESEND_API_KEY
-        }
-      });
+      if (result.success) {
+        res.json({ 
+          success: true, 
+          message: `Test email sent to ${user.email}. Please check your inbox (and spam folder).`,
+          resendEmailId: result.id,
+          details: {
+            to: result.to,
+            from: result.from,
+            apiKeyConfigured: !!process.env.RESEND_API_KEY
+          }
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          message: `Failed to send email: ${result.error}`,
+          details: {
+            to: result.to || user.email,
+            from: result.from || process.env.RESEND_FROM || 'onboarding@resend.dev',
+            apiKeyConfigured: !!process.env.RESEND_API_KEY,
+            error: result.error
+          }
+        });
+      }
     } catch (error: any) {
       console.error("[Test Email] Error:", error);
       res.status(500).json({ 
