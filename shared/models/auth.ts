@@ -33,6 +33,7 @@ export const users = pgTable("users", {
   tier: varchar("tier").default("free").notNull(),
   stripeCustomerId: varchar("stripe_customer_id"),
   stripeSubscriptionId: varchar("stripe_subscription_id"),
+  notificationEmail: varchar("notification_email"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

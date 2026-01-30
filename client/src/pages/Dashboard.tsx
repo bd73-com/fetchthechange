@@ -3,6 +3,7 @@ import { useMonitors, useCheckMonitor } from "@/hooks/use-monitors";
 import { CreateMonitorDialog } from "@/components/CreateMonitorDialog";
 import { MonitorCard } from "@/components/MonitorCard";
 import { UpgradeDialog } from "@/components/UpgradeDialog";
+import { NotificationEmailDialog } from "@/components/NotificationEmailDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -111,6 +112,10 @@ export default function Dashboard() {
             <div className="hidden sm:block text-sm text-muted-foreground">
               Welcome, <span className="font-medium text-foreground">{user?.firstName || user?.email}</span>
             </div>
+            <NotificationEmailDialog 
+              currentNotificationEmail={(user as any)?.notificationEmail} 
+              accountEmail={user?.email} 
+            />
             <Button variant="ghost" size="sm" onClick={() => logout()} className="text-muted-foreground hover:text-destructive">
               <LogOut className="h-4 w-4 mr-2" />
               Sign Out
