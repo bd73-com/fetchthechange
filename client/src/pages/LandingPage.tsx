@@ -55,6 +55,16 @@ export default function LandingPage() {
             <p className="text-xl text-muted-foreground leading-relaxed max-w-2xl mx-auto">
               Works on modern, JavaScript-heavy websites where most trackers fail.
             </p>
+            <div className="mt-8 mb-4">
+              <img 
+                src="/images/fix-selector-showcase.png" 
+                alt="Fix Selector feature showing selector suggestions" 
+                className="rounded-lg shadow-2xl border border-border mx-auto max-w-full md:max-w-2xl"
+              />
+              <p className="text-muted-foreground mt-4 text-base">
+                When a site changes, FetchTheChange shows you what broke and helps you fix it.
+              </p>
+            </div>
             <p className="text-lg text-muted-foreground">
               FetchTheChange is a reliable website change-monitoring tool that helps you track exactly what matters — and alerts you when it changes.
             </p>
