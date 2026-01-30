@@ -29,9 +29,13 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
       return { success: false, error: "User has no email address" };
     }
 
+    // Use custom notification email if set, otherwise fall back to account email
+    const recipientEmail = user.notificationEmail || user.email;
+    console.log(`[Email] Sending to ${recipientEmail} (custom: ${!!user.notificationEmail})`);
+
     const response = await resend.emails.send({
       from: fromAddress,
-      to: user.email,
+      to: recipientEmail,
       subject: `Change detected: ${monitor.name}`,
       text: `
         Hello,
@@ -62,11 +66,11 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     
     if (response.error) {
       console.error(`[Email] Resend error:`, response.error);
-      return { success: false, error: response.error.message, to: user.email, from: fromAddress };
+      return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
     }
     
-    console.log(`[Email] Sent to ${user.email} for monitor ${monitor.id}, id: ${response.data?.id}`);
-    return { success: true, id: response.data?.id, to: user.email, from: fromAddress };
+    console.log(`[Email] Sent to ${recipientEmail} for monitor ${monitor.id}, id: ${response.data?.id}`);
+    return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
     console.error("[Email] Error sending via Resend:", error);
     return { success: false, error: error.message };

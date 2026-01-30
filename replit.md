@@ -95,6 +95,11 @@ Subscription payments are handled via Stripe integration:
 - **Provider**: Resend API
 - **Trigger**: When a monitor detects a value change
 - **Fallback**: Console logging when RESEND_API_KEY is not configured
+- **Custom Notification Email**: Users can set a custom email address to receive notifications instead of their account email
+  - **Database**: `users.notificationEmail` column (nullable varchar)
+  - **API**: `PATCH /api/auth/user/notification-email` to update custom email
+  - **UI**: Settings button in Dashboard header opens NotificationEmailDialog
+  - **Priority**: Uses `user.notificationEmail` if set, falls back to `user.email`
 
 ## External Dependencies
 
