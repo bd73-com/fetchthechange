@@ -181,7 +181,20 @@ export async function registerRoutes(
       res.json(result);
     } catch (error: any) {
       console.error("[Suggest] Selector suggestion error:", error);
-      res.status(500).json({ message: error.message });
+      const errorMessage = error.message || "";
+      if (errorMessage.includes("Playwright") || errorMessage.includes("connectOverCDP") || errorMessage.includes("browser")) {
+        return res.status(503).json({ 
+          message: "Browser automation service is temporarily unavailable. Please try again later.",
+          code: "BROWSERLESS_UNAVAILABLE"
+        });
+      }
+      if (errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {
+        return res.status(504).json({ 
+          message: "The page took too long to load. Please try again.",
+          code: "TIMEOUT"
+        });
+      }
+      res.status(500).json({ message: "Failed to analyze page for selectors. Please try again." });
     }
   });
 

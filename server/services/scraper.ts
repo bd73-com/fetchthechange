@@ -150,8 +150,13 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
   if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
 
   let browser;
+  let chromium;
   try {
-    const { chromium } = await import("playwright-core");
+    const playwrightModule = await import("playwright-core");
+    chromium = playwrightModule.chromium;
+    if (!chromium || typeof chromium.connectOverCDP !== 'function') {
+      throw new Error("Playwright browser automation is not available");
+    }
     browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`, {
       timeout: 30000
     });
@@ -433,8 +438,13 @@ export async function discoverSelectors(
   if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
 
   let browser;
+  let chromium;
   try {
-    const { chromium } = await import("playwright-core");
+    const playwrightModule = await import("playwright-core");
+    chromium = playwrightModule.chromium;
+    if (!chromium || typeof chromium.connectOverCDP !== 'function') {
+      throw new Error("Playwright browser automation is not available. Please try again later.");
+    }
     browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`, {
       timeout: 30000
     });

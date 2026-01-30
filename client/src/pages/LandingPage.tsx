@@ -53,12 +53,10 @@ export default function LandingPage() {
               <span className="text-primary">Get alerted when it changes.</span>
             </h1>
             <p className="text-xl text-muted-foreground leading-relaxed max-w-2xl mx-auto">
-              FetchTheChange is a reliable website change-monitoring tool that works even on modern, 
-              JavaScript-heavy sites where most trackers fail.
+              Works on modern, JavaScript-heavy websites where most trackers fail.
             </p>
             <p className="text-lg text-muted-foreground">
-              Whether you're tracking prices, availability, numbers, text, or status messages — 
-              FetchTheChange watches exactly what <em>you</em> care about and tells you when it changes.
+              FetchTheChange is a reliable website change-monitoring tool that helps you track exactly what matters — and alerts you when it changes.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
               <Button size="lg" className="text-lg px-8 shadow-lg shadow-primary/20" asChild>
