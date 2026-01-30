@@ -152,7 +152,7 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
   let browser;
   let chromium;
   try {
-    const playwrightModule = await import("playwright-core");
+    const playwrightModule = await import("playwright");
     chromium = playwrightModule.chromium;
     if (!chromium || typeof chromium.connectOverCDP !== 'function') {
       throw new Error("Playwright browser automation is not available");
@@ -440,7 +440,7 @@ export async function discoverSelectors(
   let browser;
   let chromium;
   try {
-    const playwrightModule = await import("playwright-core");
+    const playwrightModule = await import("playwright");
     chromium = playwrightModule.chromium;
     if (!chromium || typeof chromium.connectOverCDP !== 'function') {
       throw new Error("Playwright browser automation is not available. Please try again later.");
