@@ -81,7 +81,7 @@ export default function LandingPage() {
             <div className="mt-6">
               <a 
                 href="/blog/why-website-change-monitors-fail-silently" 
-                className="text-muted-foreground hover:text-primary transition-colors text-sm underline underline-offset-4"
+                className="text-muted-foreground hover:text-primary transition-colors text-base underline underline-offset-4"
                 data-testid="link-blog-silent-failures"
               >
                 Read: Why monitors fail silently on JavaScript-heavy sites

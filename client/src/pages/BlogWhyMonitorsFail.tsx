@@ -6,7 +6,7 @@ import { Link } from "wouter";
 
 const BLOG_PATH = "/blog/why-website-change-monitors-fail-silently";
 const PUBLISH_DATE = "2026-01-30";
-const AUTHOR = "Christian Ustvedt Kavli";
+const AUTHOR = "Christian - developer of FetchTheChange";
 
 function getCanonicalUrl() {
   const baseUrl = import.meta.env.VITE_PUBLIC_BASE_URL || 
