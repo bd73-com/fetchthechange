@@ -10,6 +10,7 @@ import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/LandingPage";
 import Dashboard from "@/pages/Dashboard";
 import MonitorDetails from "@/pages/MonitorDetails";
+import BlogWhyMonitorsFail from "@/pages/BlogWhyMonitorsFail";
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme] = useState<"dark" | "light">("dark");
@@ -46,6 +47,7 @@ function Router() {
       <Route path="/" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/monitors/:id" component={() => <ProtectedRoute component={MonitorDetails} />} />
+      <Route path="/blog/why-website-change-monitors-fail-silently" component={BlogWhyMonitorsFail} />
       {/* Fallback to 404 */}
       <Route component={NotFound} />
     </Switch>
