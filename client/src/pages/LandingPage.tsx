@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { 
-  Zap, 
   CheckCircle2, 
   MousePointer2, 
   Bell, 
@@ -21,24 +20,15 @@ import {
   Clock,
   History,
   Search,
-  Target
+  Target,
+  Zap
 } from "lucide-react";
+import PublicNav from "@/components/PublicNav";
 
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background">
-      {/* Navigation */}
-      <nav className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Zap className="h-6 w-6 text-primary" />
-            <span className="text-xl font-display font-bold">FetchTheChange</span>
-          </div>
-          <Button asChild>
-            <a href="/api/login" data-testid="link-login">Get Started</a>
-          </Button>
-        </div>
-      </nav>
+      <PublicNav />
 
       {/* Hero Section */}
       <section className="relative overflow-hidden">

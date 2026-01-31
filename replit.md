@@ -127,6 +127,21 @@ Subscription payments are handled via Stripe integration:
 - `node-cron` - Scheduled task execution
 - `passport` + `openid-client` - Authentication
 
+### Public Navigation
+Shared navigation component for all public pages:
+- **Component**: `client/src/components/PublicNav.tsx`
+- **Links**: FetchTheChange logo, How it works, Use cases, Blog, Pricing, Sign in
+- **Features**: 
+  - Sticky positioning with backdrop blur
+  - Desktop: horizontal menu
+  - Mobile: hamburger menu with slide-out sheet
+  - Anchor links scroll smoothly when on homepage
+
+### Public Pages
+- **Homepage**: `/` - Landing page with hero, features, pricing, use cases
+- **Blog Index**: `/blog` - List of blog articles
+- **Pricing**: `/pricing` - Dedicated pricing page with FAQ
+
 ### Blog Pages
 Public, SEO-optimized blog articles for content marketing:
 - **Location**: `client/src/pages/Blog*.tsx`
