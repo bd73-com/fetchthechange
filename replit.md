@@ -122,7 +122,16 @@ Subscription payments are handled via Stripe integration:
 ### Key NPM Dependencies
 - `drizzle-orm` + `drizzle-kit` - Database ORM and migrations
 - `cheerio` - HTML parsing for static content
-- `playwright` - Browser automation (with Browserless integration)
+- `playwright-core` - Browser automation (with Browserless integration)
 - `resend` - Email API client
 - `node-cron` - Scheduled task execution
 - `passport` + `openid-client` - Authentication
+
+### Blog Pages
+Public, SEO-optimized blog articles for content marketing:
+- **Location**: `client/src/pages/Blog*.tsx`
+- **Route Pattern**: `/blog/{slug}`
+- **Current Articles**:
+  - `/blog/why-website-change-monitors-fail-silently` - Article about silent monitor failures
+- **SEO Features**: Meta tags, Open Graph, Twitter cards, canonical URLs, JSON-LD structured data
+- **Canonical URL**: Uses `VITE_PUBLIC_BASE_URL` env var with fallback to `window.location.origin`
