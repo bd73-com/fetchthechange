@@ -46,14 +46,14 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-24 md:py-32 relative">
           <div className="text-center max-w-3xl mx-auto space-y-6">
             <Badge variant="secondary" className="px-4 py-1.5 text-sm">
-              Website change monitoring that doesn't fail silently
+              Reliable change monitoring for the modern web
             </Badge>
             <h1 className="text-4xl md:text-6xl font-display font-bold leading-tight">
               Monitor any web value.{" "}
               <span className="text-primary">Get alerted when it changes.</span>
             </h1>
             <p className="text-xl text-muted-foreground leading-relaxed max-w-2xl mx-auto">
-              Works on modern, JavaScript-heavy websites — and tells you when tracking breaks, not just when values change.
+              Works on modern, JavaScript-heavy websites where most trackers fail.
             </p>
             <div className="mt-8 mb-4">
               <img 
@@ -66,7 +66,7 @@ export default function LandingPage() {
               </p>
             </div>
             <p className="text-lg text-muted-foreground">
-              FetchTheChange is a website change monitoring tool that tracks specific values on modern, JavaScript-rendered pages and alerts you when they change.
+              FetchTheChange is a reliable website change-monitoring tool that helps you track exactly what matters — and alerts you when it changes.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
               <Button size="lg" className="text-lg px-8 shadow-lg shadow-primary/20" asChild>
@@ -82,63 +82,13 @@ export default function LandingPage() {
         </div>
       </section>
 
-
-      {/* Problem Section */}
-      <section className="py-16 md:py-20">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="max-w-3xl mx-auto text-center mb-10">
-            <h2 className="text-3xl md:text-4xl font-display font-bold mb-4">Most website change monitors fail silently</h2>
-            <p className="text-lg text-muted-foreground">
-              The modern web is dynamic. Traditional monitors often miss changes — or worse, report the wrong thing — without telling you.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-xl">
-                  <AlertTriangle className="h-5 w-5 text-primary" />
-                  Selectors break
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                Sites change structure and CSS selectors stop matching. Many tools just keep running and return garbage.
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-xl">
-                  <Code2 className="h-5 w-5 text-primary" />
-                  JavaScript content
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                More and more values only exist after JavaScript renders. Static scrapers won’t see them.
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-xl">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
-                  You need confidence
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                If monitoring is unreliable, you’re back to manual checking. FetchTheChange flags failures and helps you fix them.
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-{/* Who is this for */}
+      {/* Who is this for */}
       <section className="py-24 bg-secondary/30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-display font-bold mb-4">Who is this for?</h2>
           </div>
-
+          
           <div className="grid md:grid-cols-2 gap-8">
             {/* Non-technical users */}
             <Card className="relative overflow-hidden">
@@ -230,7 +180,7 @@ export default function LandingPage() {
               FetchTheChange is <strong>not just a price tracker</strong>.
             </p>
           </div>
-
+          
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { icon: DollarSign, label: "Prices" },
@@ -248,7 +198,7 @@ export default function LandingPage() {
               </Card>
             ))}
           </div>
-
+          
           <p className="text-center text-lg text-muted-foreground mt-8">
             If it appears on a webpage, FetchTheChange can watch it.
           </p>
@@ -265,7 +215,7 @@ export default function LandingPage() {
               send false alerts, and hide what went wrong. <strong>FetchTheChange does the opposite.</strong>
             </p>
           </div>
-
+          
           <div className="grid md:grid-cols-3 gap-8">
             <Card>
               <CardHeader>
@@ -346,7 +296,7 @@ export default function LandingPage() {
             <h2 className="text-3xl md:text-4xl font-display font-bold mb-4">How it works</h2>
             <p className="text-lg text-muted-foreground">Four simple steps. That's it.</p>
           </div>
-
+          
           <div className="grid md:grid-cols-4 gap-6">
             {[
               { step: 1, icon: Target, title: "Add a page URL", desc: "Paste the URL of any webpage you want to monitor" },
@@ -369,7 +319,7 @@ export default function LandingPage() {
               </div>
             ))}
           </div>
-
+          
           <p className="text-center text-muted-foreground mt-12 text-lg">
             If the page structure changes, FetchTheChange helps you fix it — instead of silently failing.
           </p>
@@ -383,7 +333,7 @@ export default function LandingPage() {
             <h2 className="text-3xl md:text-4xl font-display font-bold mb-4">Pricing</h2>
             <p className="text-lg text-muted-foreground">Simple, transparent pricing for everyone.</p>
           </div>
-
+          
           <div className="grid md:grid-cols-3 gap-6">
             {/* Free tier */}
             <Card className="relative">
@@ -517,55 +467,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-
-      {/* FAQ */}
-      <section className="py-24">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-display font-bold mb-4">FAQ</h2>
-            <p className="text-lg text-muted-foreground">Quick answers to common questions.</p>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">What is FetchTheChange?</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                FetchTheChange is a website change monitoring tool that tracks a specific value on a page and alerts you when it changes.
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">What can I monitor?</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                Anything visible on a page: prices, availability, metrics, text blocks, KPIs, or any DOM-based value you care about.
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">Does it work on JavaScript-heavy sites?</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                Yes. When needed, FetchTheChange renders the page with JavaScript and monitors the rendered DOM instead of the static HTML.
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">What happens when my selector stops matching?</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                FetchTheChange reports the failure instead of failing silently and can suggest alternative selectors to get you back to a working monitor.
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-{/* Final CTA */}
+      {/* Final CTA */}
       <section className="py-24 bg-primary text-primary-foreground">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="text-3xl md:text-4xl font-display font-bold mb-6">
