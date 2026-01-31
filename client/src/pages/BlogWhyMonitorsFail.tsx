@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Zap, ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
+import PublicNav from "@/components/PublicNav";
 
 const BLOG_PATH = "/blog/why-website-change-monitors-fail-silently";
 const PUBLISH_DATE = "2026-01-30";
@@ -84,21 +85,7 @@ export default function BlogWhyMonitorsFail() {
   return (
     <div className="min-h-screen bg-background">
       <SEOHead />
-      
-      <nav className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-md">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2" data-testid="link-logo-home">
-            <Zap className="h-6 w-6 text-primary" />
-            <span className="text-xl font-display font-bold">FetchTheChange</span>
-          </Link>
-          <Button variant="outline" size="sm" asChild data-testid="button-back-home-top">
-            <Link href="/">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to home
-            </Link>
-          </Button>
-        </div>
-      </nav>
+      <PublicNav />
 
       <article className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">
         <header className="mb-10">
@@ -317,9 +304,8 @@ export default function BlogWhyMonitorsFail() {
 
         <footer className="mt-12 pt-8 border-t border-border">
           <Button variant="ghost" asChild data-testid="button-back-home-bottom">
-            <Link href="/">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to home
+            <Link href="/blog">
+              Back to Blog
             </Link>
           </Button>
         </footer>
