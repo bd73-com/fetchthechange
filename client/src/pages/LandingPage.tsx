@@ -404,19 +404,23 @@ export default function LandingPage() {
                 <div className="space-y-3">
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Up to <strong>5 pages</strong></span>
+                    <span>Up to <strong>5 monitors</strong></span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Email alerts</span>
+                    <span>Hourly or daily checks</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Full change history</span>
+                    <span>Email notifications</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Daily checks</span>
+                    <span>JavaScript-rendered pages</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                    <span>Fix Selector tool</span>
                   </div>
                 </div>
                 <Button className="w-full mt-6" size="lg" asChild>
@@ -433,29 +437,21 @@ export default function LandingPage() {
               <CardHeader>
                 <CardTitle className="text-2xl">Pro</CardTitle>
                 <p className="text-4xl font-display font-bold">$9<span className="text-lg text-muted-foreground font-normal">/month</span></p>
-                <p className="text-muted-foreground">For serious monitoring needs</p>
+                <p className="text-muted-foreground">For users who need more monitors</p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-3">
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Up to <strong>100 pages</strong></span>
+                    <span>Up to <strong>100 monitors</strong></span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
                     <span>Everything in Free</span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Hourly checks</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Priority JS rendering</span>
-                  </div>
                 </div>
                 <Button className="w-full mt-6" size="lg" asChild>
-                  <a href="/api/login">Get Started</a>
+                  <a href="/api/login">Upgrade to Pro</a>
                 </Button>
               </CardContent>
             </Card>
@@ -465,33 +461,21 @@ export default function LandingPage() {
               <CardHeader>
                 <CardTitle className="text-2xl">Power</CardTitle>
                 <p className="text-4xl font-display font-bold">$29<span className="text-lg text-muted-foreground font-normal">/month</span></p>
-                <p className="text-muted-foreground">For power users & teams</p>
+                <p className="text-muted-foreground">For agencies and heavy users</p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-3">
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span><strong>Unlimited</strong> pages</span>
+                    <span><strong>Unlimited</strong> monitors</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Everything in Pro</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Faster check intervals</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Advanced notifications</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Priority support</span>
+                    <span>Everything in Free</span>
                   </div>
                 </div>
                 <Button className="w-full mt-6" size="lg" variant="outline" asChild>
-                  <a href="/api/login">Get Started</a>
+                  <a href="/api/login">Upgrade to Power</a>
                 </Button>
               </CardContent>
             </Card>
