@@ -151,3 +151,10 @@ Public, SEO-optimized blog articles for content marketing:
   - `/blog/why-website-change-monitors-fail-silently` - Article about silent monitor failures
 - **SEO Features**: Meta tags, Open Graph, Twitter cards, canonical URLs, JSON-LD structured data
 - **Canonical URL**: Uses `VITE_PUBLIC_BASE_URL` env var with fallback to `window.location.origin`
+
+## Future Roadmap
+
+### Planned Features
+- **Rate limiting on email update endpoint**: Prevent abuse of the notification email change API
+- **Email notification limits for free tier**: Limit free accounts to one notification email per day per monitor to control Resend costs
+- **Resend account limits**: Implement rate limiting aligned with Resend account quotas
