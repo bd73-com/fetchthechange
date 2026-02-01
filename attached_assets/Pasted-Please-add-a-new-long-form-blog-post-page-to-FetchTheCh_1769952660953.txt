@@ -1,0 +1,136 @@
+Please add a new long-form blog post page to FetchTheChange that compares FetchTheChange to established website change monitoring tools (neutral tone, fair comparisons, not salesy). This is for SEO/AI discoverability and user trust.
+
+Goal
+
+Create a new blog article page:
+
+Title: “FetchTheChange vs Distill, Visualping, Hexowatch (and others): Which Website Change Monitor Should You Use?”
+
+URL slug: /blog/fetchthechange-vs-distill-visualping-hexowatch
+
+Include: a short intro, a comparison table, short “when to choose which tool” sections, and a concluding CTA to try FetchTheChange.
+
+Tone: factual, balanced, includes cases where competitors are better.
+
+Requirements
+
+Create a new page component
+
+File: client/src/pages/BlogComparison.tsx
+
+Use the same layout/styling patterns as existing blog pages (fonts, spacing, max width).
+
+Add a “Back to Blog” link at top.
+
+Add routing
+
+Ensure it’s reachable at: /blog/fetchthechange-vs-distill-visualping-hexowatch
+
+Add it to the Blog index page list (whatever file renders the list of posts), with title + short excerpt.
+
+SEO / AI optimization
+Add meta:
+
+<title>: FetchTheChange vs Distill vs Visualping vs Hexowatch | Website Change Monitor Comparison
+
+meta description: A neutral comparison of website change monitoring tools for JavaScript-heavy sites, selector breakage detection, and value-level monitoring.
+Add canonical URL if you already support it.
+Add Article JSON-LD (date can be “2026-02-01” or today in code).
+
+Content: include these tools
+Compare at least:
+
+FetchTheChange
+
+Distill.io
+
+Visualping
+
+Hexowatch
+Also briefly mention (not full columns) for completeness:
+
+ChangeTower (or similar enterprise monitor category)
+
+changedetection.io (self-hosted)
+
+Synthetic monitoring tools (Checkly / Datadog Synthetics / Better Stack)
+
+Comparison table
+Create a clean table with columns:
+
+Feature
+
+FetchTheChange
+
+Distill
+
+Visualping
+
+Hexowatch
+
+Rows (exact concepts to cover):
+
+JavaScript rendering (real browser)
+
+Monitor specific DOM value (CSS selector)
+
+Visual/screenshot change detection
+
+Alerts when selector stops matching (explicit error)
+
+Helps recover when selector breaks (suggests alternatives)
+
+Login / macros / recorded steps
+
+Integrations (email/webhook/Slack etc.) – keep generic
+
+Best for (short)
+
+Be honest:
+
+Distill: strong browser automation/macros and mature
+
+Visualping: very easy + visual + summaries
+
+Hexowatch: multiple watch types + team/scale
+
+FetchTheChange: differentiation is fails loudly + helps fix broken selectors (Fix Selector flow)
+
+Structure
+Use this outline:
+
+H1 title
+
+TL;DR (3 bullets)
+
+The problem: why monitors fail silently on JS-heavy sites and selector breakage
+
+Comparison table
+
+“When FetchTheChange is best”
+
+“When Distill is better”
+
+“When Visualping is better”
+
+“When Hexowatch is better”
+
+“If you need self-hosting or synthetic checks”
+
+FAQ (short, 3–5 questions)
+
+Conclusion + CTA button linking to / or your “create monitor” flow
+
+Internal links
+Add links to:
+
+your “Why monitors fail…” article page (if it exists)
+
+the Fix Selector section on the homepage (/#how-it-works or wherever you explain it)
+
+No new dependencies
+Use existing components only.
+
+Deliverable
+
+Implement the new page, route, and blog index entry. Ensure build passes.

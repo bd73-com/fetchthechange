@@ -147,6 +147,7 @@ Public, SEO-optimized blog articles for content marketing:
 - **Location**: `client/src/pages/Blog*.tsx`
 - **Route Pattern**: `/blog/{slug}`
 - **Current Articles**:
+  - `/blog/fetchthechange-vs-distill-visualping-hexowatch` - Neutral comparison of website change monitors
   - `/blog/why-website-change-monitors-fail-silently` - Article about silent monitor failures
 - **SEO Features**: Meta tags, Open Graph, Twitter cards, canonical URLs, JSON-LD structured data
 - **Canonical URL**: Uses `VITE_PUBLIC_BASE_URL` env var with fallback to `window.location.origin`
