@@ -6,6 +6,13 @@ import PublicNav from "@/components/PublicNav";
 
 const blogPosts = [
   {
+    slug: "fetchthechange-vs-distill-visualping-hexowatch",
+    title: "FetchTheChange vs Distill, Visualping, Hexowatch (and others): Which Website Change Monitor Should You Use?",
+    description: "A neutral comparison of website change monitoring tools for JavaScript-heavy sites, selector breakage detection, and value-level monitoring.",
+    category: "Comparison",
+    date: "2026-02-01",
+  },
+  {
     slug: "why-website-change-monitors-fail-silently",
     title: "Why Website Change Monitors Fail Silently on JavaScript-Heavy Sites",
     description: "Modern websites render content dynamically with JavaScript. Most monitoring tools fetch static HTML and miss critical changes entirely.",
