@@ -158,3 +158,5 @@ Public, SEO-optimized blog articles for content marketing:
 - **Rate limiting on email update endpoint**: Prevent abuse of the notification email change API
 - **Email notification limits for free tier**: Limit free accounts to one notification email per day per monitor to control Resend costs
 - **Resend account limits**: Implement rate limiting aligned with Resend account quotas
+- **Webhooks**: Allow users to configure custom webhook URLs to receive change notifications programmatically
+- **Slack integration**: Send change notifications directly to Slack channels
