@@ -70,22 +70,15 @@ export default function LandingPage() {
             </div>
             <div className="mt-6">
               <a 
-                href="/blog/why-website-change-monitors-fail-silently" 
+                href="/blog/" 
                 className="text-muted-foreground hover:text-primary transition-colors text-base underline underline-offset-4"
-                data-testid="link-blog-silent-failures"
+                data-testid="link-blog"
               >
-                Read: Why monitors fail silently on JavaScript-heavy sites
+                Read insights on web monitoring, change detection, and staying ahead of website updates in my blog.
               </a>
             </div>
             <div className="mt-6">
-              <a 
-                href="/blog/fetchthechange-vs-distill-visualping-hexowatch" 
-                className="text-muted-foreground hover:text-primary transition-colors text-base underline underline-offset-4"
-                data-testid="link-blog-comparison"
-              >
-                Read: FetchTheChange vs Distill, Visualping, Hexowatch (and others): Which Website Change Monitor Should You Use?
-              </a>
-            </div>
+           </div>
           </div>
         </div>
       </section>
