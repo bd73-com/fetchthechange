@@ -41,7 +41,7 @@ export function CreateMonitorDialog() {
     defaultValues: {
       name: "",
       url: "",
-      selector: "body",
+      selector: "name of the selctor",
       frequency: "daily",
       emailEnabled: true,
       active: true,
@@ -81,7 +81,7 @@ export function CreateMonitorDialog() {
                 <FormItem>
                   <FormLabel>Name</FormLabel>
                   <FormControl>
-                    <Input placeholder="Pricing Page Price" {...field} />
+                    <Input placeholder="Monitor name" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -94,7 +94,7 @@ export function CreateMonitorDialog() {
                 <FormItem>
                   <FormLabel>URL</FormLabel>
                   <FormControl>
-                    <Input placeholder="https://example.com/pricing" {...field} />
+                    <Input placeholder="https://example.com/monitoring" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
