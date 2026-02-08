@@ -397,15 +397,15 @@ export default function LandingPage() {
                 <div className="space-y-3">
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Up to <strong>5 monitors</strong></span>
+                    <span><strong>1 monitor</strong></span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Hourly or daily checks</span>
+                    <span>1 check per 24 hours</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Email notifications</span>
+                    <span>1 email notification per 24 hours</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-primary" />

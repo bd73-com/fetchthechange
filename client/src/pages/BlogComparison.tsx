@@ -326,7 +326,7 @@ export default function BlogComparison() {
             <div>
               <h3 className="font-semibold mb-2">Which tool is cheapest?</h3>
               <p className="text-muted-foreground">
-                Pricing varies by usage. FetchTheChange starts free with 5 monitors. Distill has a free tier with limited cloud checks. Visualping and Hexowatch have free trials. For high-volume use, self-hosted changedetection.io is most cost-effective.
+                Pricing varies by usage. FetchTheChange starts free with 1 monitor. Distill has a free tier with limited cloud checks. Visualping and Hexowatch have free trials. For high-volume use, self-hosted changedetection.io is most cost-effective.
               </p>
             </div>
           </div>
@@ -348,7 +348,7 @@ export default function BlogComparison() {
           <div className="bg-secondary/50 rounded-lg p-6 mt-10 border border-border">
             <h3 className="text-xl font-display font-bold mb-3">Try FetchTheChange</h3>
             <p className="text-muted-foreground mb-4">
-              Start free with up to 5 monitors. No credit card required.
+              Start free with 1 monitor. No credit card required.
             </p>
             <Button asChild data-testid="button-cta-start-monitoring">
               <a href="/api/login">
