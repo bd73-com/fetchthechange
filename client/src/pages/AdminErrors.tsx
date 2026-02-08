@@ -37,7 +37,9 @@ export default function AdminErrors() {
       const params = new URLSearchParams();
       if (levelFilter !== "all") params.set("level", levelFilter);
       params.set("limit", "100");
-      const res = await fetch(`/api/admin/error-logs?${params}`);
+      const res = await fetch(`/api/admin/error-logs?${params}`, {
+        credentials: "include",
+      });
       if (!res.ok) throw new Error("Failed to fetch logs");
       return res.json();
     },
