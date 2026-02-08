@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { type Monitor } from "@shared/schema";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { type UserTier } from "@shared/models/auth";
+import { ErrorLogger } from "./logger";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -108,9 +109,10 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     }
     
     console.log(`[Email] Sent to ${recipientEmail} for monitor ${monitor.id}, id: ${response.data?.id}`);
+    await ErrorLogger.info("email", `Email sent for monitor ${monitor.id}`, { monitorId: monitor.id, to: recipientEmail, emailId: response.data?.id });
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    console.error("[Email] Error sending via Resend:", error);
+    await ErrorLogger.error("email", `Failed to send email for monitor ${monitor.id}`, error instanceof Error ? error : null, { monitorId: monitor.id });
     return { success: false, error: error.message };
   }
 }

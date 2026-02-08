@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { storage } from "../storage";
 import { sendNotificationEmail } from "./email";
+import { ErrorLogger } from "./logger";
 import { type Monitor } from "@shared/schema";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -198,7 +199,7 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
       reason: block.reason
     };
   } catch (error) {
-    console.error(`[Scraper] Browserless failed:`, error);
+    await ErrorLogger.error("scraper", "Browserless extraction failed", error instanceof Error ? error : null, { url, selector });
     throw error;
   } finally {
     if (browser) await browser.close();
@@ -210,7 +211,7 @@ async function fetchWithCurl(url: string): Promise<string> {
     const { stdout } = await execAsync(`curl -L -s -m 15 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" "${url}"`);
     return stdout;
   } catch (error) {
-    console.error(`Curl fallback failed:`, error);
+    await ErrorLogger.error("scraper", "Curl fallback failed", error instanceof Error ? error : null, { url });
     throw error;
   }
 }
@@ -270,7 +271,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         block = { blocked: result.blocked, reason: result.reason };
         console.log(`stage=rendered selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
       } catch (err) {
-        console.error(`[Scraper] Browserless fallback failed:`, err);
+        await ErrorLogger.error("scraper", "Browserless fallback failed", err instanceof Error ? err : null, { monitorId: monitor.id, url: monitor.url });
       }
     }
 
@@ -319,7 +320,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       error: finalError
     };
   } catch (error) {
-    console.error(`Scraping error for monitor ${monitor.id}:`, error);
+    await ErrorLogger.error("scraper", `Monitor check failed for monitor ${monitor.id}`, error instanceof Error ? error : null, { monitorId: monitor.id, url: monitor.url, selector: monitor.selector });
     return { 
       changed: false, 
       currentValue: null,
