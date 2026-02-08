@@ -43,3 +43,8 @@ waitForPort = 5000
 
 [agent]
 integrations = ["stripe:2.0.0", "javascript_stripe:1.0.0"]
+
+[userenv]
+
+[userenv.shared]
+APP_OWNER_ID = "53759728"

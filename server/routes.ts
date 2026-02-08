@@ -576,7 +576,8 @@ export async function registerRoutes(
     }
   });
 
-  // Admin error logs endpoint (restricted to admin users)
+  // Admin error logs endpoint (restricted to Power tier users, scoped to own monitors)
+  const APP_OWNER_ID = process.env.APP_OWNER_ID || "53759728";
   app.get("/api/admin/error-logs", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
@@ -597,8 +598,24 @@ export async function registerRoutes(
         query = db.select().from(errorLogs).where(eq(errorLogs.level, level)).orderBy(desc(errorLogs.timestamp)).limit(limitNum) as any;
       }
 
-      const results = await query;
-      res.json(results);
+      const allResults = await query;
+
+      const isAppOwner = userId === APP_OWNER_ID;
+
+      const userMonitorIds = new Set(
+        (await storage.getMonitors(userId)).map((m: any) => m.id)
+      );
+
+      const filtered = allResults.filter((log: any) => {
+        const ctx = log.context;
+        const monitorId = ctx?.monitorId;
+        if (monitorId != null) {
+          return userMonitorIds.has(monitorId);
+        }
+        return isAppOwner;
+      });
+
+      res.json(filtered);
     } catch (error: any) {
       console.error("Error fetching error logs:", error);
       res.status(500).json({ message: "Failed to fetch error logs" });
