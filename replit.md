@@ -67,13 +67,13 @@ The application includes a UI tool to help users fix broken selectors:
 
 ### Tier System
 The application enforces monitor limits based on user subscription tier:
-- **Free**: 5 monitors (default for new users)
+- **Free**: 1 monitor (default for new users)
 - **Pro**: 100 monitors ($9/month)
 - **Power**: Unlimited monitors ($29/month)
 
 Enforcement:
 - **Backend**: Create monitor endpoint checks user tier and current count before allowing creation
-- **Frontend**: Dashboard shows tier badge and usage (e.g., "3 / 5 monitors used")
+- **Frontend**: Dashboard shows tier badge and usage (e.g., "1 / 1 monitors used")
 - **Config**: Tier limits defined in `shared/models/auth.ts` via TIER_LIMITS constant
 - **Database**: `users.tier` column with default "free"
 

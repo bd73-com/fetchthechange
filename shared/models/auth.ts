@@ -15,7 +15,7 @@ export const sessions = pgTable(
 
 // Tier configuration
 export const TIER_LIMITS = {
-  free: 5,
+  free: 1,
   pro: 100,
   power: Infinity,
 } as const;
