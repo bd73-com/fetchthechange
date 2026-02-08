@@ -164,6 +164,17 @@ All authenticated endpoints are rate-limited based on user tier to control costs
 - **Frontend**: Check Now button disabled for free tier users who checked within 24h, shows "Check in 24h"
 - **Error Handling**: 429 responses include tier info, message, and upgrade URL for free tier
 
+### Error Logging System
+Internal error logging for tracking scraping failures, email delivery issues, and API errors.
+- **Database**: `error_logs` table stores all log entries with level, source, message, stack trace, and sanitized context
+- **Logger Service**: `server/services/logger.ts` - `ErrorLogger` class with static methods (`error`, `warning`, `info`)
+  - Sanitizes sensitive fields (passwords, tokens, secrets) from context
+  - Truncates strings over 1000 characters
+  - Writes to both database and console
+- **Integration Points**: Scraper errors, email success/failure, scheduler errors, Stripe webhook errors, catch-all API error handler
+- **Admin Dashboard**: `/admin/errors` - Authenticated page to view error logs with level filtering
+- **API**: `GET /api/admin/error-logs?level=error&limit=100` - Authenticated endpoint returning logs ordered by timestamp desc
+
 ## Future Roadmap
 
 ### Planned Features

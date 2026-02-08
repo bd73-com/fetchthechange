@@ -1,5 +1,6 @@
 import { getStripeSync, getUncachableStripeClient } from './stripeClient';
 import { authStorage } from './replit_integrations/auth/storage';
+import { ErrorLogger } from './services/logger';
 import type { UserTier } from '@shared/models/auth';
 
 export class WebhookHandlers {
@@ -92,8 +93,7 @@ export class WebhookHandlers {
         console.warn(`[Stripe] Could not determine tier for product ${product.id}, defaulting to free`);
       }
     } catch (error: any) {
-      console.error(`[Stripe] Error retrieving price ${priceId}:`, error.message);
-      // Don't update tier if we can't determine it
+      await ErrorLogger.error("stripe", `Error retrieving price ${priceId}`, error instanceof Error ? error : null, { customerId, priceId, subscriptionId: subscription.id });
       await authStorage.updateUser(user.id, {
         stripeSubscriptionId: subscription.id,
       });

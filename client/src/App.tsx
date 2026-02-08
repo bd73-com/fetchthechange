@@ -14,6 +14,7 @@ import Blog from "@/pages/Blog";
 import BlogWhyMonitorsFail from "@/pages/BlogWhyMonitorsFail";
 import BlogComparison from "@/pages/BlogComparison";
 import Pricing from "@/pages/Pricing";
+import AdminErrors from "@/pages/AdminErrors";
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme] = useState<"dark" | "light">("dark");
@@ -54,6 +55,7 @@ function Router() {
       <Route path="/blog/why-website-change-monitors-fail-silently" component={BlogWhyMonitorsFail} />
       <Route path="/blog/fetchthechange-vs-distill-visualping-hexowatch" component={BlogComparison} />
       <Route path="/pricing" component={Pricing} />
+      <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
       {/* Fallback to 404 */}
       <Route component={NotFound} />
     </Switch>

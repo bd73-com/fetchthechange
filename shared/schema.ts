@@ -47,6 +47,22 @@ export const monitorChangesRelations = relations(monitorChanges, ({ one }) => ({
   }),
 }));
 
+export const errorLogs = pgTable("error_logs", {
+  id: serial("id").primaryKey(),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+  level: text("level").notNull(), // 'error' | 'warning' | 'info'
+  source: text("source").notNull(), // 'scraper' | 'email' | 'api' | 'scheduler' | 'stripe'
+  errorType: text("error_type"),
+  message: text("message").notNull(),
+  stackTrace: text("stack_trace"),
+  context: jsonb("context"),
+  resolved: boolean("resolved").default(false).notNull(),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: text("resolved_by"),
+});
+
+export type ErrorLog = typeof errorLogs.$inferSelect;
+
 export const insertMonitorSchema = createInsertSchema(monitors).omit({ 
   id: true, 
   userId: true, 

@@ -10,9 +10,11 @@ import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
-import { sql } from "drizzle-orm";
+import { sql, desc, eq } from "drizzle-orm";
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
+import { ErrorLogger } from "./services/logger";
+import { errorLogs } from "@shared/schema";
 import {
   generalRateLimiter,
   createMonitorRateLimiter,
@@ -572,6 +574,41 @@ export async function registerRoutes(
       console.error("Error creating portal session:", error);
       res.status(500).json({ message: "Failed to open billing portal" });
     }
+  });
+
+  // Admin error logs endpoint (restricted to admin users)
+  app.get("/api/admin/error-logs", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const level = req.query.level as string | undefined;
+      const limitNum = Math.min(Number(req.query.limit) || 100, 500);
+
+      let query = db.select().from(errorLogs).orderBy(desc(errorLogs.timestamp)).limit(limitNum);
+
+      if (level && ["error", "warning", "info"].includes(level)) {
+        query = db.select().from(errorLogs).where(eq(errorLogs.level, level)).orderBy(desc(errorLogs.timestamp)).limit(limitNum) as any;
+      }
+
+      const results = await query;
+      res.json(results);
+    } catch (error: any) {
+      console.error("Error fetching error logs:", error);
+      res.status(500).json({ message: "Failed to fetch error logs" });
+    }
+  });
+
+  // Catch-all error handler
+  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    ErrorLogger.error("api", err.message || "Unhandled API error", err instanceof Error ? err : null, { status: err.status || 500 });
+    res.status(err.status || 500).json({ message: err.message || "Internal server error" });
   });
 
   return httpServer;

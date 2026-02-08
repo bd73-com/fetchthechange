@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { storage } from "../storage";
 import { checkMonitor } from "./scraper";
+import { ErrorLogger } from "./logger";
 
 export async function startScheduler() {
   console.log("Starting scheduler...");
@@ -38,7 +39,7 @@ export async function startScheduler() {
         }
       }
     } catch (error) {
-      console.error("Scheduler error:", error);
+      await ErrorLogger.error("scheduler", "Scheduler iteration failed", error instanceof Error ? error : null);
     }
   });
 }
