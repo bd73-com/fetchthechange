@@ -387,91 +387,145 @@ export default function LandingPage() {
 
           <div className="grid md:grid-cols-3 gap-6">
             {/* Free tier */}
-            <Card className="relative">
-              <CardHeader>
-                <CardTitle className="text-2xl">Free</CardTitle>
-                <p className="text-4xl font-display font-bold">$0<span className="text-lg text-muted-foreground font-normal">/month</span></p>
-                <p className="text-muted-foreground">Perfect for getting started</p>
+            <Card className="relative" data-testid="card-landing-plan-free">
+              <CardHeader className="text-center pb-2">
+                <CardTitle className="text-xl">Free</CardTitle>
+                <p className="text-muted-foreground text-sm">Perfect for getting started</p>
+                <div className="mt-4">
+                  <span className="text-4xl font-bold">$0</span>
+                  <span className="text-muted-foreground">forever</span>
+                </div>
+                <p className="text-primary font-medium mt-2">1 monitor</p>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span><strong>1 monitor</strong></span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>1 check per 24 hours</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>1 email notification per 24 hours</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>JavaScript-rendered pages</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Fix Selector tool</span>
-                  </div>
-                </div>
-                <Button className="w-full mt-6" size="lg" asChild>
+                <ul className="space-y-3">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">1 website monitor</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">1 check per 24 hours</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">1 email notification per 24 hours</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">JavaScript-rendered pages</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Fix Selector tool</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Full change history</span>
+                  </li>
+                </ul>
+                <Button className="w-full" variant="outline" asChild data-testid="button-landing-plan-free">
                   <a href="/api/login">Get Started Free</a>
                 </Button>
               </CardContent>
             </Card>
 
             {/* Pro tier */}
-            <Card className="relative border-primary shadow-lg shadow-primary/10">
+            <Card className="relative border-primary" data-testid="card-landing-plan-pro">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <Badge className="px-4 py-1">Most Popular</Badge>
+                <Badge className="bg-primary text-primary-foreground">Most Popular</Badge>
               </div>
-              <CardHeader>
-                <CardTitle className="text-2xl">Pro</CardTitle>
-                <p className="text-4xl font-display font-bold">$9<span className="text-lg text-muted-foreground font-normal">/month</span></p>
-                <p className="text-muted-foreground">For users who need more monitors</p>
+              <CardHeader className="text-center pb-2">
+                <CardTitle className="text-xl">Pro</CardTitle>
+                <p className="text-muted-foreground text-sm">For users who need more monitors</p>
+                <div className="mt-4">
+                  <span className="text-4xl font-bold">$9</span>
+                  <span className="text-muted-foreground">/month</span>
+                </div>
+                <p className="text-primary font-medium mt-2">100 monitors</p>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Up to <strong>100 monitors</strong></span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Everything in Free</span>
-                  </div>
-                </div>
-                <Button className="w-full mt-6" size="lg" asChild>
+                <ul className="space-y-3">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">100 website monitors</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Hourly or daily checks</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Email notifications</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">JavaScript-rendered pages</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Fix Selector tool</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Full change history</span>
+                  </li>
+                </ul>
+                <Button className="w-full" asChild data-testid="button-landing-plan-pro">
                   <a href="/api/login">Upgrade to Pro</a>
                 </Button>
               </CardContent>
             </Card>
 
             {/* Power tier */}
-            <Card className="relative">
-              <CardHeader>
-                <CardTitle className="text-2xl">Power</CardTitle>
-                <p className="text-4xl font-display font-bold">$29<span className="text-lg text-muted-foreground font-normal">/month</span></p>
-                <p className="text-muted-foreground">For agencies and heavy users</p>
+            <Card className="relative" data-testid="card-landing-plan-power">
+              <CardHeader className="text-center pb-2">
+                <CardTitle className="text-xl">Power</CardTitle>
+                <p className="text-muted-foreground text-sm">For agencies and heavy users</p>
+                <div className="mt-4">
+                  <span className="text-4xl font-bold">$29</span>
+                  <span className="text-muted-foreground">/month</span>
+                </div>
+                <p className="text-primary font-medium mt-2">Unlimited monitors</p>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span><strong>Unlimited</strong> monitors</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <span>Everything in Free</span>
-                  </div>
-                </div>
-                <Button className="w-full mt-6" size="lg" variant="outline" asChild>
+                <ul className="space-y-3">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Unlimited website monitors</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Hourly or daily checks</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Email notifications</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">JavaScript-rendered pages</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Fix Selector tool</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Full change history</span>
+                  </li>
+                </ul>
+                <Button className="w-full" variant="outline" asChild data-testid="button-landing-plan-power">
                   <a href="/api/login">Upgrade to Power</a>
                 </Button>
               </CardContent>
             </Card>
+          </div>
+
+          <div className="text-center mt-8">
+            <a href="/pricing" className="text-primary hover:underline text-sm font-medium" data-testid="link-full-pricing">
+              View full pricing details and FAQ
+            </a>
           </div>
         </div>
       </section>
