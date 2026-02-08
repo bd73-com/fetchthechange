@@ -514,6 +514,10 @@ export default function LandingPage() {
                     <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
                     <span className="text-sm">Full change history</span>
                   </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Admin error logs</span>
+                  </li>
                 </ul>
                 <Button className="w-full" variant="outline" asChild data-testid="button-landing-plan-power">
                   <a href="/api/login">Upgrade to Power</a>
