@@ -38,6 +38,11 @@ export default function MonitorDetails() {
   const { mutate: updateMonitor } = useUpdateMonitor();
   const { toast } = useToast();
 
+  const isFreeTier = (user as any)?.tier === "free" || !(user as any)?.tier;
+  const checkedRecently = monitor?.lastChecked && 
+    (Date.now() - new Date(monitor.lastChecked).getTime()) < 24 * 60 * 60 * 1000;
+  const canCheckNow = !isFreeTier || !checkedRecently;
+
   const form = useForm({
     resolver: zodResolver(insertMonitorSchema),
     values: monitor ? {
@@ -123,11 +128,13 @@ export default function MonitorDetails() {
                 <Button 
                   variant="outline" 
                   onClick={() => checkNow(id)} 
-                  disabled={isChecking}
+                  disabled={isChecking || !canCheckNow}
                   className="hidden sm:flex"
+                  title={!canCheckNow ? "Free tier: Wait 24 hours between checks" : undefined}
+                  data-testid="button-check-now"
                 >
                   {isChecking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                  Check Now
+                  {!canCheckNow ? "Check in 24h" : "Check Now"}
                 </Button>
                 <Button variant="destructive" size="icon" onClick={handleDelete} disabled={isDeleting}>
                   {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}

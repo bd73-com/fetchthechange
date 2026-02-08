@@ -2,10 +2,9 @@ import type { Express } from "express";
 import { authStorage } from "./storage";
 import { isAuthenticated } from "./replitAuth";
 import { z } from "zod";
+import { emailUpdateRateLimiter } from "../../middleware/rateLimiter";
 
-// Register auth-specific routes
 export function registerAuthRoutes(app: Express): void {
-  // Get current authenticated user
   app.get("/api/auth/user", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
@@ -17,8 +16,7 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
-  // Update notification email
-  app.patch("/api/auth/user/notification-email", isAuthenticated, async (req: any, res) => {
+  app.patch("/api/auth/user/notification-email", isAuthenticated, emailUpdateRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const schema = z.object({

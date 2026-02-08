@@ -13,6 +13,14 @@ import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClie
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
+import {
+  generalRateLimiter,
+  createMonitorRateLimiter,
+  checkMonitorRateLimiter,
+  suggestSelectorsRateLimiter,
+  emailUpdateRateLimiter,
+  unauthenticatedRateLimiter
+} from "./middleware/rateLimiter";
 
 // Dev-only auth bypass middleware for testing debug/suggest endpoints
 // Usage: Add header "x-dev-bypass: true" in development mode
@@ -62,8 +70,17 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
-  // Setup Auth
+  // Setup Auth (must be before rate limiter so req.user is populated)
   await setupAuth(app);
+
+  // Apply general rate limiting to all API routes (after auth so req.user is available)
+  app.use("/api/", async (req: any, res: Response, next: NextFunction) => {
+    if (req.user) {
+      return generalRateLimiter(req, res, next);
+    }
+    return unauthenticatedRateLimiter(req, res, next);
+  });
+
   registerAuthRoutes(app);
 
   // Start Scheduler
@@ -229,7 +246,7 @@ export async function registerRoutes(
   // Selector suggestion endpoint
   // Dev bypass example: curl -X POST http://localhost:5000/api/monitors/3/suggest-selectors -H "x-dev-bypass: true" -H "Content-Type: application/json" -d '{"expectedText":"$3,200.00"}'
   // Auth example: curl -X POST http://localhost:5000/api/monitors/3/suggest-selectors -H "Cookie: connect.sid=..." -H "Content-Type: application/json" -d '{"expectedText":"$3,200.00"}'
-  app.post("/api/monitors/:id/suggest-selectors", devAuthBypass, async (req: any, res) => {
+  app.post("/api/monitors/:id/suggest-selectors", devAuthBypass, suggestSelectorsRateLimiter, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       const { expectedText } = req.body || {};
@@ -294,7 +311,7 @@ export async function registerRoutes(
     res.json(monitor);
   });
 
-  app.post(api.monitors.create.path, isAuthenticated, async (req: any, res) => {
+  app.post(api.monitors.create.path, isAuthenticated, createMonitorRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       
@@ -364,7 +381,7 @@ export async function registerRoutes(
     res.json(changes);
   });
 
-  app.post(api.monitors.check.path, isAuthenticated, async (req: any, res) => {
+  app.post(api.monitors.check.path, isAuthenticated, checkMonitorRateLimiter, async (req: any, res) => {
     const id = Number(req.params.id);
     const existing = await storage.getMonitor(id);
     if (!existing) return res.status(404).json({ message: "Not found" });

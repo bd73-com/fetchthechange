@@ -59,6 +59,9 @@ export function useCreateMonitor() {
       
       if (!res.ok) {
         const errorData = await res.json();
+        if (res.status === 429) {
+          throw new Error(errorData.message || "Too many requests. Please try again later.");
+        }
         if (res.status === 403 && errorData.code === "TIER_LIMIT_REACHED") {
           throw new Error(errorData.message);
         }
@@ -144,7 +147,13 @@ export function useCheckMonitor() {
         method: api.monitors.check.method,
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to check monitor");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        if (res.status === 429) {
+          throw new Error(errorData.message || "Rate limit reached. Please try again later.");
+        }
+        throw new Error(errorData.message || "Failed to check monitor");
+      }
       return api.monitors.check.responses[200].parse(await res.json());
     },
     onSuccess: (data, id) => {

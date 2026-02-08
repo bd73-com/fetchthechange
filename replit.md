@@ -152,11 +152,21 @@ Public, SEO-optimized blog articles for content marketing:
 - **SEO Features**: Meta tags, Open Graph, Twitter cards, canonical URLs, JSON-LD structured data
 - **Canonical URL**: Uses `VITE_PUBLIC_BASE_URL` env var with fallback to `window.location.origin`
 
+### Rate Limiting
+All authenticated endpoints are rate-limited based on user tier to control costs and prevent abuse.
+- **Middleware**: `server/middleware/rateLimiter.ts` - Tiered rate limiter factory using express-rate-limit
+- **General API Limits (per minute)**: Free: 30, Pro: 120, Power: 300, Unauthenticated: 20/IP
+- **Create Monitor**: Free: 3/hour, Pro: 30/hour, Power: 100/hour
+- **Manual Check**: Free: 1 per 24h per monitor, Pro: 100/hour, Power: 500/hour
+- **Suggest Selectors** (Browserless): Free: 3/24h, Pro: 20/hour, Power: 100/hour
+- **Update Notification Email**: All tiers: 5/hour
+- **Email Notifications**: Free: 1 email per 24h per monitor (enforced in email service via monitor_changes query)
+- **Frontend**: Check Now button disabled for free tier users who checked within 24h, shows "Check in 24h"
+- **Error Handling**: 429 responses include tier info, message, and upgrade URL for free tier
+
 ## Future Roadmap
 
 ### Planned Features
-- **Rate limiting on email update endpoint**: Prevent abuse of the notification email change API
-- **Email notification limits for free tier**: Limit free accounts to one notification email per day per monitor to control Resend costs
 - **Resend account limits**: Implement rate limiting aligned with Resend account quotas
 - **Webhooks**: Allow users to configure custom webhook URLs to receive change notifications programmatically
 - **Slack integration**: Send change notifications directly to Slack channels

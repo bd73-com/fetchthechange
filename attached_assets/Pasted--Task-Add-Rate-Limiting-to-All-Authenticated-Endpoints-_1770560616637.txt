@@ -1,0 +1,430 @@
+# Task: Add Rate Limiting to All Authenticated Endpoints with Strict Free Tier Limits
+
+## Context
+We need to add rate limiting to all authenticated API endpoints to prevent abuse and ensure fair usage across our user tiers. Currently, there is no rate limiting implemented, which poses a security and cost risk.
+
+**IMPORTANT**: The free tier needs strict limits to control Browserless and email costs:
+- Free tier users can only create **1 monitor total**
+- Free tier monitors can only be checked **once per 24 hours**
+- Free tier users receive **max 1 email notification per 24 hours per monitor**
+
+## Requirements
+
+### 1. Install Dependencies
+Add the `express-rate-limit` package:
+````bash
+npm install express-rate-limit
+````
+
+### 2. Create Rate Limit Configuration
+
+Create a new file `server/middleware/rateLimiter.ts` with the following rate limit configurations:
+
+**General API rate limits (per minute):**
+- **Free tier**: 30 requests per minute per user
+- **Pro tier**: 120 requests per minute per user
+- **Power tier**: 300 requests per minute per user
+- **Unauthenticated requests**: 20 requests per minute per IP
+
+**Special endpoints with stricter limits:**
+
+**Create Monitor** (`/api/monitors` POST):
+- **Free tier**: Already enforced at 5 monitors max in database, but rate limit to 3 attempts per hour
+- **Pro tier**: 30 per hour
+- **Power tier**: 100 per hour
+
+**Manual Check** (`/api/monitors/:id/check` POST):
+- **Free tier**: 1 check per 24 hours per monitor (enforce with per-monitor-per-user key)
+- **Pro tier**: 100 per hour total across all monitors
+- **Power tier**: 500 per hour total across all monitors
+
+**Suggest Selectors** (`/api/monitors/:id/suggest-selectors` POST) - Browserless usage:
+- **Free tier**: 3 per 24 hours per user (expensive operation)
+- **Pro tier**: 20 per hour per user
+- **Power tier**: 100 per hour per user
+
+**Update Notification Email** (`/api/auth/user/notification-email` PATCH):
+- **All tiers**: 5 per hour per user
+
+### 3. Email Rate Limiting in Scraper Service
+
+In addition to API rate limiting, we need to enforce email limits at the service level to prevent free tier users from receiving too many notifications.
+
+**Modify `server/services/email.ts`:**
+
+1. Add a helper function to check if email should be sent:
+````typescript
+import { db } from "../db";
+import { sql } from "drizzle-orm";
+import { authStorage } from "../replit_integrations/auth/storage";
+
+async function canSendEmail(monitor: Monitor): Promise<{ allowed: boolean; reason?: string }> {
+  const user = await authStorage.getUser(monitor.userId);
+  const tier = (user?.tier || "free") as UserTier;
+  
+  // Pro and Power tiers have unlimited emails
+  if (tier !== "free") {
+    return { allowed: true };
+  }
+  
+  // Free tier: check if we've sent an email for this monitor in the last 24 hours
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  
+  // Query for recent emails sent for this monitor
+  // We'll need to track this - add a new table or use monitorChanges
+  const recentChanges = await db.execute(sql`
+    SELECT COUNT(*) as count 
+    FROM monitor_changes 
+    WHERE monitor_id = ${monitor.id} 
+    AND detected_at > ${twentyFourHoursAgo}
+  `);
+  
+  const count = Number(recentChanges.rows[0]?.count ?? 0);
+  
+  if (count >= 1) {
+    return { 
+      allowed: false, 
+      reason: "Free tier: max 1 email per 24 hours per monitor. Upgrade to Pro for unlimited notifications."
+    };
+  }
+  
+  return { allowed: true };
+}
+````
+
+2. Update `sendNotificationEmail` function:
+````typescript
+export async function sendNotificationEmail(
+  monitor: Monitor, 
+  oldValue: string | null, 
+  newValue: string | null
+): Promise<EmailResult> {
+  if (!monitor.emailEnabled) {
+    console.log(`[Email] Notifications disabled for monitor ${monitor.id}`);
+    return { success: false, error: "Email notifications disabled" };
+  }
+  
+  // Check rate limits for free tier
+  const emailCheck = await canSendEmail(monitor);
+  if (!emailCheck.allowed) {
+    console.log(`[Email] Rate limited for monitor ${monitor.id}: ${emailCheck.reason}`);
+    return { 
+      success: false, 
+      error: emailCheck.reason || "Email rate limit exceeded" 
+    };
+  }
+  
+  // ... rest of existing sendNotificationEmail code
+}
+````
+
+### 4. Implementation Details
+
+The rate limiter should:
+1. **Use user ID as the key** for authenticated requests (not IP, since users might share IPs)
+2. **For manual checks on free tier**: Use `${userId}:${monitorId}` as the key to enforce per-monitor limits
+3. **Use IP as the key** for unauthenticated requests
+4. **Store rate limit data in memory** using the default memory store (sufficient for single-server deployment)
+5. **Return appropriate error responses**:
+````json
+   {
+     "message": "Free tier: You can check each monitor once per 24 hours. Upgrade to Pro for hourly checks.",
+     "retryAfter": 86400,
+     "upgradeUrl": "/pricing"
+   }
+````
+6. **Set `X-RateLimit-*` headers** so clients can track their usage:
+   - `X-RateLimit-Limit`: Maximum requests allowed
+   - `X-RateLimit-Remaining`: Requests remaining
+   - `X-RateLimit-Reset`: Unix timestamp when the limit resets
+
+### 5. Integration with Existing Code
+
+In `server/routes.ts`:
+
+1. Import the rate limiter middleware
+2. Apply **general rate limiter** to all `/api/*` routes BEFORE the route-specific handlers
+3. Apply **strict rate limiters** to specific endpoints that use external services (Browserless, Resend)
+
+**Example structure:**
+````typescript
+// General rate limit for all authenticated endpoints
+app.use('/api/', generalRateLimiter);
+
+// Specific stricter limits
+app.post('/api/monitors', isAuthenticated, createMonitorRateLimiter, async (req, res) => {
+  // existing code
+});
+
+app.post('/api/monitors/:id/check', isAuthenticated, checkMonitorRateLimiter, async (req, res) => {
+  // existing code  
+});
+
+app.post('/api/monitors/:id/suggest-selectors', isAuthenticated, suggestSelectorsRateLimiter, async (req, res) => {
+  // existing code
+});
+
+app.patch('/api/auth/user/notification-email', isAuthenticated, emailUpdateRateLimiter, async (req, res) => {
+  // existing code
+});
+````
+
+### 6. Extract User Tier for Rate Limiting
+
+The rate limiter needs to check the user's tier to apply the correct limits. Create a helper function:
+````typescript
+async function getUserTier(userId: string): Promise<UserTier> {
+  const user = await authStorage.getUser(userId);
+  return (user?.tier || "free") as UserTier;
+}
+````
+
+### 7. Rate Limiter Factory Function
+
+Create a factory function that generates rate limiters based on tier:
+````typescript
+import rateLimit from 'express-rate-limit';
+
+function createTieredRateLimiter(config: {
+  free: { max: number; windowMs: number };
+  pro: { max: number; windowMs: number };
+  power: { max: number; windowMs: number };
+  message: string;
+  keyGenerator?: (req: any) => string;
+}) {
+  return async (req: any, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    const userId = req.user.claims.sub;
+    const tier = await getUserTier(userId);
+    const limits = config[tier];
+    
+    // Use custom key generator if provided, otherwise use userId
+    const keyGen = config.keyGenerator || (() => userId);
+    
+    // Apply rate limit using express-rate-limit
+    const limiter = rateLimit({
+      windowMs: limits.windowMs,
+      max: limits.max,
+      message: { 
+        message: config.message,
+        tier,
+        upgradeUrl: tier === "free" ? "/pricing" : undefined
+      },
+      standardHeaders: true,
+      legacyHeaders: false,
+      keyGenerator: keyGen,
+      handler: (req, res) => {
+        res.status(429).json({
+          message: config.message,
+          retryAfter: Math.ceil(limits.windowMs / 1000),
+          tier,
+          upgradeUrl: tier === "free" ? "/pricing" : undefined
+        });
+      }
+    });
+    
+    return limiter(req, res, next);
+  };
+}
+````
+
+### 8. Specific Rate Limiter Configurations
+````typescript
+// General API rate limiter
+export const generalRateLimiter = createTieredRateLimiter({
+  free: { max: 30, windowMs: 60 * 1000 }, // 30 per minute
+  pro: { max: 120, windowMs: 60 * 1000 },
+  power: { max: 300, windowMs: 60 * 1000 },
+  message: "Too many requests. Please try again later."
+});
+
+// Create monitor rate limiter
+export const createMonitorRateLimiter = createTieredRateLimiter({
+  free: { max: 3, windowMs: 60 * 60 * 1000 }, // 3 per hour
+  pro: { max: 30, windowMs: 60 * 60 * 1000 },
+  power: { max: 100, windowMs: 60 * 60 * 1000 },
+  message: "Too many monitor creation attempts. Please try again later."
+});
+
+// Manual check rate limiter (per monitor for free tier)
+export const checkMonitorRateLimiter = createTieredRateLimiter({
+  free: { max: 1, windowMs: 24 * 60 * 60 * 1000 }, // 1 per 24 hours per monitor
+  pro: { max: 100, windowMs: 60 * 60 * 1000 }, // 100 per hour total
+  power: { max: 500, windowMs: 60 * 60 * 1000 }, // 500 per hour total
+  message: "Free tier: You can check each monitor once per 24 hours. Upgrade to Pro for hourly automatic checks.",
+  keyGenerator: (req: any) => {
+    const userId = req.user.claims.sub;
+    const monitorId = req.params.id;
+    // For free tier, key per monitor. For paid tiers, key per user only.
+    return getUserTier(userId).then(tier => 
+      tier === "free" ? `${userId}:${monitorId}` : userId
+    );
+  }
+});
+
+// Suggest selectors rate limiter (expensive Browserless operation)
+export const suggestSelectorsRateLimiter = createTieredRateLimiter({
+  free: { max: 3, windowMs: 24 * 60 * 60 * 1000 }, // 3 per 24 hours
+  pro: { max: 20, windowMs: 60 * 60 * 1000 }, // 20 per hour
+  power: { max: 100, windowMs: 60 * 60 * 1000 }, // 100 per hour
+  message: "Free tier: Limited selector suggestions per day. Upgrade to Pro for more suggestions."
+});
+
+// Email update rate limiter
+export const emailUpdateRateLimiter = createTieredRateLimiter({
+  free: { max: 5, windowMs: 60 * 60 * 1000 },
+  pro: { max: 5, windowMs: 60 * 60 * 1000 },
+  power: { max: 5, windowMs: 60 * 60 * 1000 },
+  message: "Too many email update attempts. Please try again later."
+});
+````
+
+### 9. Update Frontend to Show Rate Limit Info
+
+**In `client/src/components/MonitorCard.tsx`:**
+
+Add visual indicator for free tier limits:
+````tsx
+{monitor.lastChecked && user?.tier === "free" && (
+  <div className="text-xs text-muted-foreground mt-2">
+    Next check available: {formatDistanceToNow(addHours(new Date(monitor.lastChecked), 24), { addSuffix: true })}
+  </div>
+)}
+````
+
+**In `client/src/pages/MonitorDetails.tsx`:**
+
+Disable "Check Now" button if free tier and checked in last 24 hours:
+````tsx
+const canCheckNow = user?.tier !== "free" || 
+  !monitor.lastChecked || 
+  (Date.now() - new Date(monitor.lastChecked).getTime()) > 24 * 60 * 60 * 1000;
+
+<Button 
+  onClick={() => checkNow(id)} 
+  disabled={isChecking || !canCheckNow}
+  title={!canCheckNow ? "Free tier: Wait 24 hours between checks" : undefined}
+>
+  Check Now
+</Button>
+````
+
+### 10. Testing
+
+After implementation, test the rate limiting with:
+````bash
+# Test free tier manual check limit (should block second check within 24h)
+curl -X POST http://localhost:5000/api/monitors/1/check -H "Cookie: connect.sid=FREE_USER_SESSION"
+# Wait 1 second
+curl -X POST http://localhost:5000/api/monitors/1/check -H "Cookie: connect.sid=FREE_USER_SESSION"
+# Should return 429 Too Many Requests
+
+# Test free tier suggest-selectors limit (should allow 3 per 24h)
+for i in {1..4}; do 
+  curl -X POST http://localhost:5000/api/monitors/1/suggest-selectors \
+    -H "Cookie: connect.sid=FREE_USER_SESSION" \
+    -H "Content-Type: application/json" \
+    -d '{}'; 
+done
+# Fourth request should return 429
+
+# Test Pro tier has higher limits
+curl -X POST http://localhost:5000/api/monitors/1/check -H "Cookie: connect.sid=PRO_USER_SESSION"
+# Should succeed even if checked recently
+````
+
+### 11. Documentation
+
+Add to `replit.md` under a new section "Rate Limiting":
+````markdown
+### Rate Limiting
+
+All authenticated endpoints are rate-limited based on user tier to control costs and prevent abuse.
+
+#### General API Limits (per minute):
+- **Free**: 30 requests/min
+- **Pro**: 120 requests/min  
+- **Power**: 300 requests/min
+
+#### Free Tier Restrictions (Cost Control):
+- **Monitors**: Maximum 5 monitors total (enforced at database level)
+- **Manual Checks**: 1 check per 24 hours per monitor
+- **Email Notifications**: 1 email per 24 hours per monitor
+- **Selector Suggestions**: 3 per 24 hours per user (Browserless usage)
+
+#### Paid Tier Limits:
+- **Create Monitor**: Pro: 30/hour, Power: 100/hour
+- **Manual Check**: Pro: 100/hour, Power: 500/hour
+- **Suggest Selectors**: Pro: 20/hour, Power: 100/hour
+- **Update Notification Email**: 5/hour (all tiers)
+
+#### Rate Limit Headers:
+All responses include:
+- `X-RateLimit-Limit`: Maximum requests allowed
+- `X-RateLimit-Remaining`: Remaining requests in window
+- `X-RateLimit-Reset`: Unix timestamp when limit resets
+
+#### Rate Limit Exceeded Response:
+```json
+{
+  "message": "Free tier: You can check each monitor once per 24 hours. Upgrade to Pro for hourly checks.",
+  "retryAfter": 86400,
+  "tier": "free",
+  "upgradeUrl": "/pricing"
+}
+```
+
+#### Cost Rationale:
+- Browserless renders cost ~$0.01-0.02 per check
+- Email delivery costs ~$0.001 per email
+- Free tier limits ensure sustainable unit economics while providing value
+````
+
+### 12. Update Pricing Page
+
+Update `client/src/pages/Pricing.tsx` to highlight the rate limit differences:
+````tsx
+// In the Free plan features:
+"1 check per monitor per 24 hours",
+"1 email notification per monitor per 24 hours",
+
+// In Pro plan features:
+"Hourly automatic checks",
+"Unlimited email notifications",
+"100 manual checks per hour",
+
+// In Power plan features:
+"Hourly automatic checks",
+"Unlimited email notifications", 
+"500 manual checks per hour",
+````
+
+## Expected Files Changed
+- `server/middleware/rateLimiter.ts` (new file)
+- `server/routes.ts` (add rate limiting middleware)
+- `server/services/email.ts` (add email rate limiting logic)
+- `client/src/components/MonitorCard.tsx` (show next check time for free tier)
+- `client/src/pages/MonitorDetails.tsx` (disable check button if on cooldown)
+- `client/src/pages/Pricing.tsx` (update feature lists)
+- `package.json` (add express-rate-limit dependency)
+- `replit.md` (add documentation)
+
+## Success Criteria
+1. ✅ Free tier users can only manually check monitors once per 24 hours
+2. ✅ Free tier users receive max 1 email per 24 hours per monitor
+3. ✅ Free tier Browserless usage (suggest selectors) limited to 3 per 24 hours
+4. ✅ Pro/Power tiers have generous limits appropriate for their pricing
+5. ✅ Rate limit headers are returned in all responses
+6. ✅ Appropriate error messages with upgrade CTAs when limits exceeded
+7. ✅ Frontend shows cooldown timers and disables buttons appropriately
+8. ✅ All limits work correctly in development and production
+
+## Notes
+- Use memory store for now (sufficient for single-server deployment)
+- If we scale to multiple servers, migrate to Redis-based rate limiting
+- Rate limiter applied AFTER authentication so we can use userId as key
+- Do NOT apply rate limiting to webhook endpoints (Stripe) or static assets
+- The strict free tier limits are essential for sustainable unit economics

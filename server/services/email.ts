@@ -1,6 +1,9 @@
 import { Resend } from "resend";
 import { type Monitor } from "@shared/schema";
 import { authStorage } from "../replit_integrations/auth/storage";
+import { type UserTier } from "@shared/models/auth";
+import { db } from "../db";
+import { sql } from "drizzle-orm";
 
 export interface EmailResult {
   success: boolean;
@@ -10,7 +13,42 @@ export interface EmailResult {
   from?: string;
 }
 
+async function canSendEmail(monitor: Monitor): Promise<{ allowed: boolean; reason?: string }> {
+  const user = await authStorage.getUser(monitor.userId);
+  const tier = (user?.tier || "free") as UserTier;
+
+  if (tier !== "free") {
+    return { allowed: true };
+  }
+
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const recentChanges = await db.execute(sql`
+    SELECT COUNT(*) as count 
+    FROM monitor_changes 
+    WHERE monitor_id = ${monitor.id} 
+    AND detected_at > ${twentyFourHoursAgo}
+  `);
+
+  const count = Number(recentChanges.rows[0]?.count ?? 0);
+
+  if (count >= 1) {
+    return {
+      allowed: false,
+      reason: "Free tier: max 1 email per 24 hours per monitor. Upgrade to Pro for unlimited notifications."
+    };
+  }
+
+  return { allowed: true };
+}
+
 export async function sendNotificationEmail(monitor: Monitor, oldValue: string | null, newValue: string | null): Promise<EmailResult> {
+  const emailCheck = await canSendEmail(monitor);
+  if (!emailCheck.allowed) {
+    console.log(`[Email] Rate limited for monitor ${monitor.id}: ${emailCheck.reason}`);
+    return { success: false, error: emailCheck.reason || "Email rate limit exceeded" };
+  }
+
   if (!process.env.RESEND_API_KEY) {
     console.log("RESEND_API_KEY not set. Skipping email.");
     console.log(`[MOCK EMAIL] To: User of Monitor ${monitor.id}`);
