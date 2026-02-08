@@ -52,6 +52,7 @@ const plans = [
       "JavaScript-rendered pages",
       "Fix Selector tool",
       "Full change history",
+      "Admin error logs",
     ],
     cta: "Upgrade to Power",
     popular: false,
