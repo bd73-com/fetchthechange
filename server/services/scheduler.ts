@@ -34,8 +34,13 @@ export async function startScheduler() {
         }
 
         if (shouldCheck) {
-          // Process in background, don't await all sequentially blocking
-          checkMonitor(monitor); 
+          checkMonitor(monitor).catch(async (error) => {
+            await ErrorLogger.error("scheduler", `Monitor check failed for monitor ${monitor.id}`, error instanceof Error ? error : null, {
+              monitorId: monitor.id,
+              url: monitor.url,
+              selector: monitor.selector,
+            });
+          });
         }
       }
     } catch (error) {
