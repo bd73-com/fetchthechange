@@ -516,7 +516,7 @@ export default function LandingPage() {
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                    <span className="text-sm">Admin error logs</span>
+                    <span className="text-sm">Admin event log</span>
                   </li>
                 </ul>
                 <Button className="w-full" variant="outline" asChild data-testid="button-landing-plan-power">
