@@ -28,14 +28,16 @@ const levelConfig: Record<string, { icon: typeof XCircle; variant: "destructive"
 
 export default function AdminErrors() {
   const [levelFilter, setLevelFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  const queryKey = ["/api/admin/error-logs", levelFilter];
+  const queryKey = ["/api/admin/error-logs", levelFilter, sourceFilter];
   const { data: logs = [], isLoading, isError } = useQuery<ErrorLogEntry[]>({
     queryKey,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (levelFilter !== "all") params.set("level", levelFilter);
+      if (sourceFilter !== "all") params.set("source", sourceFilter);
       params.set("limit", "100");
       const res = await fetch(`/api/admin/error-logs?${params}`, {
         credentials: "include",
@@ -61,7 +63,7 @@ export default function AdminErrors() {
                 <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
-            <h1 className="text-2xl font-bold" data-testid="text-admin-title">Error Logs</h1>
+            <h1 className="text-2xl font-bold" data-testid="text-admin-title">Event Log</h1>
             <Badge variant="secondary">{logs.length} entries</Badge>
           </div>
           <div className="flex items-center gap-3">
@@ -74,6 +76,18 @@ export default function AdminErrors() {
                 <SelectItem value="error">Errors</SelectItem>
                 <SelectItem value="warning">Warnings</SelectItem>
                 <SelectItem value="info">Info</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sourceFilter} onValueChange={setSourceFilter} data-testid="select-source-filter">
+              <SelectTrigger className="w-[140px]" data-testid="button-source-filter">
+                <SelectValue placeholder="Filter category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                <SelectItem value="scraper">Scraper</SelectItem>
+                <SelectItem value="email">Email</SelectItem>
+                <SelectItem value="scheduler">Scheduler</SelectItem>
+                <SelectItem value="api">API</SelectItem>
               </SelectContent>
             </Select>
             <Button
@@ -90,7 +104,7 @@ export default function AdminErrors() {
         {isLoading ? (
           <div className="text-center py-12 text-muted-foreground">Loading logs...</div>
         ) : isError ? (
-          <div className="text-center py-12 text-muted-foreground">Failed to load error logs.</div>
+          <div className="text-center py-12 text-muted-foreground">Failed to load event log.</div>
         ) : logs.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">

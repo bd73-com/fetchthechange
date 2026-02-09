@@ -10,7 +10,7 @@ import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
-import { sql, desc, eq } from "drizzle-orm";
+import { sql, desc, eq, and } from "drizzle-orm";
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
@@ -590,13 +590,20 @@ export async function registerRoutes(
       }
 
       const level = req.query.level as string | undefined;
+      const source = req.query.source as string | undefined;
       const limitNum = Math.min(Number(req.query.limit) || 100, 500);
 
-      let query = db.select().from(errorLogs).orderBy(desc(errorLogs.timestamp)).limit(limitNum);
-
+      const conditions = [];
       if (level && ["error", "warning", "info"].includes(level)) {
-        query = db.select().from(errorLogs).where(eq(errorLogs.level, level)).orderBy(desc(errorLogs.timestamp)).limit(limitNum) as any;
+        conditions.push(eq(errorLogs.level, level));
       }
+      if (source && ["scraper", "email", "scheduler", "api"].includes(source)) {
+        conditions.push(eq(errorLogs.source, source));
+      }
+
+      let query = conditions.length > 0
+        ? db.select().from(errorLogs).where(and(...conditions)).orderBy(desc(errorLogs.timestamp)).limit(limitNum)
+        : db.select().from(errorLogs).orderBy(desc(errorLogs.timestamp)).limit(limitNum);
 
       const allResults = await query;
 

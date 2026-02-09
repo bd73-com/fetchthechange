@@ -116,7 +116,7 @@ export default function Dashboard() {
               <Button variant="ghost" size="sm" asChild className="text-muted-foreground" data-testid="link-error-logs">
                 <Link href="/admin/errors">
                   <FileWarning className="h-4 w-4 mr-2" />
-                  <span className="hidden sm:inline">Error Logs</span>
+                  <span className="hidden sm:inline">Event Log</span>
                 </Link>
               </Button>
             )}
