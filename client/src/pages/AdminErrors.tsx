@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe } from "lucide-react";
+import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe, Mail } from "lucide-react";
 import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 
@@ -29,6 +29,16 @@ interface BrowserlessUsageData {
   resetDate: string;
 }
 
+interface ResendUsageData {
+  dailyUsage: number;
+  dailyCap: number;
+  monthlyUsage: number;
+  monthlyCap: number;
+  failedThisMonth: number;
+  recentHistory: Array<{ date: string; count: number }>;
+  resetDate: string;
+}
+
 const levelConfig: Record<string, { icon: typeof XCircle; variant: "destructive" | "secondary" | "outline"; label: string }> = {
   error: { icon: XCircle, variant: "destructive", label: "Error" },
   warning: { icon: AlertTriangle, variant: "secondary", label: "Warning" },
@@ -44,6 +54,16 @@ export default function AdminErrors() {
     queryKey: ["/api/admin/browserless-usage"],
     queryFn: async () => {
       const res = await fetch("/api/admin/browserless-usage", { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    refetchInterval: 60000,
+  });
+
+  const { data: resendData } = useQuery<ResendUsageData>({
+    queryKey: ["/api/admin/resend-usage"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/resend-usage", { credentials: "include" });
       if (!res.ok) return null;
       return res.json();
     },
@@ -177,6 +197,94 @@ export default function AdminErrors() {
                           {i + 1}. {c.userId}
                         </span>
                         <span className="font-mono">{c.callCount} calls</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {resendData && (
+          <Card className="mb-6" data-testid="card-resend-usage">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Mail className="h-4 w-4" />
+                Resend Email Usage
+              </CardTitle>
+              <span className="text-xs text-muted-foreground">Resets {resendData.resetDate}</span>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span data-testid="text-resend-daily-label">Daily</span>
+                    <span className="font-mono" data-testid="text-resend-daily-value">
+                      {resendData.dailyUsage} / {resendData.dailyCap}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-secondary overflow-hidden" data-testid="progress-resend-daily">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        resendData.dailyUsage / resendData.dailyCap > 0.95
+                          ? "bg-destructive"
+                          : resendData.dailyUsage / resendData.dailyCap > 0.8
+                          ? "bg-orange-500 dark:bg-orange-400"
+                          : "bg-primary"
+                      }`}
+                      style={{ width: `${Math.min(100, (resendData.dailyUsage / resendData.dailyCap) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span data-testid="text-resend-monthly-label">Monthly</span>
+                    <span className="font-mono" data-testid="text-resend-monthly-value">
+                      {resendData.monthlyUsage} / {resendData.monthlyCap}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-secondary overflow-hidden" data-testid="progress-resend-monthly">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        resendData.monthlyUsage / resendData.monthlyCap > 0.95
+                          ? "bg-destructive"
+                          : resendData.monthlyUsage / resendData.monthlyCap > 0.8
+                          ? "bg-orange-500 dark:bg-orange-400"
+                          : "bg-primary"
+                      }`}
+                      style={{ width: `${Math.min(100, (resendData.monthlyUsage / resendData.monthlyCap) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              {resendData.failedThisMonth > 0 && (
+                <div className="text-xs text-muted-foreground" data-testid="text-resend-failed">
+                  {resendData.failedThisMonth} failed this month
+                </div>
+              )}
+              {resendData.recentHistory.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Last 7 Days</p>
+                  <div className="flex items-end gap-1 h-12">
+                    {resendData.recentHistory.slice().reverse().map((day) => {
+                      const maxCount = Math.max(...resendData.recentHistory.map(d => d.count), 1);
+                      const heightPct = Math.max(4, (day.count / maxCount) * 100);
+                      return (
+                        <div key={day.date} className="flex-1 flex flex-col items-center gap-1" data-testid={`bar-resend-${day.date}`}>
+                          <div
+                            className="w-full bg-primary/60 rounded-sm min-w-[4px]"
+                            style={{ height: `${heightPct}%` }}
+                            title={`${day.date}: ${day.count} emails`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-1 mt-1">
+                    {resendData.recentHistory.slice().reverse().map((day) => (
+                      <div key={day.date} className="flex-1 text-center">
+                        <span className="text-[10px] text-muted-foreground">{day.count}</span>
                       </div>
                     ))}
                   </div>

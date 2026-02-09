@@ -200,9 +200,24 @@ Tracks and caps Browserless (headless Chrome) usage per user and system-wide to 
 - **Admin API**: `GET /api/admin/browserless-usage` - Returns system usage, tier breakdown, top consumers (owner-only)
 - **Admin UI**: Browserless Usage card on Event Log page (`/admin/errors`) with progress bar, tier breakdown, top consumers
 
+### Resend Email Usage Tracking
+Tracks Resend email API usage against free plan limits to prevent exceeding quotas.
+- **Database**: `resend_usage` table records each email send with userId, monitorId, recipient, resendId, success, timestamp
+- **Service**: `server/services/resendTracker.ts` - `ResendUsageTracker` class
+  - `canSendEmail()` - Checks daily and monthly caps before allowing a send
+  - `recordUsage(userId, monitorId, recipientEmail, resendId, success)` - Logs each email attempt
+  - `getDailyUsage()` / `getMonthlyUsage()` - Current usage counts
+  - `getRecentHistory(days)` - Daily send counts for chart display
+  - `getTotalFailed(sinceMonthStart)` - Failed email count
+- **Caps**: Daily: 100, Monthly: 3,000 (matching Resend free plan)
+- **Constants**: Defined in `shared/models/auth.ts` as `RESEND_CAPS`
+- **Integration**: Email service checks caps before sending, records usage after each attempt
+- **Alerts**: Warning log entries at 80%/95% monthly and 90% daily thresholds (6h cooldown via error_logs)
+- **Admin API**: `GET /api/admin/resend-usage` - Returns daily/monthly usage, caps, recent history, failed count (owner-only)
+- **Admin UI**: Resend Email Usage card on Event Log page (`/admin/errors`) with dual progress bars (daily/monthly) and 7-day bar chart
+
 ## Future Roadmap
 
 ### Planned Features
-- **Resend account limits**: Implement rate limiting aligned with Resend account quotas
 - **Webhooks**: Allow users to configure custom webhook URLs to receive change notifications programmatically
 - **Slack integration**: Send change notifications directly to Slack channels
