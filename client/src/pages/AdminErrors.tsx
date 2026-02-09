@@ -133,11 +133,11 @@ export default function AdminErrors() {
                           {log.message}
                         </p>
                         {isExpanded && (
-                          <div className="mt-3 space-y-2">
+                          <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
                             {log.stack_trace && (
                               <div>
                                 <p className="text-xs font-medium text-muted-foreground mb-1">Stack Trace</p>
-                                <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-48 overflow-y-auto">
+                                <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-48 overflow-y-auto select-text">
                                   {log.stack_trace}
                                 </pre>
                               </div>
@@ -145,7 +145,7 @@ export default function AdminErrors() {
                             {log.context && (
                               <div>
                                 <p className="text-xs font-medium text-muted-foreground mb-1">Context</p>
-                                <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-32 overflow-y-auto">
+                                <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-32 overflow-y-auto select-text">
                                   {JSON.stringify(log.context, null, 2)}
                                 </pre>
                               </div>
