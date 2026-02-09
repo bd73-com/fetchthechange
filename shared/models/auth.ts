@@ -29,6 +29,11 @@ export const BROWSERLESS_CAPS = {
   system: 1000,
 } as const;
 
+export const RESEND_CAPS = {
+  daily: 100,
+  monthly: 3000,
+} as const;
+
 // User storage table.
 // (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
 export const users = pgTable("users", {

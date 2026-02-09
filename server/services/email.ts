@@ -3,6 +3,7 @@ import { type Monitor } from "@shared/schema";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { type UserTier } from "@shared/models/auth";
 import { ErrorLogger } from "./logger";
+import { ResendUsageTracker } from "./resendTracker";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -50,6 +51,12 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     return { success: false, error: emailCheck.reason || "Email rate limit exceeded" };
   }
 
+  const resendCapCheck = await ResendUsageTracker.canSendEmail();
+  if (!resendCapCheck.allowed) {
+    console.log(`[Email] Resend cap reached for monitor ${monitor.id}: ${resendCapCheck.reason}`);
+    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
+  }
+
   if (!process.env.RESEND_API_KEY) {
     console.log("RESEND_API_KEY not set. Skipping email.");
     console.log(`[MOCK EMAIL] To: User of Monitor ${monitor.id}`);
@@ -68,7 +75,6 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
       return { success: false, error: "User has no email address" };
     }
 
-    // Use custom notification email if set, otherwise fall back to account email
     const recipientEmail = user.notificationEmail || user.email;
     console.log(`[Email] Sending to ${recipientEmail} (custom: ${!!user.notificationEmail})`);
 
@@ -105,9 +111,11 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     
     if (response.error) {
       console.error(`[Email] Resend error:`, response.error);
+      await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, undefined, false).catch(() => {});
       return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
     }
     
+    await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, response.data?.id, true).catch(() => {});
     console.log(`[Email] Sent to ${recipientEmail} for monitor ${monitor.id}, id: ${response.data?.id}`);
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {

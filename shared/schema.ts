@@ -76,6 +76,20 @@ export const browserlessUsage = pgTable("browserless_usage", {
 
 export type BrowserlessUsageRecord = typeof browserlessUsage.$inferSelect;
 
+export const resendUsage = pgTable("resend_usage", {
+  id: serial("id").primaryKey(),
+  monitorId: integer("monitor_id").references(() => monitors.id),
+  userId: text("user_id").notNull().references(() => users.id),
+  recipientEmail: text("recipient_email").notNull(),
+  resendId: text("resend_id"),
+  success: boolean("success").notNull(),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+}, (table) => [
+  index("idx_resend_usage_timestamp").on(table.timestamp),
+]);
+
+export type ResendUsageRecord = typeof resendUsage.$inferSelect;
+
 export const insertMonitorSchema = createInsertSchema(monitors).omit({ 
   id: true, 
   userId: true, 
