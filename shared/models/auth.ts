@@ -22,6 +22,13 @@ export const TIER_LIMITS = {
 
 export type UserTier = keyof typeof TIER_LIMITS;
 
+export const BROWSERLESS_CAPS = {
+  free: 0,
+  pro: 200,
+  power: 500,
+  system: 1000,
+} as const;
+
 // User storage table.
 // (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
 export const users = pgTable("users", {

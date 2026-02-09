@@ -2,7 +2,9 @@ import * as cheerio from "cheerio";
 import { storage } from "../storage";
 import { sendNotificationEmail } from "./email";
 import { ErrorLogger } from "./logger";
+import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { type Monitor } from "@shared/schema";
+import { type UserTier } from "@shared/models/auth";
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
@@ -265,13 +267,27 @@ export async function checkMonitor(monitor: Monitor): Promise<{
 
     // Fallback to Rendered if static failed or blocked
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
-      try {
-        const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id);
-        newValue = result.value;
-        block = { blocked: result.blocked, reason: result.reason };
-        console.log(`stage=rendered selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
-      } catch (err) {
-        await ErrorLogger.error("scraper", "Browserless fallback failed", err instanceof Error ? err : null, { monitorId: monitor.id, url: monitor.url });
+      const user = await storage.getUser(monitor.userId);
+      const tier = (user?.tier || "free") as UserTier;
+      const capCheck = await BrowserlessUsageTracker.canUseBrowserless(monitor.userId, tier);
+
+      if (capCheck.allowed) {
+        const startTime = Date.now();
+        let browserlessSuccess = false;
+        try {
+          const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id);
+          browserlessSuccess = true;
+          newValue = result.value;
+          block = { blocked: result.blocked, reason: result.reason };
+          console.log(`stage=rendered selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
+        } catch (err) {
+          await ErrorLogger.error("scraper", "Browserless fallback failed", err instanceof Error ? err : null, { monitorId: monitor.id, url: monitor.url });
+        } finally {
+          const durationMs = Date.now() - startTime;
+          await BrowserlessUsageTracker.recordUsage(monitor.userId, monitor.id, durationMs, browserlessSuccess).catch(() => {});
+        }
+      } else {
+        console.log(`Browserless skipped for monitor ${monitor.id}: ${capCheck.reason}`);
       }
     }
 

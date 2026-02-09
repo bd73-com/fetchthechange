@@ -177,6 +177,21 @@ Internal event logging for tracking scraping failures, email delivery issues, an
 - **API**: `GET /api/admin/error-logs?level=error&source=scraper&limit=100` - Supports `level` and `source` query params
 - **Privacy**: Logs with monitorId scoped to monitor owner; system-level logs only visible to app owner (APP_OWNER_ID)
 
+### Browserless Usage Tracking
+Tracks and caps Browserless (headless Chrome) usage per user and system-wide to control costs.
+- **Database**: `browserless_usage` table records each session with userId, monitorId, timestamp, duration, success
+- **Service**: `server/services/browserlessTracker.ts` - `BrowserlessUsageTracker` class
+  - `canUseBrowserless(userId, tier)` - Checks user and system caps before allowing a call
+  - `recordUsage(userId, monitorId, durationMs, success)` - Logs each Browserless session
+  - `getSystemMonthlyUsage()` / `getUserMonthlyUsage(userId)` - Current month counts
+  - `getTopConsumers(limit)` / `getTierBreakdown()` - Admin analytics
+- **Tier Caps (per month)**: Free: 0 (no Browserless), Pro: 200, Power: 500, System total: 1,000
+- **Constants**: Defined in `shared/models/auth.ts` as `BROWSERLESS_CAPS`
+- **Integration**: Scraper's `checkMonitor` checks caps before calling `extractWithBrowserless`, records usage after
+- **Email Alerts**: Automatic email to admin at 80% and 95% system usage thresholds (6h cooldown between alerts)
+- **Admin API**: `GET /api/admin/browserless-usage` - Returns system usage, tier breakdown, top consumers (owner-only)
+- **Admin UI**: Browserless Usage card on Event Log page (`/admin/errors`) with progress bar, tier breakdown, top consumers
+
 ## Future Roadmap
 
 ### Planned Features

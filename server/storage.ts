@@ -1,8 +1,10 @@
 import { monitors, monitorChanges, type Monitor, type InsertMonitor, type MonitorChange } from "@shared/schema";
+import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
 import { eq, desc, and, or, isNull, sql } from "drizzle-orm";
 
 export interface IStorage {
+  getUser(id: string): Promise<User | undefined>;
   getMonitors(userId: string): Promise<Monitor[]>;
   getMonitor(id: number): Promise<Monitor | undefined>;
   getMonitorCount(userId: string): Promise<number>;
@@ -17,6 +19,11 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  async getUser(id: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
   async getMonitors(userId: string): Promise<Monitor[]> {
     return await db.select().from(monitors).where(eq(monitors.userId, userId)).orderBy(desc(monitors.createdAt));
   }
