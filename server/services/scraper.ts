@@ -252,18 +252,63 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       }
     }
 
-    if (!html) return { 
-      changed: false, 
-      currentValue: null, 
-      previousValue: monitor.currentValue, 
-      status: "error" as const, 
-      error: "Failed to fetch page" 
-    };
+    if (!html) {
+      await storage.updateMonitor(monitor.id, {
+        lastChecked: new Date(),
+        lastStatus: "error",
+        lastError: "Failed to fetch page"
+      } as any);
+      return { 
+        changed: false, 
+        currentValue: monitor.currentValue, 
+        previousValue: monitor.currentValue, 
+        status: "error" as const, 
+        error: "Failed to fetch page" 
+      };
+    }
 
     // Stage: Static
     let newValue = extractValueFromHtml(html, monitor.selector);
     let block = detectPageBlockReason(html);
     console.log(`stage=static selectorCount=${newValue ? 1 : 0} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
+
+    if (!newValue && !block.blocked) {
+      console.log(`Retry: static extraction found no value, retrying fetch once...`);
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        let retryHtml = "";
+        try {
+          const retryResponse = await fetch(monitor.url, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Cache-Control': 'no-cache',
+              'Upgrade-Insecure-Requests': '1'
+            },
+            signal: AbortSignal.timeout(20000)
+          });
+          retryHtml = await retryResponse.text();
+        } catch (e: any) {
+          if (e.code === 'UND_ERR_HEADERS_OVERFLOW' || (e.cause && e.cause.code === 'UND_ERR_HEADERS_OVERFLOW')) {
+            retryHtml = await fetchWithCurl(monitor.url, monitor.id);
+          }
+        }
+        if (retryHtml) {
+          const retryValue = extractValueFromHtml(retryHtml, monitor.selector);
+          const retryBlock = detectPageBlockReason(retryHtml);
+          if (retryValue) {
+            newValue = retryValue;
+            block = retryBlock;
+            console.log(`Retry: succeeded on second attempt`);
+          } else if (retryBlock.blocked) {
+            block = retryBlock;
+          }
+        }
+      } catch (e) {
+        console.log(`Retry: second attempt failed, continuing with original result`);
+      }
+    }
 
     // Fallback to Rendered if static failed or blocked
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
@@ -293,53 +338,71 @@ export async function checkMonitor(monitor: Monitor): Promise<{
 
     const oldValue = monitor.currentValue;
     
-    // Determine final status
-    let finalValue: string | null = newValue;
     let finalStatus: "ok" | "blocked" | "selector_missing" | "error" = "ok";
     let finalError: string | null = null;
 
     if (!newValue) {
       if (block.blocked) {
-        finalValue = null;
         finalStatus = "blocked";
         finalError = block.reason || "Blocked";
       } else {
-        finalValue = null;
         finalStatus = "selector_missing";
         finalError = "Selector not found";
       }
     }
 
-    // Only detect changes if status is OK
-    const changed = finalStatus === "ok" && finalValue !== oldValue;
+    if (finalStatus === "ok") {
+      const changed = newValue !== oldValue;
+
+      await storage.updateMonitor(monitor.id, {
+        lastChecked: new Date(),
+        currentValue: newValue,
+        lastStatus: finalStatus,
+        lastError: null
+      } as any);
+
+      if (changed) {
+        await storage.addMonitorChange(monitor.id, oldValue, newValue);
+        await storage.updateMonitor(monitor.id, { lastChanged: new Date() } as any);
+        if (monitor.emailEnabled) {
+          await sendNotificationEmail(monitor, oldValue, newValue);
+        }
+      }
+
+      return { 
+        changed, 
+        currentValue: newValue,
+        previousValue: oldValue,
+        status: finalStatus,
+        error: null
+      };
+    } else {
+      await storage.updateMonitor(monitor.id, {
+        lastChecked: new Date(),
+        lastStatus: finalStatus,
+        lastError: finalError
+      } as any);
+
+      return { 
+        changed: false, 
+        currentValue: oldValue,
+        previousValue: oldValue,
+        status: finalStatus,
+        error: finalError
+      };
+    }
+  } catch (error) {
+    await ErrorLogger.error("scraper", `Monitor check failed for monitor ${monitor.id}`, error instanceof Error ? error : null, { monitorId: monitor.id, url: monitor.url, selector: monitor.selector });
 
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
-      currentValue: finalStatus === "ok" ? finalValue : null,
-      lastStatus: finalStatus,
-      lastError: finalError
+      lastStatus: "error",
+      lastError: error instanceof Error ? error.message : "Unknown error"
     } as any);
 
-    if (changed) {
-      await storage.addMonitorChange(monitor.id, oldValue, finalValue);
-      await storage.updateMonitor(monitor.id, { lastChanged: new Date() } as any);
-      if (monitor.emailEnabled) {
-        await sendNotificationEmail(monitor, oldValue, finalValue);
-      }
-    }
-
-    return { 
-      changed, 
-      currentValue: finalStatus === "ok" ? finalValue : null,
-      previousValue: oldValue,
-      status: finalStatus,
-      error: finalError
-    };
-  } catch (error) {
-    await ErrorLogger.error("scraper", `Monitor check failed for monitor ${monitor.id}`, error instanceof Error ? error : null, { monitorId: monitor.id, url: monitor.url, selector: monitor.selector });
     return { 
       changed: false, 
-      currentValue: null,
+      currentValue: monitor.currentValue,
       previousValue: monitor.currentValue,
       status: "error" as const,
       error: error instanceof Error ? error.message : "Unknown error"
