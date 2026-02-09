@@ -139,7 +139,7 @@ async function tryDismissConsent(page: any): Promise<boolean> {
 /**
  * Retries extraction using Browserless.
  */
-export async function extractWithBrowserless(url: string, selector: string): Promise<{ 
+export async function extractWithBrowserless(url: string, selector: string, monitorId?: number): Promise<{ 
   value: string | null, 
   urlAfter: string, 
   title: string, 
@@ -199,19 +199,19 @@ export async function extractWithBrowserless(url: string, selector: string): Pro
       reason: block.reason
     };
   } catch (error) {
-    await ErrorLogger.error("scraper", "Browserless extraction failed", error instanceof Error ? error : null, { url, selector });
+    await ErrorLogger.error("scraper", "Browserless extraction failed", error instanceof Error ? error : null, { url, selector, ...(monitorId ? { monitorId } : {}) });
     throw error;
   } finally {
     if (browser) await browser.close();
   }
 }
 
-async function fetchWithCurl(url: string): Promise<string> {
+async function fetchWithCurl(url: string, monitorId?: number): Promise<string> {
   try {
     const { stdout } = await execAsync(`curl -L -s -m 15 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" "${url}"`);
     return stdout;
   } catch (error) {
-    await ErrorLogger.error("scraper", "Curl fallback failed", error instanceof Error ? error : null, { url });
+    await ErrorLogger.error("scraper", "Curl fallback failed", error instanceof Error ? error : null, { url, ...(monitorId ? { monitorId } : {}) });
     throw error;
   }
 }
@@ -244,7 +244,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       html = await response.text();
     } catch (e: any) {
       if (e.code === 'UND_ERR_HEADERS_OVERFLOW' || (e.cause && e.cause.code === 'UND_ERR_HEADERS_OVERFLOW')) {
-        html = await fetchWithCurl(monitor.url);
+        html = await fetchWithCurl(monitor.url, monitor.id);
       } else {
         throw e;
       }
@@ -266,7 +266,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     // Fallback to Rendered if static failed or blocked
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
       try {
-        const result = await extractWithBrowserless(monitor.url, monitor.selector);
+        const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id);
         newValue = result.value;
         block = { blocked: result.blocked, reason: result.reason };
         console.log(`stage=rendered selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
