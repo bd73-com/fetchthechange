@@ -38,11 +38,19 @@ The scraper (`server/services/scraper.ts`) is the core feature with these capabi
 1. Fetch static HTML via fetch/curl
 2. Extract value using CSS selector
 3. If selector found → return value (status: ok)
-4. If selector not found OR blocked detected:
+4. If selector not found (and not blocked) → retry static fetch once after 2s delay
+5. If still not found OR blocked detected:
    - With BROWSERLESS_TOKEN → render via headless Chrome with consent dismissal
    - Re-check block detection on rendered DOM
    - Retry selector extraction
-5. Final status determines outcome (blocked vs selector_missing vs ok)
+6. Final status determines outcome (blocked vs selector_missing vs ok)
+
+### Value Preservation on Failed Checks
+- **Key behavior**: When a check fails (blocked, error, selector_missing), the monitor's `currentValue` is NOT cleared
+- Only `lastStatus`, `lastError`, and `lastChecked` are updated on failure
+- `currentValue` is only updated when a successful extraction occurs
+- This prevents false change notifications: if a site is temporarily blocked, the last known value is preserved, so when the site becomes accessible again, the scraper compares the new value to the real previous value instead of comparing against null
+- Change records are only created on genuine value transitions (old value differs from new value)
 
 ### Data Storage
 - **Database**: PostgreSQL via Drizzle ORM
