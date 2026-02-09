@@ -6,7 +6,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { authStorage } from "./replit_integrations/auth/storage";
-import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
+import { TIER_LIMITS, BROWSERLESS_CAPS, type UserTier } from "@shared/models/auth";
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
@@ -14,6 +14,7 @@ import { sql, desc, eq, and } from "drizzle-orm";
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
+import { BrowserlessUsageTracker, getMonthResetDate } from "./services/browserlessTracker";
 import { errorLogs } from "@shared/schema";
 import {
   generalRateLimiter,
@@ -626,6 +627,36 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error fetching error logs:", error);
       res.status(500).json({ message: "Failed to fetch error logs" });
+    }
+  });
+
+  app.get("/api/admin/browserless-usage", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+
+      const isAppOwner = userId === APP_OWNER_ID;
+      if (!isAppOwner) return res.status(403).json({ message: "Owner access required" });
+
+      const [systemUsage, topConsumers, tierBreakdown] = await Promise.all([
+        BrowserlessUsageTracker.getSystemMonthlyUsage(),
+        BrowserlessUsageTracker.getTopConsumers(10),
+        BrowserlessUsageTracker.getTierBreakdown(),
+      ]);
+
+      res.json({
+        systemUsage,
+        systemCap: BROWSERLESS_CAPS.system,
+        tierCaps: { free: BROWSERLESS_CAPS.free, pro: BROWSERLESS_CAPS.pro, power: BROWSERLESS_CAPS.power },
+        topConsumers,
+        tierBreakdown,
+        resetDate: getMonthResetDate(),
+      });
+    } catch (error: any) {
+      console.error("Error fetching browserless usage:", error);
+      res.status(500).json({ message: "Failed to fetch browserless usage" });
     }
   });
 

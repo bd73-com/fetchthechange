@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { users } from "./models/auth";
@@ -62,6 +62,19 @@ export const errorLogs = pgTable("error_logs", {
 });
 
 export type ErrorLog = typeof errorLogs.$inferSelect;
+
+export const browserlessUsage = pgTable("browserless_usage", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  monitorId: integer("monitor_id").references(() => monitors.id),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+  sessionDurationMs: integer("session_duration_ms"),
+  success: boolean("success").notNull(),
+}, (table) => [
+  index("idx_browserless_usage_user_timestamp").on(table.userId, table.timestamp),
+]);
+
+export type BrowserlessUsageRecord = typeof browserlessUsage.$inferSelect;
 
 export const insertMonitorSchema = createInsertSchema(monitors).omit({ 
   id: true, 

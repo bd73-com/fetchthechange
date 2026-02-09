@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw } from "lucide-react";
+import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe } from "lucide-react";
 import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 
@@ -20,6 +20,15 @@ interface ErrorLogEntry {
   resolved: boolean;
 }
 
+interface BrowserlessUsageData {
+  systemUsage: number;
+  systemCap: number;
+  tierCaps: { free: number; pro: number; power: number };
+  topConsumers: Array<{ userId: string; callCount: number }>;
+  tierBreakdown: Record<string, { users: number; totalCalls: number }>;
+  resetDate: string;
+}
+
 const levelConfig: Record<string, { icon: typeof XCircle; variant: "destructive" | "secondary" | "outline"; label: string }> = {
   error: { icon: XCircle, variant: "destructive", label: "Error" },
   warning: { icon: AlertTriangle, variant: "secondary", label: "Warning" },
@@ -30,6 +39,16 @@ export default function AdminErrors() {
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  const { data: browserlessData } = useQuery<BrowserlessUsageData>({
+    queryKey: ["/api/admin/browserless-usage"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/browserless-usage", { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    refetchInterval: 60000,
+  });
 
   const queryKey = ["/api/admin/error-logs", levelFilter, sourceFilter];
   const { data: logs = [], isLoading, isError } = useQuery<ErrorLogEntry[]>({
@@ -100,6 +119,72 @@ export default function AdminErrors() {
             </Button>
           </div>
         </div>
+
+        {browserlessData && (
+          <Card className="mb-6" data-testid="card-browserless-usage">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Globe className="h-4 w-4" />
+                Browserless Usage
+              </CardTitle>
+              <span className="text-xs text-muted-foreground">Resets {browserlessData.resetDate}</span>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span data-testid="text-system-usage-label">System Usage</span>
+                  <span className="font-mono" data-testid="text-system-usage-value">
+                    {browserlessData.systemUsage} / {browserlessData.systemCap}
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-secondary overflow-hidden" data-testid="progress-system-usage">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      browserlessData.systemUsage / browserlessData.systemCap > 0.95
+                        ? "bg-destructive"
+                        : browserlessData.systemUsage / browserlessData.systemCap > 0.8
+                        ? "bg-orange-500 dark:bg-orange-400"
+                        : "bg-primary"
+                    }`}
+                    style={{ width: `${Math.min(100, (browserlessData.systemUsage / browserlessData.systemCap) * 100)}%` }}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {(["pro", "power"] as const).map((tier) => {
+                  const data = browserlessData.tierBreakdown[tier];
+                  return (
+                    <div key={tier} className="text-center" data-testid={`text-tier-breakdown-${tier}`}>
+                      <p className="text-xs text-muted-foreground capitalize">{tier}</p>
+                      <p className="text-lg font-semibold">{data?.totalCalls ?? 0}</p>
+                      <p className="text-xs text-muted-foreground">{data?.users ?? 0} users</p>
+                    </div>
+                  );
+                })}
+                <div className="text-center" data-testid="text-tier-caps">
+                  <p className="text-xs text-muted-foreground">Per-User Caps</p>
+                  <p className="text-xs mt-1">Pro: {browserlessData.tierCaps.pro}</p>
+                  <p className="text-xs">Power: {browserlessData.tierCaps.power}</p>
+                </div>
+              </div>
+              {browserlessData.topConsumers.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Top Consumers</p>
+                  <div className="space-y-1">
+                    {browserlessData.topConsumers.slice(0, 5).map((c, i) => (
+                      <div key={c.userId} className="flex justify-between text-xs" data-testid={`text-consumer-${c.userId}`}>
+                        <span className="text-muted-foreground truncate max-w-[200px]">
+                          {i + 1}. {c.userId}
+                        </span>
+                        <span className="font-mono">{c.callCount} calls</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {isLoading ? (
           <div className="text-center py-12 text-muted-foreground">Loading logs...</div>
