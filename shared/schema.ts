@@ -59,7 +59,11 @@ export const errorLogs = pgTable("error_logs", {
   resolved: boolean("resolved").default(false).notNull(),
   resolvedAt: timestamp("resolved_at"),
   resolvedBy: text("resolved_by"),
-});
+}, (table) => ({
+  levelIdx: index("error_logs_level_idx").on(table.level),
+  sourceIdx: index("error_logs_source_idx").on(table.source),
+  timestampIdx: index("error_logs_timestamp_idx").on(table.timestamp),
+}));
 
 export type ErrorLog = typeof errorLogs.$inferSelect;
 
