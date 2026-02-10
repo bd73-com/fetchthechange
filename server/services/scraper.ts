@@ -5,11 +5,7 @@ import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { type Monitor } from "@shared/schema";
 import { type UserTier } from "@shared/models/auth";
-import { exec } from "child_process";
-import { promisify } from "util";
 import fs from "fs/promises";
-
-const execAsync = promisify(exec);
 
 interface SelectorSuggestion {
   selector: string;
@@ -210,10 +206,19 @@ export async function extractWithBrowserless(url: string, selector: string, moni
 
 async function fetchWithCurl(url: string, monitorId?: number): Promise<string> {
   try {
-    const { stdout } = await execAsync(`curl -L -s -m 15 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" "${url}"`);
-    return stdout;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      },
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    return await response.text();
   } catch (error) {
-    await ErrorLogger.error("scraper", "Curl fallback failed", error instanceof Error ? error : null, { url, ...(monitorId ? { monitorId } : {}) });
+    await ErrorLogger.error("scraper", "Fetch fallback failed", error instanceof Error ? error : null, { url, ...(monitorId ? { monitorId } : {}) });
     throw error;
   }
 }
