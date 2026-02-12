@@ -16,7 +16,7 @@ interface SelectorSuggestion {
 /**
  * Normalizes values by trimming, collapsing spaces, and removing invisible characters.
  */
-function normalizeValue(raw: string): string {
+export function normalizeValue(raw: string): string {
   return raw.replace(/[\u200B-\u200D\uFEFF]/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -76,7 +76,7 @@ export function detectPageBlockReason(html: string): { blocked: boolean; reason?
 /**
  * Extracts value from HTML using a generic approach.
  */
-function extractValueFromHtml(html: string, selector: string): string | null {
+export function extractValueFromHtml(html: string, selector: string): string | null {
   const $ = cheerio.load(html);
   const trimmedSelector = selector.trim();
   const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
@@ -418,7 +418,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
 /**
  * Normalize text for matching: lowercase, remove whitespace/commas/currency symbols.
  */
-function normalizeTextForMatch(text: string): string {
+export function normalizeTextForMatch(text: string): string {
   return text
     .toLowerCase()
     .replace(/[\s,]+/g, '')
@@ -428,14 +428,14 @@ function normalizeTextForMatch(text: string): string {
 /**
  * Extract digits-only version for fallback matching.
  */
-function extractDigits(text: string): string {
+export function extractDigits(text: string): string {
   return text.replace(/[^\d.]/g, '');
 }
 
 /**
  * Check if candidate text matches expected text using normalized comparison.
  */
-function textMatches(candidateText: string, expectedText: string): boolean {
+export function textMatches(candidateText: string, expectedText: string): boolean {
   const normCandidate = normalizeTextForMatch(candidateText);
   const normExpected = normalizeTextForMatch(expectedText);
   
