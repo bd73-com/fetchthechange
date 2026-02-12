@@ -178,9 +178,8 @@ export async function registerRoutes(
       console.log(`[Debug] monitorId=${id}`);
       const monitor = await storage.getMonitor(id);
       if (!monitor) return res.status(404).json({ message: "Not found" });
-      // Skip user check if dev bypass
-      if (req.headers["x-dev-bypass"] !== "true" && monitor.userId !== req.user.claims.sub) {
-        return res.status(401).json({ message: "Unauthorized" });
+      if (monitor.userId !== req.user.claims.sub) {
+        return res.status(403).json({ message: "Forbidden" });
       }
 
       // Static Phase
@@ -243,9 +242,8 @@ export async function registerRoutes(
       
       const monitor = await storage.getMonitor(id);
       if (!monitor) return res.status(404).json({ message: "Not found" });
-      // Skip user check if dev bypass
-      if (req.headers["x-dev-bypass"] !== "true" && monitor.userId !== req.user.claims.sub) {
-        return res.status(401).json({ message: "Unauthorized" });
+      if (monitor.userId !== req.user.claims.sub) {
+        return res.status(403).json({ message: "Forbidden" });
       }
       
       if (!process.env.BROWSERLESS_TOKEN) {
