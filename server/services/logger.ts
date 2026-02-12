@@ -4,11 +4,38 @@ import { errorLogs } from "@shared/schema";
 type LogLevel = "error" | "warning" | "info";
 type LogSource = "scraper" | "email" | "api" | "scheduler" | "stripe";
 
-const SENSITIVE_KEYS = ["password", "token", "apikey", "api_key", "secret", "authorization", "cookie", "session"];
+const SENSITIVE_KEYS = [
+  "password", "token", "apikey", "api_key", "secret", "authorization",
+  "cookie", "session", "credential", "private_key", "privatekey",
+  "access_key", "accesskey", "connection_string", "connectionstring",
+  "database_url", "databaseurl", "dsn", "bearer",
+];
+
+const SENSITIVE_VALUE_PATTERNS = [
+  /postgres(ql)?:\/\/[^\s"']+/gi,
+  /mysql:\/\/[^\s"']+/gi,
+  /mongodb(\+srv)?:\/\/[^\s"']+/gi,
+  /redis:\/\/[^\s"']+/gi,
+  /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi,
+  /\b(sk|pk|rk|whsec)[-_](?:live|test)[-_][A-Za-z0-9]{10,}\b/g,
+  /\bre_[A-Za-z0-9]{10,}\b/g,
+  /\bghp_[A-Za-z0-9]{36,}\b/g,
+  /\bxox[bprsao]-[A-Za-z0-9\-]{10,}\b/g,
+  /\b[A-Za-z0-9+/]{40,}={0,2}\b/g,
+];
+
+function sanitizeString(str: string): string {
+  let result = str;
+  for (const pattern of SENSITIVE_VALUE_PATTERNS) {
+    pattern.lastIndex = 0;
+    result = result.replace(pattern, "[REDACTED]");
+  }
+  return result.length > 1000 ? result.substring(0, 1000) + "...[truncated]" : result;
+}
 
 function sanitizeContext(obj: any): any {
   if (obj === null || obj === undefined) return obj;
-  if (typeof obj === "string") return obj.length > 1000 ? obj.substring(0, 1000) + "...[truncated]" : obj;
+  if (typeof obj === "string") return sanitizeString(obj);
   if (typeof obj !== "object") return obj;
   if (Array.isArray(obj)) return obj.map(sanitizeContext);
 
@@ -46,9 +73,9 @@ export class ErrorLogger {
       await db.insert(errorLogs).values({
         level,
         source,
-        message,
+        message: sanitizeString(message),
         errorType: error?.constructor?.name || null,
-        stackTrace: error?.stack || null,
+        stackTrace: error?.stack ? sanitizeString(error.stack) : null,
         context: context ? sanitizeContext(context) : null,
       });
     } catch (dbError) {
