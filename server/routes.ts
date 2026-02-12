@@ -28,6 +28,76 @@ import {
 
 
 // ------------------------------------------------------------------
+// URL VALIDATION - SSRF PROTECTION
+// ------------------------------------------------------------------
+import { resolve4, resolve6 } from 'dns/promises';
+
+const BLOCKED_HOSTNAMES = new Set([
+  'localhost',
+  'metadata.google.internal',
+  'metadata.google',
+  'metadata',
+]);
+
+function isPrivateIp(ip: string): boolean {
+  if (/^10\./.test(ip)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) return true;
+  if (/^192\.168\./.test(ip)) return true;
+  if (/^169\.254\./.test(ip)) return true;
+  if (/^127\./.test(ip)) return true;
+  if (/^0\./.test(ip) || ip === '0.0.0.0') return true;
+  if (/^(fc00|fd|fe80)/i.test(ip)) return true;
+  if (ip === '::1') return true;
+  return false;
+}
+
+async function isPrivateUrl(urlString: string): Promise<string | null> {
+  try {
+    const parsed = new URL(urlString);
+
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return "Only http and https URLs are allowed";
+    }
+
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+
+    if (BLOCKED_HOSTNAMES.has(hostname)) {
+      return "This hostname is not allowed";
+    }
+
+    if (hostname.endsWith('.local') || hostname.endsWith('.internal') || hostname.endsWith('.localhost')) {
+      return "Internal hostnames are not allowed";
+    }
+
+    if (isPrivateIp(hostname)) {
+      return "Private or internal IP addresses are not allowed";
+    }
+
+    try {
+      const ips: string[] = [];
+      try { ips.push(...await resolve4(hostname)); } catch {}
+      try { ips.push(...await resolve6(hostname)); } catch {}
+
+      if (ips.length === 0) {
+        return "Could not resolve hostname";
+      }
+
+      for (const ip of ips) {
+        if (isPrivateIp(ip)) {
+          return "This URL resolves to a private or internal address";
+        }
+      }
+    } catch {
+      return "Could not verify hostname";
+    }
+
+    return null;
+  } catch {
+    return "Invalid URL format";
+  }
+}
+
+// ------------------------------------------------------------------
 // 1. CHECK MONITOR FUNCTION
 // ------------------------------------------------------------------
 async function checkMonitor(monitor: any) {
@@ -320,6 +390,12 @@ export async function registerRoutes(
       }
       
       const input = api.monitors.create.input.parse(req.body);
+      
+      const urlError = await isPrivateUrl(input.url);
+      if (urlError) {
+        return res.status(400).json({ message: urlError });
+      }
+
       const monitor = await storage.createMonitor({
         ...input,
         userId,
@@ -344,6 +420,14 @@ export async function registerRoutes(
     if (existing.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
 
     const input = api.monitors.update.input.parse(req.body);
+    
+    if (input.url) {
+      const urlError = await isPrivateUrl(input.url);
+      if (urlError) {
+        return res.status(400).json({ message: urlError });
+      }
+    }
+
     const updated = await storage.updateMonitor(id, input);
     res.json(updated);
   });

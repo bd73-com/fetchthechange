@@ -112,9 +112,27 @@ export async function setupAuth(app: Express) {
 
   app.get("/api/callback", (req, res, next) => {
     ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      successReturnToOrRedirect: "/",
-      failureRedirect: "/api/login",
+    passport.authenticate(`replitauth:${req.hostname}`, (err: any, user: any) => {
+      if (err) return next(err);
+      if (!user) return res.redirect("/api/login");
+
+      const oldSessionData = { ...req.session } as any;
+      delete oldSessionData.cookie;
+
+      req.session.regenerate((regenerateErr) => {
+        if (regenerateErr) return next(regenerateErr);
+
+        Object.assign(req.session, oldSessionData);
+
+        req.logIn(user, (loginErr) => {
+          if (loginErr) return next(loginErr);
+
+          req.session.save((saveErr) => {
+            if (saveErr) return next(saveErr);
+            res.redirect("/");
+          });
+        });
+      });
     })(req, res, next);
   });
 

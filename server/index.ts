@@ -90,14 +90,46 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         await WebhookHandlers.processWebhook(req.body as Buffer, sig);
         res.status(200).json({ received: true });
       } catch (error: any) {
-        console.error('Webhook error:', error.message);
-        res.status(400).json({ error: 'Webhook processing error' });
+        const msg = error.message || '';
+        if (msg.includes('signature') || msg.includes('webhook') || msg.includes('No signatures found') || msg.includes('timestamp')) {
+          const { ErrorLogger } = await import('./services/logger');
+          await ErrorLogger.error('stripe', 'Webhook signature validation failed', error, {
+            ip: req.ip,
+          });
+          return res.status(401).json({ error: 'Invalid signature' });
+        }
+
+        const { ErrorLogger } = await import('./services/logger');
+        await ErrorLogger.error('stripe', 'Webhook processing failed', error);
+        return res.status(500).json({ error: 'Processing failed' });
       }
     }
   );
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
+
+  const cors = (await import("cors")).default;
+  const allowedOrigins: string[] = [];
+  if (process.env.REPLIT_DOMAINS) {
+    for (const d of process.env.REPLIT_DOMAINS.split(',')) {
+      allowedOrigins.push(`https://${d.trim()}`);
+    }
+  }
+  const isDev = process.env.NODE_ENV !== 'production';
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (isDev && (origin.endsWith('.replit.dev') || origin.startsWith('http://localhost'))) {
+        return callback(null, true);
+      }
+      callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }));
 
   // Logging Middleware
   app.use((req, res, next) => {
