@@ -60,7 +60,7 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
   if (!process.env.RESEND_API_KEY) {
     console.log("RESEND_API_KEY not set. Skipping email.");
     console.log(`[MOCK EMAIL] To: User of Monitor ${monitor.id}`);
-    console.log(`[MOCK EMAIL] Subject: Change detected on ${monitor.name}`);
+    console.log(`[MOCK EMAIL] Subject: FetchTheChange: ${monitor.name}`);
     console.log(`[MOCK EMAIL] Body: Value changed from "${oldValue}" to "${newValue}"`);
     return { success: false, error: "RESEND_API_KEY not configured" };
   }
@@ -81,29 +81,34 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     const response = await resend.emails.send({
       from: fromAddress,
       to: recipientEmail,
-      subject: `Change detected: ${monitor.name}`,
+      subject: `FetchTheChange: ${monitor.name}`,
       text: `
         Hello,
 
         A change was detected on your monitored page: ${monitor.name}
         URL: ${monitor.url}
 
-        Old Value: ${oldValue}
         New Value: ${newValue}
+        Old Value: ${oldValue}
 
         Check your dashboard for more details.
+
+        We hope you enjoy our service!
+        FetchTheChange Team
       `,
       html: `
         <h2>Change Detected</h2>
         <p><strong>Monitor:</strong> ${monitor.name}</p>
         <p><strong>URL:</strong> <a href="${monitor.url}">${monitor.url}</a></p>
         <hr/>
-        <p><strong>Old Value:</strong></p>
-        <pre>${oldValue}</pre>
         <p><strong>New Value:</strong></p>
         <pre>${newValue}</pre>
+        <p><strong>Old Value:</strong></p>
+        <pre>${oldValue}</pre>
         <hr/>
         <p><a href="https://fetch-the-change.replit.app">View Dashboard</a></p>
+        <br/>
+        <p>We hope you enjoy our service!<br/>FetchTheChange Team</p>
       `
     });
     
