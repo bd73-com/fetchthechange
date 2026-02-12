@@ -5,7 +5,6 @@ import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { type Monitor } from "@shared/schema";
 import { type UserTier } from "@shared/models/auth";
-import fs from "fs/promises";
 
 interface SelectorSuggestion {
   selector: string;
