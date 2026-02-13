@@ -27,43 +27,73 @@ export function normalizeValue(raw: string): string {
  */
 export function detectPageBlockReason(html: string): { blocked: boolean; reason?: string } {
   const $ = cheerio.load(html);
-  
+
   // Clone and remove non-visible/noise content to avoid false positives (like noscript)
   const $clean = $.load($.html());
   $clean("script, style, noscript, iframe, link, meta").remove();
   const visibleText = $clean("body").text().replace(/\s+/g, " ").trim();
   const visibleTextLower = visibleText.toLowerCase();
   const visibleTextLength = visibleText.length;
-  
+
   const title = $("title").text().substring(0, 120);
 
-  const blockPatterns = [
-    { pattern: /enable javascript/i, reason: "JavaScript required" },
+  // Patterns that are highly specific to block pages — no false-positive guard needed
+  // for body text matching (they are unlikely to appear in normal content).
+  const strictPatterns = [
     { pattern: /please enable cookies/i, reason: "Cookies required" },
-    { pattern: /access denied/i, reason: "Access denied" },
     { pattern: /verify you are a human/i, reason: "Human verification (Captcha)" },
     { pattern: /checking your browser/i, reason: "Browser check (Cloudflare)" },
-    { pattern: /just a moment/i, reason: "Interstitial/Challenge" },
     { pattern: /unusual traffic/i, reason: "Rate limited" },
-    { pattern: /captcha/i, reason: "Captcha detected" }
   ];
 
-  for (const { pattern, reason } of blockPatterns) {
+  // Patterns that commonly appear in legitimate content — only flag them
+  // when the page is short (< 4000 chars visible text, typical of interstitials)
+  // or when the pattern appears more than twice (indicating a block page, not
+  // a passing mention).
+  const fuzzyPatterns = [
+    { pattern: /enable javascript/i, reason: "JavaScript required" },
+    { pattern: /access denied/i, reason: "Access denied" },
+    { pattern: /just a moment/i, reason: "Interstitial/Challenge" },
+    { pattern: /captcha/i, reason: "Captcha detected" },
+  ];
+
+  // Title matches are always suspicious regardless of pattern type
+  for (const { pattern, reason } of [...strictPatterns, ...fuzzyPatterns]) {
     if (pattern.test(title)) {
       return { blocked: true, reason: `${reason} (Matched in title: "${pattern.source}")` };
     }
-    
+  }
+
+  // Strict patterns: flag on any body match
+  for (const { pattern, reason } of strictPatterns) {
     if (pattern.test(visibleTextLower)) {
-      // Special logic for "enable javascript" to avoid false positives
-      if (reason === "JavaScript required") {
-        const isSuspicious = visibleTextLength < 4000 || (visibleTextLower.split(pattern).length - 1) > 2;
-        if (!isSuspicious) continue;
-      }
       return { blocked: true, reason: `${reason} (Matched in visible text, length=${visibleTextLength})` };
     }
   }
 
-  const challengeMarkers = ['[id*="captcha"]', '[class*="captcha"]', '[id*="challenge"]', '[class*="challenge"]', '[class*="cf-"]', '.turnstile', '.h-captcha', '.g-recaptcha'];
+  // Fuzzy patterns: only flag on short pages or repeated occurrences
+  for (const { pattern, reason } of fuzzyPatterns) {
+    if (pattern.test(visibleTextLower)) {
+      const isSuspicious = visibleTextLength < 4000 || (visibleTextLower.split(pattern).length - 1) > 2;
+      if (!isSuspicious) continue;
+      return { blocked: true, reason: `${reason} (Matched in visible text, length=${visibleTextLength})` };
+    }
+  }
+
+  // Challenge element markers — use specific selectors that indicate actual
+  // challenge widgets rather than incidental Cloudflare CDN classes.
+  const challengeMarkers = [
+    '[id*="captcha"]',
+    '[class*="captcha"]',
+    '[id*="challenge"]',
+    '[class*="challenge"]',
+    '[class*="cf-browser"]',
+    '[class*="cf-error"]',
+    '[class*="cf-challenge"]',
+    '.turnstile',
+    '.h-captcha',
+    '.g-recaptcha',
+  ];
   for (const marker of challengeMarkers) {
     if ($(marker).length > 0) {
       return { blocked: true, reason: `Challenge element detected: ${marker}` };
