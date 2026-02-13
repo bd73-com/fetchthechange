@@ -15,6 +15,17 @@ export interface EmailResult {
   from?: string;
 }
 
+/** Escape HTML special characters to prevent XSS in email templates. */
+function escapeHtml(str: string | null | undefined): string {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function canSendEmail(monitor: Monitor): Promise<{ allowed: boolean; reason?: string }> {
   const user = await authStorage.getUser(monitor.userId);
   const tier = (user?.tier || "free") as UserTier;
@@ -98,13 +109,13 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
       `,
       html: `
         <h2>Change Detected</h2>
-        <p><strong>Monitor:</strong> ${monitor.name}</p>
-        <p><strong>URL:</strong> <a href="${monitor.url}">${monitor.url}</a></p>
+        <p><strong>Monitor:</strong> ${escapeHtml(monitor.name)}</p>
+        <p><strong>URL:</strong> <a href="${escapeHtml(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
         <hr/>
         <p><strong>New Value:</strong></p>
-        <pre>${newValue}</pre>
+        <pre>${escapeHtml(newValue)}</pre>
         <p><strong>Old Value:</strong></p>
-        <pre>${oldValue}</pre>
+        <pre>${escapeHtml(oldValue)}</pre>
         <hr/>
         <p><a href="https://fetch-the-change.replit.app">View Dashboard</a></p>
         <br/>

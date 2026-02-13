@@ -28,6 +28,10 @@ vi.mock("./browserlessTracker", () => ({
   },
 }));
 
+vi.mock("../utils/ssrf", () => ({
+  validateUrlBeforeFetch: vi.fn().mockResolvedValue(undefined),
+}));
+
 import {
   normalizeValue,
   detectPageBlockReason,
@@ -95,6 +99,18 @@ describe("normalizeValue", () => {
   it("handles string with mixed invisible chars and spaces", () => {
     expect(normalizeValue(" \u200B $19.99 \u200D ")).toBe("$19.99");
   });
+
+  it("handles string that is only invisible characters", () => {
+    expect(normalizeValue("\u200B\u200C\u200D\uFEFF")).toBe("");
+  });
+
+  it("handles multiple consecutive invisible characters interspersed with text", () => {
+    expect(normalizeValue("\u200B\u200Bhello\u200C\u200Cworld\u200D\u200D")).toBe("helloworld");
+  });
+
+  it("preserves normal punctuation and symbols", () => {
+    expect(normalizeValue("  $1,234.56!  ")).toBe("$1,234.56!");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -124,6 +140,18 @@ describe("normalizeTextForMatch", () => {
   it("handles empty string", () => {
     expect(normalizeTextForMatch("")).toBe("");
   });
+
+  it("removes tabs and newlines", () => {
+    expect(normalizeTextForMatch("hello\tworld\n")).toBe("helloworld");
+  });
+
+  it("handles combined currency, whitespace, commas, and case", () => {
+    expect(normalizeTextForMatch("  $1, 234. 56  ")).toBe("1234.56");
+  });
+
+  it("handles multiple currency symbols in sequence", () => {
+    expect(normalizeTextForMatch("$€£")).toBe("");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -144,6 +172,22 @@ describe("extractDigits", () => {
 
   it("handles mixed text and numbers", () => {
     expect(extractDigits("Price: $42 USD")).toBe("42");
+  });
+
+  it("handles empty string", () => {
+    expect(extractDigits("")).toBe("");
+  });
+
+  it("preserves multiple decimal points", () => {
+    expect(extractDigits("1.2.3")).toBe("1.2.3");
+  });
+
+  it("handles string with only dots", () => {
+    expect(extractDigits("...")).toBe("...");
+  });
+
+  it("handles string with only non-digit characters", () => {
+    expect(extractDigits("abc$€")).toBe("");
   });
 });
 
@@ -184,6 +228,42 @@ describe("textMatches", () => {
   it("does NOT use digit fallback when extracted digits are too short", () => {
     // expectedText "abcd" has length >= 4, but extractDigits("abcd") = "" (length < 3)
     expect(textMatches("1234", "abcd")).toBe(false);
+  });
+
+  it("matches when both strings are empty", () => {
+    // "" includes "" => true
+    expect(textMatches("", "")).toBe(true);
+  });
+
+  it("matches when expected is empty (substring match always true)", () => {
+    expect(textMatches("anything", "")).toBe(true);
+  });
+
+  it("does NOT match when candidate is empty but expected is not", () => {
+    expect(textMatches("", "something")).toBe(false);
+  });
+
+  it("boundary: expected text length exactly 4, digits exactly 3", () => {
+    // expectedText "a123" has length 4, extractDigits = "123" which has length 3
+    // candidate "xx123xx", extractDigits = "123"
+    expect(textMatches("xx123xx", "a123")).toBe(true);
+  });
+
+  it("boundary: expected text length exactly 3 skips digit fallback", () => {
+    // expectedText "a12" has length 3, < 4, so digit fallback is skipped
+    // normalizeTextForMatch("a12") = "a12", normalizeTextForMatch("xx12xx") = "xx12xx"
+    // "xx12xx" does not include "a12" so should be false
+    expect(textMatches("xx12xx", "a12")).toBe(false);
+  });
+
+  it("matches with exact normalized equality", () => {
+    expect(textMatches("$19.99", "$19.99")).toBe(true);
+  });
+
+  it("digit fallback: expected has digits but candidate digits don't contain them", () => {
+    // expectedText "item5678" length >= 4, digits "5678" length >= 3
+    // candidate "item1234", digits "1234", doesn't include "5678"
+    expect(textMatches("item1234", "item5678")).toBe(false);
   });
 });
 
@@ -362,6 +442,156 @@ describe("detectPageBlockReason", () => {
     expect(result.blocked).toBe(true);
     expect(result.reason).toContain("JavaScript required");
   });
+
+  it("detects 'enable javascript' on long page when it appears more than 2 times", () => {
+    const longContent = "x ".repeat(2500); // > 4000 chars
+    const html = `
+      <html><head><title>Page</title></head>
+      <body>
+        <p>${longContent}</p>
+        <p>Please enable javascript</p>
+        <p>You must enable javascript</p>
+        <p>Please enable javascript</p>
+      </body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    // visibleTextLength > 4000 but "enable javascript" appears 3 times (> 2), so isSuspicious = true
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("JavaScript required");
+  });
+
+  it("detects 'enable javascript' in title regardless of body length", () => {
+    const longContent = "x ".repeat(2500);
+    const html = `
+      <html><head><title>Please Enable JavaScript</title></head>
+      <body><p>${longContent}</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("JavaScript required");
+    expect(result.reason).toContain("title");
+  });
+
+  it("ignores block patterns inside script tags", () => {
+    const html = `
+      <html><head><title>Normal Page</title></head>
+      <body>
+        <script>var msg = "checking your browser";</script>
+        <p>Welcome to our site with lots of content here.</p>
+      </body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(false);
+  });
+
+  it("ignores block patterns inside style tags", () => {
+    const html = `
+      <html><head><title>Normal Page</title>
+      <style>.captcha { display: none; }</style></head>
+      <body><p>Welcome to our site.</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    // "captcha" in style should not trigger visible text check.
+    // However the element .captcha doesn't exist in body, but let's check
+    // the text matching - style content is stripped from visible text.
+    expect(result.blocked).toBe(false);
+  });
+
+  it("detects challenge element with class containing 'challenge'", () => {
+    const html = `
+      <html><head><title>Page</title></head>
+      <body><div class="security-challenge-wrapper">Loading...</div></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Challenge element detected");
+  });
+
+  it("detects challenge element with id containing 'challenge'", () => {
+    const html = `
+      <html><head><title>Page</title></head>
+      <body><div id="challenge-form">Verify</div></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Challenge element detected");
+  });
+
+  it("detects captcha class attribute", () => {
+    const html = `
+      <html><head><title>Page</title></head>
+      <body><div class="my-captcha-widget">Fill in</div></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Challenge element detected");
+  });
+
+  it("returns first matching block pattern (priority order)", () => {
+    // "enable javascript" and "captcha" both in body, enable javascript comes first in patterns
+    const html = `
+      <html><head><title>Page</title></head>
+      <body><p>Please enable javascript. Also captcha here.</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("JavaScript required");
+  });
+
+  it("handles minimal/empty HTML without crashing", () => {
+    const result = detectPageBlockReason("");
+    expect(result.blocked).toBe(false);
+  });
+
+  it("handles HTML with only head, no body", () => {
+    const html = `<html><head><title>Test</title></head></html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(false);
+  });
+
+  it("detects 'please enable cookies' in title", () => {
+    const html = `
+      <html><head><title>Please Enable Cookies</title></head>
+      <body><p>Normal content here</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Cookies required");
+    expect(result.reason).toContain("title");
+  });
+
+  it("detects 'unusual traffic' in title", () => {
+    const html = `
+      <html><head><title>Unusual Traffic Detected</title></head>
+      <body><p>Sorry</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Rate limited");
+    expect(result.reason).toContain("title");
+  });
+
+  it("detects 'captcha' in title", () => {
+    const html = `
+      <html><head><title>Captcha Verification</title></head>
+      <body><p>Please complete the form</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Captcha");
+    expect(result.reason).toContain("title");
+  });
+
+  it("detects 'verify you are a human' in title", () => {
+    const html = `
+      <html><head><title>Verify You Are A Human</title></head>
+      <body><p>Continue</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Human verification");
+    expect(result.reason).toContain("title");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -443,6 +673,49 @@ describe("extractValueFromHtml", () => {
     const html = `<html><body><span class="price">$1.00</span></body></html>`;
     expect(extractValueFromHtml(html, "  .price  ")).toBe("$1.00");
   });
+
+  it("trims ID selector with surrounding whitespace", () => {
+    const html = `<html><body><div id="total">$42.00</div></body></html>`;
+    expect(extractValueFromHtml(html, "  #total  ")).toBe("$42.00");
+  });
+
+  it("returns null when element has only whitespace text", () => {
+    const html = `<html><body><div class="empty">   \t\n  </div></body></html>`;
+    // normalizeValue("   \t\n  ") = "", so returns null
+    expect(extractValueFromHtml(html, ".empty")).toBeNull();
+  });
+
+  it("extracts text from nested elements", () => {
+    const html = `<html><body><div class="price"><span>$</span><span>19.99</span></div></body></html>`;
+    expect(extractValueFromHtml(html, ".price")).toBe("$19.99");
+  });
+
+  it("auto-prefixes bare class name containing hyphens", () => {
+    const html = `<html><body><span class="sale-price">$5.99</span></body></html>`;
+    // "sale-price" doesn't start with . or # but contains a hyphen (not a space) → treated as class
+    expect(extractValueFromHtml(html, "sale-price")).toBe("$5.99");
+  });
+
+  it("does not auto-prefix selector that starts with #", () => {
+    const html = `<html><body><div id="price">$9.99</div></body></html>`;
+    expect(extractValueFromHtml(html, "#price")).toBe("$9.99");
+  });
+
+  it("does not auto-prefix selector that contains a space (compound selector)", () => {
+    const html = `<html><body><div class="a"><span class="b">hello</span></div></body></html>`;
+    expect(extractValueFromHtml(html, ".a .b")).toBe("hello");
+  });
+
+  it("returns content attribute for element with zero-width text only", () => {
+    const html = `<html><body><meta class="meta-val" content="42" /></body></html>`;
+    // text() returns "" (or whitespace), so falls back to content attr
+    expect(extractValueFromHtml(html, ".meta-val")).toBe("42");
+  });
+
+  it("returns null when content attribute is also empty", () => {
+    const html = `<html><body><meta class="meta-empty" content="" /></body></html>`;
+    expect(extractValueFromHtml(html, ".meta-empty")).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -457,14 +730,23 @@ describe("checkMonitor", () => {
   const mockSendEmail = sendNotificationEmail as ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
     // Remove BROWSERLESS_TOKEN so the test doesn't try to use browserless
     delete process.env.BROWSERLESS_TOKEN;
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
+
+  // Helper: run checkMonitor and advance past the 2s retry delay
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    await vi.advanceTimersByTimeAsync(3000);
+    return promise;
+  }
 
   it("returns ok with extracted value when selector matches", async () => {
     const html = `<html><body><span class="price">$19.99</span></body></html>`;
@@ -473,7 +755,7 @@ describe("checkMonitor", () => {
     );
 
     const monitor = makeMonitor({ currentValue: "$19.99" });
-    const result = await checkMonitor(monitor);
+    const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("ok");
     expect(result.currentValue).toBe("$19.99");
@@ -483,12 +765,12 @@ describe("checkMonitor", () => {
 
   it("detects change when value differs from currentValue", async () => {
     const html = `<html><body><span class="price">$24.99</span></body></html>`;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
     );
 
     const monitor = makeMonitor({ currentValue: "$19.99" });
-    const result = await checkMonitor(monitor);
+    const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("ok");
     expect(result.changed).toBe(true);
@@ -501,49 +783,49 @@ describe("checkMonitor", () => {
 
   it("sends email notification when value changes and emailEnabled is true", async () => {
     const html = `<html><body><span class="price">$24.99</span></body></html>`;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
     );
 
     const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: true });
-    await checkMonitor(monitor);
+    await runWithTimers(monitor);
 
     expect(mockSendEmail).toHaveBeenCalledWith(monitor, "$19.99", "$24.99");
   });
 
   it("does NOT send email when emailEnabled is false", async () => {
     const html = `<html><body><span class="price">$24.99</span></body></html>`;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
     );
 
     const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: false });
-    await checkMonitor(monitor);
+    await runWithTimers(monitor);
 
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
   it("does NOT send email when value has not changed", async () => {
     const html = `<html><body><span class="price">$19.99</span></body></html>`;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
     );
 
     const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: true });
-    await checkMonitor(monitor);
+    await runWithTimers(monitor);
 
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
   it("returns selector_missing when selector matches nothing on an unblocked page", async () => {
     const html = `<html><body><span class="title">Hello</span></body></html>`;
-    // Needs two fetch calls: initial + retry
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(html, { status: 200 })
-    );
+    // Both initial and retry get the same non-matching HTML
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
 
     const monitor = makeMonitor({ selector: ".nonexistent" });
-    const result = await checkMonitor(monitor);
+    const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("selector_missing");
     expect(result.error).toBe("Selector not found");
@@ -555,12 +837,12 @@ describe("checkMonitor", () => {
       <html><head><title>Access Denied</title></head>
       <body><p>You do not have permission to access this resource.</p></body>
       </html>`;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
     );
 
     const monitor = makeMonitor();
-    const result = await checkMonitor(monitor);
+    const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("blocked");
     expect(result.error).toContain("Access denied");
@@ -568,10 +850,10 @@ describe("checkMonitor", () => {
   });
 
   it("returns error status when fetch throws", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network failure"));
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failure"));
 
     const monitor = makeMonitor();
-    const result = await checkMonitor(monitor);
+    const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
     expect(result.error).toBe("Network failure");
@@ -579,12 +861,12 @@ describe("checkMonitor", () => {
   });
 
   it("returns error status when page returns empty body", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("", { status: 200 })
     );
 
     const monitor = makeMonitor();
-    const result = await checkMonitor(monitor);
+    const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
     expect(result.error).toBe("Failed to fetch page");
@@ -592,12 +874,12 @@ describe("checkMonitor", () => {
 
   it("updates monitor lastChecked and lastStatus in storage on success", async () => {
     const html = `<html><body><span class="price">$5.00</span></body></html>`;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
     );
 
     const monitor = makeMonitor({ currentValue: "$5.00" });
-    await checkMonitor(monitor);
+    await runWithTimers(monitor);
 
     expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
       1,
@@ -610,10 +892,10 @@ describe("checkMonitor", () => {
   });
 
   it("updates monitor with error status when fetch fails", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("timeout"));
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
 
     const monitor = makeMonitor();
-    await checkMonitor(monitor);
+    await runWithTimers(monitor);
 
     expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
       1,
@@ -626,14 +908,13 @@ describe("checkMonitor", () => {
 
   it("updates monitor with selector_missing when selector not found", async () => {
     const html = `<html><body><p>No match</p></body></html>`;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(html, { status: 200 })
-    );
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
 
     const monitor = makeMonitor({ selector: ".missing" });
-    await checkMonitor(monitor);
+    await runWithTimers(monitor);
 
-    // updateMonitor may be called for blocked/selector_missing
     const calls = mockStorage.updateMonitor.mock.calls;
     const lastCall = calls[calls.length - 1];
     expect(lastCall[1]).toMatchObject({
@@ -644,14 +925,13 @@ describe("checkMonitor", () => {
 
   it("records lastChanged when a value change is detected", async () => {
     const html = `<html><body><span class="price">$30.00</span></body></html>`;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
     );
 
     const monitor = makeMonitor({ currentValue: "$20.00" });
-    await checkMonitor(monitor);
+    await runWithTimers(monitor);
 
-    // Should have two updateMonitor calls: one for currentValue, one for lastChanged
     const calls = mockStorage.updateMonitor.mock.calls;
     const lastChangedCall = calls.find(
       (c: any[]) => c[1].lastChanged !== undefined
@@ -662,12 +942,12 @@ describe("checkMonitor", () => {
 
   it("handles first check (currentValue is null) as a change", async () => {
     const html = `<html><body><span class="price">$15.00</span></body></html>`;
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
     );
 
     const monitor = makeMonitor({ currentValue: null });
-    const result = await checkMonitor(monitor);
+    const result = await runWithTimers(monitor);
 
     expect(result.changed).toBe(true);
     expect(result.currentValue).toBe("$15.00");
@@ -684,7 +964,7 @@ describe("checkMonitor", () => {
       .mockResolvedValueOnce(new Response(fullHtml, { status: 200 }));
 
     const monitor = makeMonitor({ selector: ".price" });
-    const result = await checkMonitor(monitor);
+    const result = await runWithTimers(monitor);
 
     // Should have been called twice (initial + retry)
     expect(fetchSpy).toHaveBeenCalledTimes(2);
@@ -697,16 +977,181 @@ describe("checkMonitor", () => {
     const headerError = new Error("Headers overflow");
     (headerError as any).code = "UND_ERR_HEADERS_OVERFLOW";
 
-    const fetchSpy = vi.spyOn(globalThis, "fetch")
-      // First call throws headers overflow
+    vi.spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(headerError)
-      // fetchWithCurl calls fetch internally
       .mockResolvedValueOnce(new Response(html, { status: 200 }));
 
     const monitor = makeMonitor();
-    const result = await checkMonitor(monitor);
+    const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("ok");
     expect(result.currentValue).toBe("$7.77");
+  });
+
+  it("uses fetchWithCurl fallback on UND_ERR_HEADERS_OVERFLOW via e.cause.code", async () => {
+    const html = `<html><body><span class="price">$8.88</span></body></html>`;
+    const headerError = new Error("Headers overflow");
+    (headerError as any).cause = { code: "UND_ERR_HEADERS_OVERFLOW" };
+
+    vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(headerError)
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    const monitor = makeMonitor();
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$8.88");
+  });
+
+  it("retry path: updates block status when retry also detects blocked content", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    const blockedHtml = `
+      <html><head><title>Access Denied</title></head>
+      <body><p>You are blocked.</p></body>
+      </html>`;
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(blockedHtml, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("blocked");
+    expect(result.error).toContain("Access denied");
+  });
+
+  it("retry path: continues with original result when retry fetch throws", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockRejectedValueOnce(new Error("Network error on retry"));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found");
+  });
+
+  it("retry path: uses fetchWithCurl on UND_ERR_HEADERS_OVERFLOW during retry", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    const retryHtml = `<html><body><span class="price">$3.33</span></body></html>`;
+    const headerError = new Error("Headers overflow");
+    (headerError as any).code = "UND_ERR_HEADERS_OVERFLOW";
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockRejectedValueOnce(headerError)
+      .mockResolvedValueOnce(new Response(retryHtml, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$3.33");
+  });
+
+  it("retry path: empty retryHtml is ignored and falls through", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response("", { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found");
+  });
+
+  it("handles non-Error thrown during fetch (unknown error)", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce("string error");
+
+    const monitor = makeMonitor();
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Unknown error");
+  });
+
+  it("blocked page with challenge element detected", async () => {
+    const html = `
+      <html><head><title>Page</title></head>
+      <body><div class="g-recaptcha" data-sitekey="abc"></div></body>
+      </html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(html, { status: 200 })
+    );
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("blocked");
+    expect(result.error).toContain("Challenge element detected");
+  });
+
+  it("does not retry when first fetch finds the value", async () => {
+    const html = `<html><body><span class="price">$55.00</span></body></html>`;
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$55.00");
+  });
+
+  it("does not retry when first fetch is blocked (even without value)", async () => {
+    const blockedHtml = `
+      <html><head><title>Access Denied</title></head>
+      <body><p>Forbidden</p></body>
+      </html>`;
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(blockedHtml, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("blocked");
+  });
+
+  it("preserves oldValue in return when status is not ok", async () => {
+    const html = `<html><body><p>No match here</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price", currentValue: "$99.99" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    expect(result.currentValue).toBe("$99.99");
+    expect(result.previousValue).toBe("$99.99");
+    expect(result.changed).toBe(false);
+  });
+
+  it("retry succeeds on second static attempt when first had no value", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    const fullHtml = `<html><body><span class="price">$10.00</span></body></html>`;
+
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(fullHtml, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price", currentValue: "$5.00" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(result.changed).toBe(true);
+    expect(result.currentValue).toBe("$10.00");
+    expect(result.previousValue).toBe("$5.00");
+    expect(mockStorage.addMonitorChange).toHaveBeenCalledWith(1, "$5.00", "$10.00");
   });
 });
