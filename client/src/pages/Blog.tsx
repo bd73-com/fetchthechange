@@ -6,6 +6,13 @@ import PublicNav from "@/components/PublicNav";
 
 const blogPosts = [
   {
+    slug: "monitor-competitor-prices-without-getting-blocked",
+    title: "How to Monitor Competitor Prices Without Getting Blocked (2026 Guide)",
+    description: "Learn how to monitor competitor prices on modern JavaScript-heavy websites without getting blocked — and how to avoid silent monitoring failures.",
+    category: "Price Monitoring",
+    date: "2026-02-13",
+  },
+  {
     slug: "fetchthechange-vs-distill-visualping-hexowatch",
     title: "FetchTheChange vs Distill, Visualping, Hexowatch (and others): Which Website Change Monitor Should You Use?",
     description: "A neutral comparison of website change monitoring tools for JavaScript-heavy sites, selector breakage detection, and value-level monitoring.",
