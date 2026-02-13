@@ -183,7 +183,7 @@ export async function registerRoutes(
       console.log(`[Debug] monitorId=${id}`);
       const monitor = await storage.getMonitor(id);
       if (!monitor) return res.status(404).json({ message: "Not found" });
-      if (monitor.userId !== req.user.claims.sub) {
+      if (String(monitor.userId) !== String(req.user.claims.sub)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -253,7 +253,7 @@ export async function registerRoutes(
       
       const monitor = await storage.getMonitor(id);
       if (!monitor) return res.status(404).json({ message: "Not found" });
-      if (monitor.userId !== req.user.claims.sub) {
+      if (String(monitor.userId) !== String(req.user.claims.sub)) {
         return res.status(403).json({ message: "Forbidden" });
       }
       
@@ -305,7 +305,7 @@ export async function registerRoutes(
   app.get(api.monitors.get.path, isAuthenticated, async (req: any, res) => {
     const monitor = await storage.getMonitor(Number(req.params.id));
     if (!monitor) return res.status(404).json({ message: "Not found" });
-    if (monitor.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
     res.json(monitor);
   });
 
@@ -358,7 +358,7 @@ export async function registerRoutes(
     const id = Number(req.params.id);
     const existing = await storage.getMonitor(id);
     if (!existing) return res.status(404).json({ message: "Not found" });
-    if (existing.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
+    if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
     const input = api.monitors.update.input.parse(req.body);
     
@@ -374,20 +374,25 @@ export async function registerRoutes(
   });
 
   app.delete(api.monitors.delete.path, isAuthenticated, async (req: any, res) => {
-    const id = Number(req.params.id);
-    const existing = await storage.getMonitor(id);
-    if (!existing) return res.status(404).json({ message: "Not found" });
-    if (existing.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getMonitor(id);
+      if (!existing) return res.status(404).json({ message: "Monitor not found" });
+      if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
-    await storage.deleteMonitor(id);
-    res.status(204).send();
+      await storage.deleteMonitor(id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("[Delete Monitor] Error:", error.message);
+      res.status(500).json({ message: "Server error while deleting monitor" });
+    }
   });
 
   app.get(api.monitors.history.path, isAuthenticated, async (req: any, res) => {
     const id = Number(req.params.id);
     const existing = await storage.getMonitor(id);
     if (!existing) return res.status(404).json({ message: "Not found" });
-    if (existing.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
+    if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
     const changes = await storage.getMonitorChanges(id);
     res.json(changes);
@@ -397,7 +402,7 @@ export async function registerRoutes(
     const id = Number(req.params.id);
     const existing = await storage.getMonitor(id);
     if (!existing) return res.status(404).json({ message: "Not found" });
-    if (existing.userId !== req.user.claims.sub) return res.status(401).json({ message: "Unauthorized" });
+    if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
     const result = await checkMonitor(existing);
     res.json(result);
