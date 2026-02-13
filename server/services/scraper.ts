@@ -3,6 +3,7 @@ import { storage } from "../storage";
 import { sendNotificationEmail } from "./email";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
+import { validateUrlBeforeFetch } from "../utils/ssrf";
 import { type Monitor } from "@shared/schema";
 import { type UserTier } from "@shared/models/auth";
 
@@ -205,6 +206,8 @@ export async function extractWithBrowserless(url: string, selector: string, moni
 
 async function fetchWithCurl(url: string, monitorId?: number): Promise<string> {
   try {
+    // SSRF: Validate URL before fallback fetch to close TOCTOU gap
+    await validateUrlBeforeFetch(url);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
     const response = await fetch(url, {
@@ -235,6 +238,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
   try {
     console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
     
+    // SSRF: Re-validate URL at fetch time to close TOCTOU gap (DNS rebinding)
+    await validateUrlBeforeFetch(monitor.url);
+
     let html = "";
     try {
       const response = await fetch(monitor.url, {

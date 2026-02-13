@@ -28,6 +28,10 @@ vi.mock("./browserlessTracker", () => ({
   },
 }));
 
+vi.mock("../utils/ssrf", () => ({
+  validateUrlBeforeFetch: vi.fn().mockResolvedValue(undefined),
+}));
+
 import {
   normalizeValue,
   detectPageBlockReason,
