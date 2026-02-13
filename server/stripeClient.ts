@@ -2,6 +2,9 @@ import Stripe from 'stripe';
 
 // Uses environment variables for Stripe API keys
 // Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY in your secrets
+const SECRET_KEY_PREFIX = /^sk_(live|test)_/;
+const PUBLISHABLE_KEY_PREFIX = /^pk_(live|test)_/;
+
 function getCredentials() {
   const secretKey = process.env.STRIPE_SECRET_KEY;
   const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
@@ -9,6 +12,18 @@ function getCredentials() {
   if (!secretKey || !publishableKey) {
     throw new Error(
       'Stripe API keys not found. Please set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY in your secrets.'
+    );
+  }
+
+  if (!SECRET_KEY_PREFIX.test(secretKey)) {
+    throw new Error(
+      'Invalid STRIPE_SECRET_KEY format. Must start with sk_live_ or sk_test_.'
+    );
+  }
+
+  if (!PUBLISHABLE_KEY_PREFIX.test(publishableKey)) {
+    throw new Error(
+      'Invalid STRIPE_PUBLISHABLE_KEY format. Must start with pk_live_ or pk_test_.'
     );
   }
 

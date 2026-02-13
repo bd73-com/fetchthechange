@@ -131,6 +131,10 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     allowedHeaders: ['Content-Type', 'Authorization'],
   }));
 
+  // CSRF protection: validate Origin header on state-changing requests
+  const { csrfProtection } = await import("./middleware/csrf");
+  app.use("/api/", csrfProtection(allowedOrigins, isDev));
+
   // Logging Middleware
   app.use((req, res, next) => {
     const start = Date.now();
