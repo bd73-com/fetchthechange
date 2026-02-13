@@ -23,7 +23,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   const { registerRoutes } = await import("./routes");
   const { serveStatic } = await import("./static");
   const { runMigrations } = await import("stripe-replit-sync");
-  const { getStripeSync } = await import("./stripeClient");
+  const { getStripeSync, setWebhookSecret, getWebhookSecret } = await import("./stripeClient");
   const { WebhookHandlers } = await import("./webhookHandlers");
 
   const app = express();
@@ -50,13 +50,21 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         const result = await stripeSync.findOrCreateManagedWebhook(
           `${webhookBaseUrl}/api/stripe/webhook`
         );
-        if (result?.webhook?.url) {
-          console.log(`Webhook configured: ${result.webhook.url}`);
-        } else {
-          console.log('Webhook setup completed (no URL returned)');
+        if (result?.secret) {
+          setWebhookSecret(result.secret);
+          console.log(`Webhook configured: ${result.url}`);
+        } else if (result?.url) {
+          console.log(`Webhook found (existing): ${result.url}`);
         }
       } catch (webhookError: any) {
-        console.log('Could not set up managed webhook:', webhookError.message);
+        console.error('ERROR: Could not set up managed webhook:', webhookError.message);
+        if (!getWebhookSecret()) {
+          console.error(
+            'CRITICAL: No webhook secret available. ' +
+            'Set STRIPE_WEBHOOK_SECRET env var or fix managed webhook creation. ' +
+            'Webhook signature verification will reject all events until this is resolved.'
+          );
+        }
       }
 
       console.log('Syncing Stripe data...');
