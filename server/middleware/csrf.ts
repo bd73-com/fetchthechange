@@ -35,8 +35,13 @@ export function csrfProtection(allowedOrigins: string[], isDev: boolean) {
       return next();
     }
 
-    if (isDev && (origin.endsWith('.replit.dev') || origin.startsWith('http://localhost'))) {
-      return next();
+    if (isDev) {
+      try {
+        const hostname = new URL(origin).hostname;
+        if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.replit.dev')) {
+          return next();
+        }
+      } catch {}
     }
 
     res.status(403).json({ message: 'Forbidden: origin not allowed' });

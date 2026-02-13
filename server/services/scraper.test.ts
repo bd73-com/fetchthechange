@@ -1284,4 +1284,17 @@ describe("checkMonitor", () => {
     expect(result.previousValue).toBe("$5.00");
     expect(mockStorage.addMonitorChange).toHaveBeenCalledWith(1, "$5.00", "$10.00");
   });
+
+  it("rejects monitors targeting private/internal URLs (SSRF protection)", async () => {
+    const { validateUrlBeforeFetch } = await import("../utils/ssrf");
+    const mockValidate = validateUrlBeforeFetch as ReturnType<typeof vi.fn>;
+    mockValidate.mockRejectedValueOnce(new Error("SSRF blocked: This hostname is not allowed"));
+
+    const monitor = makeMonitor({ url: "http://127.0.0.1/admin" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("SSRF blocked: This hostname is not allowed");
+    expect(mockValidate).toHaveBeenCalledWith("http://127.0.0.1/admin");
+  });
 });
