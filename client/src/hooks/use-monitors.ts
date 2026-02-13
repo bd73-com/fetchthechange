@@ -123,7 +123,10 @@ export function useDeleteMonitor() {
         method: api.monitors.delete.method,
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to delete monitor");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Failed to delete monitor");
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
