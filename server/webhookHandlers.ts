@@ -1,4 +1,5 @@
-import { getStripeSync, getUncachableStripeClient } from './stripeClient';
+import Stripe from 'stripe';
+import { getStripeSync, getUncachableStripeClient, getWebhookSecret } from './stripeClient';
 import { authStorage } from './replit_integrations/auth/storage';
 import { ErrorLogger } from './services/logger';
 import type { UserTier } from '@shared/models/auth';
@@ -14,15 +15,21 @@ export class WebhookHandlers {
       );
     }
 
-    const sync = await getStripeSync();
-    
-    // StripeSync.processWebhook validates signature internally before processing
-    // This ensures only verified events are ingested into the database
-    await sync.processWebhook(payload, signature);
+    const secret = getWebhookSecret();
+    if (!secret) {
+      throw new Error(
+        'Stripe webhook secret is not configured. ' +
+        'Set STRIPE_WEBHOOK_SECRET or ensure managed webhook creation succeeds.'
+      );
+    }
 
-    // Parse event for our custom business logic (tier updates)
-    // We use JSON.parse since signature was already verified by StripeSync
-    const event = JSON.parse(payload.toString());
+    // Verify signature ourselves before trusting the payload
+    const stripe = await getUncachableStripeClient();
+    const event = stripe.webhooks.constructEvent(payload, signature, secret);
+
+    // Now that signature is verified, let StripeSync process for DB syncing
+    const sync = await getStripeSync();
+    await sync.processWebhook(payload, signature);
 
     await WebhookHandlers.handleStripeEvent(event);
   }
