@@ -53,6 +53,17 @@ export async function getStripeSecretKey() {
 
 let stripeSync: any = null;
 
+/** Webhook signing secret — set from STRIPE_WEBHOOK_SECRET env or managed webhook creation. */
+let webhookSecret: string | null = process.env.STRIPE_WEBHOOK_SECRET ?? null;
+
+export function getWebhookSecret(): string | null {
+  return webhookSecret;
+}
+
+export function setWebhookSecret(secret: string): void {
+  webhookSecret = secret;
+}
+
 export async function getStripeSync() {
   if (!stripeSync) {
     const { StripeSync } = await import('stripe-replit-sync');
@@ -64,6 +75,7 @@ export async function getStripeSync() {
         max: 2,
       },
       stripeSecretKey: secretKey,
+      ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
     });
   }
   return stripeSync;
