@@ -286,8 +286,19 @@ describe("detectPageBlockReason", () => {
       <html><head><title>Just a moment...</title></head>
       <body><p>Checking your browser</p></body>
       </html>`;
-    // "checking your browser" pattern is checked before "just a moment",
-    // and matches the visible text first.
+    // Title matches are checked first; "just a moment" in the title fires
+    // before "checking your browser" in the body is reached.
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Interstitial/Challenge");
+    expect(result.reason).toContain("title");
+  });
+
+  it("detects 'checking your browser' in body when title is clean", () => {
+    const html = `
+      <html><head><title>Loading</title></head>
+      <body><p>Checking your browser before accessing the site.</p></body>
+      </html>`;
     const result = detectPageBlockReason(html);
     expect(result.blocked).toBe(true);
     expect(result.reason).toContain("Browser check");
@@ -591,6 +602,125 @@ describe("detectPageBlockReason", () => {
     expect(result.blocked).toBe(true);
     expect(result.reason).toContain("Human verification");
     expect(result.reason).toContain("title");
+  });
+
+  // --- False-positive guards for fuzzy patterns on large pages ---
+
+  it("does NOT flag 'access denied' on a large legitimate page", () => {
+    const longContent = "x ".repeat(2500); // > 4000 chars
+    const html = `
+      <html><head><title>News Article</title></head>
+      <body><p>${longContent}</p><p>The user was access denied by the system.</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(false);
+  });
+
+  it("flags 'access denied' on a short interstitial page", () => {
+    const html = `
+      <html><head><title>Error</title></head>
+      <body><p>Access Denied. You do not have permission.</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Access denied");
+  });
+
+  it("does NOT flag 'just a moment' on a large legitimate page", () => {
+    const longContent = "x ".repeat(2500);
+    const html = `
+      <html><head><title>Blog Post</title></head>
+      <body><p>${longContent}</p><p>Just a moment ago, the team announced the news.</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(false);
+  });
+
+  it("flags 'just a moment' on a short interstitial page", () => {
+    const html = `
+      <html><head><title>Loading</title></head>
+      <body><p>Just a moment while we verify your connection.</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Interstitial/Challenge");
+  });
+
+  it("does NOT flag 'captcha' on a large page mentioning it incidentally", () => {
+    const longContent = "x ".repeat(2500);
+    const html = `
+      <html><head><title>Security Blog</title></head>
+      <body><p>${longContent}</p><p>We implemented a captcha on our login page.</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(false);
+  });
+
+  it("flags 'captcha' on a short page (actual captcha challenge)", () => {
+    const html = `
+      <html><head><title>Verify</title></head>
+      <body><p>Please complete the captcha to proceed.</p></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Captcha");
+  });
+
+  it("flags fuzzy pattern on large page when it appears more than 2 times", () => {
+    const longContent = "x ".repeat(2500);
+    const html = `
+      <html><head><title>Page</title></head>
+      <body>
+        <p>${longContent}</p>
+        <p>Access denied</p>
+        <p>Access denied</p>
+        <p>Access denied</p>
+      </body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Access denied");
+  });
+
+  // --- cf- selector specificity tests ---
+
+  it("does NOT flag generic cf- CDN classes (e.g. cf-wrapper)", () => {
+    const html = `
+      <html><head><title>Normal Page</title></head>
+      <body><div class="cf-wrapper"><p>Hello world</p></div></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(false);
+  });
+
+  it("flags cf-browser-verification class", () => {
+    const html = `
+      <html><head><title>Page</title></head>
+      <body><div class="cf-browser-verification">Loading...</div></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Challenge element detected");
+  });
+
+  it("flags cf-error class", () => {
+    const html = `
+      <html><head><title>Page</title></head>
+      <body><div class="cf-error-overview">Error 1020</div></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Challenge element detected");
+  });
+
+  it("flags cf-challenge class", () => {
+    const html = `
+      <html><head><title>Page</title></head>
+      <body><div class="cf-challenge-running">Please wait</div></body>
+      </html>`;
+    const result = detectPageBlockReason(html);
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("Challenge element detected");
   });
 });
 
