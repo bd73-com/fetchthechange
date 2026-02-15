@@ -75,3 +75,47 @@ export async function validateUrlBeforeFetch(urlString: string): Promise<void> {
     throw new Error(`SSRF blocked: ${error}`);
   }
 }
+
+const MAX_REDIRECTS = 10;
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * A fetch wrapper that validates every redirect target against SSRF
+ * before following it. Uses redirect: 'manual' internally.
+ */
+export async function ssrfSafeFetch(
+  url: string,
+  init?: RequestInit
+): Promise<Response> {
+  let currentUrl = url;
+
+  for (let i = 0; i <= MAX_REDIRECTS; i++) {
+    await validateUrlBeforeFetch(currentUrl);
+
+    const response = await fetch(currentUrl, {
+      ...init,
+      redirect: 'manual',
+    });
+
+    if (!REDIRECT_STATUSES.has(response.status)) {
+      return response;
+    }
+
+    const location = response.headers.get('location');
+    if (!location) {
+      return response;
+    }
+
+    let resolvedUrl: string;
+    try {
+      resolvedUrl = new URL(location, currentUrl).toString();
+    } catch {
+      throw new Error(`SSRF blocked: Invalid redirect URL: ${location}`);
+    }
+
+    currentUrl = resolvedUrl;
+  }
+
+  throw new Error(`SSRF blocked: Too many redirects (max ${MAX_REDIRECTS})`);
+}
