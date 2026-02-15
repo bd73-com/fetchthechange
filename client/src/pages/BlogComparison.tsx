@@ -1,85 +1,13 @@
-import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight, Check, X, Minus } from "lucide-react";
 import { Link } from "wouter";
 import PublicNav from "@/components/PublicNav";
+import SEOHead from "@/components/SEOHead";
 
 const BLOG_PATH = "/blog/fetchthechange-vs-distill-visualping-hexowatch";
 const PUBLISH_DATE = "2026-02-01";
 const AUTHOR = "Christian - developer of FetchTheChange";
-
-function getCanonicalUrl() {
-  const baseUrl = import.meta.env.VITE_PUBLIC_BASE_URL || 
-    (typeof window !== "undefined" ? window.location.origin : "https://fetch-the-change.replit.app");
-  return `${baseUrl}${BLOG_PATH}`;
-}
-
-function SEOHead() {
-  useEffect(() => {
-    const canonicalUrl = getCanonicalUrl();
-    const todayDate = new Date().toISOString().split('T')[0];
-    
-    document.title = "FetchTheChange vs Distill vs Visualping vs Hexowatch | Website Change Monitor Comparison";
-    
-    const metaTags = [
-      { name: "description", content: "A neutral comparison of website change monitoring tools for JavaScript-heavy sites, selector breakage detection, and value-level monitoring." },
-      { property: "og:title", content: "FetchTheChange vs Distill vs Visualping vs Hexowatch | Website Change Monitor Comparison" },
-      { property: "og:description", content: "A neutral comparison of website change monitoring tools for JavaScript-heavy sites, selector breakage detection, and value-level monitoring." },
-      { property: "og:type", content: "article" },
-      { property: "og:url", content: canonicalUrl },
-      { name: "twitter:card", content: "summary" },
-      { name: "twitter:title", content: "FetchTheChange vs Distill vs Visualping vs Hexowatch" },
-      { name: "twitter:description", content: "A neutral comparison of website change monitoring tools for JavaScript-heavy sites, selector breakage detection, and value-level monitoring." },
-    ];
-
-    const existingMetas: HTMLMetaElement[] = [];
-    metaTags.forEach(tag => {
-      const meta = document.createElement("meta");
-      if (tag.name) meta.setAttribute("name", tag.name);
-      if (tag.property) meta.setAttribute("property", tag.property);
-      meta.setAttribute("content", tag.content);
-      document.head.appendChild(meta);
-      existingMetas.push(meta);
-    });
-
-    const canonicalLink = document.createElement("link");
-    canonicalLink.setAttribute("rel", "canonical");
-    canonicalLink.setAttribute("href", canonicalUrl);
-    document.head.appendChild(canonicalLink);
-
-    const jsonLd = {
-      "@context": "https://schema.org",
-      "@type": "BlogPosting",
-      "headline": "FetchTheChange vs Distill vs Visualping vs Hexowatch: Which Website Change Monitor Should You Use?",
-      "description": "A neutral comparison of website change monitoring tools for JavaScript-heavy sites, selector breakage detection, and value-level monitoring.",
-      "author": {
-        "@type": "Person",
-        "name": AUTHOR
-      },
-      "publisher": {
-        "@type": "Organization",
-        "name": "FetchTheChange"
-      },
-      "mainEntityOfPage": canonicalUrl,
-      "datePublished": PUBLISH_DATE,
-      "dateModified": todayDate
-    };
-    
-    const script = document.createElement("script");
-    script.type = "application/ld+json";
-    script.text = JSON.stringify(jsonLd);
-    document.head.appendChild(script);
-
-    return () => {
-      existingMetas.forEach(meta => meta.remove());
-      canonicalLink.remove();
-      script.remove();
-    };
-  }, []);
-
-  return null;
-}
 
 function FeatureCell({ value }: { value: "yes" | "no" | "partial" | string }) {
   if (value === "yes") {
@@ -97,7 +25,13 @@ function FeatureCell({ value }: { value: "yes" | "no" | "partial" | string }) {
 export default function BlogComparison() {
   return (
     <div className="min-h-screen bg-background">
-      <SEOHead />
+      <SEOHead
+        title="FetchTheChange vs Distill vs Visualping vs Hexowatch | Website Change Monitor Comparison"
+        description="A neutral comparison of website change monitoring tools for JavaScript-heavy sites, selector breakage detection, and value-level monitoring."
+        canonicalPath={BLOG_PATH}
+        author={AUTHOR}
+        publishDate={PUBLISH_DATE}
+      />
       <PublicNav />
 
       <article className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">

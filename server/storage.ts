@@ -51,10 +51,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteMonitor(id: number): Promise<void> {
-    await db.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
-    await db.delete(browserlessUsage).where(eq(browserlessUsage.monitorId, id));
-    await db.delete(resendUsage).where(eq(resendUsage.monitorId, id));
-    await db.delete(monitors).where(eq(monitors.id, id));
+    await db.transaction(async (tx) => {
+      await tx.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
+      await tx.delete(browserlessUsage).where(eq(browserlessUsage.monitorId, id));
+      await tx.delete(resendUsage).where(eq(resendUsage.monitorId, id));
+      await tx.delete(monitors).where(eq(monitors.id, id));
+    });
   }
 
   async getMonitorChanges(monitorId: number): Promise<MonitorChange[]> {

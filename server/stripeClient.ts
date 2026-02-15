@@ -62,6 +62,8 @@ export function getWebhookSecret(): string | null {
 
 export function setWebhookSecret(secret: string): void {
   webhookSecret = secret;
+  // Invalidate cached StripeSync so it re-initializes with the new secret
+  stripeSync = null;
 }
 
 export async function getStripeSync() {

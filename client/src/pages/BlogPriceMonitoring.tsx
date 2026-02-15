@@ -1,90 +1,24 @@
-import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight } from "lucide-react";
 import { Link } from "wouter";
 import PublicNav from "@/components/PublicNav";
+import SEOHead from "@/components/SEOHead";
 
 const BLOG_PATH = "/blog/monitor-competitor-prices-without-getting-blocked";
 const PUBLISH_DATE = "2026-02-13";
 const AUTHOR = "Christian - developer of FetchTheChange";
 
-function getCanonicalUrl() {
-  const baseUrl = import.meta.env.VITE_PUBLIC_BASE_URL || 
-    (typeof window !== "undefined" ? window.location.origin : "https://fetch-the-change.replit.app");
-  return `${baseUrl}${BLOG_PATH}`;
-}
-
-function SEOHead() {
-  useEffect(() => {
-    const canonicalUrl = getCanonicalUrl();
-    const todayDate = new Date().toISOString().split('T')[0];
-    
-    document.title = "How to Monitor Competitor Prices Without Getting Blocked (2026 Guide)";
-    
-    const metaTags = [
-      { name: "description", content: "Learn how to monitor competitor prices on modern JavaScript-heavy websites without getting blocked — and how to avoid silent monitoring failures." },
-      { property: "og:title", content: "How to Monitor Competitor Prices Without Getting Blocked (2026 Guide)" },
-      { property: "og:description", content: "Learn how to monitor competitor prices on modern JavaScript-heavy websites without getting blocked — and how to avoid silent monitoring failures." },
-      { property: "og:type", content: "article" },
-      { property: "og:url", content: canonicalUrl },
-      { name: "twitter:card", content: "summary" },
-      { name: "twitter:title", content: "How to Monitor Competitor Prices Without Getting Blocked (2026 Guide)" },
-      { name: "twitter:description", content: "Learn how to monitor competitor prices on modern JavaScript-heavy websites without getting blocked — and how to avoid silent monitoring failures." },
-    ];
-
-    const existingMetas: HTMLMetaElement[] = [];
-    metaTags.forEach(tag => {
-      const meta = document.createElement("meta");
-      if (tag.name) meta.setAttribute("name", tag.name);
-      if (tag.property) meta.setAttribute("property", tag.property);
-      meta.setAttribute("content", tag.content);
-      document.head.appendChild(meta);
-      existingMetas.push(meta);
-    });
-
-    const canonicalLink = document.createElement("link");
-    canonicalLink.setAttribute("rel", "canonical");
-    canonicalLink.setAttribute("href", canonicalUrl);
-    document.head.appendChild(canonicalLink);
-
-    const jsonLd = {
-      "@context": "https://schema.org",
-      "@type": "BlogPosting",
-      "headline": "How to Monitor Competitor Prices Without Getting Blocked (2026 Guide)",
-      "description": "Learn how to monitor competitor prices on modern JavaScript-heavy websites without getting blocked — and how to avoid silent monitoring failures.",
-      "author": {
-        "@type": "Person",
-        "name": AUTHOR
-      },
-      "publisher": {
-        "@type": "Organization",
-        "name": "FetchTheChange"
-      },
-      "mainEntityOfPage": canonicalUrl,
-      "datePublished": PUBLISH_DATE,
-      "dateModified": todayDate
-    };
-    
-    const script = document.createElement("script");
-    script.type = "application/ld+json";
-    script.text = JSON.stringify(jsonLd);
-    document.head.appendChild(script);
-
-    return () => {
-      existingMetas.forEach(meta => meta.remove());
-      canonicalLink.remove();
-      script.remove();
-    };
-  }, []);
-
-  return null;
-}
-
 export default function BlogPriceMonitoring() {
   return (
     <div className="min-h-screen bg-background">
-      <SEOHead />
+      <SEOHead
+        title="How to Monitor Competitor Prices Without Getting Blocked (2026 Guide)"
+        description="Learn how to monitor competitor prices on modern JavaScript-heavy websites without getting blocked — and how to avoid silent monitoring failures."
+        canonicalPath={BLOG_PATH}
+        author={AUTHOR}
+        publishDate={PUBLISH_DATE}
+      />
       <PublicNav />
 
       <article className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -12,11 +12,9 @@ import LandingPage from "@/pages/LandingPage";
 import Dashboard from "@/pages/Dashboard";
 import MonitorDetails from "@/pages/MonitorDetails";
 import Blog from "@/pages/Blog";
-import BlogWhyMonitorsFail from "@/pages/BlogWhyMonitorsFail";
-import BlogComparison from "@/pages/BlogComparison";
-import BlogPriceMonitoring from "@/pages/BlogPriceMonitoring";
 import Pricing from "@/pages/Pricing";
 import AdminErrors from "@/pages/AdminErrors";
+import { blogPosts } from "@/lib/blog-posts";
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme] = useState<"dark" | "light">("dark");
@@ -47,6 +45,14 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
   return <Component {...rest} />;
 }
 
+function BlogPostFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  );
+}
+
 function Router() {
   return (
     <Switch>
@@ -54,9 +60,17 @@ function Router() {
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/monitors/:id" component={() => <ProtectedRoute component={MonitorDetails} />} />
       <Route path="/blog" component={Blog} />
-      <Route path="/blog/why-website-change-monitors-fail-silently" component={BlogWhyMonitorsFail} />
-      <Route path="/blog/fetchthechange-vs-distill-visualping-hexowatch" component={BlogComparison} />
-      <Route path="/blog/monitor-competitor-prices-without-getting-blocked" component={BlogPriceMonitoring} />
+      {blogPosts.map((post) => (
+        <Route
+          key={post.slug}
+          path={`/blog/${post.slug}`}
+          component={() => (
+            <Suspense fallback={<BlogPostFallback />}>
+              <post.component />
+            </Suspense>
+          )}
+        />
+      ))}
       <Route path="/pricing" component={Pricing} />
       <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
       {/* Fallback to 404 */}

@@ -1,90 +1,24 @@
-import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { Link } from "wouter";
 import PublicNav from "@/components/PublicNav";
+import SEOHead from "@/components/SEOHead";
 
 const BLOG_PATH = "/blog/why-website-change-monitors-fail-silently";
 const PUBLISH_DATE = "2026-01-30";
 const AUTHOR = "Christian - developer of FetchTheChange";
 
-function getCanonicalUrl() {
-  const baseUrl = import.meta.env.VITE_PUBLIC_BASE_URL || 
-    (typeof window !== "undefined" ? window.location.origin : "https://fetch-the-change.replit.app");
-  return `${baseUrl}${BLOG_PATH}`;
-}
-
-function SEOHead() {
-  useEffect(() => {
-    const canonicalUrl = getCanonicalUrl();
-    const todayDate = new Date().toISOString().split('T')[0];
-    
-    document.title = "Why Website Change Monitors Fail Silently on JavaScript-Heavy Sites | FetchTheChange";
-    
-    const metaTags = [
-      { name: "description", content: "Most website change monitors fail silently when JavaScript or CSS selectors break. Learn why this happens and how to detect it before you miss important changes." },
-      { property: "og:title", content: "Why Website Change Monitors Fail Silently on JavaScript-Heavy Sites" },
-      { property: "og:description", content: "Most website change monitors fail silently when JavaScript or CSS selectors break. Learn why this happens and how to detect it before you miss important changes." },
-      { property: "og:type", content: "article" },
-      { property: "og:url", content: canonicalUrl },
-      { name: "twitter:card", content: "summary" },
-      { name: "twitter:title", content: "Why Website Change Monitors Fail Silently on JavaScript-Heavy Sites" },
-      { name: "twitter:description", content: "Most website change monitors fail silently when JavaScript or CSS selectors break. Learn why this happens and how to detect it before you miss important changes." },
-    ];
-
-    const existingMetas: HTMLMetaElement[] = [];
-    metaTags.forEach(tag => {
-      const meta = document.createElement("meta");
-      if (tag.name) meta.setAttribute("name", tag.name);
-      if (tag.property) meta.setAttribute("property", tag.property);
-      meta.setAttribute("content", tag.content);
-      document.head.appendChild(meta);
-      existingMetas.push(meta);
-    });
-
-    const canonicalLink = document.createElement("link");
-    canonicalLink.setAttribute("rel", "canonical");
-    canonicalLink.setAttribute("href", canonicalUrl);
-    document.head.appendChild(canonicalLink);
-
-    const jsonLd = {
-      "@context": "https://schema.org",
-      "@type": "BlogPosting",
-      "headline": "Why Website Change Monitors Fail Silently on JavaScript-Heavy Sites",
-      "description": "Most website change monitors fail silently when JavaScript or CSS selectors break. Learn why this happens and how to detect it before you miss important changes.",
-      "author": {
-        "@type": "Person",
-        "name": AUTHOR
-      },
-      "publisher": {
-        "@type": "Organization",
-        "name": "FetchTheChange"
-      },
-      "mainEntityOfPage": canonicalUrl,
-      "datePublished": PUBLISH_DATE,
-      "dateModified": todayDate
-    };
-    
-    const script = document.createElement("script");
-    script.type = "application/ld+json";
-    script.text = JSON.stringify(jsonLd);
-    document.head.appendChild(script);
-
-    return () => {
-      existingMetas.forEach(meta => meta.remove());
-      canonicalLink.remove();
-      script.remove();
-    };
-  }, []);
-
-  return null;
-}
-
 export default function BlogWhyMonitorsFail() {
   return (
     <div className="min-h-screen bg-background">
-      <SEOHead />
+      <SEOHead
+        title="Why Website Change Monitors Fail Silently on JavaScript-Heavy Sites | FetchTheChange"
+        description="Most website change monitors fail silently when JavaScript or CSS selectors break. Learn why this happens and how to detect it before you miss important changes."
+        canonicalPath={BLOG_PATH}
+        author={AUTHOR}
+        publishDate={PUBLISH_DATE}
+      />
       <PublicNav />
 
       <article className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">

@@ -3,30 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight } from "lucide-react";
 import PublicNav from "@/components/PublicNav";
-
-const blogPosts = [
-  {
-    slug: "monitor-competitor-prices-without-getting-blocked",
-    title: "How to Monitor Competitor Prices Without Getting Blocked (2026 Guide)",
-    description: "Learn how to monitor competitor prices on modern JavaScript-heavy websites without getting blocked — and how to avoid silent monitoring failures.",
-    category: "Price Monitoring",
-    date: "2026-02-13",
-  },
-  {
-    slug: "fetchthechange-vs-distill-visualping-hexowatch",
-    title: "FetchTheChange vs Distill, Visualping, Hexowatch (and others): Which Website Change Monitor Should You Use?",
-    description: "A neutral comparison of website change monitoring tools for JavaScript-heavy sites, selector breakage detection, and value-level monitoring.",
-    category: "Comparison",
-    date: "2026-02-01",
-  },
-  {
-    slug: "why-website-change-monitors-fail-silently",
-    title: "Why Website Change Monitors Fail Silently on JavaScript-Heavy Sites",
-    description: "Modern websites render content dynamically with JavaScript. Most monitoring tools fetch static HTML and miss critical changes entirely.",
-    category: "Website Monitoring",
-    date: "2026-01-30",
-  },
-];
+import { blogPosts } from "@/lib/blog-posts";
 
 export default function Blog() {
   return (
@@ -51,10 +28,10 @@ export default function Blog() {
                   <div className="flex items-center gap-2 mb-2">
                     <Badge variant="secondary">{post.category}</Badge>
                     <span className="text-sm text-muted-foreground">
-                      {new Date(post.date).toLocaleDateString("en-US", { 
-                        year: "numeric", 
-                        month: "long", 
-                        day: "numeric" 
+                      {new Date(post.date).toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric"
                       })}
                     </span>
                   </div>
