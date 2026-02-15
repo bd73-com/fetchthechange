@@ -30,6 +30,9 @@ vi.mock("./browserlessTracker", () => ({
 
 vi.mock("../utils/ssrf", () => ({
   validateUrlBeforeFetch: vi.fn().mockResolvedValue(undefined),
+  ssrfSafeFetch: vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+    return globalThis.fetch(url, init);
+  }),
 }));
 
 import {
@@ -1286,15 +1289,35 @@ describe("checkMonitor", () => {
   });
 
   it("rejects monitors targeting private/internal URLs (SSRF protection)", async () => {
-    const { validateUrlBeforeFetch } = await import("../utils/ssrf");
-    const mockValidate = validateUrlBeforeFetch as ReturnType<typeof vi.fn>;
-    mockValidate.mockRejectedValueOnce(new Error("SSRF blocked: This hostname is not allowed"));
+    const { ssrfSafeFetch } = await import("../utils/ssrf");
+    const mockSafeFetch = ssrfSafeFetch as ReturnType<typeof vi.fn>;
+    mockSafeFetch.mockRejectedValueOnce(new Error("SSRF blocked: This hostname is not allowed"));
 
     const monitor = makeMonitor({ url: "http://127.0.0.1/admin" });
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
     expect(result.error).toBe("SSRF blocked: This hostname is not allowed");
-    expect(mockValidate).toHaveBeenCalledWith("http://127.0.0.1/admin");
+    expect(mockSafeFetch).toHaveBeenCalledWith(
+      "http://127.0.0.1/admin",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
+  });
+
+  it("uses ssrfSafeFetch for all HTTP requests (redirect safety)", async () => {
+    const { ssrfSafeFetch } = await import("../utils/ssrf");
+    const mockSafeFetch = ssrfSafeFetch as ReturnType<typeof vi.fn>;
+
+    const html = `<html><body><span class="price">$19.99</span></body></html>`;
+    mockSafeFetch.mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    const monitor = makeMonitor({ currentValue: "$19.99" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(mockSafeFetch).toHaveBeenCalledWith(
+      "https://example.com",
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
   });
 });
