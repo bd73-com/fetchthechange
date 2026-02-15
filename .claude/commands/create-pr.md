@@ -1,22 +1,19 @@
-Review the Pull Request on the current branch, fix any issues found, merge it, and clean up the branch.
+Create a GitHub Pull Request for the current branch with a generated title and description.
 
 ## Instructions
 
 1. Run `git diff main...HEAD` to see all changes on this branch.
-2. For each changed file, read the full file to understand context.
-3. Review the changes for:
-   - **Bugs**: Logic errors, null handling gaps, race conditions, off-by-one mistakes
-   - **Security**: Injection, auth issues, data exposure, input validation gaps
-   - **Architecture**: Separation of concerns, coupling, consistency with existing patterns
-4. Rate each finding as **critical**, **warning**, or **nit**.
-5. If any **critical** or **warning** issues are found:
-   - Fix each issue directly in the source code.
-   - Run `npx vitest run` to verify nothing is broken.
-   - If tests fail, fix them and re-run until all tests pass.
-   - Commit the fixes with a clear message describing what was fixed and why.
-   - Push the fixes with `git push -u origin HEAD`.
-6. Output a summary of findings: what was found, what was fixed, and what was left as-is.
-7. Merge the PR with `gh pr merge --squash --delete-branch`.
-8. Confirm the merge succeeded and the remote branch was deleted.
+2. Run `git log main..HEAD --oneline` to see all commit messages on this branch.
+3. For each changed file, read the full file to understand what was changed and why.
+4. Generate a PR title:
+   - Use a short imperative phrase (under 72 characters)
+   - Summarize the overall intent, not individual commits
+5. Generate a PR description with these sections:
+   - **Summary**: 2-3 sentences explaining what this PR does and why
+   - **Changes**: Bulleted list of the key changes, grouped by area
+   - **How to test**: Step-by-step instructions for verifying the changes
+6. Push the current branch with `git push -u origin HEAD`.
+7. Create the PR with `gh pr create --title "<title>" --body "<description>"` targeting `main`.
+8. Output the PR URL and the generated title and description for review.
 
-Fix real problems, not style preferences. When in doubt, leave it alone and mention it in the summary.
+Write the PR description for a reviewer who has no context. Be specific, not vague.
