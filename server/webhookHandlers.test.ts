@@ -66,6 +66,17 @@ describe("determineTierFromProduct", () => {
     expect(determineTierFromProduct({ metadata: {}, name: "PRO PLAN" })).toBe("pro");
     expect(determineTierFromProduct({ metadata: {}, name: "POWER PLAN" })).toBe("power");
   });
+
+  it("ignores invalid metadata.tier and falls back to name matching", () => {
+    expect(determineTierFromProduct({ metadata: { tier: "enterprise" }, name: "Pro Plan" })).toBe("pro");
+    expect(determineTierFromProduct({ metadata: { tier: "admin" }, name: "Power Plan" })).toBe("power");
+    expect(determineTierFromProduct({ metadata: { tier: "invalid" }, name: "Basic Plan" })).toBe("free");
+  });
+
+  it("handles null metadata gracefully", () => {
+    expect(determineTierFromProduct({ metadata: null, name: "Pro Plan" })).toBe("pro");
+    expect(determineTierFromProduct({ metadata: null, name: "Basic" })).toBe("free");
+  });
 });
 
 describe("WebhookHandlers.processWebhook", () => {
