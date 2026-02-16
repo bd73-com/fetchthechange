@@ -4,6 +4,28 @@ import { authStorage } from './replit_integrations/auth/storage';
 import { ErrorLogger } from './services/logger';
 import type { UserTier } from '@shared/models/auth';
 
+/**
+ * Determines user tier from a Stripe product.
+ * Priority: explicit metadata.tier > name containing 'power' > name containing 'pro' > 'free'.
+ * 'power' is checked before 'pro' so a product like "Professional Power" resolves to 'power'.
+ */
+export function determineTierFromProduct(product: { metadata?: Record<string, string>; name?: string; id?: string }): UserTier {
+  if (product.metadata?.tier) {
+    return product.metadata.tier as UserTier;
+  }
+
+  const name = product.name?.toLowerCase() ?? '';
+  if (name.includes('power')) {
+    return 'power';
+  }
+  if (name.includes('pro')) {
+    return 'pro';
+  }
+
+  console.warn(`[Stripe] Could not determine tier for product ${product.id}, defaulting to free`);
+  return 'free';
+}
+
 export class WebhookHandlers {
   static async processWebhook(payload: Buffer, signature: string): Promise<void> {
     if (!Buffer.isBuffer(payload)) {
@@ -84,21 +106,12 @@ export class WebhookHandlers {
     }
 
     let newTier: UserTier = 'free';
-    
+
     try {
       const stripe = await getUncachableStripeClient();
       const price = await stripe.prices.retrieve(priceId, { expand: ['product'] });
       const product = price.product as any;
-      
-      if (product.metadata?.tier) {
-        newTier = product.metadata.tier as UserTier;
-      } else if (product.name?.toLowerCase().includes('power')) {
-        newTier = 'power';
-      } else if (product.name?.toLowerCase().includes('pro')) {
-        newTier = 'pro';
-      } else {
-        console.warn(`[Stripe] Could not determine tier for product ${product.id}, defaulting to free`);
-      }
+      newTier = determineTierFromProduct(product);
     } catch (error: any) {
       await ErrorLogger.error("stripe", `Error retrieving price ${priceId}`, error instanceof Error ? error : null, { customerId, priceId, subscriptionId: subscription.id });
       await authStorage.updateUser(user.id, {
