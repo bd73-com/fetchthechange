@@ -4,7 +4,8 @@ import { authStorage } from './replit_integrations/auth/storage';
 import { ErrorLogger } from './services/logger';
 import { type UserTier, TIER_LIMITS } from '@shared/models/auth';
 
-const VALID_TIERS = new Set<string>(Object.keys(TIER_LIMITS));
+const VALID_TIERS = new Set<UserTier>(Object.keys(TIER_LIMITS) as UserTier[]);
+const isUserTier = (value: string): value is UserTier => VALID_TIERS.has(value as UserTier);
 
 /**
  * Determines user tier from a Stripe product.
@@ -13,8 +14,8 @@ const VALID_TIERS = new Set<string>(Object.keys(TIER_LIMITS));
  */
 export function determineTierFromProduct(product: { metadata?: Record<string, string> | null; name?: string; id?: string }): UserTier {
   const tier = product.metadata?.tier;
-  if (tier && VALID_TIERS.has(tier)) {
-    return tier as UserTier;
+  if (tier && isUserTier(tier)) {
+    return tier;
   }
 
   const name = product.name?.toLowerCase() ?? '';
