@@ -16,7 +16,8 @@ Review the Pull Request on the current branch, fix any issues found, merge it, a
    - Commit the fixes with a clear message describing what was fixed and why.
    - Push the fixes with `git push -u origin HEAD`.
 6. Output a summary of findings: what was found, what was fixed, and what was left as-is.
-7. Merge the PR with `gh pr merge --squash --delete-branch`.
-8. Confirm the merge succeeded and the remote branch was deleted.
+7. **Ask the user for confirmation before merging.** Present the summary and wait for explicit approval.
+8. If approved, merge the PR with `gh pr merge --squash --delete-branch`.
+9. Confirm the merge succeeded and the remote branch was deleted.
 
 Fix real problems, not style preferences. When in doubt, leave it alone and mention it in the summary.
