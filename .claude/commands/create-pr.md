@@ -13,7 +13,7 @@ Create a GitHub Pull Request for the current branch with a generated title and d
    - **Changes**: Bulleted list of the key changes, grouped by area
    - **How to test**: Step-by-step instructions for verifying the changes
 6. Push the current branch with `git push -u origin HEAD`.
-7. Create the PR with `gh pr create --title "<title>" --body "<description>"` targeting `main`.
+7. Create the PR with `gh pr create --title "<title>" --body "<description>" --base main`.
 8. Output the PR URL and the generated title and description for review.
 
 Write the PR description for a reviewer who has no context. Be specific, not vague.
