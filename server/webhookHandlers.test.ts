@@ -24,10 +24,60 @@ vi.mock("./services/logger", () => ({
   },
 }));
 
-import { WebhookHandlers } from "./webhookHandlers";
+import { WebhookHandlers, determineTierFromProduct } from "./webhookHandlers";
 import { authStorage } from "./replit_integrations/auth/storage";
 
 const mockAuthStorage = vi.mocked(authStorage);
+
+describe("determineTierFromProduct", () => {
+  it("returns tier from explicit metadata.tier", () => {
+    expect(determineTierFromProduct({ metadata: { tier: "pro" }, name: "Anything" })).toBe("pro");
+  });
+
+  it("returns tier from metadata even if name suggests a different tier", () => {
+    expect(determineTierFromProduct({ metadata: { tier: "pro" }, name: "Power Plan" })).toBe("pro");
+  });
+
+  it("returns 'power' when name contains 'power' (no metadata)", () => {
+    expect(determineTierFromProduct({ metadata: {}, name: "Power User Subscription" })).toBe("power");
+  });
+
+  it("returns 'pro' when name contains 'pro' (no metadata)", () => {
+    expect(determineTierFromProduct({ metadata: {}, name: "Pro Plan Monthly" })).toBe("pro");
+  });
+
+  it("returns 'power' over 'pro' when name contains both", () => {
+    expect(determineTierFromProduct({ metadata: {}, name: "Professional Power Bundle" })).toBe("power");
+  });
+
+  it("returns 'free' when name matches nothing", () => {
+    expect(determineTierFromProduct({ metadata: {}, name: "Basic Plan" })).toBe("free");
+  });
+
+  it("returns 'free' when name is undefined", () => {
+    expect(determineTierFromProduct({ metadata: {} })).toBe("free");
+  });
+
+  it("returns 'free' when metadata is undefined and name matches nothing", () => {
+    expect(determineTierFromProduct({ name: "Starter" })).toBe("free");
+  });
+
+  it("is case-insensitive for name matching", () => {
+    expect(determineTierFromProduct({ metadata: {}, name: "PRO PLAN" })).toBe("pro");
+    expect(determineTierFromProduct({ metadata: {}, name: "POWER PLAN" })).toBe("power");
+  });
+
+  it("ignores invalid metadata.tier and falls back to name matching", () => {
+    expect(determineTierFromProduct({ metadata: { tier: "enterprise" }, name: "Pro Plan" })).toBe("pro");
+    expect(determineTierFromProduct({ metadata: { tier: "admin" }, name: "Power Plan" })).toBe("power");
+    expect(determineTierFromProduct({ metadata: { tier: "invalid" }, name: "Basic Plan" })).toBe("free");
+  });
+
+  it("handles null metadata gracefully", () => {
+    expect(determineTierFromProduct({ metadata: null, name: "Pro Plan" })).toBe("pro");
+    expect(determineTierFromProduct({ metadata: null, name: "Basic" })).toBe("free");
+  });
+});
 
 describe("WebhookHandlers.processWebhook", () => {
   beforeEach(() => {
