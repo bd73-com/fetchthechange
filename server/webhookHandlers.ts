@@ -2,16 +2,20 @@ import Stripe from 'stripe';
 import { getStripeSync, getUncachableStripeClient, getWebhookSecret } from './stripeClient';
 import { authStorage } from './replit_integrations/auth/storage';
 import { ErrorLogger } from './services/logger';
-import type { UserTier } from '@shared/models/auth';
+import { type UserTier, TIER_LIMITS } from '@shared/models/auth';
+
+const VALID_TIERS = new Set<UserTier>(Object.keys(TIER_LIMITS) as UserTier[]);
+const isUserTier = (value: string): value is UserTier => VALID_TIERS.has(value as UserTier);
 
 /**
  * Determines user tier from a Stripe product.
  * Priority: explicit metadata.tier > name containing 'power' > name containing 'pro' > 'free'.
  * 'power' is checked before 'pro' so a product like "Professional Power" resolves to 'power'.
  */
-export function determineTierFromProduct(product: { metadata?: Record<string, string>; name?: string; id?: string }): UserTier {
-  if (product.metadata?.tier) {
-    return product.metadata.tier as UserTier;
+export function determineTierFromProduct(product: { metadata?: Record<string, string> | null; name?: string; id?: string }): UserTier {
+  const tier = product.metadata?.tier;
+  if (tier && isUserTier(tier)) {
+    return tier;
   }
 
   const name = product.name?.toLowerCase() ?? '';
