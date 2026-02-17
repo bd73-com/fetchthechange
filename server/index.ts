@@ -129,8 +129,16 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      if (isDev && (origin.endsWith('.replit.dev') || origin.startsWith('http://localhost'))) {
-        return callback(null, true);
+      if (isDev) {
+        try {
+          const { hostname, protocol } = new URL(origin);
+          if (
+            protocol === "http:" &&
+            (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1")
+          ) {
+            return callback(null, true);
+          }
+        } catch {}
       }
       callback(new Error('Not allowed by CORS'));
     },
@@ -144,6 +152,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   app.use("/api/", csrfProtection(allowedOrigins, isDev));
 
   // Logging Middleware
+  const SENSITIVE_LOG_PATHS = ['/api/stripe/', '/api/admin/', '/api/callback', '/api/login'];
   app.use((req, res, next) => {
     const start = Date.now();
     const path = req.path;
@@ -160,7 +169,13 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       if (path.startsWith("/api")) {
         let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
         if (capturedJsonResponse) {
-          logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+          const isSensitive = SENSITIVE_LOG_PATHS.some(p => path.startsWith(p));
+          if (isSensitive) {
+            logLine += ` :: [body redacted]`;
+          } else {
+            const body = JSON.stringify(capturedJsonResponse);
+            logLine += ` :: ${body.length > 500 ? body.substring(0, 500) + '...[truncated]' : body}`;
+          }
         }
         console.log(logLine);
       }
@@ -175,10 +190,9 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   // Error Handler
   app.use((err: any, _req: any, res: any, next: any) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
     console.error("Internal Server Error:", err);
     if (res.headersSent) return next(err);
-    return res.status(status).json({ message });
+    return res.status(status).json({ message: "Internal Server Error" });
   });
 
   // Setup Vite or Static Files
