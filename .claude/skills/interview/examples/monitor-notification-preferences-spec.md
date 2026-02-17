@@ -57,7 +57,7 @@ Allow users to configure per-monitor notification preferences including quiet ho
 - Users can set quiet hours per monitor (start/end time in HH:MM format, user's local timezone)
 - Users can enable digest mode per monitor (batch changes into a single daily email instead of immediate)
 - Users can override the notification email per monitor (defaults to user's `notificationEmail`)
-- Users can set a change sensitivity threshold (minimum character difference to trigger notification)
+- Users can set a change sensitivity threshold (minimum character difference to trigger notification, inclusive: changes >= threshold trigger)
 - Preferences are optional — monitors without explicit preferences use current default behavior
 - The scheduler must check notification preferences before sending emails on detected changes
 
@@ -78,7 +78,7 @@ Change detected by scheduler
 │   ├── NO → Use default behavior (immediate email if emailEnabled)
 │   └── YES → Continue with preferences
 │
-├── Change meets sensitivity threshold?
+├── Change meets sensitivity threshold? (change_size >= threshold)
 │   ├── NO → Log as minor change, skip notification
 │   └── YES → Continue
 │
@@ -191,7 +191,7 @@ Modified table: `monitors` — no schema changes needed. The `emailEnabled` bool
 ### Happy Path
 - [ ] Given a monitor with quiet hours set to 23:00-07:00 EST, when a change is detected at 2:00 AM EST, then the notification is queued and delivered after 07:00 AM EST
 - [ ] Given a monitor with digest mode enabled, when 3 changes are detected throughout the day, then a single digest email is sent at the next scheduled digest time
-- [ ] Given a monitor with sensitivity threshold of 50, when a change of 60 characters is detected, then a notification is sent
+- [ ] Given a monitor with sensitivity threshold of 50, when a change of exactly 50 characters is detected, then a notification is sent (boundary is inclusive: change >= threshold)
 - [ ] Given a monitor with a notification email override, when a change is detected, then the email is sent to the override address instead of the user's default
 
 ### Negative / Prohibition Tests
@@ -203,7 +203,7 @@ Modified table: `monitors` — no schema changes needed. The `emailEnabled` bool
 ### Edge Cases
 - [ ] Given a monitor with no notification preferences set, when a change is detected, then the default behavior (immediate email if `emailEnabled`) is used — no regression
 - [ ] Given quiet hours spanning midnight (23:00-07:00), when a change is detected at 23:30, then it is correctly identified as within quiet hours
-- [ ] Given a sensitivity threshold of 50, when a change of exactly 50 characters is detected, then a notification IS sent (boundary inclusive)
+- [ ] Given a sensitivity threshold of 50, when a change of 49 characters is detected, then a notification is NOT sent (below threshold)
 - [ ] Given this is the first-ever change for a monitor with sensitivity threshold of 100, when a 10-character change is detected, then a notification IS sent (first change exception)
 
 ### Integration / Resilience
