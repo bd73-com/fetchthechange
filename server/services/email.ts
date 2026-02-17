@@ -26,6 +26,12 @@ function escapeHtml(str: string | null | undefined): string {
     .replace(/'/g, '&#39;');
 }
 
+/** Sanitize text for plain-text email body to prevent header injection. */
+function sanitizePlainText(str: string | null | undefined): string {
+  if (!str) return '';
+  return str.replace(/[\r\n]+/g, ' ').trim();
+}
+
 async function canSendEmail(monitor: Monitor): Promise<{ allowed: boolean; reason?: string }> {
   const user = await authStorage.getUser(monitor.userId);
   const tier = (user?.tier || "free") as UserTier;
@@ -96,11 +102,11 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
       text: `
         Hello,
 
-        A change was detected on your monitored page: ${monitor.name}
-        URL: ${monitor.url}
+        A change was detected on your monitored page: ${sanitizePlainText(monitor.name)}
+        URL: ${sanitizePlainText(monitor.url)}
 
-        New Value: ${newValue}
-        Old Value: ${oldValue}
+        New Value: ${sanitizePlainText(newValue)}
+        Old Value: ${sanitizePlainText(oldValue)}
 
         Check your dashboard for more details.
 
