@@ -98,7 +98,7 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     const response = await resend.emails.send({
       from: fromAddress,
       to: recipientEmail,
-      subject: `FetchTheChange: ${monitor.name}`,
+      subject: `FetchTheChange: ${sanitizePlainText(monitor.name)}`,
       text: `
         Hello,
 

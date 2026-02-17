@@ -38,7 +38,7 @@ export function csrfProtection(allowedOrigins: string[], isDev: boolean) {
     if (isDev) {
       try {
         const hostname = new URL(origin).hostname;
-        if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.replit.dev')) {
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
           return next();
         }
       } catch {}

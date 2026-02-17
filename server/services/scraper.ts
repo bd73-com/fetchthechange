@@ -197,17 +197,27 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
       locale: "en-US"
     });
+    // Intercept all navigation requests (including redirects) to enforce SSRF validation
+    await context.route('**/*', async (route) => {
+      if (!route.request().isNavigationRequest()) return route.continue();
+      try {
+        await validateUrlBeforeFetch(route.request().url());
+        return route.continue();
+      } catch {
+        return route.abort();
+      }
+    });
     const page = await context.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    
+
     await tryDismissConsent(page);
     await page.waitForTimeout(1200);
     await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
 
     const content = await page.content();
     const block = detectPageBlockReason(content);
-    
+
     const trimmedSelector = selector.trim();
     const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
     const effectiveSelector = isClassName ? `.${trimmedSelector}` : trimmedSelector;
@@ -572,6 +582,16 @@ export async function discoverSelectors(
     const context = await browser.newContext({
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
       locale: "en-US"
+    });
+    // Intercept all navigation requests (including redirects) to enforce SSRF validation
+    await context.route('**/*', async (route) => {
+      if (!route.request().isNavigationRequest()) return route.continue();
+      try {
+        await validateUrlBeforeFetch(route.request().url());
+        return route.continue();
+      } catch {
+        return route.abort();
+      }
     });
     const page = await context.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });

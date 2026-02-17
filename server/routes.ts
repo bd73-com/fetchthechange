@@ -177,9 +177,9 @@ export async function registerRoutes(
       }
     } catch (error: any) {
       console.error("[Test Email] Error:", error);
-      res.status(500).json({ 
-        success: false, 
-        message: error.message,
+      res.status(500).json({
+        success: false,
+        message: "Failed to send test email",
         details: {
           apiKeyConfigured: !!process.env.RESEND_API_KEY
         }
@@ -604,6 +604,9 @@ export async function registerRoutes(
 
   // Admin error logs endpoint (restricted to Power tier users, scoped to own monitors)
   const APP_OWNER_ID = process.env.APP_OWNER_ID;
+  if (!APP_OWNER_ID) {
+    console.warn("APP_OWNER_ID not set; owner-only admin endpoints will be inaccessible.");
+  }
   app.get("/api/admin/error-logs", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
