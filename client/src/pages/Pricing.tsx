@@ -132,13 +132,7 @@ export default function Pricing() {
               <p className="text-muted-foreground text-sm">
                 You won't be able to create new monitors until you upgrade or delete existing ones. Your current monitors will continue working.
               </p>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-2">Do you offer refunds?</h3>
-              <p className="text-muted-foreground text-sm">
-                Yes, we offer a 14-day money-back guarantee. Contact support if you're not satisfied.
-              </p>
-            </div>
+           </div>
           </div>
         </div>
       </div>
