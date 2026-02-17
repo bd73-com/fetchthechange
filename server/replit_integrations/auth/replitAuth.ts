@@ -100,7 +100,16 @@ export async function setupAuth(app: Express) {
     }
   };
 
-  passport.serializeUser((user: Express.User, cb) => cb(null, user));
+  passport.serializeUser((user: any, cb) => {
+    // Only persist the fields needed for authentication — avoid leaking
+    // the full user object (tokens, profile data) into the session store.
+    cb(null, {
+      claims: user.claims,
+      access_token: user.access_token,
+      refresh_token: user.refresh_token,
+      expires_at: user.expires_at,
+    });
+  });
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", (req, res, next) => {

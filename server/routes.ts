@@ -30,7 +30,7 @@ import {
 // ------------------------------------------------------------------
 // URL VALIDATION - SSRF PROTECTION (shared module)
 // ------------------------------------------------------------------
-import { isPrivateUrl } from './utils/ssrf';
+import { isPrivateUrl, ssrfSafeFetch } from './utils/ssrf';
 
 // ------------------------------------------------------------------
 // 1. CHECK MONITOR FUNCTION
@@ -84,17 +84,28 @@ export async function registerRoutes(
   // Start Scheduler
   startScheduler();
 
-  // Debug Browserless Endpoint
+  // Debug Browserless Endpoint (admin-only, SSRF-validated)
   app.post("/api/debug/browserless", isAuthenticated, async (req: any, res) => {
     try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
       const { url, selector } = req.body;
       if (!url || !selector) {
         return res.status(400).json({ message: "URL and Selector are required" });
       }
 
+      const urlError = await isPrivateUrl(url);
+      if (urlError) {
+        return res.status(400).json({ message: urlError });
+      }
+
       console.log(`[Debug] Running Browserless extraction for: ${url}`);
       const result = await extractWithBrowserless(url, selector);
-      
+
       res.json({
         urlAfter: result.urlAfter,
         title: result.title,
@@ -103,7 +114,7 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("[Debug] Browserless endpoint error:", error);
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: "Browserless extraction failed" });
     }
   });
 
@@ -166,9 +177,9 @@ export async function registerRoutes(
       }
     } catch (error: any) {
       console.error("[Test Email] Error:", error);
-      res.status(500).json({ 
-        success: false, 
-        message: error.message,
+      res.status(500).json({
+        success: false,
+        message: "Failed to send test email",
         details: {
           apiKeyConfigured: !!process.env.RESEND_API_KEY
         }
@@ -187,10 +198,10 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Forbidden" });
       }
 
-      // Static Phase
+      // Static Phase (uses ssrfSafeFetch to validate URL at fetch time)
       let staticHtml = "";
       try {
-        const response = await fetch(monitor.url, {
+        const response = await ssrfSafeFetch(monitor.url, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -240,7 +251,7 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("[Debug] Selector debug endpoint error:", error);
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ message: "Selector debug failed" });
     }
   });
 
@@ -290,7 +301,7 @@ export async function registerRoutes(
           code: "BROWSER_CLOSED"
         });
       }
-      res.status(500).json({ message: `Failed to analyze page: ${errorMessage || "Unknown error"}. Please try again.` });
+      res.status(500).json({ message: "Failed to analyze page. Please try again." });
     }
   });
 
@@ -541,7 +552,7 @@ export async function registerRoutes(
       res.json({ url: session.url });
     } catch (error: any) {
       console.error("Error creating checkout session:", error);
-      res.status(500).json({ message: error.message || "Failed to create checkout session" });
+      res.status(500).json({ message: "Failed to create checkout session" });
     }
   });
 
@@ -592,7 +603,10 @@ export async function registerRoutes(
   });
 
   // Admin error logs endpoint (restricted to Power tier users, scoped to own monitors)
-  const APP_OWNER_ID = process.env.APP_OWNER_ID || "53759728";
+  const APP_OWNER_ID = process.env.APP_OWNER_ID;
+  if (!APP_OWNER_ID) {
+    console.warn("APP_OWNER_ID not set; owner-only admin endpoints will be inaccessible.");
+  }
   app.get("/api/admin/error-logs", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
@@ -709,7 +723,7 @@ export async function registerRoutes(
   // Catch-all error handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     ErrorLogger.error("api", err.message || "Unhandled API error", err instanceof Error ? err : null, { status: err.status || 500 });
-    res.status(err.status || 500).json({ message: err.message || "Internal server error" });
+    res.status(err.status || 500).json({ message: "Internal server error" });
   });
 
   return httpServer;

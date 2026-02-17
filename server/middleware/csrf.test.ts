@@ -186,7 +186,7 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("allows *.localhost origin in dev mode", () => {
+    it("rejects *.localhost subdomain origin in dev mode", () => {
       const middleware = csrfProtection(allowedOrigins, true);
       const req = mockReq({
         method: "POST",
@@ -196,10 +196,11 @@ describe("csrfProtection", () => {
 
       middleware(req, res, next);
 
-      expect(next).toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
+      expect(res._status).toBe(403);
     });
 
-    it("allows *.replit.dev origin in dev mode", () => {
+    it("rejects *.replit.dev origin in dev mode", () => {
       const middleware = csrfProtection(allowedOrigins, true);
       const req = mockReq({
         method: "POST",
@@ -209,7 +210,8 @@ describe("csrfProtection", () => {
 
       middleware(req, res, next);
 
-      expect(next).toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
+      expect(res._status).toBe(403);
     });
 
     it("still rejects unknown origin in dev mode", () => {
