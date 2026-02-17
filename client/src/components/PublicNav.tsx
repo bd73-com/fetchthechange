@@ -9,6 +9,7 @@ const navLinks = [
   { label: "Use cases", href: "/#use-cases" },
   { label: "Blog", href: "/blog" },
   { label: "Pricing", href: "/pricing" },
+  { label: "Support", href: "/support" },
 ];
 
 export default function PublicNav() {
