@@ -634,7 +634,11 @@ export async function registerRoutes(
       const { Resend } = await import("resend");
       const resend = new Resend(process.env.RESEND_API_KEY);
       const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
-      const supportEmail = process.env.SUPPORT_EMAIL || "christian@ustvedtkavli.no";
+      const supportEmail = process.env.SUPPORT_EMAIL;
+      if (!supportEmail) {
+        console.error("[Support] SUPPORT_EMAIL not configured");
+        return res.status(500).json({ message: "Support email is not configured." });
+      }
 
       const escapeHtml = (str: string) =>
         str
