@@ -102,6 +102,13 @@ export const emailUpdateRateLimiter = createTieredRateLimiter("emailUpdate", {
   message: "Too many email update attempts. Please try again later."
 });
 
+export const contactFormRateLimiter = createTieredRateLimiter("contactForm", {
+  free: { max: 3, windowMs: 60 * 60 * 1000 },
+  pro: { max: 5, windowMs: 60 * 60 * 1000 },
+  power: { max: 10, windowMs: 60 * 60 * 1000 },
+  message: "Too many support requests. Please try again later."
+});
+
 export const unauthenticatedRateLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 20,

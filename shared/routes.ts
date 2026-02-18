@@ -17,6 +17,15 @@ export const errorSchemas = {
   }),
 };
 
+export const contactFormSchema = z.object({
+  email: z.string().email("Please enter a valid email address"),
+  category: z.enum(["bug", "feature", "billing", "general"], {
+    required_error: "Please select a category",
+  }),
+  subject: z.string().min(3, "Subject must be at least 3 characters").max(200, "Subject must be under 200 characters"),
+  message: z.string().min(10, "Message must be at least 10 characters").max(5000, "Message must be under 5000 characters"),
+});
+
 export const api = {
   monitors: {
     list: {
@@ -109,6 +118,18 @@ export const api = {
         401: errorSchemas.unauthorized,
       }
     }
+  },
+  support: {
+    contact: {
+      method: 'POST' as const,
+      path: '/api/support/contact',
+      input: contactFormSchema,
+      responses: {
+        200: z.object({ success: z.boolean(), message: z.string() }),
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+      },
+    },
   },
 };
 

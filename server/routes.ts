@@ -23,6 +23,7 @@ import {
   checkMonitorRateLimiter,
   suggestSelectorsRateLimiter,
   emailUpdateRateLimiter,
+  contactFormRateLimiter,
   unauthenticatedRateLimiter
 } from "./middleware/rateLimiter";
 
@@ -599,6 +600,101 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error creating portal session:", error);
       res.status(500).json({ message: "Failed to open billing portal" });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // SUPPORT CONTACT FORM
+  // ------------------------------------------------------------------
+  app.post(api.support.contact.path, isAuthenticated, contactFormRateLimiter, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+
+      if (!user) {
+        return res.status(401).json({ message: "User not found" });
+      }
+
+      const input = api.support.contact.input.parse(req.body);
+
+      const categoryLabels: Record<string, string> = {
+        bug: "Bug Report",
+        feature: "Feature Request",
+        billing: "Billing",
+        general: "General",
+      };
+
+      if (!process.env.RESEND_API_KEY) {
+        console.log(`[Support] RESEND_API_KEY not set. Logging contact form submission.`);
+        console.log(`[Support] From: ${input.email}, Category: ${input.category}, Subject: ${input.subject}`);
+        console.log(`[Support] Message: ${input.message}`);
+        return res.json({ success: true, message: "Your message has been received. We'll get back to you soon." });
+      }
+
+      const { Resend } = await import("resend");
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
+      const supportEmail = process.env.SUPPORT_EMAIL || fromAddress;
+
+      const escapeHtml = (str: string) =>
+        str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      const escapedEmail = escapeHtml(input.email);
+      const escapedSubject = escapeHtml(input.subject);
+      const escapedMessage = escapeHtml(input.message);
+
+      const response = await resend.emails.send({
+        from: fromAddress,
+        to: supportEmail,
+        replyTo: input.email,
+        subject: `[Support - ${categoryLabels[input.category]}] ${input.subject}`,
+        text: [
+          "Support Request from FetchTheChange",
+          "",
+          `From: ${input.email}`,
+          `User ID: ${userId}`,
+          `User Tier: ${user.tier || "free"}`,
+          `Category: ${categoryLabels[input.category]}`,
+          `Subject: ${input.subject}`,
+          "",
+          "Message:",
+          input.message,
+        ].join("\n"),
+        html: `
+<h2>Support Request</h2>
+<table style="border-collapse:collapse;">
+  <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">From:</td><td>${escapedEmail}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">User ID:</td><td>${userId}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Tier:</td><td>${user.tier || "free"}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Category:</td><td>${categoryLabels[input.category]}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Subject:</td><td>${escapedSubject}</td></tr>
+</table>
+<hr/>
+<h3>Message</h3>
+<p style="white-space:pre-wrap;">${escapedMessage}</p>
+<hr/>
+<p style="color:#888;font-size:12px;">Sent via FetchTheChange Support Form</p>
+        `.trim(),
+      });
+
+      if (response.error) {
+        console.error("[Support] Resend error:", response.error);
+        return res.status(500).json({ message: "Failed to send your message. Please try again." });
+      }
+
+      console.log(`[Support] Contact form sent for user ${userId}, Resend ID: ${response.data?.id}`);
+      res.json({ success: true, message: "Your message has been sent. We'll get back to you soon." });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      console.error("[Support] Contact form error:", err);
+      res.status(500).json({ message: "Failed to send your message. Please try again." });
     }
   });
 
