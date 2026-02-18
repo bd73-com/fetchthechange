@@ -141,7 +141,7 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     console.log(`[Email] Sent to ${recipientEmail} for monitor ${monitor.id}, id: ${response.data?.id}`);
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    await ErrorLogger.error("email", `Failed to send email for monitor ${monitor.id}`, error instanceof Error ? error : null, { monitorId: monitor.id });
+    await ErrorLogger.error("email", `"${monitor.name}" — notification email failed to send. Check that your email address is valid. If this keeps happening, contact support.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url });
     return { success: false, error: error.message };
   }
 }

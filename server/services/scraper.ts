@@ -167,7 +167,7 @@ async function tryDismissConsent(page: any): Promise<boolean> {
 /**
  * Retries extraction using Browserless.
  */
-export async function extractWithBrowserless(url: string, selector: string, monitorId?: number): Promise<{
+export async function extractWithBrowserless(url: string, selector: string, monitorId?: number, monitorName?: string): Promise<{
   value: string | null,
   urlAfter: string,
   title: string,
@@ -240,14 +240,15 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       reason: block.reason
     };
   } catch (error) {
-    await ErrorLogger.error("scraper", "Browserless extraction failed", error instanceof Error ? error : null, { url, selector, ...(monitorId ? { monitorId } : {}) });
+    const label = monitorName ? `"${monitorName}" — browser` : "Browser";
+    await ErrorLogger.error("scraper", `${label}-based extraction failed — the page may be unreachable or blocking automated access. Check that the URL loads in a normal browser.`, error instanceof Error ? error : null, { url, selector, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
     throw error;
   } finally {
     if (browser) await browser.close();
   }
 }
 
-async function fetchWithCurl(url: string, monitorId?: number): Promise<string> {
+async function fetchWithCurl(url: string, monitorId?: number, monitorName?: string): Promise<string> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -260,7 +261,8 @@ async function fetchWithCurl(url: string, monitorId?: number): Promise<string> {
     clearTimeout(timeout);
     return await response.text();
   } catch (error) {
-    await ErrorLogger.error("scraper", "Fetch fallback failed", error instanceof Error ? error : null, { url, ...(monitorId ? { monitorId } : {}) });
+    const label = monitorName ? `"${monitorName}" — page` : "Page";
+    await ErrorLogger.error("scraper", `${label} fetch with curl failed — the site returned an error or is blocking the request. Verify the URL is correct and the site is accessible.`, error instanceof Error ? error : null, { url, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
     throw error;
   }
 }
@@ -293,7 +295,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       html = await response.text();
     } catch (e: any) {
       if (e.code === 'UND_ERR_HEADERS_OVERFLOW' || (e.cause && e.cause.code === 'UND_ERR_HEADERS_OVERFLOW')) {
-        html = await fetchWithCurl(monitor.url, monitor.id);
+        html = await fetchWithCurl(monitor.url, monitor.id, monitor.name);
       } else {
         throw e;
       }
@@ -338,7 +340,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           retryHtml = await retryResponse.text();
         } catch (e: any) {
           if (e.code === 'UND_ERR_HEADERS_OVERFLOW' || (e.cause && e.cause.code === 'UND_ERR_HEADERS_OVERFLOW')) {
-            retryHtml = await fetchWithCurl(monitor.url, monitor.id);
+            retryHtml = await fetchWithCurl(monitor.url, monitor.id, monitor.name);
           }
         }
         if (retryHtml) {
@@ -367,13 +369,13 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         const startTime = Date.now();
         let browserlessSuccess = false;
         try {
-          const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id);
+          const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
           browserlessSuccess = true;
           newValue = result.value;
           block = { blocked: result.blocked, reason: result.reason };
           console.log(`stage=rendered selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
         } catch (err) {
-          await ErrorLogger.error("scraper", "Browserless fallback failed", err instanceof Error ? err : null, { monitorId: monitor.id, url: monitor.url });
+          await ErrorLogger.error("scraper", `"${monitor.name}" — rendered page extraction failed. The site may block automated browsers or the page took too long to load. Try simplifying the selector or check if the site requires login.`, err instanceof Error ? err : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
         } finally {
           const durationMs = Date.now() - startTime;
           await BrowserlessUsageTracker.recordUsage(monitor.userId, monitor.id, durationMs, browserlessSuccess).catch(() => {});
@@ -439,7 +441,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       };
     }
   } catch (error) {
-    await ErrorLogger.error("scraper", `Monitor check failed for monitor ${monitor.id}`, error instanceof Error ? error : null, { monitorId: monitor.id, url: monitor.url, selector: monitor.selector });
+    await ErrorLogger.error("scraper", `"${monitor.name}" failed to check — the page could not be fetched or parsed. Verify the URL is accessible and the CSS selector is correct.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
 
     await storage.updateMonitor(monitor.id, {
       lastChecked: new Date(),
