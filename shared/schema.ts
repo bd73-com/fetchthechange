@@ -94,89 +94,13 @@ export const resendUsage = pgTable("resend_usage", {
 
 export type ResendUsageRecord = typeof resendUsage.$inferSelect;
 
-// Email campaigns
-export const campaigns = pgTable("campaigns", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  subject: text("subject").notNull(),
-  htmlBody: text("html_body").notNull(),
-  textBody: text("text_body"),
-  status: text("status").default("draft").notNull(), // 'draft' | 'sending' | 'sent' | 'partially_sent' | 'cancelled'
-  filters: jsonb("filters"), // { tier?: string[], signupBefore?, signupAfter?, minMonitors?, maxMonitors?, hasActiveMonitors? }
-  totalRecipients: integer("total_recipients").default(0).notNull(),
-  sentCount: integer("sent_count").default(0).notNull(),
-  failedCount: integer("failed_count").default(0).notNull(),
-  deliveredCount: integer("delivered_count").default(0).notNull(),
-  openedCount: integer("opened_count").default(0).notNull(),
-  clickedCount: integer("clicked_count").default(0).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  scheduledAt: timestamp("scheduled_at"),
-  sentAt: timestamp("sent_at"),
-  completedAt: timestamp("completed_at"),
-}, (table) => ({
-  statusIdx: index("campaigns_status_idx").on(table.status),
-  createdAtIdx: index("campaigns_created_at_idx").on(table.createdAt),
-}));
-
-export const campaignRecipients = pgTable("campaign_recipients", {
-  id: serial("id").primaryKey(),
-  campaignId: integer("campaign_id").notNull().references(() => campaigns.id),
-  userId: text("user_id").notNull().references(() => users.id),
-  recipientEmail: text("recipient_email").notNull(),
-  status: text("status").default("pending").notNull(), // 'pending' | 'sent' | 'delivered' | 'opened' | 'clicked' | 'bounced' | 'failed'
-  resendId: text("resend_id"),
-  sentAt: timestamp("sent_at"),
-  deliveredAt: timestamp("delivered_at"),
-  openedAt: timestamp("opened_at"),
-  clickedAt: timestamp("clicked_at"),
-  failedAt: timestamp("failed_at"),
-  failureReason: text("failure_reason"),
-}, (table) => ({
-  campaignIdx: index("campaign_recipients_campaign_idx").on(table.campaignId),
-  userIdx: index("campaign_recipients_user_idx").on(table.userId),
-  resendIdIdx: index("campaign_recipients_resend_id_idx").on(table.resendId),
-  statusIdx: index("campaign_recipients_status_idx").on(table.status),
-}));
-
-export const campaignsRelations = relations(campaigns, ({ many }) => ({
-  recipients: many(campaignRecipients),
-}));
-
-export const campaignRecipientsRelations = relations(campaignRecipients, ({ one }) => ({
-  campaign: one(campaigns, {
-    fields: [campaignRecipients.campaignId],
-    references: [campaigns.id],
-  }),
-  user: one(users, {
-    fields: [campaignRecipients.userId],
-    references: [users.id],
-  }),
-}));
-
-export const insertCampaignSchema = createInsertSchema(campaigns).omit({
-  id: true,
-  totalRecipients: true,
-  sentCount: true,
-  failedCount: true,
-  deliveredCount: true,
-  openedCount: true,
-  clickedCount: true,
-  createdAt: true,
-  sentAt: true,
-  completedAt: true,
-});
-
-export type Campaign = typeof campaigns.$inferSelect;
-export type InsertCampaign = z.infer<typeof insertCampaignSchema>;
-export type CampaignRecipient = typeof campaignRecipients.$inferSelect;
-
-export const insertMonitorSchema = createInsertSchema(monitors).omit({
-  id: true,
-  userId: true,
-  lastChecked: true,
-  lastChanged: true,
+export const insertMonitorSchema = createInsertSchema(monitors).omit({ 
+  id: true, 
+  userId: true, 
+  lastChecked: true, 
+  lastChanged: true, 
   currentValue: true,
-  createdAt: true
+  createdAt: true 
 });
 
 export type Monitor = typeof monitors.$inferSelect;

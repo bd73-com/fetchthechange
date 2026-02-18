@@ -1,7 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
 import { NotificationEmailDialog } from "@/components/NotificationEmailDialog";
 import { Button } from "@/components/ui/button";
-import { LogOut, LayoutDashboard, FileWarning, HelpCircle, Send } from "lucide-react";
+import { LogOut, LayoutDashboard, FileWarning, HelpCircle } from "lucide-react";
 import { Link } from "wouter";
 
 export default function DashboardNav() {
@@ -25,20 +25,12 @@ export default function DashboardNav() {
             Welcome, <span className="font-medium text-foreground">{user?.firstName || user?.email}</span>
           </div>
           {((user as any)?.tier === "power") && (
-            <>
-              <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
-                <Link href="/admin/campaigns">
-                  <Send className="h-4 w-4 mr-2" />
-                  <span className="hidden sm:inline">Campaigns</span>
-                </Link>
-              </Button>
-              <Button variant="ghost" size="sm" asChild className="text-muted-foreground" data-testid="link-error-logs">
-                <Link href="/admin/errors">
-                  <FileWarning className="h-4 w-4 mr-2" />
-                  <span className="hidden sm:inline">Event Log</span>
-                </Link>
-              </Button>
-            </>
+            <Button variant="ghost" size="sm" asChild className="text-muted-foreground" data-testid="link-error-logs">
+              <Link href="/admin/errors">
+                <FileWarning className="h-4 w-4 mr-2" />
+                <span className="hidden sm:inline">Event Log</span>
+              </Link>
+            </Button>
           )}
           <Button variant="ghost" size="sm" asChild className="text-muted-foreground" data-testid="link-support">
             <Link href="/support">
