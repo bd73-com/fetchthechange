@@ -1,5 +1,4 @@
 import Stripe from 'stripe';
-import { databaseUrl } from './db';
 
 // Uses environment variables for Stripe API keys
 // Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY in your secrets
@@ -72,7 +71,7 @@ export async function getStripeSync() {
 
     stripeSync = new StripeSync({
       poolConfig: {
-        connectionString: databaseUrl,
+        connectionString: process.env.DATABASE_URL!,
         max: 2,
       },
       stripeSecretKey: secretKey,

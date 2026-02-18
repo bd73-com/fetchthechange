@@ -31,7 +31,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   // Initialize Stripe schema and sync
   async function initStripe() {
-    const { databaseUrl } = await import("./db");
+    const databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) {
       console.log('DATABASE_URL not set, skipping Stripe initialization');
       return;
