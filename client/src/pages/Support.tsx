@@ -7,6 +7,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import PublicNav from "@/components/PublicNav";
+import DashboardNav from "@/components/DashboardNav";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -377,7 +378,7 @@ export default function Support() {
   return (
     <div className="min-h-screen bg-background">
       <SEOHead />
-      <PublicNav />
+      {user ? <DashboardNav /> : <PublicNav />}
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20">
         {/* Header */}
