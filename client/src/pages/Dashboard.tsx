@@ -7,7 +7,7 @@ import { NotificationEmailDialog } from "@/components/NotificationEmailDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { LogOut, LayoutDashboard, RefreshCw, Loader2, Sparkles, FileWarning } from "lucide-react";
+import { LogOut, LayoutDashboard, RefreshCw, Loader2, Sparkles, FileWarning, HelpCircle } from "lucide-react";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
@@ -120,9 +120,15 @@ export default function Dashboard() {
                 </Link>
               </Button>
             )}
-            <NotificationEmailDialog 
-              currentNotificationEmail={(user as any)?.notificationEmail} 
-              accountEmail={user?.email} 
+            <Button variant="ghost" size="sm" asChild className="text-muted-foreground" data-testid="link-support">
+              <Link href="/support">
+                <HelpCircle className="h-4 w-4 mr-2" />
+                <span className="hidden sm:inline">Support</span>
+              </Link>
+            </Button>
+            <NotificationEmailDialog
+              currentNotificationEmail={(user as any)?.notificationEmail}
+              accountEmail={user?.email}
             />
             <Button variant="ghost" size="sm" onClick={() => logout()} className="text-muted-foreground hover:text-destructive">
               <LogOut className="h-4 w-4 mr-2" />
