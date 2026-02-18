@@ -14,4 +14,6 @@ fi
 
 # Install project dependencies
 cd "$CLAUDE_PROJECT_DIR"
-npm install
+if [ -f "package.json" ]; then
+  npm install
+fi
