@@ -226,7 +226,7 @@ export async function registerRoutes(
       let rendered: any = { used: false };
       if (process.env.BROWSERLESS_TOKEN) {
         try {
-          const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id);
+          const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
           rendered = {
             used: true,
             blocked: result.blocked,
