@@ -29,12 +29,6 @@ export const BROWSERLESS_CAPS = {
   system: 1000,
 } as const;
 
-export const PAUSE_THRESHOLDS = {
-  free: 3,
-  pro: 5,
-  power: 10,
-} as const;
-
 export const RESEND_CAPS = {
   daily: 100,
   monthly: 3000,

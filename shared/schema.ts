@@ -21,8 +21,6 @@ export const monitors = pgTable("monitors", {
   lastError: text("last_error"),
   active: boolean("active").default(true).notNull(),
   emailEnabled: boolean("email_enabled").default(true).notNull(),
-  consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
-  pauseReason: text("pause_reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -95,23 +93,6 @@ export const resendUsage = pgTable("resend_usage", {
 ]);
 
 export type ResendUsageRecord = typeof resendUsage.$inferSelect;
-
-export const monitorMetrics = pgTable("monitor_metrics", {
-  id: serial("id").primaryKey(),
-  monitorId: integer("monitor_id").notNull().references(() => monitors.id),
-  checkedAt: timestamp("checked_at").defaultNow().notNull(),
-  stage: text("stage").notNull(), // 'static' | 'static_retry' | 'browserless'
-  durationMs: integer("duration_ms"),
-  status: text("status").notNull(), // 'ok' | 'blocked' | 'selector_missing' | 'error'
-  selectorCount: integer("selector_count"),
-  blocked: boolean("blocked").default(false).notNull(),
-  blockReason: text("block_reason"),
-}, (table) => [
-  index("idx_monitor_metrics_monitor_id").on(table.monitorId),
-  index("idx_monitor_metrics_checked_at").on(table.checkedAt),
-]);
-
-export type MonitorMetric = typeof monitorMetrics.$inferSelect;
 
 // Email campaigns
 export const campaigns = pgTable("campaigns", {
@@ -195,8 +176,6 @@ export const insertMonitorSchema = createInsertSchema(monitors).omit({
   lastChecked: true,
   lastChanged: true,
   currentValue: true,
-  consecutiveFailures: true,
-  pauseReason: true,
   createdAt: true
 });
 

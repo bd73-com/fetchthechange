@@ -11,7 +11,6 @@ vi.mock("../storage", () => ({
 
 vi.mock("./email", () => ({
   sendNotificationEmail: vi.fn().mockResolvedValue({ success: true }),
-  sendAutoPauseEmail: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 vi.mock("./logger", () => ({
@@ -26,14 +25,6 @@ vi.mock("./browserlessTracker", () => ({
   BrowserlessUsageTracker: {
     canUseBrowserless: vi.fn().mockResolvedValue({ allowed: false, reason: "free_tier" }),
     recordUsage: vi.fn().mockResolvedValue(undefined),
-  },
-}));
-
-vi.mock("../db", () => ({
-  db: {
-    insert: vi.fn().mockReturnValue({
-      values: vi.fn().mockResolvedValue({}),
-    }),
   },
 }));
 
