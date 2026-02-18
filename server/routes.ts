@@ -694,7 +694,7 @@ export async function registerRoutes(
       }
 
       console.log(`[Support] Contact form sent for user ${userId}, Resend ID: ${response.data?.id}`);
-      res.json({ success: true, message: "Your message has been sent. We'll get back to you soon." });
+      res.json({ success: true, message: "Your message has been sent successfully. We'll get back to you soon.", resendId: response.data?.id });
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
