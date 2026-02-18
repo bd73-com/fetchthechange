@@ -16,6 +16,7 @@ import BlogWhyMonitorsFail from "@/pages/BlogWhyMonitorsFail";
 import BlogComparison from "@/pages/BlogComparison";
 import BlogPriceMonitoring from "@/pages/BlogPriceMonitoring";
 import Pricing from "@/pages/Pricing";
+import Support from "@/pages/Support";
 import AdminErrors from "@/pages/AdminErrors";
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -58,6 +59,7 @@ function Router() {
       <Route path="/blog/fetchthechange-vs-distill-visualping-hexowatch" component={BlogComparison} />
       <Route path="/blog/monitor-competitor-prices-without-getting-blocked" component={BlogPriceMonitoring} />
       <Route path="/pricing" component={Pricing} />
+      <Route path="/support" component={Support} />
       <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
       {/* Fallback to 404 */}
       <Route component={NotFound} />
