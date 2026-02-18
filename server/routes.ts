@@ -10,13 +10,13 @@ import { TIER_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS, type UserTier } from "@shar
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
-import { sql, desc, eq, and } from "drizzle-orm";
+import { sql, desc, eq, and, gte, count } from "drizzle-orm";
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
 import { BrowserlessUsageTracker, getMonthResetDate } from "./services/browserlessTracker";
 import { ResendUsageTracker, getResendResetDate } from "./services/resendTracker";
-import { errorLogs } from "@shared/schema";
+import { errorLogs, monitorMetrics, monitors } from "@shared/schema";
 import {
   generalRateLimiter,
   createMonitorRateLimiter,
@@ -373,12 +373,18 @@ export async function registerRoutes(
     if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
     const input = api.monitors.update.input.parse(req.body);
-    
+
     if (input.url) {
       const urlError = await isPrivateUrl(input.url);
       if (urlError) {
         return res.status(400).json({ message: urlError });
       }
+    }
+
+    // Reset failure counter when re-enabling a paused monitor
+    if (input.active === true && !existing.active) {
+      (input as any).consecutiveFailures = 0;
+      (input as any).pauseReason = null;
     }
 
     const updated = await storage.updateMonitor(id, input);
@@ -886,6 +892,75 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error fetching resend usage:", error);
       res.status(500).json({ message: "Failed to fetch resend usage" });
+    }
+  });
+
+  app.get("/api/admin/monitor-metrics", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+
+      const isAppOwner = userId === APP_OWNER_ID;
+      if (!isAppOwner) return res.status(403).json({ message: "Owner access required" });
+
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+      const [failuresByDomain, avgDurationByStage, browserlessStats, autoPauseEvents] = await Promise.all([
+        // Top 10 most-failing domains
+        db.execute(sql`
+          SELECT
+            substring(m.url from '(?:https?://)?([^/]+)') as domain,
+            count(*) as failure_count
+          FROM monitor_metrics mm
+          JOIN monitors m ON m.id = mm.monitor_id
+          WHERE mm.status != 'ok'
+            AND mm.checked_at >= ${thirtyDaysAgo}
+          GROUP BY domain
+          ORDER BY failure_count DESC
+          LIMIT 10
+        `),
+        // Average check duration by stage
+        db.execute(sql`
+          SELECT stage, avg(duration_ms) as avg_duration_ms, count(*) as total_checks
+          FROM monitor_metrics
+          WHERE checked_at >= ${thirtyDaysAgo}
+          GROUP BY stage
+          ORDER BY stage
+        `),
+        // Browserless success/failure ratio
+        db.execute(sql`
+          SELECT
+            count(*) FILTER (WHERE status = 'ok') as successes,
+            count(*) FILTER (WHERE status != 'ok') as failures,
+            count(*) as total
+          FROM monitor_metrics
+          WHERE stage = 'browserless'
+            AND checked_at >= ${thirtyDaysAgo}
+        `),
+        // Auto-pause events per day (last 30 days)
+        db.execute(sql`
+          SELECT
+            date_trunc('day', last_checked) as day,
+            count(*) as pause_count
+          FROM monitors
+          WHERE pause_reason IS NOT NULL
+            AND last_checked >= ${thirtyDaysAgo}
+          GROUP BY day
+          ORDER BY day DESC
+        `),
+      ]);
+
+      res.json({
+        failuresByDomain: failuresByDomain.rows,
+        avgDurationByStage: avgDurationByStage.rows,
+        browserlessStats: browserlessStats.rows[0] || { successes: 0, failures: 0, total: 0 },
+        autoPauseEvents: autoPauseEvents.rows,
+      });
+    } catch (error: any) {
+      console.error("Error fetching monitor metrics:", error);
+      res.status(500).json({ message: "Failed to fetch monitor metrics" });
     }
   });
 
