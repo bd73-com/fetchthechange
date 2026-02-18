@@ -48,6 +48,44 @@ async function recordMetric(
   }
 }
 
+async function handleMonitorFailure(
+  monitor: Monitor,
+  finalStatus: "blocked" | "selector_missing" | "error",
+  errorMsg: string,
+  browserlessInfraFailure: boolean
+): Promise<{ newFailureCount: number; paused: boolean }> {
+  const shouldPenalize = !browserlessInfraFailure;
+  const newFailureCount = shouldPenalize
+    ? (monitor.consecutiveFailures ?? 0) + 1
+    : (monitor.consecutiveFailures ?? 0);
+
+  const user = await storage.getUser(monitor.userId);
+  const tier = (user?.tier || "free") as UserTier;
+  const threshold = PAUSE_THRESHOLDS[tier] ?? PAUSE_THRESHOLDS.free;
+  const shouldPause = newFailureCount >= threshold;
+
+  const updates: Record<string, any> = {
+    lastChecked: new Date(),
+    lastStatus: finalStatus,
+    lastError: errorMsg,
+    consecutiveFailures: newFailureCount,
+  };
+
+  if (shouldPause) {
+    updates.active = false;
+    updates.pauseReason = `Auto-paused after ${newFailureCount} consecutive failures (last: ${errorMsg})`;
+    console.log(`Monitor ${monitor.id} auto-paused after ${newFailureCount} consecutive failures`);
+  }
+
+  await storage.updateMonitor(monitor.id, updates);
+
+  if (shouldPause && monitor.emailEnabled) {
+    await sendAutoPauseEmail(monitor, newFailureCount, errorMsg).catch(() => {});
+  }
+
+  return { newFailureCount, paused: shouldPause };
+}
+
 /**
  * Normalizes values by trimming, collapsing spaces, and removing invisible characters.
  */
@@ -341,11 +379,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
 
     if (!html) {
       await recordMetric(monitor.id, "static", Date.now() - staticStart, "error");
-      await storage.updateMonitor(monitor.id, {
-        lastChecked: new Date(),
-        lastStatus: "error",
-        lastError: "Failed to fetch page"
-      } as any);
+      await handleMonitorFailure(monitor, "error", "Failed to fetch page", false);
       return {
         changed: false,
         currentValue: monitor.currentValue,
@@ -494,32 +528,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         error: null
       };
     } else {
-      const shouldPenalize = !browserlessInfraFailure;
-      const newFailureCount = shouldPenalize ? (monitor.consecutiveFailures ?? 0) + 1 : (monitor.consecutiveFailures ?? 0);
-
-      const user = await storage.getUser(monitor.userId);
-      const tier = (user?.tier || "free") as UserTier;
-      const threshold = PAUSE_THRESHOLDS[tier] ?? PAUSE_THRESHOLDS.free;
-      const shouldPause = newFailureCount >= threshold;
-
-      const updates: Record<string, any> = {
-        lastChecked: new Date(),
-        lastStatus: finalStatus,
-        lastError: finalError,
-        consecutiveFailures: newFailureCount,
-      };
-
-      if (shouldPause) {
-        updates.active = false;
-        updates.pauseReason = `Auto-paused after ${newFailureCount} consecutive failures (last: ${finalError})`;
-        console.log(`Monitor ${monitor.id} auto-paused after ${newFailureCount} consecutive failures`);
-      }
-
-      await storage.updateMonitor(monitor.id, updates);
-
-      if (shouldPause && monitor.emailEnabled) {
-        await sendAutoPauseEmail(monitor, newFailureCount, finalError).catch(() => {});
-      }
+      await handleMonitorFailure(monitor, finalStatus, finalError!, browserlessInfraFailure);
 
       return {
         changed: false,
@@ -532,33 +541,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{
   } catch (error) {
     await ErrorLogger.error("scraper", `"${monitor.name}" failed to check — the page could not be fetched or parsed. Verify the URL is accessible and the CSS selector is correct.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
 
-    const shouldPenalize = !browserlessInfraFailure;
-    const newFailureCount = shouldPenalize ? (monitor.consecutiveFailures ?? 0) + 1 : (monitor.consecutiveFailures ?? 0);
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
-
-    const user = await storage.getUser(monitor.userId);
-    const tier = (user?.tier || "free") as UserTier;
-    const threshold = PAUSE_THRESHOLDS[tier] ?? PAUSE_THRESHOLDS.free;
-    const shouldPause = newFailureCount >= threshold;
-
-    const updates: Record<string, any> = {
-      lastChecked: new Date(),
-      lastStatus: "error",
-      lastError: errorMsg,
-      consecutiveFailures: newFailureCount,
-    };
-
-    if (shouldPause) {
-      updates.active = false;
-      updates.pauseReason = `Auto-paused after ${newFailureCount} consecutive failures (last: ${errorMsg})`;
-      console.log(`Monitor ${monitor.id} auto-paused after ${newFailureCount} consecutive failures`);
-    }
-
-    await storage.updateMonitor(monitor.id, updates);
-
-    if (shouldPause && monitor.emailEnabled) {
-      await sendAutoPauseEmail(monitor, newFailureCount, errorMsg).catch(() => {});
-    }
+    await handleMonitorFailure(monitor, "error", errorMsg, browserlessInfraFailure);
 
     return {
       changed: false,
