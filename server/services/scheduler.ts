@@ -35,8 +35,9 @@ export async function startScheduler() {
 
         if (shouldCheck) {
           checkMonitor(monitor).catch(async (error) => {
-            await ErrorLogger.error("scheduler", `Monitor check failed for monitor ${monitor.id}`, error instanceof Error ? error : null, {
+            await ErrorLogger.error("scheduler", `"${monitor.name}" — scheduled check failed. This is usually a temporary issue. If it persists, verify the URL is still valid and the selector matches the page.`, error instanceof Error ? error : null, {
               monitorId: monitor.id,
+              monitorName: monitor.name,
               url: monitor.url,
               selector: monitor.selector,
             });
