@@ -636,8 +636,10 @@ export async function registerRoutes(
       const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
       const supportEmail = process.env.SUPPORT_EMAIL;
       if (!supportEmail) {
-        console.error("[Support] SUPPORT_EMAIL not configured");
-        return res.status(500).json({ message: "Support email is not configured." });
+        console.log(`[Support] SUPPORT_EMAIL not set. Logging contact form submission.`);
+        console.log(`[Support] From: ${input.email}, Category: ${input.category}, Subject: ${input.subject}`);
+        console.log(`[Support] Message: ${input.message}`);
+        return res.json({ success: true, message: "Your message has been received. We'll get back to you soon." });
       }
 
       const escapeHtml = (str: string) =>
