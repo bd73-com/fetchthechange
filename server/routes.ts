@@ -625,10 +625,10 @@ export async function registerRoutes(
       };
 
       if (!process.env.RESEND_API_KEY) {
-        console.log(`[Support] RESEND_API_KEY not set. Logging contact form submission.`);
+        console.error(`[Support] RESEND_API_KEY not set. Cannot send email.`);
         console.log(`[Support] From: ${input.email}, Category: ${input.category}, Subject: ${input.subject}`);
         console.log(`[Support] Message: ${input.message}`);
-        return res.json({ success: true, message: "Your message has been received. We'll get back to you soon." });
+        return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly." });
       }
 
       const { Resend } = await import("resend");
@@ -636,10 +636,10 @@ export async function registerRoutes(
       const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
       const supportEmail = process.env.SUPPORT_EMAIL;
       if (!supportEmail) {
-        console.log(`[Support] SUPPORT_EMAIL not set. Logging contact form submission.`);
+        console.error(`[Support] SUPPORT_EMAIL not set. Cannot send email.`);
         console.log(`[Support] From: ${input.email}, Category: ${input.category}, Subject: ${input.subject}`);
         console.log(`[Support] Message: ${input.message}`);
-        return res.json({ success: true, message: "Your message has been received. We'll get back to you soon." });
+        return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly." });
       }
 
       const escapeHtml = (str: string) =>
@@ -694,7 +694,7 @@ export async function registerRoutes(
       }
 
       console.log(`[Support] Contact form sent for user ${userId}, Resend ID: ${response.data?.id}`);
-      res.json({ success: true, message: "Your message has been sent. We'll get back to you soon." });
+      res.json({ success: true, message: "Your message has been sent successfully. We'll get back to you soon.", resendId: response.data?.id });
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
