@@ -636,10 +636,17 @@ export async function registerRoutes(
       const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
       const supportEmail = process.env.SUPPORT_EMAIL || fromAddress;
 
-      const escapedMessage = input.message
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+      const escapeHtml = (str: string) =>
+        str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+
+      const escapedEmail = escapeHtml(input.email);
+      const escapedSubject = escapeHtml(input.subject);
+      const escapedMessage = escapeHtml(input.message);
 
       const response = await resend.emails.send({
         from: fromAddress,
@@ -661,11 +668,11 @@ export async function registerRoutes(
         html: `
 <h2>Support Request</h2>
 <table style="border-collapse:collapse;">
-  <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">From:</td><td>${input.email}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">From:</td><td>${escapedEmail}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">User ID:</td><td>${userId}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Tier:</td><td>${user.tier || "free"}</td></tr>
   <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Category:</td><td>${categoryLabels[input.category]}</td></tr>
-  <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Subject:</td><td>${input.subject}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Subject:</td><td>${escapedSubject}</td></tr>
 </table>
 <hr/>
 <h3>Message</h3>
