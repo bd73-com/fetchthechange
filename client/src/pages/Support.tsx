@@ -112,11 +112,6 @@ const faqSections: FAQSection[] = [
           "Yes. You can manage your subscription through the Stripe billing portal, accessible from your dashboard. Changes and cancellations take effect at the end of the current billing period.",
       },
       {
-        question: "Do you offer refunds?",
-        answer:
-          "Yes, we offer a 14-day money-back guarantee. If you're not satisfied with your paid plan, contact our support team within 14 days of purchase for a full refund.",
-      },
-      {
         question: "What happens to my monitors if I downgrade?",
         answer:
           "Your existing monitors will continue to work, but you won't be able to create new ones if you exceed the lower plan's limit. You'll need to delete monitors to get below the new limit before creating new ones.",
