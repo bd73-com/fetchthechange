@@ -18,8 +18,6 @@ import BlogPriceMonitoring from "@/pages/BlogPriceMonitoring";
 import Pricing from "@/pages/Pricing";
 import Support from "@/pages/Support";
 import AdminErrors from "@/pages/AdminErrors";
-import AdminCampaigns from "@/pages/AdminCampaigns";
-import AdminCampaignDetail from "@/pages/AdminCampaignDetail";
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme] = useState<"dark" | "light">("dark");
@@ -63,8 +61,6 @@ function Router() {
       <Route path="/pricing" component={Pricing} />
       <Route path="/support" component={Support} />
       <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
-      <Route path="/admin/campaigns" component={() => <ProtectedRoute component={AdminCampaigns} />} />
-      <Route path="/admin/campaigns/:id" component={() => <ProtectedRoute component={AdminCampaignDetail} />} />
       {/* Fallback to 404 */}
       <Route component={NotFound} />
     </Switch>

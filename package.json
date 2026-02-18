@@ -87,7 +87,6 @@
     "resend": "^6.8.0",
     "stripe": "^20.0.0",
     "stripe-replit-sync": "^1.0.0",
-    "svix": "^1.85.0",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "tw-animate-css": "^1.2.5",

@@ -114,38 +114,6 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     }
   );
 
-  // Resend webhook route MUST be before express.json()
-  app.post(
-    '/api/webhooks/resend',
-    express.raw({ type: 'application/json' }),
-    async (req, res) => {
-      try {
-        const { verifyResendWebhook, handleResendWebhookEvent } = await import('./services/resendWebhook');
-
-        if (!Buffer.isBuffer(req.body)) {
-          return res.status(400).json({ error: 'Invalid request body' });
-        }
-
-        const event = await verifyResendWebhook(req.body, req.headers as Record<string, string | string[] | undefined>);
-        await handleResendWebhookEvent(event);
-        res.status(200).json({ received: true });
-      } catch (error: any) {
-        const msg = error.message || '';
-        if (msg.includes('signature') || msg.includes('timestamp') || msg.includes('webhook')) {
-          const { ErrorLogger } = await import('./services/logger');
-          await ErrorLogger.error('email', 'Resend webhook signature validation failed', error, {
-            ip: req.ip,
-          });
-          return res.status(401).json({ error: 'Invalid signature' });
-        }
-
-        const { ErrorLogger } = await import('./services/logger');
-        await ErrorLogger.error('email', 'Resend webhook processing failed', error);
-        return res.status(500).json({ error: 'Processing failed' });
-      }
-    }
-  );
-
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
