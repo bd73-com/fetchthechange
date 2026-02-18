@@ -51,7 +51,7 @@ interface UserOverviewEntry {
   updated_at: string | null;
   monitor_count: number;
   active_monitor_count: number;
-  last_monitor_check: string | null;
+  last_activity: string | null;
   browserless_usage_this_month: number;
   emails_sent_this_month: number;
 }
@@ -91,10 +91,17 @@ export default function AdminErrors() {
     queryKey: ["/api/admin/users-overview"],
     queryFn: async () => {
       const res = await fetch("/api/admin/users-overview", { credentials: "include" });
+      if (res.status === 403) {
+        const err = new Error("forbidden");
+        (err as any).status = 403;
+        throw err;
+      }
       if (!res.ok) return null;
       return res.json();
     },
-    refetchInterval: 60000,
+    retry: (_count, error) => (error as any)?.status !== 403,
+    refetchInterval: (query) =>
+      (query.state.error as any)?.status === 403 ? false : 60000,
   });
 
   const queryKey = ["/api/admin/error-logs", levelFilter, sourceFilter];
@@ -254,7 +261,7 @@ export default function AdminErrors() {
                           {u.emails_sent_this_month}
                         </TableCell>
                         <TableCell className="text-right text-xs text-muted-foreground">
-                          {formatRelativeTime(u.last_monitor_check)}
+                          {formatRelativeTime(u.last_activity)}
                         </TableCell>
                         <TableCell className="text-right text-xs text-muted-foreground">
                           {u.created_at
