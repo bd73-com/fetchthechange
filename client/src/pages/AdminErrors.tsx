@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe, Mail } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe, Mail, Users } from "lucide-react";
 import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 
@@ -39,6 +40,22 @@ interface ResendUsageData {
   resetDate: string;
 }
 
+interface UserOverviewEntry {
+  id: string;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  tier: string;
+  created_at: string | null;
+  updated_at: string | null;
+  monitor_count: number;
+  active_monitor_count: number;
+  last_activity: string | null;
+  browserless_usage_this_month: number;
+  emails_sent_this_month: number;
+}
+
 const levelConfig: Record<string, { icon: typeof XCircle; variant: "destructive" | "secondary" | "outline"; label: string }> = {
   error: { icon: XCircle, variant: "destructive", label: "Error" },
   warning: { icon: AlertTriangle, variant: "secondary", label: "Warning" },
@@ -70,6 +87,23 @@ export default function AdminErrors() {
     refetchInterval: 60000,
   });
 
+  const { data: usersOverview } = useQuery<UserOverviewEntry[]>({
+    queryKey: ["/api/admin/users-overview"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/users-overview", { credentials: "include" });
+      if (res.status === 403) {
+        const err = new Error("forbidden");
+        (err as any).status = 403;
+        throw err;
+      }
+      if (!res.ok) return null;
+      return res.json();
+    },
+    retry: (_count, error) => (error as any)?.status !== 403,
+    refetchInterval: (query) =>
+      (query.state.error as any)?.status === 403 ? false : 60000,
+  });
+
   const queryKey = ["/api/admin/error-logs", levelFilter, sourceFilter];
   const { data: logs = [], isLoading, isError } = useQuery<ErrorLogEntry[]>({
     queryKey,
@@ -90,6 +124,29 @@ export default function AdminErrors() {
   const formatTimestamp = (ts: string) => {
     const d = new Date(ts);
     return d.toLocaleString();
+  };
+
+  const getTierBadgeClass = (tier: string) => {
+    switch (tier) {
+      case "power": return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
+      case "pro": return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
+      default: return "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300";
+    }
+  };
+
+  const formatRelativeTime = (dateStr: string | null) => {
+    if (!dateStr) return "Never";
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `${diffDays}d ago`;
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
   return (
@@ -139,6 +196,90 @@ export default function AdminErrors() {
             </Button>
           </div>
         </div>
+
+        {usersOverview && usersOverview.length > 0 && (
+          <Card className="mb-6" data-testid="card-users-overview">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                User Overview
+              </CardTitle>
+              <span className="text-xs text-muted-foreground">
+                {usersOverview.length} user{usersOverview.length !== 1 ? "s" : ""}
+              </span>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[200px]">User</TableHead>
+                      <TableHead>Tier</TableHead>
+                      <TableHead className="text-right">Monitors</TableHead>
+                      <TableHead className="text-right">Browserless</TableHead>
+                      <TableHead className="text-right">Emails</TableHead>
+                      <TableHead className="text-right">Last Active</TableHead>
+                      <TableHead className="text-right">Joined</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {usersOverview.map((u) => (
+                      <TableRow key={u.id} data-testid={`row-user-${u.id}`}>
+                        <TableCell className="font-medium">
+                          <div className="flex flex-col">
+                            <span className="truncate max-w-[180px]">
+                              {u.first_name || u.last_name
+                                ? `${u.first_name || ""} ${u.last_name || ""}`.trim()
+                                : u.email || u.id.slice(0, 8) + "..."}
+                            </span>
+                            {(u.first_name || u.last_name) && u.email && (
+                              <span className="text-xs text-muted-foreground truncate max-w-[180px]">
+                                {u.email}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={getTierBadgeClass(u.tier)}
+                            data-testid={`badge-tier-${u.id}`}
+                          >
+                            {u.tier}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          <span data-testid={`text-monitors-${u.id}`}>
+                            {u.active_monitor_count}/{u.monitor_count}
+                          </span>
+                          <span className="text-xs text-muted-foreground ml-1">active</span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono" data-testid={`text-browserless-${u.id}`}>
+                          {u.browserless_usage_this_month}
+                        </TableCell>
+                        <TableCell className="text-right font-mono" data-testid={`text-emails-${u.id}`}>
+                          {u.emails_sent_this_month}
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {formatRelativeTime(u.last_activity)}
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {u.created_at
+                            ? new Date(u.created_at).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })
+                            : "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {browserlessData && (
           <Card className="mb-6" data-testid="card-browserless-usage">

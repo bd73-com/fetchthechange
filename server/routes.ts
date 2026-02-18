@@ -760,6 +760,73 @@ export async function registerRoutes(
     }
   });
 
+  // Admin users overview endpoint (owner-only)
+  app.get("/api/admin/users-overview", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+
+      const isAppOwner = userId === APP_OWNER_ID;
+      if (!isAppOwner) return res.status(403).json({ message: "Owner access required" });
+
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      const result = await db.execute(sql`
+        SELECT
+          u.id,
+          u.email,
+          u.first_name,
+          u.last_name,
+          u.profile_image_url,
+          u.tier,
+          u.created_at,
+          u.updated_at,
+          GREATEST(
+            m.last_monitor_check,
+            bu.last_browserless_usage,
+            ru.last_email_sent,
+            u.updated_at
+          ) AS last_activity,
+          COALESCE(m.monitor_count, 0)::int AS monitor_count,
+          COALESCE(m.active_monitor_count, 0)::int AS active_monitor_count,
+          COALESCE(bu.browserless_usage_this_month, 0)::int AS browserless_usage_this_month,
+          COALESCE(ru.emails_sent_this_month, 0)::int AS emails_sent_this_month
+        FROM users u
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS monitor_count,
+            COUNT(*) FILTER (WHERE mon.active = true)::int AS active_monitor_count,
+            MAX(mon.last_checked) AS last_monitor_check
+          FROM monitors mon
+          WHERE mon.user_id = u.id
+        ) m ON true
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS browserless_usage_this_month,
+            MAX(bru.timestamp) AS last_browserless_usage
+          FROM browserless_usage bru
+          WHERE bru.user_id = u.id AND bru.timestamp >= ${monthStart}
+        ) bu ON true
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS emails_sent_this_month,
+            MAX(rsu.timestamp) AS last_email_sent
+          FROM resend_usage rsu
+          WHERE rsu.user_id = u.id AND rsu.timestamp >= ${monthStart}
+        ) ru ON true
+        ORDER BY last_activity DESC NULLS LAST, u.created_at DESC
+      `);
+
+      res.json(result.rows);
+    } catch (error: any) {
+      console.error("Error fetching users overview:", error);
+      res.status(500).json({ message: "Failed to fetch users overview" });
+    }
+  });
+
   app.get("/api/admin/browserless-usage", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
