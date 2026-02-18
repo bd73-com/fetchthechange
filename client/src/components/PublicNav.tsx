@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Zap, Menu, X } from "lucide-react";
+import { Zap, Menu } from "lucide-react";
 
 const navLinks = [
   { label: "How it works", href: "/#how-it-works" },
@@ -15,6 +16,7 @@ const navLinks = [
 export default function PublicNav() {
   const [open, setOpen] = useState(false);
   const [location] = useLocation();
+  const { user } = useAuth();
 
   const handleNavClick = (href: string) => {
     setOpen(false);
@@ -54,9 +56,15 @@ export default function PublicNav() {
               {link.label}
             </a>
           ))}
-          <Button asChild data-testid="button-nav-signin">
-            <a href="/api/login">Sign in</a>
-          </Button>
+          {user ? (
+            <Button asChild data-testid="button-nav-dashboard">
+              <Link href="/dashboard">Dashboard</Link>
+            </Button>
+          ) : (
+            <Button asChild data-testid="button-nav-signin">
+              <a href="/api/login">Sign in</a>
+            </Button>
+          )}
         </div>
 
         <div className="md:hidden">
@@ -98,9 +106,15 @@ export default function PublicNav() {
                   ))}
                 </div>
                 
-                <Button asChild className="mt-4" data-testid="button-nav-signin-mobile">
-                  <a href="/api/login">Sign in</a>
-                </Button>
+                {user ? (
+                  <Button asChild className="mt-4" data-testid="button-nav-dashboard-mobile">
+                    <Link href="/dashboard" onClick={() => setOpen(false)}>Dashboard</Link>
+                  </Button>
+                ) : (
+                  <Button asChild className="mt-4" data-testid="button-nav-signin-mobile">
+                    <a href="/api/login">Sign in</a>
+                  </Button>
+                )}
               </div>
             </SheetContent>
           </Sheet>
