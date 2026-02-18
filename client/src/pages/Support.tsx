@@ -111,7 +111,7 @@ const faqSections: FAQSection[] = [
         answer:
           "Yes. You can manage your subscription through the Stripe billing portal, accessible from your dashboard. Changes and cancellations take effect at the end of the current billing period.",
       },
-{
+      {
         question: "What happens to my monitors if I downgrade?",
         answer:
           "Your existing monitors will continue to work, but you won't be able to create new ones if you exceed the lower plan's limit. You'll need to delete monitors to get below the new limit before creating new ones.",

@@ -123,7 +123,7 @@ export default function Dashboard() {
             <Button variant="ghost" size="sm" asChild className="text-muted-foreground" data-testid="link-support">
               <Link href="/support">
                 <HelpCircle className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Support</span>
+                <span className="sr-only sm:not-sr-only">Support</span>
               </Link>
             </Button>
             <NotificationEmailDialog
