@@ -4,7 +4,7 @@ import { db } from "../db";
 import { users, campaigns, campaignRecipients, monitors } from "@shared/schema";
 import { ResendUsageTracker } from "./resendTracker";
 import { ErrorLogger } from "./logger";
-import { eq, and, inArray, gte, lte, sql, count } from "drizzle-orm";
+import { eq, and, inArray, gte, lte, sql, count, SQL } from "drizzle-orm";
 
 export interface CampaignFilters {
   tier?: string[];
@@ -54,8 +54,8 @@ export async function resolveRecipients(filters: CampaignFilters): Promise<Resol
   conditions.push(sql`u.email IS NOT NULL`);
 
   if (filters.tier && filters.tier.length > 0) {
-    const tierList = filters.tier.map((t) => `'${t.replace(/'/g, "''")}'`).join(",");
-    conditions.push(sql.raw(`u.tier IN (${tierList})`));
+    const placeholders = filters.tier.map((t) => sql`${t}`);
+    conditions.push(sql`u.tier IN (${sql.join(placeholders, sql`, `)})`);
   }
 
   if (filters.signupAfter) {
@@ -305,14 +305,16 @@ export async function triggerCampaignSend(campaignId: number): Promise<{ totalRe
     throw new Error("No recipients match the campaign filters");
   }
 
-  // Create recipient rows
-  for (const recipient of recipients) {
-    await db.insert(campaignRecipients).values({
-      campaignId,
-      userId: recipient.id,
-      recipientEmail: recipient.email,
-      status: "pending",
-    });
+  // Create recipient rows in batches
+  const CHUNK_SIZE = 100;
+  const recipientRows = recipients.map((r) => ({
+    campaignId,
+    userId: r.id,
+    recipientEmail: r.email,
+    status: "pending" as const,
+  }));
+  for (let i = 0; i < recipientRows.length; i += CHUNK_SIZE) {
+    await db.insert(campaignRecipients).values(recipientRows.slice(i, i + CHUNK_SIZE));
   }
 
   // Update campaign status
@@ -345,8 +347,17 @@ async function sendCampaignBatch(
 ): Promise<void> {
   const BATCH_SIZE = 10;
   const BATCH_DELAY_MS = 2000;
+  const MAX_BATCHES = 1000;
+  let batchCount = 0;
 
   while (true) {
+    if (batchCount >= MAX_BATCHES) {
+      console.log(`[Campaign] Campaign ${campaignId} hit max batch limit (${MAX_BATCHES}). Finalizing as partially_sent.`);
+      await finalizeCampaign(campaignId, "partially_sent");
+      activeSends.delete(campaignId);
+      return;
+    }
+    batchCount++;
     if (control.cancelled) {
       await finalizeCampaign(campaignId, "cancelled");
       activeSends.delete(campaignId);

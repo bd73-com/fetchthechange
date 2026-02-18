@@ -54,6 +54,7 @@ const recipientStatusConfig: Record<string, { variant: "default" | "secondary" |
   opened: { variant: "default", label: "Opened" },
   clicked: { variant: "default", label: "Clicked" },
   bounced: { variant: "destructive", label: "Bounced" },
+  complained: { variant: "destructive", label: "Complained" },
   failed: { variant: "destructive", label: "Failed" },
 };
 

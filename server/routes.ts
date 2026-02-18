@@ -1255,7 +1255,52 @@ export async function registerRoutes(
   });
 
   // Public unsubscribe endpoint (no auth required)
+  // GET shows a confirmation page; POST performs the actual unsubscribe.
+  // This prevents link prefetchers / email scanners from triggering unsubscribes.
   app.get("/api/campaigns/unsubscribe/:token", unauthenticatedRateLimiter, async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      if (!token) return res.status(400).send("Invalid unsubscribe link.");
+
+      const [user] = await db
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.unsubscribeToken, token))
+        .limit(1);
+
+      if (!user) {
+        return res.status(404).send(`
+          <!DOCTYPE html>
+          <html><head><title>Unsubscribe</title><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+          <body style="font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:20px;text-align:center;color:#333;">
+            <h2>Invalid Link</h2>
+            <p>This unsubscribe link is invalid or has expired.</p>
+          </body></html>
+        `);
+      }
+
+      const safeToken = encodeURIComponent(token);
+      res.send(`
+        <!DOCTYPE html>
+        <html><head><title>Unsubscribe</title><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+        <body style="font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:20px;text-align:center;color:#333;">
+          <h2>Unsubscribe</h2>
+          <p>Click the button below to unsubscribe from FetchTheChange campaign emails.</p>
+          <p style="color:#666;font-size:14px;">You will continue to receive monitor change notifications.</p>
+          <form method="POST" action="/api/campaigns/unsubscribe/${safeToken}/confirm">
+            <button type="submit" style="margin-top:16px;padding:10px 24px;background:#4f46e5;color:#fff;border:none;border-radius:6px;font-size:16px;cursor:pointer;">
+              Unsubscribe
+            </button>
+          </form>
+        </body></html>
+      `);
+    } catch (error: any) {
+      console.error("Error processing unsubscribe:", error);
+      res.status(500).send("An error occurred. Please try again.");
+    }
+  });
+
+  app.post("/api/campaigns/unsubscribe/:token/confirm", unauthenticatedRateLimiter, async (req: any, res) => {
     try {
       const { token } = req.params;
       if (!token) return res.status(400).send("Invalid unsubscribe link.");
@@ -1282,6 +1327,7 @@ export async function registerRoutes(
         .set({ campaignUnsubscribed: true })
         .where(eq(usersTable.id, user.id));
 
+      const safeToken = encodeURIComponent(token);
       res.send(`
         <!DOCTYPE html>
         <html><head><title>Unsubscribed</title><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
@@ -1290,7 +1336,7 @@ export async function registerRoutes(
           <p>You have been successfully unsubscribed from FetchTheChange campaign emails.</p>
           <p style="color:#666;font-size:14px;">You will continue to receive monitor change notifications.</p>
           <br/>
-          <p><a href="/api/campaigns/resubscribe/${encodeURIComponent(token)}" style="color:#4f46e5;text-decoration:underline;">Re-subscribe to campaign emails</a></p>
+          <p><a href="/api/campaigns/resubscribe/${safeToken}" style="color:#4f46e5;text-decoration:underline;">Re-subscribe to campaign emails</a></p>
         </body></html>
       `);
     } catch (error: any) {

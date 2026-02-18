@@ -42,6 +42,7 @@ export async function verifyResendWebhook(
   }
 
   // No secret configured — parse without verification (development)
+  console.warn("[ResendWebhook] RESEND_WEBHOOK_SECRET is not set — skipping signature verification. Do not use this in production.");
   return JSON.parse(rawBody.toString()) as ResendWebhookEvent;
 }
 
@@ -148,11 +149,16 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
       await db
         .update(campaignRecipients)
         .set({
-          status: "bounced",
+          status: "complained",
           failedAt: now,
           failureReason: "spam complaint",
         })
         .where(eq(campaignRecipients.id, recipient.id));
+
+      await db.execute(sql`
+        UPDATE campaigns SET failed_count = failed_count + 1
+        WHERE id = ${recipient.campaignId}
+      `);
       break;
 
     default:
