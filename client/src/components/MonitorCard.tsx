@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X } from "lucide-react";
+import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle } from "lucide-react";
 import { useUpdateMonitor, useMonitorHistory } from "@/hooks/use-monitors";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
@@ -173,6 +173,12 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4 pt-4">
+        {monitor.pauseReason && (
+          <div className="flex items-start gap-2 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-2.5 text-xs text-amber-800 dark:text-amber-300">
+            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>{monitor.pauseReason}</span>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div className="space-y-1">
             <span className="text-muted-foreground flex items-center gap-1.5">

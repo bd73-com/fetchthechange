@@ -145,3 +145,66 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     return { success: false, error: error.message };
   }
 }
+
+export async function sendAutoPauseEmail(monitor: Monitor, failureCount: number, lastError: string | null): Promise<EmailResult> {
+  const resendCapCheck = await ResendUsageTracker.canSendEmail();
+  if (!resendCapCheck.allowed) {
+    console.log(`[Email] Resend cap reached for auto-pause email, monitor ${monitor.id}: ${resendCapCheck.reason}`);
+    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
+  }
+
+  if (!process.env.RESEND_API_KEY) {
+    console.log(`[MOCK EMAIL] Auto-pause notification for monitor ${monitor.id} "${monitor.name}" after ${failureCount} failures`);
+    return { success: false, error: "RESEND_API_KEY not configured" };
+  }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const fromAddress = process.env.RESEND_FROM || 'onboarding@resend.dev';
+
+  try {
+    const user = await authStorage.getUser(monitor.userId);
+    if (!user || !user.email) {
+      return { success: false, error: "User has no email address" };
+    }
+
+    const recipientEmail = user.notificationEmail || user.email;
+
+    const response = await resend.emails.send({
+      from: fromAddress,
+      to: recipientEmail,
+      subject: `FetchTheChange: "${sanitizePlainText(monitor.name)}" has been paused`,
+      text: `Hello,
+
+Your monitor "${sanitizePlainText(monitor.name)}" has been automatically paused after ${failureCount} consecutive failures.
+
+URL: ${sanitizePlainText(monitor.url)}
+Last error: ${sanitizePlainText(lastError)}
+
+To resume monitoring, visit your dashboard and re-enable the monitor after verifying the URL and selector are correct.
+
+FetchTheChange Team`,
+      html: `
+        <h2>Monitor Auto-Paused</h2>
+        <p>Your monitor <strong>${escapeHtml(monitor.name)}</strong> has been automatically paused after <strong>${failureCount}</strong> consecutive failures.</p>
+        <p><strong>URL:</strong> <a href="${escapeHtml(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
+        <p><strong>Last error:</strong> ${escapeHtml(lastError)}</p>
+        <hr/>
+        <p>To resume monitoring, visit your <a href="https://fetch-the-change.replit.app">dashboard</a> and re-enable the monitor after verifying the URL and selector are correct.</p>
+        <br/>
+        <p>FetchTheChange Team</p>
+      `
+    });
+
+    if (response.error) {
+      await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, undefined, false).catch(() => {});
+      return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
+    }
+
+    await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, response.data?.id, true).catch(() => {});
+    console.log(`[Email] Sent auto-pause notification to ${recipientEmail} for monitor ${monitor.id}`);
+    return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
+  } catch (error: any) {
+    await ErrorLogger.error("email", `"${monitor.name}" — auto-pause email failed to send.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name });
+    return { success: false, error: error.message };
+  }
+}
