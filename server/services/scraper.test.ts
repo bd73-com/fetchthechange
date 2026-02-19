@@ -1348,8 +1348,13 @@ describe("failure tracking and auto-pause", () => {
   const mockAutoPauseEmail = sendAutoPauseEmail as ReturnType<typeof vi.fn>;
 
   // Deep mock chain helper for db.update().set().where().returning()
-  function mockDbUpdate(returnedFailureCount: number) {
-    const returningFn = vi.fn().mockResolvedValue([{ consecutiveFailures: returnedFailureCount }]);
+  // The atomic UPDATE now returns both consecutiveFailures and active.
+  // `returnedActive=false` simulates the SQL CASE evaluating the pause condition as true.
+  function mockDbUpdate(returnedFailureCount: number, returnedActive = true) {
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
     const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
     const setFn = vi.fn().mockReturnValue({ where: whereFn });
     mockDb.update.mockReturnValue({ set: setFn });
@@ -1360,8 +1365,8 @@ describe("failure tracking and auto-pause", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     delete process.env.BROWSERLESS_TOKEN;
-    // Default: failure count below threshold
-    mockDbUpdate(1);
+    // Default: failure count below threshold, monitor still active
+    mockDbUpdate(1, true);
     // Default: free tier user
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
   });
@@ -1402,7 +1407,7 @@ describe("failure tracking and auto-pause", () => {
 
   it("calls db.update with atomic increment on failure", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
-    const { setFn } = mockDbUpdate(1);
+    const { setFn } = mockDbUpdate(1, true);
 
     const monitor = makeMonitor();
     await runWithTimers(monitor);
@@ -1420,75 +1425,65 @@ describe("failure tracking and auto-pause", () => {
 
   it("auto-pauses monitor when failure count reaches free tier threshold (3)", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
-    // Simulate that after this increment, count = 3 (free threshold)
-    mockDbUpdate(3);
+    // Simulate that after this increment, count = 3 (free threshold) and DB set active=false
+    mockDbUpdate(3, false);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
-    const monitor = makeMonitor();
+    const monitor = makeMonitor({ emailEnabled: true });
     await runWithTimers(monitor);
 
-    // Should auto-pause: storage.updateMonitor called with active=false and pauseReason
-    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({
-        active: false,
-        pauseReason: expect.stringContaining("Auto-paused after 3 consecutive failures"),
-      })
+    // Pause is now done atomically in db.update, so verify via email
+    expect(mockAutoPauseEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      3,
+      "timeout"
     );
   });
 
   it("does NOT auto-pause when failure count is below threshold", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
-    // Simulate count = 2 (below free threshold of 3)
-    mockDbUpdate(2);
+    // Simulate count = 2 (below free threshold of 3), monitor stays active
+    mockDbUpdate(2, true);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
-    const monitor = makeMonitor();
+    const monitor = makeMonitor({ emailEnabled: true });
     await runWithTimers(monitor);
 
-    // storage.updateMonitor should NOT have been called with active=false
-    const pauseCalls = mockStorage.updateMonitor.mock.calls.filter(
-      (c: any[]) => c[1]?.active === false
-    );
-    expect(pauseCalls).toHaveLength(0);
+    // Should NOT send auto-pause email
+    expect(mockAutoPauseEmail).not.toHaveBeenCalled();
   });
 
   it("pro tier has higher pause threshold (5)", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
-    // count = 4, below pro threshold of 5
-    mockDbUpdate(4);
+    // count = 4, below pro threshold of 5, still active
+    mockDbUpdate(4, true);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "pro" });
 
-    const monitor = makeMonitor();
+    const monitor = makeMonitor({ emailEnabled: true });
     await runWithTimers(monitor);
 
-    // Should NOT pause at 4 for pro tier
-    const pauseCalls = mockStorage.updateMonitor.mock.calls.filter(
-      (c: any[]) => c[1]?.active === false
-    );
-    expect(pauseCalls).toHaveLength(0);
+    // Should NOT send auto-pause email at 4 for pro tier
+    expect(mockAutoPauseEmail).not.toHaveBeenCalled();
   });
 
   it("pro tier pauses at threshold (5)", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
-    mockDbUpdate(5);
+    mockDbUpdate(5, false);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "pro" });
 
-    const monitor = makeMonitor();
+    const monitor = makeMonitor({ emailEnabled: true });
     await runWithTimers(monitor);
 
-    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({
-        active: false,
-        pauseReason: expect.stringContaining("Auto-paused after 5"),
-      })
+    expect(mockAutoPauseEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      5,
+      "timeout"
     );
   });
 
   it("sends auto-pause email when emailEnabled is true", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("site down"));
-    mockDbUpdate(3);
+    mockDbUpdate(3, false);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
     const monitor = makeMonitor({ emailEnabled: true });
@@ -1503,7 +1498,7 @@ describe("failure tracking and auto-pause", () => {
 
   it("does NOT send auto-pause email when emailEnabled is false", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("site down"));
-    mockDbUpdate(3);
+    mockDbUpdate(3, false);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
     const monitor = makeMonitor({ emailEnabled: false });
@@ -1514,7 +1509,7 @@ describe("failure tracking and auto-pause", () => {
 
   it("does NOT send auto-pause email when below threshold", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("site down"));
-    mockDbUpdate(1);
+    mockDbUpdate(1, true);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
     const monitor = makeMonitor({ emailEnabled: true });
@@ -1523,19 +1518,19 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).not.toHaveBeenCalled();
   });
 
-  it("includes last error message in pause reason", async () => {
+  it("includes last error message in auto-pause email", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("DNS resolution failed"));
-    mockDbUpdate(3);
+    mockDbUpdate(3, false);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
-    const monitor = makeMonitor();
+    const monitor = makeMonitor({ emailEnabled: true });
     await runWithTimers(monitor);
 
-    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({
-        pauseReason: expect.stringContaining("DNS resolution failed"),
-      })
+    // The error message is passed to sendAutoPauseEmail
+    expect(mockAutoPauseEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      3,
+      "DNS resolution failed"
     );
   });
 
@@ -1544,19 +1539,24 @@ describe("failure tracking and auto-pause", () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(html, { status: 200 }))
       .mockResolvedValueOnce(new Response(html, { status: 200 }));
-    mockDbUpdate(3);
+    const { setFn } = mockDbUpdate(3, false);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
-    const monitor = makeMonitor({ selector: ".missing" });
+    const monitor = makeMonitor({ selector: ".missing", emailEnabled: true });
     await runWithTimers(monitor);
 
-    // Should auto-pause on selector_missing after threshold
-    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
-      1,
+    // Should invoke db.update with selector_missing status
+    expect(setFn).toHaveBeenCalledWith(
       expect.objectContaining({
-        active: false,
-        pauseReason: expect.stringContaining("Selector not found"),
+        lastStatus: "selector_missing",
+        lastError: "Selector not found",
       })
+    );
+    // Should send auto-pause email with the selector error
+    expect(mockAutoPauseEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      3,
+      "Selector not found"
     );
   });
 
@@ -1565,18 +1565,23 @@ describe("failure tracking and auto-pause", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
     );
-    mockDbUpdate(3);
+    const { setFn } = mockDbUpdate(3, false);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
-    const monitor = makeMonitor();
+    const monitor = makeMonitor({ emailEnabled: true });
     await runWithTimers(monitor);
 
-    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
-      1,
+    // Should invoke db.update with blocked status
+    expect(setFn).toHaveBeenCalledWith(
       expect.objectContaining({
-        active: false,
-        pauseReason: expect.stringContaining("Access denied"),
+        lastStatus: "blocked",
       })
+    );
+    // The error passed to email should contain the block reason
+    expect(mockAutoPauseEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      3,
+      expect.stringContaining("Access denied")
     );
   });
 
@@ -1593,36 +1598,57 @@ describe("failure tracking and auto-pause", () => {
     expect(mockDb.insert).toHaveBeenCalled();
   });
 
+  it("recordMetric failure does not break the check (best-effort metrics)", async () => {
+    // Make db.insert throw to simulate a metrics recording failure
+    mockDb.insert.mockReturnValueOnce({
+      values: vi.fn().mockRejectedValueOnce(new Error("DB connection lost")),
+    });
+    const consoleSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    const html = `<html><body><span class="price">$19.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(html, { status: 200 })
+    );
+
+    const monitor = makeMonitor({ currentValue: "$19.99" });
+    const result = await runWithTimers(monitor);
+
+    // The check should still succeed despite metrics failure
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$19.99");
+    // Should have logged the metrics error
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[Metrics] Failed to record metric"),
+      expect.stringContaining("DB connection lost")
+    );
+    consoleSpy.mockRestore();
+  });
+
   it("power tier has highest pause threshold (10)", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
-    // count = 9, below power threshold of 10
-    mockDbUpdate(9);
+    // count = 9, below power threshold of 10, still active
+    mockDbUpdate(9, true);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "power" });
 
-    const monitor = makeMonitor();
+    const monitor = makeMonitor({ emailEnabled: true });
     await runWithTimers(monitor);
 
-    // Should NOT pause at 9 for power tier
-    const pauseCalls = mockStorage.updateMonitor.mock.calls.filter(
-      (c: any[]) => c[1]?.active === false
-    );
-    expect(pauseCalls).toHaveLength(0);
+    // Should NOT send auto-pause email at 9 for power tier
+    expect(mockAutoPauseEmail).not.toHaveBeenCalled();
   });
 
   it("power tier pauses at threshold (10)", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
-    mockDbUpdate(10);
+    mockDbUpdate(10, false);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "power" });
 
-    const monitor = makeMonitor();
+    const monitor = makeMonitor({ emailEnabled: true });
     await runWithTimers(monitor);
 
-    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({
-        active: false,
-        pauseReason: expect.stringContaining("Auto-paused after 10"),
-      })
+    expect(mockAutoPauseEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      10,
+      "timeout"
     );
   });
 
@@ -1649,7 +1675,7 @@ describe("failure tracking and auto-pause", () => {
       },
     }));
 
-    const { setFn } = mockDbUpdate(1);
+    const { setFn } = mockDbUpdate(1, true);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
     const monitor = makeMonitor({ selector: ".missing" });
@@ -1675,19 +1701,18 @@ describe("failure tracking and auto-pause", () => {
 
   it("falls back to free tier threshold when user tier is unknown", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
-    mockDbUpdate(3); // free threshold
+    // free threshold: DB returns active=false to indicate SQL CASE triggered
+    mockDbUpdate(3, false);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: undefined });
 
-    const monitor = makeMonitor();
+    const monitor = makeMonitor({ emailEnabled: true });
     await runWithTimers(monitor);
 
     // Should auto-pause using free threshold (3)
-    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({
-        active: false,
-        pauseReason: expect.stringContaining("Auto-paused after 3"),
-      })
+    expect(mockAutoPauseEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      3,
+      "timeout"
     );
   });
 
@@ -1702,16 +1727,15 @@ describe("failure tracking and auto-pause", () => {
     // Monitor already has 2 consecutive failures; after +1 it should be 3 (free threshold)
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
-    const monitor = makeMonitor({ consecutiveFailures: 2 });
+    const monitor = makeMonitor({ consecutiveFailures: 2, emailEnabled: true });
     await runWithTimers(monitor);
 
     // Fallback calculation: shouldPenalize=true, so fallbackCount(2) + 1 = 3 >= free threshold
-    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({
-        active: false,
-        pauseReason: expect.stringContaining("Auto-paused after 3"),
-      })
+    // Should pause and send email
+    expect(mockAutoPauseEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      3,
+      "timeout"
     );
   });
 });

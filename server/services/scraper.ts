@@ -35,7 +35,8 @@ async function recordMetric(
       blockReason: blockReason ?? null,
     });
   } catch (e) {
-    // Metrics recording is best-effort
+    // Metrics recording is best-effort; log for debugging schema/connection issues
+    console.debug(`[Metrics] Failed to record metric for monitor ${monitorId}:`, e instanceof Error ? e.message : e);
   }
 }
 
@@ -47,7 +48,15 @@ async function handleMonitorFailure(
 ): Promise<{ newFailureCount: number; paused: boolean }> {
   const shouldPenalize = !browserlessInfraFailure;
 
-  // Use atomic SQL increment to avoid race conditions under concurrent checks
+  // Look up the user's tier to determine the pause threshold BEFORE the atomic update,
+  // so we can include the pause decision in the same UPDATE statement.
+  const user = await storage.getUser(monitor.userId);
+  const tier = (user?.tier || "free") as UserTier;
+  const threshold = PAUSE_THRESHOLDS[tier] ?? PAUSE_THRESHOLDS.free;
+
+  // Single atomic UPDATE: increment failure count AND conditionally pause in one statement.
+  // This prevents a concurrent successful check from resetting consecutiveFailures between
+  // the increment and the pause, which would leave the monitor in an inconsistent state.
   const [updated] = await db.update(monitors)
     .set({
       lastChecked: new Date(),
@@ -56,24 +65,25 @@ async function handleMonitorFailure(
       consecutiveFailures: shouldPenalize
         ? sql`${monitors.consecutiveFailures} + 1`
         : monitors.consecutiveFailures,
+      active: shouldPenalize
+        ? sql`CASE WHEN ${monitors.consecutiveFailures} + 1 >= ${threshold} THEN false ELSE ${monitors.active} END`
+        : monitors.active,
+      pauseReason: shouldPenalize
+        ? sql`CASE WHEN ${monitors.consecutiveFailures} + 1 >= ${threshold} THEN 'Auto-paused after ' || (${monitors.consecutiveFailures} + 1)::text || ${' consecutive failures (last: ' + errorMsg + ')'} ELSE ${monitors.pauseReason} END`
+        : monitors.pauseReason,
     })
     .where(eq(monitors.id, monitor.id))
-    .returning({ consecutiveFailures: monitors.consecutiveFailures });
+    .returning({
+      consecutiveFailures: monitors.consecutiveFailures,
+      active: monitors.active,
+    });
 
   const fallbackCount = monitor.consecutiveFailures ?? 0;
   const newFailureCount = updated?.consecutiveFailures
     ?? (shouldPenalize ? fallbackCount + 1 : fallbackCount);
-
-  const user = await storage.getUser(monitor.userId);
-  const tier = (user?.tier || "free") as UserTier;
-  const threshold = PAUSE_THRESHOLDS[tier] ?? PAUSE_THRESHOLDS.free;
-  const shouldPause = newFailureCount >= threshold;
+  const shouldPause = updated ? !updated.active : (newFailureCount >= threshold);
 
   if (shouldPause) {
-    await storage.updateMonitor(monitor.id, {
-      active: false,
-      pauseReason: `Auto-paused after ${newFailureCount} consecutive failures (last: ${errorMsg})`,
-    } as any);
     console.log(`Monitor ${monitor.id} auto-paused after ${newFailureCount} consecutive failures`);
   }
 
@@ -457,7 +467,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           console.log(`stage=rendered selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : "Unknown error";
-          const isInfra = errMsg.includes("connectOverCDP") || errMsg.includes("websocket") || errMsg.includes("Playwright") || errMsg.includes("browser") || errMsg.includes("ECONNREFUSED") || errMsg.includes("Target page, context or browser has been closed");
+          const isInfra = errMsg.includes("connectOverCDP") || errMsg.includes("websocket") || errMsg.includes("Playwright") || errMsg.includes("Browser is not connected") || errMsg.includes("Browser has been closed") || errMsg.includes("ECONNREFUSED") || errMsg.includes("Target page, context or browser has been closed");
           if (isInfra) {
             browserlessInfraFailure = true;
           }
@@ -499,11 +509,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         lastStatus: finalStatus,
         lastError: null,
         consecutiveFailures: 0,
-      } as any);
+      });
 
       if (changed) {
         await storage.addMonitorChange(monitor.id, oldValue, newValue);
-        await storage.updateMonitor(monitor.id, { lastChanged: new Date() } as any);
+        await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
         if (monitor.emailEnabled) {
           await sendNotificationEmail(monitor, oldValue, newValue);
         }
