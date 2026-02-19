@@ -1579,4 +1579,50 @@ describe("failure tracking and auto-pause", () => {
       })
     );
   });
+
+  it("records metrics via db.insert on each check stage", async () => {
+    const html = `<html><body><span class="price">$19.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(html, { status: 200 })
+    );
+
+    const monitor = makeMonitor({ currentValue: "$19.99" });
+    await runWithTimers(monitor);
+
+    // recordMetric calls db.insert for the "static" stage
+    expect(mockDb.insert).toHaveBeenCalled();
+  });
+
+  it("power tier has highest pause threshold (10)", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
+    // count = 9, below power threshold of 10
+    mockDbUpdate(9);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "power" });
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    // Should NOT pause at 9 for power tier
+    const pauseCalls = mockStorage.updateMonitor.mock.calls.filter(
+      (c: any[]) => c[1]?.active === false
+    );
+    expect(pauseCalls).toHaveLength(0);
+  });
+
+  it("power tier pauses at threshold (10)", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
+    mockDbUpdate(10);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "power" });
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        active: false,
+        pauseReason: expect.stringContaining("Auto-paused after 10"),
+      })
+    );
+  });
 });
