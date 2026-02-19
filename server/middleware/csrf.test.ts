@@ -170,6 +170,92 @@ describe("csrfProtection", () => {
 
       expect(next).toHaveBeenCalled();
     });
+
+    it("bypasses CSRF check for /api/webhooks/resend", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/webhooks/resend",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("bypasses CSRF check for /api/webhooks/resend with bad origin", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/webhooks/resend",
+        headers: { origin: "https://evil.com" },
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("bypasses CSRF check for campaign unsubscribe confirm path", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/campaigns/unsubscribe/some-uuid-token/confirm",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("bypasses CSRF for unsubscribe with bad origin", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/campaigns/unsubscribe/token-123/confirm",
+        headers: { origin: "https://evil.com" },
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("does NOT exempt /api/campaigns/ (non-unsubscribe paths)", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/campaigns/",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res._status).toBe(403);
+    });
+
+    it("does NOT exempt /api/admin/campaigns (admin routes need CSRF)", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/admin/campaigns",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res._status).toBe(403);
+    });
   });
 
   describe("development mode", () => {
