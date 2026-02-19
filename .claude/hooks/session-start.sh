@@ -13,4 +13,5 @@ fi
 
 # Install gh CLI
 apt-get update -qq
-apt-get install -y -qq gh > /dev/null 2>&1
+apt-get install -y -qq gh > /dev/null
+
