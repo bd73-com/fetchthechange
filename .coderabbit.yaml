@@ -1,0 +1,416 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+# ──────────────────────────────────────────────────────────────
+# FetchTheChange — CodeRabbit Configuration
+# Full-stack TypeScript web monitoring app with payments,
+# web scraping, and email notifications.
+# ──────────────────────────────────────────────────────────────
+
+language: "en-US"
+
+tone_instructions: >-
+  Be direct and security-focused. Flag any potential vulnerability
+  immediately. Prioritize correctness over brevity.
+
+early_access: true
+
+reviews:
+  # ── Review Profile ──────────────────────────────────────────
+  # "assertive" — this app handles Stripe payments, web scraping
+  # of arbitrary user-supplied URLs, authentication, and email.
+  profile: "assertive"
+
+  request_changes_workflow: true
+  high_level_summary: true
+  high_level_summary_placeholder: "@coderabbitai summary"
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: true
+  review_status: true
+  poem: false
+  commit_status: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  suggested_reviewers: true
+  abort_on_close: true
+
+  # ── Path Filters ────────────────────────────────────────────
+  path_filters:
+    - "!package-lock.json"
+    - "!dist/**"
+    - "!.replit"
+    - "!replit.nix"
+    - "!replit.md"
+    - "!attached_assets/**"
+    - "!client/src/components/ui/**"
+    - "!client/public/**"
+
+  # ── Path-Specific Review Instructions ───────────────────────
+  path_instructions:
+    # ── SERVER: Security-Critical Backend ─────────────────────
+    - path: "server/**"
+      instructions: |
+        This is the Express.js v5 backend for a web monitoring SaaS.
+        It handles payments (Stripe), web scraping, email (Resend),
+        and user authentication. Apply MAXIMUM security scrutiny:
+
+        **SQL injection / ORM misuse:**
+        - Verify all database queries use Drizzle ORM parameterized
+          methods. Flag any raw SQL string concatenation.
+        - Check that user input never flows into sql`` template
+          literals without proper parameterization.
+
+        **Authentication & authorization:**
+        - Every route that accesses user data MUST check
+          req.user and validate ownership (userId match).
+        - Flag any endpoint missing isAuthenticated middleware.
+        - Ensure no privilege escalation between tiers
+          (free/pro/power).
+
+        **Input validation:**
+        - All request body, params, and query values MUST be
+          validated with Zod schemas before use.
+        - Flag any use of req.body/req.params/req.query without
+          prior validation.
+
+        **XSS prevention:**
+        - Ensure no user-supplied content is rendered without
+          sanitization in API responses that may be displayed.
+
+        **SSRF (Server-Side Request Forgery):**
+        - All outbound HTTP requests MUST use ssrfSafeFetch or
+          validateUrlBeforeFetch from server/utils/ssrf.ts.
+        - Flag any direct use of fetch(), axios, or http.get()
+          for user-supplied URLs.
+        - Check that DNS rebinding / TOCTOU gaps are addressed.
+        - Verify redirect following validates each hop.
+
+        **Stripe webhook security:**
+        - Webhook handlers MUST verify signatures using
+          stripe.webhooks.constructEvent() BEFORE processing.
+        - The webhook route MUST receive raw Buffer body, NOT
+          parsed JSON. Flag if express.json() could intercept.
+        - Verify idempotency: repeated webhook delivery must
+          not cause duplicate tier changes or charges.
+
+        **Rate limiting:**
+        - Verify rate limiters are applied to all public and
+          authenticated endpoints.
+        - Check for bypass vectors: missing rate limits on new
+          endpoints, inconsistent key generation.
+
+        **Secret exposure:**
+        - Flag any hardcoded API keys, tokens, or secrets.
+        - Ensure environment variables are used for all
+          sensitive configuration.
+        - Check that error responses do not leak internal
+          details (stack traces, DB errors, file paths).
+
+    - path: "server/services/scraper.ts"
+      instructions: |
+        Web scraping engine using Cheerio and Playwright/Browserless.
+        Additional focus areas:
+        - Verify all URLs pass SSRF validation before fetching.
+        - Check for resource exhaustion: timeouts on page loads,
+          limits on response size, and Browserless session caps.
+        - Ensure Cheerio parsing does not execute injected scripts.
+        - Verify Browserless usage tracking respects tier caps.
+
+    - path: "server/webhookHandlers.ts"
+      instructions: |
+        Stripe webhook handler. Critical payment security:
+        - Signature verification MUST happen before ANY processing.
+        - Tier determination must be defensive (unknown products
+          default to 'free', never to a paid tier).
+        - Check for race conditions in user tier updates.
+
+    - path: "server/middleware/**"
+      instructions: |
+        Security middleware (CSRF, rate limiting). Verify:
+        - CSRF exempt paths are minimal and justified.
+        - Rate limiter cannot be bypassed by header manipulation
+          or missing authentication.
+        - Response status codes are correct (429 for rate limit,
+          403 for CSRF).
+
+    - path: "server/utils/ssrf.ts"
+      instructions: |
+        SSRF protection module — critical security boundary. Verify:
+        - Private IP ranges cover ALL RFC 1918, link-local,
+          loopback, and IPv6 equivalents.
+        - DNS resolution checks happen for EVERY request, not
+          just the initial URL (redirect targets too).
+        - Blocked hostname list includes cloud metadata endpoints
+          (169.254.169.254, metadata.google.internal).
+        - Redirect limit is enforced and cannot be circumvented.
+
+    # ── CLIENT: React Frontend ────────────────────────────────
+    - path: "client/src/**"
+      instructions: |
+        React 18 frontend with shadcn/ui, Tailwind CSS, wouter
+        router, and TanStack Query. Review for:
+
+        **React best practices:**
+        - Proper use of hooks (no conditional hooks, correct
+          dependency arrays in useEffect/useMemo/useCallback).
+        - Avoid unnecessary re-renders: memoize expensive
+          computations, use React.memo where appropriate.
+        - Components should have clear single responsibilities.
+
+        **Accessibility (a11y):**
+        - Interactive elements need proper ARIA labels.
+        - Form inputs require associated labels.
+        - Color contrast and keyboard navigation support.
+        - Focus management in modals and dialogs.
+
+        **XSS prevention:**
+        - NEVER use dangerouslySetInnerHTML with user content.
+        - Sanitize any data rendered from API responses that
+          originates from user-supplied web scraping results.
+        - URL parameters must be validated before use.
+
+        **State management:**
+        - Server state should use TanStack Query, not local state.
+        - Check for proper query invalidation after mutations.
+        - Optimistic updates should have rollback handlers.
+
+        **Performance:**
+        - Large lists should consider virtualization.
+        - Images and heavy components should lazy load.
+        - Avoid inline object/function creation in render paths.
+
+    - path: "client/src/pages/**"
+      instructions: |
+        Page-level components. Additional checks:
+        - Verify route protection (authenticated pages redirect
+          unauthenticated users).
+        - Loading and error states must be handled gracefully.
+        - SEO-relevant pages should have proper meta tags.
+
+    - path: "client/src/hooks/**"
+      instructions: |
+        Custom React hooks. Verify:
+        - Hooks follow the Rules of Hooks.
+        - Proper cleanup in useEffect return functions.
+        - Error handling for async operations within hooks.
+        - Type safety of hook return values.
+
+    # ── SHARED: Types and Database Schema ─────────────────────
+    - path: "shared/**"
+      instructions: |
+        Shared TypeScript types and Drizzle ORM database schema.
+        Changes here affect both server and client. Review for:
+
+        **Type safety:**
+        - Exported types must be precise (avoid 'any', prefer
+          union types and branded types where appropriate).
+        - Zod schemas must match Drizzle table definitions.
+        - Insert schemas should properly omit auto-generated
+          fields (id, timestamps).
+
+        **Drizzle schema correctness:**
+        - Foreign key references must point to valid tables/columns.
+        - Indexes should exist for frequently queried columns.
+        - Column types and constraints (notNull, default, unique)
+          must match business logic requirements.
+
+        **Backward compatibility:**
+        - Schema changes must be additive where possible (new
+          columns should have defaults or be nullable).
+        - Dropping or renaming columns is a breaking change that
+          requires a migration plan.
+        - Changes to shared types may break server or client;
+          verify both sides are updated.
+
+    - path: "shared/models/auth.ts"
+      instructions: |
+        Authentication model and tier configuration. Critical:
+        - Tier limits must be consistent across the codebase.
+        - Session table schema MUST NOT be modified (Replit Auth
+          dependency).
+        - User table changes affect Stripe integration and auth
+          flow.
+
+    # ── TEST FILES ────────────────────────────────────────────
+    - path: "**/*.test.ts"
+      instructions: |
+        Test files using Vitest. Review for:
+        - Test coverage of edge cases and error paths.
+        - Proper mocking (no real API calls, DB connections,
+          or network requests in unit tests).
+        - Assertions are specific (not just truthy/falsy).
+        - Test descriptions clearly state expected behavior.
+        - Security-related tests: verify that SSRF, CSRF, auth
+          bypass, and rate limiting tests exist and are thorough.
+
+    # ── BUILD & UTILITY SCRIPTS ───────────────────────────────
+    - path: "script/**"
+      instructions: |
+        Build scripts. Verify:
+        - No execution of arbitrary or user-supplied commands.
+        - Output paths are correct and do not overwrite source.
+        - Build dependencies are properly resolved.
+
+    - path: "scripts/**"
+      instructions: |
+        Utility/seed scripts. Verify:
+        - Scripts do not contain hardcoded secrets or credentials.
+        - Database operations are idempotent or clearly documented
+          as destructive.
+        - Stripe product seeding uses test mode indicators.
+
+    # ── ROOT CONFIG FILES ─────────────────────────────────────
+    - path: "vite.config.ts"
+      instructions: |
+        Vite bundler configuration. Check:
+        - No sensitive paths or secrets in config.
+        - Proxy settings do not expose internal services.
+        - Build output targets match deployment expectations.
+
+    - path: "drizzle.config.ts"
+      instructions: |
+        Drizzle ORM configuration. Verify:
+        - Database connection uses environment variables.
+        - Schema path references are correct.
+        - No credentials are hardcoded.
+
+    - path: "tsconfig.json"
+      instructions: |
+        TypeScript configuration. Verify:
+        - Strict mode settings are appropriate.
+        - Path aliases match across vite, vitest, and tsc.
+        - No overly permissive compiler options.
+
+    - path: "tailwind.config.ts"
+      instructions: |
+        Tailwind CSS configuration. Check:
+        - Content paths cover all template files.
+        - Custom theme extensions are consistent.
+
+  # ── Auto Review Settings ────────────────────────────────────
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "wip"
+      - "DO NOT REVIEW"
+      - "[skip review]"
+    base_branches:
+      - "main"
+      - "master"
+
+  # ── Tools ───────────────────────────────────────────────────
+  tools:
+    # Secret scanners — critical for this project
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+
+    # TypeScript/JavaScript linting
+    eslint:
+      enabled: true
+    biome:
+      enabled: true
+    oxc:
+      enabled: true
+
+    # Security analysis
+    semgrep:
+      enabled: true
+
+    # YAML linting
+    yamllint:
+      enabled: true
+
+    # Markdown linting
+    markdownlint:
+      enabled: true
+
+    # Language quality
+    languagetool:
+      enabled: true
+
+    # Web technologies
+    dotenvLint:
+      enabled: true
+    htmlhint:
+      enabled: true
+    stylelint:
+      enabled: true
+
+    # GitHub checks integration
+    github-checks:
+      enabled: true
+      timeout_ms: 90000
+
+    # Disable tools for unused languages
+    hadolint:
+      enabled: false
+    swiftlint:
+      enabled: false
+    phpstan:
+      enabled: false
+    phpmd:
+      enabled: false
+    phpcs:
+      enabled: false
+    golangci-lint:
+      enabled: false
+    checkov:
+      enabled: false
+    tflint:
+      enabled: false
+    detekt:
+      enabled: false
+    flake8:
+      enabled: false
+    pylint:
+      enabled: false
+    ruff:
+      enabled: false
+    rubocop:
+      enabled: false
+    buf:
+      enabled: false
+    regal:
+      enabled: false
+    actionlint:
+      enabled: false
+    pmd:
+      enabled: false
+    clang:
+      enabled: false
+    cppcheck:
+      enabled: false
+    clippy:
+      enabled: false
+    sqlfluff:
+      enabled: false
+
+  # ── Pre-merge Checks ────────────────────────────────────────
+  pre_merge_checks:
+    title:
+      mode: "warning"
+    description:
+      mode: "warning"
+
+# ── Chat Configuration ────────────────────────────────────────
+chat:
+  auto_reply: true
+
+# ── Knowledge Base ────────────────────────────────────────────
+knowledge_base:
+  opt_out: false
+  web_search:
+    enabled: true
+  learnings:
+    scope: "local"
+  issues:
+    scope: "auto"
+  pull_requests:
+    scope: "auto"
