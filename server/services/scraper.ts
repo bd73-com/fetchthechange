@@ -1,16 +1,87 @@
 import * as cheerio from "cheerio";
 import { storage } from "../storage";
-import { sendNotificationEmail } from "./email";
+import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { validateUrlBeforeFetch, ssrfSafeFetch } from "../utils/ssrf";
-import { type Monitor } from "@shared/schema";
-import { type UserTier } from "@shared/models/auth";
+import { type Monitor, monitorMetrics, monitors } from "@shared/schema";
+import { type UserTier, PAUSE_THRESHOLDS } from "@shared/models/auth";
+import { db } from "../db";
+import { eq, sql } from "drizzle-orm";
 
 interface SelectorSuggestion {
   selector: string;
   count: number;
   sampleText: string;
+}
+
+async function recordMetric(
+  monitorId: number,
+  stage: string,
+  durationMs: number,
+  status: string,
+  selectorCount?: number,
+  blocked?: boolean,
+  blockReason?: string | null
+): Promise<void> {
+  try {
+    await db.insert(monitorMetrics).values({
+      monitorId,
+      stage,
+      durationMs,
+      status,
+      selectorCount: selectorCount ?? null,
+      blocked: blocked ?? false,
+      blockReason: blockReason ?? null,
+    });
+  } catch (e) {
+    // Metrics recording is best-effort
+  }
+}
+
+async function handleMonitorFailure(
+  monitor: Monitor,
+  finalStatus: "blocked" | "selector_missing" | "error",
+  errorMsg: string,
+  browserlessInfraFailure: boolean
+): Promise<{ newFailureCount: number; paused: boolean }> {
+  const shouldPenalize = !browserlessInfraFailure;
+
+  // Use atomic SQL increment to avoid race conditions under concurrent checks
+  const [updated] = await db.update(monitors)
+    .set({
+      lastChecked: new Date(),
+      lastStatus: finalStatus,
+      lastError: errorMsg,
+      consecutiveFailures: shouldPenalize
+        ? sql`${monitors.consecutiveFailures} + 1`
+        : monitors.consecutiveFailures,
+    })
+    .where(eq(monitors.id, monitor.id))
+    .returning({ consecutiveFailures: monitors.consecutiveFailures });
+
+  const fallbackCount = monitor.consecutiveFailures ?? 0;
+  const newFailureCount = updated?.consecutiveFailures
+    ?? (shouldPenalize ? fallbackCount + 1 : fallbackCount);
+
+  const user = await storage.getUser(monitor.userId);
+  const tier = (user?.tier || "free") as UserTier;
+  const threshold = PAUSE_THRESHOLDS[tier] ?? PAUSE_THRESHOLDS.free;
+  const shouldPause = newFailureCount >= threshold;
+
+  if (shouldPause) {
+    await storage.updateMonitor(monitor.id, {
+      active: false,
+      pauseReason: `Auto-paused after ${newFailureCount} consecutive failures (last: ${errorMsg})`,
+    } as any);
+    console.log(`Monitor ${monitor.id} auto-paused after ${newFailureCount} consecutive failures`);
+  }
+
+  if (shouldPause && monitor.emailEnabled) {
+    await sendAutoPauseEmail(monitor, newFailureCount, errorMsg).catch(() => {});
+  }
+
+  return { newFailureCount, paused: shouldPause };
 }
 
 /**
@@ -302,28 +373,30 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     }
 
     if (!html) {
-      await storage.updateMonitor(monitor.id, {
-        lastChecked: new Date(),
-        lastStatus: "error",
-        lastError: "Failed to fetch page"
-      } as any);
-      return { 
-        changed: false, 
-        currentValue: monitor.currentValue, 
-        previousValue: monitor.currentValue, 
-        status: "error" as const, 
-        error: "Failed to fetch page" 
+      await recordMetric(monitor.id, "static", 0, "error");
+      await handleMonitorFailure(monitor, "error", "Failed to fetch page", false);
+      return {
+        changed: false,
+        currentValue: monitor.currentValue,
+        previousValue: monitor.currentValue,
+        status: "error" as const,
+        error: "Failed to fetch page"
       };
     }
 
     // Stage: Static
+    const staticStart = Date.now();
     let newValue = extractValueFromHtml(html, monitor.selector);
     let block = detectPageBlockReason(html);
+    const staticDuration = Date.now() - staticStart;
+    const staticStatus = newValue ? "ok" : (block.blocked ? "blocked" : "selector_missing");
+    await recordMetric(monitor.id, "static", staticDuration, staticStatus, newValue ? 1 : 0, block.blocked, block.reason);
     console.log(`stage=static selectorCount=${newValue ? 1 : 0} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
 
     if (!newValue && !block.blocked) {
       console.log(`Retry: static extraction found no value, retrying fetch once...`);
       await new Promise(r => setTimeout(r, 2000));
+      const retryStart = Date.now();
       try {
         let retryHtml = "";
         try {
@@ -346,6 +419,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         if (retryHtml) {
           const retryValue = extractValueFromHtml(retryHtml, monitor.selector);
           const retryBlock = detectPageBlockReason(retryHtml);
+          const retryStatus = retryValue ? "ok" : (retryBlock.blocked ? "blocked" : "selector_missing");
+          await recordMetric(monitor.id, "static_retry", Date.now() - retryStart, retryStatus, retryValue ? 1 : 0, retryBlock.blocked, retryBlock.reason);
           if (retryValue) {
             newValue = retryValue;
             block = retryBlock;
@@ -353,13 +428,17 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           } else if (retryBlock.blocked) {
             block = retryBlock;
           }
+        } else {
+          await recordMetric(monitor.id, "static_retry", Date.now() - retryStart, "error");
         }
       } catch (e) {
+        await recordMetric(monitor.id, "static_retry", Date.now() - retryStart, "error");
         console.log(`Retry: second attempt failed, continuing with original result`);
       }
     }
 
     // Fallback to Rendered if static failed or blocked
+    let browserlessInfraFailure = false;
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
       const user = await storage.getUser(monitor.userId);
       const tier = (user?.tier || "free") as UserTier;
@@ -371,10 +450,18 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         try {
           const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
           browserlessSuccess = true;
+          const bStatus = result.value ? "ok" : (result.blocked ? "blocked" : "selector_missing");
+          await recordMetric(monitor.id, "browserless", Date.now() - startTime, bStatus, result.selectorCount, result.blocked, result.reason);
           newValue = result.value;
           block = { blocked: result.blocked, reason: result.reason };
           console.log(`stage=rendered selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
         } catch (err) {
+          const errMsg = err instanceof Error ? err.message : "Unknown error";
+          const isInfra = errMsg.includes("connectOverCDP") || errMsg.includes("websocket") || errMsg.includes("Playwright") || errMsg.includes("browser") || errMsg.includes("ECONNREFUSED") || errMsg.includes("Target page, context or browser has been closed");
+          if (isInfra) {
+            browserlessInfraFailure = true;
+          }
+          await recordMetric(monitor.id, "browserless", Date.now() - startTime, "error", undefined, false, errMsg);
           await ErrorLogger.error("scraper", `"${monitor.name}" — rendered page extraction failed. The site may block automated browsers or the page took too long to load. Try simplifying the selector or check if the site requires login.`, err instanceof Error ? err : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
         } finally {
           const durationMs = Date.now() - startTime;
@@ -391,7 +478,10 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     let finalError: string | null = null;
 
     if (!newValue) {
-      if (block.blocked) {
+      if (browserlessInfraFailure) {
+        finalStatus = "error";
+        finalError = "Browserless service unavailable";
+      } else if (block.blocked) {
         finalStatus = "blocked";
         finalError = block.reason || "Blocked";
       } else {
@@ -407,7 +497,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         lastChecked: new Date(),
         currentValue: newValue,
         lastStatus: finalStatus,
-        lastError: null
+        lastError: null,
+        consecutiveFailures: 0,
       } as any);
 
       if (changed) {
@@ -426,14 +517,10 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         error: null
       };
     } else {
-      await storage.updateMonitor(monitor.id, {
-        lastChecked: new Date(),
-        lastStatus: finalStatus,
-        lastError: finalError
-      } as any);
+      await handleMonitorFailure(monitor, finalStatus, finalError!, browserlessInfraFailure);
 
-      return { 
-        changed: false, 
+      return {
+        changed: false,
         currentValue: oldValue,
         previousValue: oldValue,
         status: finalStatus,
@@ -443,18 +530,15 @@ export async function checkMonitor(monitor: Monitor): Promise<{
   } catch (error) {
     await ErrorLogger.error("scraper", `"${monitor.name}" failed to check — the page could not be fetched or parsed. Verify the URL is accessible and the CSS selector is correct.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
 
-    await storage.updateMonitor(monitor.id, {
-      lastChecked: new Date(),
-      lastStatus: "error",
-      lastError: error instanceof Error ? error.message : "Unknown error"
-    } as any);
+    const errorMsg = error instanceof Error ? error.message : "Unknown error";
+    await handleMonitorFailure(monitor, "error", errorMsg, false);
 
-    return { 
-      changed: false, 
+    return {
+      changed: false,
       currentValue: monitor.currentValue,
       previousValue: monitor.currentValue,
       status: "error" as const,
-      error: error instanceof Error ? error.message : "Unknown error"
+      error: errorMsg
     };
   }
 }
