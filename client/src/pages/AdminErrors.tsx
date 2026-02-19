@@ -105,7 +105,7 @@ export default function AdminErrors() {
   });
 
   const queryKey = ["/api/admin/error-logs", levelFilter, sourceFilter];
-  const { data: logs = [], isLoading, isError } = useQuery<ErrorLogEntry[]>({
+  const { data: logs = [], isLoading, isFetching, isError } = useQuery<ErrorLogEntry[]>({
     queryKey,
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -189,10 +189,16 @@ export default function AdminErrors() {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => queryClient.invalidateQueries({ queryKey })}
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey });
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/browserless-usage"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/resend-usage"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/users-overview"] });
+              }}
+              disabled={isFetching}
               data-testid="button-refresh-logs"
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
             </Button>
           </div>
         </div>

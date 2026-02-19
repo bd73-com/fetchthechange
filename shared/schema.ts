@@ -1,3 +1,4 @@
+// Schema defines all database tables - drizzle-kit push compares this against the DB
 import { pgTable, text, serial, integer, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
