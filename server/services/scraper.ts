@@ -48,11 +48,19 @@ async function handleMonitorFailure(
 ): Promise<{ newFailureCount: number; paused: boolean }> {
   const shouldPenalize = !browserlessInfraFailure;
 
+  // Truncate error message to prevent unbounded storage in pause_reason.
+  // Use spread to operate on Unicode code points, not UTF-16 code units,
+  // so surrogate pairs (e.g. emoji) are never split.
+  const truncatedError = [...errorMsg].slice(0, 200).join('');
+
   // Look up the user's tier to determine the pause threshold BEFORE the atomic update,
   // so we can include the pause decision in the same UPDATE statement.
   const user = await storage.getUser(monitor.userId);
   const tier = (user?.tier || "free") as UserTier;
   const threshold = PAUSE_THRESHOLDS[tier] ?? PAUSE_THRESHOLDS.free;
+
+  // Build the pause reason suffix as a standalone parameterized value
+  const pauseSuffix = ` consecutive failures (last: ${truncatedError})`;
 
   // Single atomic UPDATE: increment failure count AND conditionally pause in one statement.
   // This prevents a concurrent successful check from resetting consecutiveFailures between
@@ -61,7 +69,7 @@ async function handleMonitorFailure(
     .set({
       lastChecked: new Date(),
       lastStatus: finalStatus,
-      lastError: errorMsg,
+      lastError: truncatedError,
       consecutiveFailures: shouldPenalize
         ? sql`${monitors.consecutiveFailures} + 1`
         : monitors.consecutiveFailures,
@@ -69,7 +77,7 @@ async function handleMonitorFailure(
         ? sql`CASE WHEN ${monitors.consecutiveFailures} + 1 >= ${threshold} THEN false ELSE ${monitors.active} END`
         : monitors.active,
       pauseReason: shouldPenalize
-        ? sql`CASE WHEN ${monitors.consecutiveFailures} + 1 >= ${threshold} THEN 'Auto-paused after ' || (${monitors.consecutiveFailures} + 1)::text || ${' consecutive failures (last: ' + errorMsg + ')'} ELSE ${monitors.pauseReason} END`
+        ? sql`CASE WHEN ${monitors.consecutiveFailures} + 1 >= ${threshold} THEN 'Auto-paused after ' || (${monitors.consecutiveFailures} + 1)::text || ${pauseSuffix} ELSE ${monitors.pauseReason} END`
         : monitors.pauseReason,
     })
     .where(eq(monitors.id, monitor.id))
@@ -88,7 +96,7 @@ async function handleMonitorFailure(
   }
 
   if (shouldPause && monitor.emailEnabled) {
-    await sendAutoPauseEmail(monitor, newFailureCount, errorMsg).catch(() => {});
+    await sendAutoPauseEmail(monitor, newFailureCount, truncatedError).catch(() => {});
   }
 
   return { newFailureCount, paused: shouldPause };

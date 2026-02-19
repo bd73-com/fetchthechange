@@ -127,6 +127,8 @@ export const insertMonitorSchema = createInsertSchema(monitors).omit({
   lastChecked: true,
   lastChanged: true,
   currentValue: true,
+  lastStatus: true,
+  lastError: true,
   consecutiveFailures: true,
   pauseReason: true,
   createdAt: true

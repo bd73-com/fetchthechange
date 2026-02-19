@@ -489,3 +489,104 @@ describe("sendNotificationEmail", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// sendAutoPauseEmail — additional edge cases
+// ---------------------------------------------------------------------------
+describe("sendAutoPauseEmail edge cases", () => {
+  const originalResendKey = process.env.RESEND_API_KEY;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.RESEND_API_KEY = "re_test_key";
+    mockSend.mockResolvedValue({ data: { id: "email_123" }, error: null });
+  });
+
+  afterEach(() => {
+    if (originalResendKey !== undefined) {
+      process.env.RESEND_API_KEY = originalResendKey;
+    } else {
+      delete process.env.RESEND_API_KEY;
+    }
+  });
+
+  it("handles null lastError gracefully in email body", async () => {
+    const monitor = makeMonitor({ name: "Test" });
+    const result = await sendAutoPauseEmail(monitor, 3, null);
+
+    expect(result.success).toBe(true);
+    const call = mockSend.mock.calls[0][0];
+    // null should be rendered safely, not crash
+    expect(call.html).toBeDefined();
+    expect(call.text).toBeDefined();
+  });
+
+  it("displays correct failure count in email body", async () => {
+    const monitor = makeMonitor({ name: "Counter Test" });
+    await sendAutoPauseEmail(monitor, 7, "DNS failed");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.html).toContain("<strong>7</strong>");
+    expect(call.text).toContain("7 consecutive failures");
+  });
+
+  it("handles very large failure counts without breaking", async () => {
+    const monitor = makeMonitor({ name: "Extreme" });
+    const result = await sendAutoPauseEmail(monitor, 99999, "persistent error");
+
+    expect(result.success).toBe(true);
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).toContain("99999 consecutive failures");
+  });
+
+  it("uses RESEND_FROM env var when set", async () => {
+    const originalFrom = process.env.RESEND_FROM;
+    process.env.RESEND_FROM = "noreply@myapp.com";
+
+    const monitor = makeMonitor();
+    await sendAutoPauseEmail(monitor, 3, "error");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.from).toBe("noreply@myapp.com");
+
+    if (originalFrom !== undefined) {
+      process.env.RESEND_FROM = originalFrom;
+    } else {
+      delete process.env.RESEND_FROM;
+    }
+  });
+
+  it("falls back to onboarding@resend.dev when RESEND_FROM is not set", async () => {
+    const originalFrom = process.env.RESEND_FROM;
+    delete process.env.RESEND_FROM;
+
+    const monitor = makeMonitor();
+    await sendAutoPauseEmail(monitor, 3, "error");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.from).toBe("onboarding@resend.dev");
+
+    if (originalFrom !== undefined) {
+      process.env.RESEND_FROM = originalFrom;
+    }
+  });
+
+  it("escapes special characters in error messages for HTML", async () => {
+    const monitor = makeMonitor();
+    await sendAutoPauseEmail(monitor, 3, 'Error: <div onclick="evil()">& "quotes"');
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.html).not.toContain('<div onclick');
+    expect(call.html).toContain("&lt;div onclick");
+    expect(call.html).toContain("&amp;");
+  });
+
+  it("sanitizes newlines in error messages for plain text", async () => {
+    const monitor = makeMonitor();
+    await sendAutoPauseEmail(monitor, 3, "line1\r\nline2\nline3");
+
+    const call = mockSend.mock.calls[0][0];
+    // sanitizePlainText replaces \r\n with space
+    expect(call.text).not.toMatch(/\r\n.*line2/);
+  });
+});
