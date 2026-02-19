@@ -15,6 +15,28 @@ interface SelectorSuggestion {
   sampleText: string;
 }
 
+/**
+ * Validates that a CSS selector is syntactically correct.
+ * Returns null if valid, or an error message string if invalid.
+ */
+export function validateCssSelector(selector: string): string | null {
+  const trimmed = selector.trim();
+  if (!trimmed) return "Selector cannot be empty";
+  if (trimmed.length > 500) return "Selector is too long (max 500 characters)";
+
+  // Normalize bare class names the same way extractValueFromHtml does
+  const isClassName = !trimmed.startsWith('.') && !trimmed.startsWith('#') && !trimmed.includes(' ');
+  const effective = isClassName ? `.${trimmed}` : trimmed;
+
+  try {
+    const $ = cheerio.load("<div></div>");
+    $(effective);
+    return null;
+  } catch {
+    return `Invalid CSS selector syntax: "${selector}"`;
+  }
+}
+
 async function recordMetric(
   monitorId: number,
   stage: string,
@@ -505,6 +527,52 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       } else {
         finalStatus = "selector_missing";
         finalError = "Selector not found";
+      }
+    }
+
+    // Auto-heal: when the selector is missing and we have a last known value,
+    // try to discover a new selector that matches the old value on the page.
+    if (finalStatus === "selector_missing" && oldValue && process.env.BROWSERLESS_TOKEN && !browserlessInfraFailure) {
+      const user = await storage.getUser(monitor.userId);
+      const tier = (user?.tier || "free") as UserTier;
+      const capCheck = await BrowserlessUsageTracker.canUseBrowserless(monitor.userId, tier);
+
+      if (capCheck.allowed) {
+        try {
+          console.log(`[AutoHeal] Monitor ${monitor.id}: selector "${monitor.selector}" missing, attempting auto-recovery with last value "${oldValue.substring(0, 50)}"`);
+          const healStart = Date.now();
+          const discovery = await discoverSelectors(monitor.url, monitor.selector, oldValue);
+          const healDuration = Date.now() - healStart;
+          await BrowserlessUsageTracker.recordUsage(monitor.userId, monitor.id, healDuration, true).catch(() => {});
+
+          if (discovery.suggestions.length > 0) {
+            // Pick the best suggestion: prefer single-match selectors, then shortest
+            const best = discovery.suggestions
+              .sort((a, b) => (a.count === 1 ? 0 : 1) - (b.count === 1 ? 0 : 1) || a.selector.length - b.selector.length)[0];
+
+            console.log(`[AutoHeal] Monitor ${monitor.id}: found replacement selector "${best.selector}" (matches=${best.count}, sample="${best.sampleText}")`);
+            await recordMetric(monitor.id, "auto_heal", healDuration, "ok", best.count);
+
+            // Update the monitor with the new selector and re-extract the value
+            await storage.updateMonitor(monitor.id, { selector: best.selector });
+            newValue = normalizeValue(best.sampleText) || null;
+            finalStatus = "ok";
+            finalError = null;
+
+            await ErrorLogger.info(
+              "scraper",
+              `"${monitor.name}" — auto-healed selector from "${monitor.selector}" to "${best.selector}". The page structure likely changed.`,
+              { monitorId: monitor.id, monitorName: monitor.name, oldSelector: monitor.selector, newSelector: best.selector }
+            );
+          } else {
+            console.log(`[AutoHeal] Monitor ${monitor.id}: no replacement selector found`);
+            await recordMetric(monitor.id, "auto_heal", healDuration, "selector_missing", 0);
+            finalError = "Selector not found on page (auto-recovery failed — no matching elements found for the last known value)";
+          }
+        } catch (healErr) {
+          console.log(`[AutoHeal] Monitor ${monitor.id}: auto-recovery failed:`, healErr instanceof Error ? healErr.message : healErr);
+          // Don't change finalStatus/finalError — fall through to normal failure path
+        }
       }
     }
 
