@@ -1,4 +1,4 @@
-import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPageBlockReason, discoverSelectors, validateCssSelector } from "./services/scraper";
+import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPageBlockReason, discoverSelectors, validateCssSelector, extractValueFromHtml } from "./services/scraper";
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -378,7 +378,6 @@ export async function registerRoutes(
           signal: AbortSignal.timeout(8000),
         });
         const preCheckHtml = await preCheckResponse.text();
-        const { extractValueFromHtml, detectPageBlockReason } = await import("./services/scraper");
         const block = detectPageBlockReason(preCheckHtml);
         if (block.blocked) {
           selectorWarning = `The page appears to be blocking automated access (${block.reason}). The monitor may need Browserless rendering to work.`;
