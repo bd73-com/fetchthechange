@@ -22,14 +22,21 @@ import { rm } from "fs/promises";
 describe("build script", () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
 
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
   });
 
   afterEach(() => {
     exitSpy.mockRestore();
-    vi.resetModules();
+    if (originalDatabaseUrl !== undefined) {
+      process.env.DATABASE_URL = originalDatabaseUrl;
+    } else {
+      delete process.env.DATABASE_URL;
+    }
   });
 
   it("cleans dist directory before building", async () => {
@@ -71,8 +78,10 @@ describe("build script", () => {
     });
   });
 
-  it("does not run drizzle-kit push during build", async () => {
+  it("does not run drizzle-kit push during build even with DATABASE_URL set", async () => {
     process.env.DATABASE_URL = "postgresql://localhost:5432/testdb";
+    const execSyncMock = vi.fn();
+    vi.doMock("child_process", () => ({ execSync: execSyncMock }));
 
     await import("./build.ts");
 
@@ -80,9 +89,8 @@ describe("build script", () => {
       expect(viteBuild).toHaveBeenCalled();
     });
 
-    // The build script should not import or use child_process at all
-    // Verify only vite and esbuild are called (no execSync)
     expect(esbuild).toHaveBeenCalled();
+    expect(execSyncMock).not.toHaveBeenCalled();
   });
 
   it("computes externals by excluding allowlisted deps", async () => {
