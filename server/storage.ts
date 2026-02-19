@@ -1,4 +1,4 @@
-import { monitors, monitorChanges, browserlessUsage, resendUsage, type Monitor, type InsertMonitor, type MonitorChange } from "@shared/schema";
+import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, type Monitor, type InsertMonitor, type MonitorChange } from "@shared/schema";
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
 import { eq, desc, and, or, isNull, sql } from "drizzle-orm";
@@ -52,6 +52,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMonitor(id: number): Promise<void> {
     await db.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
+    await db.delete(monitorMetrics).where(eq(monitorMetrics.monitorId, id));
     await db.delete(browserlessUsage).where(eq(browserlessUsage.monitorId, id));
     await db.delete(resendUsage).where(eq(resendUsage.monitorId, id));
     await db.delete(monitors).where(eq(monitors.id, id));

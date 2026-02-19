@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { insertMonitorSchema } from "./schema";
-import { TIER_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS } from "./models/auth";
+import { TIER_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS, PAUSE_THRESHOLDS } from "./models/auth";
 
 describe("insertMonitorSchema", () => {
   const validInput = {
@@ -80,6 +80,22 @@ describe("insertMonitorSchema", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect("createdAt" in result.data).toBe(false);
+      }
+    });
+
+    it("strips consecutiveFailures from input", () => {
+      const result = insertMonitorSchema.safeParse({ ...validInput, consecutiveFailures: 99 });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect("consecutiveFailures" in result.data).toBe(false);
+      }
+    });
+
+    it("strips pauseReason from input", () => {
+      const result = insertMonitorSchema.safeParse({ ...validInput, pauseReason: "hacked" });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect("pauseReason" in result.data).toBe(false);
       }
     });
   });
@@ -166,5 +182,16 @@ describe("tier configuration constants", () => {
   it("defines resend email caps", () => {
     expect(RESEND_CAPS.daily).toBe(100);
     expect(RESEND_CAPS.monthly).toBe(3000);
+  });
+
+  it("defines pause thresholds for all tiers", () => {
+    expect(PAUSE_THRESHOLDS.free).toBe(3);
+    expect(PAUSE_THRESHOLDS.pro).toBe(5);
+    expect(PAUSE_THRESHOLDS.power).toBe(10);
+  });
+
+  it("pause thresholds are lower for free tier than pro and power", () => {
+    expect(PAUSE_THRESHOLDS.free).toBeLessThan(PAUSE_THRESHOLDS.pro);
+    expect(PAUSE_THRESHOLDS.pro).toBeLessThan(PAUSE_THRESHOLDS.power);
   });
 });

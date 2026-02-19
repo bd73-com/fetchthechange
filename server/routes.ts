@@ -6,7 +6,7 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { authStorage } from "./replit_integrations/auth/storage";
-import { TIER_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS, type UserTier } from "@shared/models/auth";
+import { TIER_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS, PAUSE_THRESHOLDS, type UserTier } from "@shared/models/auth";
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
@@ -16,7 +16,7 @@ import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
 import { BrowserlessUsageTracker, getMonthResetDate } from "./services/browserlessTracker";
 import { ResendUsageTracker, getResendResetDate } from "./services/resendTracker";
-import { errorLogs } from "@shared/schema";
+import { errorLogs, monitorMetrics } from "@shared/schema";
 import {
   generalRateLimiter,
   createMonitorRateLimiter,
@@ -147,6 +147,8 @@ export async function registerRoutes(
         lastError: null,
         active: true,
         emailEnabled: true,
+        consecutiveFailures: 0,
+        pauseReason: null,
         createdAt: new Date()
       };
 
@@ -373,7 +375,7 @@ export async function registerRoutes(
     if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
     const input = api.monitors.update.input.parse(req.body);
-    
+
     if (input.url) {
       const urlError = await isPrivateUrl(input.url);
       if (urlError) {
@@ -381,7 +383,13 @@ export async function registerRoutes(
       }
     }
 
-    const updated = await storage.updateMonitor(id, input);
+    const updates: Record<string, any> = { ...input };
+    if (input.active === true && !existing.active) {
+      updates.consecutiveFailures = 0;
+      updates.pauseReason = null;
+    }
+
+    const updated = await storage.updateMonitor(id, updates);
     res.json(updated);
   });
 
@@ -886,6 +894,75 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error fetching resend usage:", error);
       res.status(500).json({ message: "Failed to fetch resend usage" });
+    }
+  });
+
+  app.get("/api/admin/monitor-metrics", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const [failuresByDomain, avgDurationByStage, browserlessStats, autoPauseEvents] = await Promise.all([
+        db.execute(sql`
+          SELECT
+            SUBSTRING(m.url FROM '://([^/]+)') AS domain,
+            COUNT(*) FILTER (WHERE mm.status != 'ok')::int AS failures,
+            COUNT(*)::int AS total,
+            ROUND(COUNT(*) FILTER (WHERE mm.status != 'ok')::numeric / GREATEST(COUNT(*), 1) * 100, 1) AS failure_rate
+          FROM monitor_metrics mm
+          JOIN monitors m ON mm.monitor_id = m.id
+          WHERE mm.checked_at > NOW() - INTERVAL '30 days'
+          GROUP BY domain
+          ORDER BY failures DESC
+          LIMIT 50
+        `),
+        db.execute(sql`
+          SELECT
+            stage,
+            ROUND(AVG(duration_ms))::int AS avg_duration_ms,
+            COUNT(*)::int AS total_checks
+          FROM monitor_metrics
+          WHERE checked_at > NOW() - INTERVAL '30 days'
+          GROUP BY stage
+          ORDER BY stage
+        `),
+        db.execute(sql`
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE status = 'ok')::int AS successes,
+            COUNT(*) FILTER (WHERE status != 'ok')::int AS failures,
+            ROUND(COUNT(*) FILTER (WHERE stage = 'browserless')::numeric / GREATEST(COUNT(*), 1) * 100, 1) AS browserless_ratio
+          FROM monitor_metrics
+          WHERE checked_at > NOW() - INTERVAL '30 days'
+        `),
+        db.execute(sql`
+          SELECT
+            m.id AS monitor_id,
+            m.name AS monitor_name,
+            m.url,
+            m.pause_reason,
+            m.consecutive_failures,
+            m.last_checked
+          FROM monitors m
+          WHERE m.pause_reason IS NOT NULL
+            AND m.last_checked > NOW() - INTERVAL '30 days'
+          ORDER BY m.last_checked DESC
+          LIMIT 50
+        `),
+      ]);
+
+      res.json({
+        failuresByDomain: failuresByDomain.rows,
+        avgDurationByStage: avgDurationByStage.rows,
+        browserlessStats: browserlessStats.rows[0] || {},
+        autoPauseEvents: autoPauseEvents.rows,
+      });
+    } catch (error: any) {
+      console.error("Error fetching monitor metrics:", error);
+      res.status(500).json({ message: "Failed to fetch monitor metrics" });
     }
   });
 
