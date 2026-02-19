@@ -278,13 +278,30 @@ export default function MonitorDetails() {
                       {monitor.lastStatus && monitor.lastStatus !== "ok" && (
                         <Badge variant="destructive" className="text-xs">
                           <AlertTriangle className="h-3 w-3 mr-1" />
-                          {monitor.lastStatus === "selector_missing" ? "Not found" : monitor.lastStatus}
+                          {monitor.lastStatus === "selector_missing" ? "Not found" : monitor.lastStatus === "blocked" ? "Blocked" : "Error"}
+                        </Badge>
+                      )}
+                      {monitor.consecutiveFailures > 0 && (
+                        <Badge variant="outline" className="text-xs text-muted-foreground">
+                          {monitor.consecutiveFailures} consecutive failure{monitor.consecutiveFailures !== 1 ? "s" : ""}
                         </Badge>
                       )}
                     </div>
                     <code className="block bg-secondary px-2 py-1 rounded text-sm font-mono w-fit break-all max-w-full">
                       {monitor.selector}
                     </code>
+                    {monitor.lastStatus && monitor.lastStatus !== "ok" && monitor.lastError && (
+                      <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive dark:text-red-400">
+                        <p className="font-medium mb-1">{monitor.lastError}</p>
+                        <p className="text-muted-foreground">
+                          {monitor.lastStatus === "selector_missing"
+                            ? "The CSS selector didn't match any elements on the page. The site may have changed its layout. Use \"Fix selector\" below to find a working selector."
+                            : monitor.lastStatus === "blocked"
+                            ? "The site is blocking automated access (CAPTCHA, rate limiting, or bot detection). Try checking again later."
+                            : "An error occurred while checking the page. Verify the URL is accessible and try again."}
+                        </p>
+                      </div>
+                    )}
                     <div className="pt-2">
                       <FixSelectorModal monitor={monitor} />
                     </div>
@@ -315,7 +332,7 @@ export default function MonitorDetails() {
                   <div>
                     <p className="text-sm text-muted-foreground">Last Checked</p>
                     <p className="font-medium">
-                      {monitor.lastChecked 
+                      {monitor.lastChecked
                         ? format(new Date(monitor.lastChecked), "PPp")
                         : "Never checked"}
                     </p>
@@ -328,9 +345,26 @@ export default function MonitorDetails() {
                   <div>
                     <p className="text-sm text-muted-foreground">Last Change Detected</p>
                     <p className="font-medium">
-                      {monitor.lastChanged 
+                      {monitor.lastChanged
                         ? format(new Date(monitor.lastChanged), "PPp")
                         : "No changes detected"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${monitor.lastStatus === "ok" ? "bg-green-500/10" : "bg-red-500/10"}`}>
+                    <AlertTriangle className={`h-5 w-5 ${monitor.lastStatus === "ok" ? "text-green-600" : "text-red-600"}`} />
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Health Status</p>
+                    <p className="font-medium">
+                      {monitor.lastStatus === "ok"
+                        ? "Healthy"
+                        : monitor.lastStatus === "selector_missing"
+                        ? "Selector not found"
+                        : monitor.lastStatus === "blocked"
+                        ? "Site blocked"
+                        : "Error"}
                     </p>
                   </div>
                 </div>

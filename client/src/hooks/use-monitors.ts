@@ -56,7 +56,7 @@ export function useCreateMonitor() {
         body: JSON.stringify(data),
         credentials: "include",
       });
-      
+
       if (!res.ok) {
         const errorData = await res.json();
         if (res.status === 429) {
@@ -70,11 +70,18 @@ export function useCreateMonitor() {
         }
         throw new Error("Failed to create monitor");
       }
-      return api.monitors.create.responses[201].parse(await res.json());
+      const json = await res.json();
+      const selectorWarning = json.selectorWarning as string | undefined;
+      const monitor = api.monitors.create.responses[201].parse(json);
+      return { monitor, selectorWarning };
     },
-    onSuccess: () => {
+    onSuccess: ({ selectorWarning }) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
-      toast({ title: "Success", description: "Monitor created successfully" });
+      if (selectorWarning) {
+        toast({ title: "Monitor created", description: selectorWarning, variant: "destructive" });
+      } else {
+        toast({ title: "Success", description: "Monitor created successfully" });
+      }
     },
     onError: (err) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
