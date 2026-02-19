@@ -60,7 +60,9 @@ async function handleMonitorFailure(
     .where(eq(monitors.id, monitor.id))
     .returning({ consecutiveFailures: monitors.consecutiveFailures });
 
-  const newFailureCount = updated?.consecutiveFailures ?? (monitor.consecutiveFailures ?? 0) + 1;
+  const fallbackCount = monitor.consecutiveFailures ?? 0;
+  const newFailureCount = updated?.consecutiveFailures
+    ?? (shouldPenalize ? fallbackCount + 1 : fallbackCount);
 
   const user = await storage.getUser(monitor.userId);
   const tier = (user?.tier || "free") as UserTier;

@@ -948,6 +948,7 @@ export async function registerRoutes(
             m.last_checked
           FROM monitors m
           WHERE m.pause_reason IS NOT NULL
+            AND m.last_checked > NOW() - INTERVAL '30 days'
           ORDER BY m.last_checked DESC
           LIMIT 50
         `),
