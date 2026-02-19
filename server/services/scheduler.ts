@@ -9,7 +9,10 @@ const MAX_CONCURRENT_CHECKS = 10;
 let activeChecks = 0;
 
 async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]) {
-  if (activeChecks >= MAX_CONCURRENT_CHECKS) return;
+  if (activeChecks >= MAX_CONCURRENT_CHECKS) {
+    console.debug(`[Scheduler] Concurrency limit reached, deferring monitor ${monitor.id}`);
+    return;
+  }
   activeChecks++;
   try {
     await checkMonitor(monitor);
