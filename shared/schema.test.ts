@@ -126,19 +126,19 @@ describe("insertMonitorSchema", () => {
       }
     });
 
-    it("accepts lastStatus field", () => {
+    it("strips lastStatus field (server-only)", () => {
       const result = insertMonitorSchema.safeParse({ ...validInput, lastStatus: "blocked" });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.lastStatus).toBe("blocked");
+        expect(result.data).not.toHaveProperty("lastStatus");
       }
     });
 
-    it("accepts lastError field", () => {
+    it("strips lastError field (server-only)", () => {
       const result = insertMonitorSchema.safeParse({ ...validInput, lastError: "connection failed" });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.lastError).toBe("connection failed");
+        expect(result.data).not.toHaveProperty("lastError");
       }
     });
   });
