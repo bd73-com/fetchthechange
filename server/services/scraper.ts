@@ -487,26 +487,50 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       if (capCheck.allowed) {
         const startTime = Date.now();
         let browserlessSuccess = false;
-        try {
-          const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
-          browserlessSuccess = true;
-          const bStatus = result.value ? "ok" : (result.blocked ? "blocked" : "selector_missing");
-          await recordMetric(monitor.id, "browserless", Date.now() - startTime, bStatus, result.selectorCount, result.blocked, result.reason);
-          newValue = result.value;
-          block = { blocked: result.blocked, reason: result.reason };
-          console.log(`stage=rendered selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : "Unknown error";
-          const isInfra = errMsg.includes("connectOverCDP") || errMsg.includes("websocket") || errMsg.includes("Playwright") || errMsg.includes("Browser is not connected") || errMsg.includes("Browser has been closed") || errMsg.includes("ECONNREFUSED") || errMsg.includes("Target page, context or browser has been closed");
-          if (isInfra) {
-            browserlessInfraFailure = true;
+        let lastBrowserlessErr: unknown = null;
+
+        // Attempt Browserless extraction with one retry for transient failures
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            if (attempt > 0) {
+              console.log(`[Browserless] Monitor ${monitor.id}: retrying after transient failure (attempt ${attempt + 1})`);
+              await new Promise(r => setTimeout(r, 3000));
+            }
+            const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
+            browserlessSuccess = true;
+            const bStatus = result.value ? "ok" : (result.blocked ? "blocked" : "selector_missing");
+            await recordMetric(monitor.id, attempt === 0 ? "browserless" : "browserless_retry", Date.now() - startTime, bStatus, result.selectorCount, result.blocked, result.reason);
+            newValue = result.value;
+            block = { blocked: result.blocked, reason: result.reason };
+            console.log(`stage=rendered attempt=${attempt + 1} selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
+            lastBrowserlessErr = null;
+            break;
+          } catch (err) {
+            lastBrowserlessErr = err;
+            const errMsg = err instanceof Error ? err.message : "Unknown error";
+            const isInfra = errMsg.includes("connectOverCDP") || errMsg.includes("websocket") || errMsg.includes("Playwright") || errMsg.includes("Browser is not connected") || errMsg.includes("Browser has been closed") || errMsg.includes("ECONNREFUSED") || errMsg.includes("Target page, context or browser has been closed");
+            if (isInfra) {
+              browserlessInfraFailure = true;
+              // Don't retry infra failures — the service itself is down
+              await recordMetric(monitor.id, "browserless", Date.now() - startTime, "error", undefined, false, errMsg);
+              break;
+            }
+            // For non-infra failures (timeouts, page blocks), retry once
+            if (attempt === 0) {
+              await recordMetric(monitor.id, "browserless", Date.now() - startTime, "error", undefined, false, errMsg);
+              console.log(`[Browserless] Monitor ${monitor.id}: transient failure, will retry — ${errMsg.substring(0, 100)}`);
+            } else {
+              await recordMetric(monitor.id, "browserless_retry", Date.now() - startTime, "error", undefined, false, errMsg);
+            }
           }
-          await recordMetric(monitor.id, "browserless", Date.now() - startTime, "error", undefined, false, errMsg);
-          await ErrorLogger.error("scraper", `"${monitor.name}" — rendered page extraction failed. The site may block automated browsers or the page took too long to load. Try simplifying the selector or check if the site requires login.`, err instanceof Error ? err : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
-        } finally {
-          const durationMs = Date.now() - startTime;
-          await BrowserlessUsageTracker.recordUsage(monitor.userId, monitor.id, durationMs, browserlessSuccess).catch(() => {});
         }
+
+        if (lastBrowserlessErr) {
+          await ErrorLogger.error("scraper", `"${monitor.name}" — rendered page extraction failed. The site may block automated browsers or the page took too long to load. Try simplifying the selector or check if the site requires login.`, lastBrowserlessErr instanceof Error ? lastBrowserlessErr : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+        }
+
+        const durationMs = Date.now() - startTime;
+        await BrowserlessUsageTracker.recordUsage(monitor.userId, monitor.id, durationMs, browserlessSuccess).catch(() => {});
       } else {
         console.log(`Browserless skipped for monitor ${monitor.id}: ${capCheck.reason}`);
       }
