@@ -146,6 +146,15 @@ export default function MonitorDetails() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {monitor.pauseReason && (
+          <div className="flex items-start gap-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-4 text-sm text-amber-800 dark:text-amber-300">
+            <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-medium">{monitor.pauseReason}</p>
+              <p className="mt-1 text-amber-700 dark:text-amber-400">Re-enable this monitor after verifying the URL and selector are correct.</p>
+            </div>
+          </div>
+        )}
         {isEditing ? (
           <Card>
             <CardHeader>

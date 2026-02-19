@@ -21,6 +21,8 @@ export const monitors = pgTable("monitors", {
   lastError: text("last_error"),
   active: boolean("active").default(true).notNull(),
   emailEnabled: boolean("email_enabled").default(true).notNull(),
+  consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
+  pauseReason: text("pause_reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -46,6 +48,30 @@ export const monitorChangesRelations = relations(monitorChanges, ({ one }) => ({
     references: [monitors.id],
   }),
 }));
+
+export const monitorMetrics = pgTable("monitor_metrics", {
+  id: serial("id").primaryKey(),
+  monitorId: integer("monitor_id").notNull().references(() => monitors.id),
+  checkedAt: timestamp("checked_at").defaultNow().notNull(),
+  stage: text("stage").notNull(),
+  durationMs: integer("duration_ms"),
+  status: text("status").notNull(),
+  selectorCount: integer("selector_count"),
+  blocked: boolean("blocked").default(false).notNull(),
+  blockReason: text("block_reason"),
+}, (table) => ({
+  monitorIdx: index("monitor_metrics_monitor_idx").on(table.monitorId),
+  checkedAtIdx: index("monitor_metrics_checked_at_idx").on(table.checkedAt),
+}));
+
+export const monitorMetricsRelations = relations(monitorMetrics, ({ one }) => ({
+  monitor: one(monitors, {
+    fields: [monitorMetrics.monitorId],
+    references: [monitors.id],
+  }),
+}));
+
+export type MonitorMetric = typeof monitorMetrics.$inferSelect;
 
 export const errorLogs = pgTable("error_logs", {
   id: serial("id").primaryKey(),
