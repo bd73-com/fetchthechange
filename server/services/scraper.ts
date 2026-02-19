@@ -15,6 +15,28 @@ interface SelectorSuggestion {
   sampleText: string;
 }
 
+/**
+ * Validates that a CSS selector is syntactically correct.
+ * Returns null if valid, or an error message string if invalid.
+ */
+export function validateCssSelector(selector: string): string | null {
+  const trimmed = selector.trim();
+  if (!trimmed) return "Selector cannot be empty";
+  if (trimmed.length > 500) return "Selector is too long (max 500 characters)";
+
+  // Normalize bare class names the same way extractValueFromHtml does
+  const isClassName = !trimmed.startsWith('.') && !trimmed.startsWith('#') && !trimmed.includes(' ');
+  const effective = isClassName ? `.${trimmed}` : trimmed;
+
+  try {
+    const $ = cheerio.load("<div></div>");
+    $(effective);
+    return null;
+  } catch {
+    return `Invalid CSS selector syntax: "${selector}"`;
+  }
+}
+
 async function recordMetric(
   monitorId: number,
   stage: string,
@@ -465,26 +487,50 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       if (capCheck.allowed) {
         const startTime = Date.now();
         let browserlessSuccess = false;
-        try {
-          const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
-          browserlessSuccess = true;
-          const bStatus = result.value ? "ok" : (result.blocked ? "blocked" : "selector_missing");
-          await recordMetric(monitor.id, "browserless", Date.now() - startTime, bStatus, result.selectorCount, result.blocked, result.reason);
-          newValue = result.value;
-          block = { blocked: result.blocked, reason: result.reason };
-          console.log(`stage=rendered selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : "Unknown error";
-          const isInfra = errMsg.includes("connectOverCDP") || errMsg.includes("websocket") || errMsg.includes("Playwright") || errMsg.includes("Browser is not connected") || errMsg.includes("Browser has been closed") || errMsg.includes("ECONNREFUSED") || errMsg.includes("Target page, context or browser has been closed");
-          if (isInfra) {
-            browserlessInfraFailure = true;
+        let lastBrowserlessErr: unknown = null;
+
+        // Attempt Browserless extraction with one retry for transient failures
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            if (attempt > 0) {
+              console.log(`[Browserless] Monitor ${monitor.id}: retrying after transient failure (attempt ${attempt + 1})`);
+              await new Promise(r => setTimeout(r, 3000));
+            }
+            const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
+            browserlessSuccess = true;
+            const bStatus = result.value ? "ok" : (result.blocked ? "blocked" : "selector_missing");
+            await recordMetric(monitor.id, attempt === 0 ? "browserless" : "browserless_retry", Date.now() - startTime, bStatus, result.selectorCount, result.blocked, result.reason);
+            newValue = result.value;
+            block = { blocked: result.blocked, reason: result.reason };
+            console.log(`stage=rendered attempt=${attempt + 1} selectorCount=${result.selectorCount} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
+            lastBrowserlessErr = null;
+            break;
+          } catch (err) {
+            lastBrowserlessErr = err;
+            const errMsg = err instanceof Error ? err.message : "Unknown error";
+            const isInfra = errMsg.includes("connectOverCDP") || errMsg.includes("websocket") || errMsg.includes("Playwright") || errMsg.includes("Browser is not connected") || errMsg.includes("Browser has been closed") || errMsg.includes("ECONNREFUSED") || errMsg.includes("Target page, context or browser has been closed");
+            if (isInfra) {
+              browserlessInfraFailure = true;
+              // Don't retry infra failures — the service itself is down
+              await recordMetric(monitor.id, "browserless", Date.now() - startTime, "error", undefined, false, errMsg);
+              break;
+            }
+            // For non-infra failures (timeouts, page blocks), retry once
+            if (attempt === 0) {
+              await recordMetric(monitor.id, "browserless", Date.now() - startTime, "error", undefined, false, errMsg);
+              console.log(`[Browserless] Monitor ${monitor.id}: transient failure, will retry — ${errMsg.substring(0, 100)}`);
+            } else {
+              await recordMetric(monitor.id, "browserless_retry", Date.now() - startTime, "error", undefined, false, errMsg);
+            }
           }
-          await recordMetric(monitor.id, "browserless", Date.now() - startTime, "error", undefined, false, errMsg);
-          await ErrorLogger.error("scraper", `"${monitor.name}" — rendered page extraction failed. The site may block automated browsers or the page took too long to load. Try simplifying the selector or check if the site requires login.`, err instanceof Error ? err : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
-        } finally {
-          const durationMs = Date.now() - startTime;
-          await BrowserlessUsageTracker.recordUsage(monitor.userId, monitor.id, durationMs, browserlessSuccess).catch(() => {});
         }
+
+        if (lastBrowserlessErr) {
+          await ErrorLogger.error("scraper", `"${monitor.name}" — rendered page extraction failed. The site may block automated browsers or the page took too long to load. Try simplifying the selector or check if the site requires login.`, lastBrowserlessErr instanceof Error ? lastBrowserlessErr : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+        }
+
+        const durationMs = Date.now() - startTime;
+        await BrowserlessUsageTracker.recordUsage(monitor.userId, monitor.id, durationMs, browserlessSuccess).catch(() => {});
       } else {
         console.log(`Browserless skipped for monitor ${monitor.id}: ${capCheck.reason}`);
       }
@@ -505,6 +551,52 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       } else {
         finalStatus = "selector_missing";
         finalError = "Selector not found";
+      }
+    }
+
+    // Auto-heal: when the selector is missing and we have a last known value,
+    // try to discover a new selector that matches the old value on the page.
+    if (finalStatus === "selector_missing" && oldValue && process.env.BROWSERLESS_TOKEN && !browserlessInfraFailure) {
+      const user = await storage.getUser(monitor.userId);
+      const tier = (user?.tier || "free") as UserTier;
+      const capCheck = await BrowserlessUsageTracker.canUseBrowserless(monitor.userId, tier);
+
+      if (capCheck.allowed) {
+        try {
+          console.log(`[AutoHeal] Monitor ${monitor.id}: selector "${monitor.selector}" missing, attempting auto-recovery with last value "${oldValue.substring(0, 50)}"`);
+          const healStart = Date.now();
+          const discovery = await discoverSelectors(monitor.url, monitor.selector, oldValue);
+          const healDuration = Date.now() - healStart;
+          await BrowserlessUsageTracker.recordUsage(monitor.userId, monitor.id, healDuration, true).catch(() => {});
+
+          if (discovery.suggestions.length > 0) {
+            // Pick the best suggestion: prefer single-match selectors, then shortest
+            const best = discovery.suggestions
+              .sort((a, b) => (a.count === 1 ? 0 : 1) - (b.count === 1 ? 0 : 1) || a.selector.length - b.selector.length)[0];
+
+            console.log(`[AutoHeal] Monitor ${monitor.id}: found replacement selector "${best.selector}" (matches=${best.count}, sample="${best.sampleText}")`);
+            await recordMetric(monitor.id, "auto_heal", healDuration, "ok", best.count);
+
+            // Update the monitor with the new selector and re-extract the value
+            await storage.updateMonitor(monitor.id, { selector: best.selector });
+            newValue = normalizeValue(best.sampleText) || null;
+            finalStatus = "ok";
+            finalError = null;
+
+            await ErrorLogger.info(
+              "scraper",
+              `"${monitor.name}" — auto-healed selector from "${monitor.selector}" to "${best.selector}". The page structure likely changed.`,
+              { monitorId: monitor.id, monitorName: monitor.name, oldSelector: monitor.selector, newSelector: best.selector }
+            );
+          } else {
+            console.log(`[AutoHeal] Monitor ${monitor.id}: no replacement selector found`);
+            await recordMetric(monitor.id, "auto_heal", healDuration, "selector_missing", 0);
+            finalError = "Selector not found on page (auto-recovery failed — no matching elements found for the last known value)";
+          }
+        } catch (healErr) {
+          console.log(`[AutoHeal] Monitor ${monitor.id}: auto-recovery failed:`, healErr instanceof Error ? healErr.message : healErr);
+          // Don't change finalStatus/finalError — fall through to normal failure path
+        }
       }
     }
 

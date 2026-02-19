@@ -1,4 +1,4 @@
-import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPageBlockReason, discoverSelectors } from "./services/scraper";
+import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPageBlockReason, discoverSelectors, validateCssSelector } from "./services/scraper";
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -345,10 +345,17 @@ export async function registerRoutes(
       }
       
       const input = api.monitors.create.input.parse(req.body);
-      
+
       const urlError = await isPrivateUrl(input.url);
       if (urlError) {
         return res.status(400).json({ message: urlError });
+      }
+
+      if (input.selector) {
+        const selectorError = validateCssSelector(input.selector);
+        if (selectorError) {
+          return res.status(400).json({ message: selectorError });
+        }
       }
 
       const monitor = await storage.createMonitor({
@@ -356,10 +363,36 @@ export async function registerRoutes(
         userId,
       } as any);
 
-      // We don't await this so the UI returns immediately
+      // Run the first check asynchronously but capture a quick static validation
+      // to return an early warning to the user if the selector is likely wrong.
       checkMonitor(monitor).catch(console.error);
 
-      res.status(201).json(monitor);
+      // Quick static pre-check: fetch the page and test the selector without Browserless.
+      // This is best-effort and doesn't block monitor creation.
+      let selectorWarning: string | undefined;
+      try {
+        const preCheckResponse = await ssrfSafeFetch(input.url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+        const preCheckHtml = await preCheckResponse.text();
+        const { extractValueFromHtml, detectPageBlockReason } = await import("./services/scraper");
+        const block = detectPageBlockReason(preCheckHtml);
+        if (block.blocked) {
+          selectorWarning = `The page appears to be blocking automated access (${block.reason}). The monitor may need Browserless rendering to work.`;
+        } else {
+          const testValue = extractValueFromHtml(preCheckHtml, input.selector);
+          if (!testValue) {
+            selectorWarning = "The CSS selector didn't match any elements on the page's static HTML. It may work after JavaScript rendering, or the selector may need adjusting.";
+          }
+        }
+      } catch {
+        // Pre-check is best-effort; don't block creation
+      }
+
+      res.status(201).json({ ...monitor, selectorWarning });
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
@@ -380,6 +413,13 @@ export async function registerRoutes(
       const urlError = await isPrivateUrl(input.url);
       if (urlError) {
         return res.status(400).json({ message: urlError });
+      }
+    }
+
+    if (input.selector) {
+      const selectorError = validateCssSelector(input.selector);
+      if (selectorError) {
+        return res.status(400).json({ message: selectorError });
       }
     }
 

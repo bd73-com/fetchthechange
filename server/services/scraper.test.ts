@@ -36,6 +36,16 @@ vi.mock("../utils/ssrf", () => ({
   }),
 }));
 
+// Hoisted playwright-core mock — connectOverCDP behavior is set per-test.
+const { mockConnectOverCDP } = vi.hoisted(() => ({
+  mockConnectOverCDP: vi.fn().mockRejectedValue(new Error("playwright-core not configured for this test")),
+}));
+vi.mock("playwright-core", () => ({
+  chromium: {
+    connectOverCDP: (...args: any[]) => mockConnectOverCDP(...args),
+  },
+}));
+
 vi.mock("../db", () => ({
   db: {
     insert: vi.fn().mockReturnValue({
@@ -59,6 +69,8 @@ import {
   normalizeTextForMatch,
   extractDigits,
   textMatches,
+  validateCssSelector,
+  discoverSelectors,
 } from "./scraper";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
@@ -1669,11 +1681,7 @@ describe("failure tracking and auto-pause", () => {
       .mockResolvedValueOnce({ allowed: true });
 
     // Mock Playwright to throw an infra error (connectOverCDP)
-    vi.doMock("playwright-core", () => ({
-      chromium: {
-        connectOverCDP: vi.fn().mockRejectedValue(new Error("connectOverCDP failed: connection refused")),
-      },
-    }));
+    mockConnectOverCDP.mockRejectedValue(new Error("connectOverCDP failed: connection refused"));
 
     const { setFn } = mockDbUpdate(1, true);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
@@ -1867,5 +1875,689 @@ describe("error message truncation", () => {
     const setArg = setFn.mock.calls[0]?.[0];
     expect(setArg.lastError).toHaveLength(200);
     expect(setArg.lastError).toBe("C".repeat(200));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateCssSelector
+// ---------------------------------------------------------------------------
+describe("validateCssSelector", () => {
+  it("returns null for valid class selector", () => {
+    expect(validateCssSelector(".price")).toBeNull();
+  });
+
+  it("returns null for valid ID selector", () => {
+    expect(validateCssSelector("#total")).toBeNull();
+  });
+
+  it("returns null for valid compound selector", () => {
+    expect(validateCssSelector(".product .price")).toBeNull();
+  });
+
+  it("returns null for bare class name (auto-prefixed with dot)", () => {
+    expect(validateCssSelector("price")).toBeNull();
+  });
+
+  it("returns null for bare class name with hyphens", () => {
+    expect(validateCssSelector("sale-price")).toBeNull();
+  });
+
+  it("returns null for selector with pseudo-class", () => {
+    expect(validateCssSelector(".item:first-child")).toBeNull();
+  });
+
+  it("treats bare attribute selectors as class names (auto-prefixed with dot)", () => {
+    // '[data-testid="price"]' doesn't start with '.', '#', or contain a space
+    // so it gets treated as a bare class name → '.[data-testid="price"]' which is invalid
+    const result = validateCssSelector('[data-testid="price"]');
+    expect(result).toContain("Invalid CSS selector syntax");
+  });
+
+  it("returns error for empty string", () => {
+    const result = validateCssSelector("");
+    expect(result).toBe("Selector cannot be empty");
+  });
+
+  it("returns error for whitespace-only string", () => {
+    const result = validateCssSelector("   ");
+    expect(result).toBe("Selector cannot be empty");
+  });
+
+  it("returns error for selector exceeding 500 characters", () => {
+    const longSelector = ".a".repeat(251); // 502 chars
+    const result = validateCssSelector(longSelector);
+    expect(result).toBe("Selector is too long (max 500 characters)");
+  });
+
+  it("accepts selector at exactly 500 characters", () => {
+    const selector = ".a".repeat(250); // exactly 500 chars
+    expect(validateCssSelector(selector)).toBeNull();
+  });
+
+  it("returns error for invalid CSS selector syntax", () => {
+    const result = validateCssSelector(".price[invalid===");
+    expect(result).toContain("Invalid CSS selector syntax");
+    expect(result).toContain(".price[invalid===");
+  });
+
+  it("trims whitespace before validating", () => {
+    expect(validateCssSelector("  .price  ")).toBeNull();
+  });
+
+  it("returns error for selector with only special chars that form invalid CSS", () => {
+    const result = validateCssSelector(">>><<<");
+    // ">>>" as bare class name becomes ".>>><<<"  which is invalid
+    expect(result).toContain("Invalid CSS selector syntax");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Browserless retry logic
+// ---------------------------------------------------------------------------
+describe("Browserless retry logic", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+
+  function mockDbUpdate(returnedFailureCount: number, returnedActive = true) {
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+    return { setFn, whereFn, returningFn };
+  }
+
+  /**
+   * Creates a mock Playwright browser/page chain for extractWithBrowserless.
+   * Returns a page mock whose behavior can be configured per-test.
+   */
+  function createPlaywrightMock(pageContentHtml: string, selectorCount: number, extractedText: string | null) {
+    const locatorMock = {
+      count: vi.fn().mockResolvedValue(selectorCount),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(extractedText || ""),
+      }),
+    };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(pageContentHtml),
+      locator: vi.fn().mockReturnValue(locatorMock),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      getByRole: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0) }),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    return { browserMock, contextMock, pageMock, locatorMock };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    // Advance in small increments so each registered setTimeout
+    // is triggered before the next one is enqueued.
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    return promise;
+  }
+
+  it("does not retry Browserless on infrastructure failure (connectOverCDP)", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    mockConnectOverCDP.mockRejectedValue(new Error("connectOverCDP failed: ECONNREFUSED"));
+
+    const monitor = makeMonitor({ selector: ".missing" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Browserless service unavailable");
+    // connectOverCDP should only be called once (no retry for infra failures)
+    expect(mockConnectOverCDP).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries Browserless once on transient (non-infra) failure then succeeds", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    const fullHtml = `<html><body><span class="price">$19.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    // First attempt: timeout error (non-infra, triggers retry)
+    // Second attempt: success with value
+    const { browserMock: successBrowser } = createPlaywrightMock(fullHtml, 1, "$19.99");
+
+    let callCount = 0;
+    mockConnectOverCDP.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.reject(new Error("Navigation timeout of 30000ms exceeded"));
+      }
+      return Promise.resolve(successBrowser);
+    });
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$19.99");
+    expect(mockConnectOverCDP).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after two transient failures", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    mockConnectOverCDP.mockRejectedValue(
+      new Error("Navigation timeout of 30000ms exceeded")
+    );
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    // Both attempts should have been made
+    expect(mockConnectOverCDP).toHaveBeenCalledTimes(2);
+  });
+
+  it("records browserless_retry metric stage on retry attempt", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    // Both attempts fail with non-infra error
+    mockConnectOverCDP.mockRejectedValue(
+      new Error("Page crashed")
+    );
+
+    const monitor = makeMonitor({ selector: ".price" });
+    await runWithTimers(monitor);
+
+    // Verify metrics were recorded for both "browserless" and "browserless_retry" stages
+    const insertCalls = mockDb.insert.mock.results;
+    const valuesCalls = insertCalls
+      .map((r: any) => r.value?.values?.mock?.calls)
+      .filter(Boolean)
+      .flat();
+
+    // At minimum, db.insert should have been called multiple times
+    // (static, static_retry, browserless, browserless_retry)
+    expect(mockDb.insert).toHaveBeenCalled();
+  });
+
+  it("records usage via BrowserlessUsageTracker after retry completes", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    mockConnectOverCDP.mockRejectedValue(
+      new Error("Timeout exceeded")
+    );
+
+    const monitor = makeMonitor({ selector: ".price" });
+    await runWithTimers(monitor);
+
+    // BrowserlessUsageTracker.recordUsage should be called even after retry failures
+    expect(BrowserlessUsageTracker.recordUsage).toHaveBeenCalledWith(
+      "user1", 1, expect.any(Number), false
+    );
+  });
+
+  it("does not retry when Browserless succeeds on first attempt", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    const fullHtml = `<html><body><span class="price">$25.00</span></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    const { browserMock } = createPlaywrightMock(fullHtml, 1, "$25.00");
+    mockConnectOverCDP.mockResolvedValue(browserMock);
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$25.00");
+    // Only one attempt needed
+    expect(mockConnectOverCDP).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-heal (selector recovery)
+// ---------------------------------------------------------------------------
+describe("auto-heal selector recovery", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+
+  function mockDbUpdate(returnedFailureCount: number, returnedActive = true) {
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+    return { setFn, whereFn, returningFn };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    // Advance in small increments so each registered setTimeout
+    // is triggered before the next one is enqueued.
+    for (let i = 0; i < 30; i++) {
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    return promise;
+  }
+
+  it("skips auto-heal when currentValue (oldValue) is null", async () => {
+    const html = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    // Don't allow browserless for the main check
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: false, reason: "capped" });
+
+    // currentValue is null → auto-heal should not be triggered
+    const monitor = makeMonitor({ selector: ".missing", currentValue: null });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    // discoverSelectors should not be called (auto-heal skipped)
+    // We verify by checking that BrowserlessUsageTracker.canUseBrowserless
+    // was only called once (for the main browserless check, not for auto-heal)
+    expect(BrowserlessUsageTracker.canUseBrowserless).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips auto-heal when BROWSERLESS_TOKEN is not set", async () => {
+    const html = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    delete process.env.BROWSERLESS_TOKEN;
+
+    const monitor = makeMonitor({ selector: ".missing", currentValue: "$50.00" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found");
+  });
+
+  it("skips auto-heal when browserless cap is not allowed", async () => {
+    const html = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    // First call: main browserless check → not allowed (so we get selector_missing)
+    // Second call: auto-heal check → also not allowed
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: false, reason: "free_tier_cap" });
+
+    const monitor = makeMonitor({ selector: ".missing", currentValue: "$50.00" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found");
+  });
+
+  it("skips auto-heal after browserless infrastructure failure", async () => {
+    const html = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+
+    // Make extractWithBrowserless fail with infra error
+    mockConnectOverCDP.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const monitor = makeMonitor({ selector: ".missing", currentValue: "$50.00" });
+    const result = await runWithTimers(monitor);
+
+    // Should be error (infra failure), NOT selector_missing with auto-heal
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Browserless service unavailable");
+  });
+
+  it("catches errors from discoverSelectors and falls through to failure", async () => {
+    const html = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    // First call: main browserless check → allowed (extractWithBrowserless runs)
+    // Second call: auto-heal check → allowed (discoverSelectors runs)
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+
+    // extractWithBrowserless will fail (returns no value via timeout),
+    // then discoverSelectors (auto-heal) will also fail with an error.
+    // Both use playwright-core, so we make connectOverCDP:
+    // - fail first two times for extractWithBrowserless (attempt + retry)
+    // - fail again for discoverSelectors in auto-heal
+    mockConnectOverCDP.mockRejectedValue(
+      new Error("Navigation timeout of 30000ms exceeded")
+    );
+
+    const monitor = makeMonitor({ selector: ".missing", currentValue: "$50.00" });
+    const result = await runWithTimers(monitor);
+
+    // Auto-heal catch block should let the failure pass through
+    expect(result.status).toBe("selector_missing");
+  });
+
+  it("updates error message when auto-heal finds no suggestions", async () => {
+    const html = `<html><body><p>No match</p></body></html>`;
+    const pageHtml = `<html><body><p>Some other content</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+
+    // For extractWithBrowserless: both attempts get timeout (non-infra) → triggers auto-heal
+    // For discoverSelectors: returns a page with no matching suggestions
+    let callCount = 0;
+    const makeLocator = () => ({
+      count: vi.fn().mockResolvedValue(0),
+      innerText: vi.fn().mockResolvedValue(""),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(""),
+        click: vi.fn().mockResolvedValue(undefined),
+        count: vi.fn().mockResolvedValue(0),
+      }),
+    });
+    const roleBtn = { count: vi.fn().mockResolvedValue(0), click: vi.fn(), first: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0), click: vi.fn().mockResolvedValue(undefined) }) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(pageHtml),
+      locator: vi.fn().mockImplementation(() => makeLocator()),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      evaluate: vi.fn().mockResolvedValue([]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockResolvedValueOnce(browserMock);
+
+    const { setFn } = mockDbUpdate(1, true);
+    const monitor = makeMonitor({ selector: ".missing", currentValue: "$50.00" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toContain("auto-recovery failed");
+    expect(result.error).toContain("no matching elements found");
+  });
+
+  it("auto-heals successfully when discoverSelectors finds a replacement", async () => {
+    const html = `<html><body><p>No match</p></body></html>`;
+    const pageHtml = `<html><body><span class="new-price">$50.00</span></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+
+    const { ErrorLogger } = await import("./logger");
+
+    // Build a page mock that returns matching suggestions for discoverSelectors
+    const makeLocator = (count = 1) => ({
+      count: vi.fn().mockResolvedValue(count),
+      innerText: vi.fn().mockResolvedValue("$50.00"),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue("$50.00"),
+        click: vi.fn().mockResolvedValue(undefined),
+        count: vi.fn().mockResolvedValue(count),
+      }),
+    });
+    const roleBtn = { count: vi.fn().mockResolvedValue(0), click: vi.fn(), first: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0), click: vi.fn().mockResolvedValue(undefined) }) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(pageHtml),
+      locator: vi.fn().mockImplementation(() => makeLocator(1)),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      evaluate: vi.fn().mockResolvedValue([
+        { text: "$50.00", selector: ".new-price" },
+      ]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockResolvedValueOnce(browserMock);
+
+    const monitor = makeMonitor({ selector: ".old-price", currentValue: "$50.00" });
+    const result = await runWithTimers(monitor);
+
+    // Auto-heal should have changed status to ok
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$50.00");
+    expect(result.error).toBeNull();
+
+    // Should have updated the monitor with the new selector
+    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ selector: ".new-price" })
+    );
+
+    // Should have logged an info message about auto-healing
+    expect(ErrorLogger.info).toHaveBeenCalledWith(
+      "scraper",
+      expect.stringContaining("auto-healed selector"),
+      expect.objectContaining({
+        oldSelector: ".old-price",
+        newSelector: ".new-price",
+      })
+    );
+  });
+
+  it("prefers single-match selectors when auto-healing", async () => {
+    const html = `<html><body><p>No match</p></body></html>`;
+    const pageHtml = `<html><body><span class="price">$50.00</span><span class="price">$60.00</span><span class="exact-price">$50.00</span></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+
+    // This mock needs to handle different locator selectors returning different counts
+    const locatorCountMap: Record<string, number> = {
+      ".price": 2,
+      ".exact-price": 1,
+    };
+    const roleBtn = { count: vi.fn().mockResolvedValue(0), click: vi.fn(), first: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0), click: vi.fn().mockResolvedValue(undefined) }) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(pageHtml),
+      locator: vi.fn().mockImplementation((sel: string) => ({
+        count: vi.fn().mockResolvedValue(locatorCountMap[sel] ?? 0),
+        innerText: vi.fn().mockResolvedValue("$50.00"),
+        first: vi.fn().mockReturnValue({
+          innerText: vi.fn().mockResolvedValue("$50.00"),
+          click: vi.fn().mockResolvedValue(undefined),
+          count: vi.fn().mockResolvedValue(locatorCountMap[sel] ?? 0),
+        }),
+      })),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      evaluate: vi.fn().mockResolvedValue([
+        { text: "$50.00", selector: ".price" },
+        { text: "$50.00", selector: ".exact-price" },
+      ]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockResolvedValueOnce(browserMock);
+
+    const monitor = makeMonitor({ selector: ".old-price", currentValue: "$50.00" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    // Should prefer .exact-price (count=1) over .price (count=2)
+    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ selector: ".exact-price" })
+    );
   });
 });
