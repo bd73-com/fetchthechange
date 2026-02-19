@@ -1598,6 +1598,32 @@ describe("failure tracking and auto-pause", () => {
     expect(mockDb.insert).toHaveBeenCalled();
   });
 
+  it("recordMetric failure does not break the check (best-effort metrics)", async () => {
+    // Make db.insert throw to simulate a metrics recording failure
+    mockDb.insert.mockReturnValueOnce({
+      values: vi.fn().mockRejectedValueOnce(new Error("DB connection lost")),
+    });
+    const consoleSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    const html = `<html><body><span class="price">$19.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(html, { status: 200 })
+    );
+
+    const monitor = makeMonitor({ currentValue: "$19.99" });
+    const result = await runWithTimers(monitor);
+
+    // The check should still succeed despite metrics failure
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$19.99");
+    // Should have logged the metrics error
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[Metrics] Failed to record metric"),
+      expect.stringContaining("DB connection lost")
+    );
+    consoleSpy.mockRestore();
+  });
+
   it("power tier has highest pause threshold (10)", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
     // count = 9, below power threshold of 10, still active
