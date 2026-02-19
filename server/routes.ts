@@ -901,9 +901,11 @@ export async function registerRoutes(
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      if (!APP_OWNER_ID) return res.status(503).json({ message: "Admin endpoint not configured (APP_OWNER_ID missing)" });
       const user = await authStorage.getUser(userId);
-      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
-      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+      if (!user || user.tier !== "power" || userId !== APP_OWNER_ID) {
+        return res.status(403).json({ message: "Owner access required" });
+      }
 
       const [failuresByDomain, avgDurationByStage, browserlessStats, autoPauseEvents] = await Promise.all([
         db.execute(sql`

@@ -32,6 +32,21 @@ function sanitizePlainText(str: string | null | undefined): string {
   return str.replace(/[\r\n]+/g, ' ').trim();
 }
 
+/** Sanitize a URL for use in an href attribute. Only allows http/https schemes. */
+function safeHref(url: string | null | undefined): string {
+  if (!url) return '';
+  const escaped = escapeHtml(url);
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return '';
+    }
+  } catch {
+    return '';
+  }
+  return escaped;
+}
+
 async function canSendEmail(monitor: Monitor): Promise<{ allowed: boolean; reason?: string }> {
   const user = await authStorage.getUser(monitor.userId);
   const tier = (user?.tier || "free") as UserTier;
@@ -116,7 +131,7 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
       html: `
         <h2>Change Detected</h2>
         <p><strong>Monitor:</strong> ${escapeHtml(monitor.name)}</p>
-        <p><strong>URL:</strong> <a href="${escapeHtml(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
+        <p><strong>URL:</strong> <a href="${safeHref(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
         <hr/>
         <p><strong>New Value:</strong></p>
         <pre>${escapeHtml(newValue)}</pre>
@@ -186,7 +201,7 @@ FetchTheChange Team`,
       html: `
         <h2>Monitor Auto-Paused</h2>
         <p>Your monitor <strong>${escapeHtml(monitor.name)}</strong> has been automatically paused after <strong>${failureCount}</strong> consecutive failures.</p>
-        <p><strong>URL:</strong> <a href="${escapeHtml(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
+        <p><strong>URL:</strong> <a href="${safeHref(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
         <p><strong>Last error:</strong> ${escapeHtml(lastError)}</p>
         <hr/>
         <p>To resume monitoring, visit your <a href="https://fetch-the-change.replit.app">dashboard</a> and re-enable the monitor after verifying the URL and selector are correct.</p>
