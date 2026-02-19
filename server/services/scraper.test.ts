@@ -1739,3 +1739,133 @@ describe("failure tracking and auto-pause", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Error message truncation in handleMonitorFailure
+// ---------------------------------------------------------------------------
+describe("error message truncation", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+  const mockAutoPauseEmail = sendAutoPauseEmail as ReturnType<typeof vi.fn>;
+
+  function mockDbUpdate(returnedFailureCount: number, returnedActive = true) {
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+    return { setFn, whereFn, returningFn };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    await vi.advanceTimersByTimeAsync(3000);
+    return promise;
+  }
+
+  it("truncates error messages longer than 200 chars in lastError", async () => {
+    const longError = "A".repeat(300);
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error(longError));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg).toBeDefined();
+    expect(setArg.lastError).toHaveLength(200);
+    expect(setArg.lastError).toBe("A".repeat(200));
+  });
+
+  it("preserves error messages shorter than 200 chars", async () => {
+    const shortError = "Connection refused";
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error(shortError));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg.lastError).toBe("Connection refused");
+  });
+
+  it("passes truncated error to sendAutoPauseEmail", async () => {
+    const longError = "X".repeat(500);
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error(longError));
+    mockDbUpdate(3, false);
+
+    const monitor = makeMonitor({ emailEnabled: true });
+    await runWithTimers(monitor);
+
+    expect(mockAutoPauseEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 1 }),
+      3,
+      "X".repeat(200)
+    );
+  });
+
+  it("truncates error messages from selector_missing failures", async () => {
+    // A page that returns HTML but the selector doesn't match,
+    // resulting in "Selector not found" (short, fits in 200 chars)
+    const html = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor({ selector: ".nonexistent" });
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg.lastError).toBe("Selector not found");
+    expect(setArg.lastError.length).toBeLessThanOrEqual(200);
+  });
+
+  it("truncates exactly at 200 chars for boundary-length errors", async () => {
+    const exactly200 = "B".repeat(200);
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error(exactly200));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg.lastError).toHaveLength(200);
+    expect(setArg.lastError).toBe(exactly200);
+  });
+
+  it("truncates 201-char error to 200 chars", async () => {
+    const error201 = "C".repeat(201);
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error(error201));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg.lastError).toHaveLength(200);
+    expect(setArg.lastError).toBe("C".repeat(200));
+  });
+});

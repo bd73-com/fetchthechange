@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { insertMonitorSchema } from "./schema";
+import { insertMonitorSchema, monitorMetrics, monitors } from "./schema";
 import { TIER_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS, PAUSE_THRESHOLDS } from "./models/auth";
+import { api } from "./routes";
 
 describe("insertMonitorSchema", () => {
   const validInput = {
@@ -193,5 +194,76 @@ describe("tier configuration constants", () => {
   it("pause thresholds are lower for free tier than pro and power", () => {
     expect(PAUSE_THRESHOLDS.free).toBeLessThan(PAUSE_THRESHOLDS.pro);
     expect(PAUSE_THRESHOLDS.pro).toBeLessThan(PAUSE_THRESHOLDS.power);
+  });
+});
+
+describe("update input schema (api.monitors.update.input)", () => {
+  const updateSchema = api.monitors.update.input;
+
+  it("strips consecutiveFailures from update input", () => {
+    const result = updateSchema.safeParse({ consecutiveFailures: 99 });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect("consecutiveFailures" in result.data).toBe(false);
+    }
+  });
+
+  it("strips pauseReason from update input", () => {
+    const result = updateSchema.safeParse({ pauseReason: "injected" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect("pauseReason" in result.data).toBe(false);
+    }
+  });
+
+  it("strips id from update input", () => {
+    const result = updateSchema.safeParse({ id: 999 });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect("id" in result.data).toBe(false);
+    }
+  });
+
+  it("strips userId from update input", () => {
+    const result = updateSchema.safeParse({ userId: "attacker" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect("userId" in result.data).toBe(false);
+    }
+  });
+
+  it("allows valid fields like name, url, active", () => {
+    const result = updateSchema.safeParse({
+      name: "Updated",
+      url: "https://new.example.com",
+      active: true,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.name).toBe("Updated");
+      expect(result.data.url).toBe("https://new.example.com");
+      expect(result.data.active).toBe(true);
+    }
+  });
+});
+
+describe("monitorMetrics table schema", () => {
+  it("has monitorId column referencing monitors", () => {
+    // Verify the table has the expected column names
+    const columns = Object.keys(monitorMetrics);
+    expect(columns).toContain("monitorId");
+    expect(columns).toContain("stage");
+    expect(columns).toContain("durationMs");
+    expect(columns).toContain("status");
+    expect(columns).toContain("blocked");
+    expect(columns).toContain("blockReason");
+    expect(columns).toContain("checkedAt");
+    expect(columns).toContain("selectorCount");
+  });
+
+  it("monitors table has consecutiveFailures and pauseReason columns", () => {
+    const columns = Object.keys(monitors);
+    expect(columns).toContain("consecutiveFailures");
+    expect(columns).toContain("pauseReason");
   });
 });

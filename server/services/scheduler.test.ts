@@ -229,6 +229,71 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     // Clean up: resolve all pending
     resolvers.forEach((r) => r());
   });
+
+  it("decrements active count after check completes, allowing new checks", async () => {
+    // First iteration: 10 monitors fill the limit
+    const monitors10 = Array.from({ length: 10 }, (_, i) =>
+      makeMonitor({ id: i + 1, name: `Monitor ${i + 1}`, lastChecked: null })
+    );
+    mockGetAllActiveMonitors.mockResolvedValueOnce(monitors10);
+
+    let resolvers: Array<() => void> = [];
+    mockCheckMonitor.mockImplementation(
+      () => new Promise<void>((resolve) => resolvers.push(resolve))
+    );
+
+    await startScheduler();
+    await cronCallbacks["* * * * *"]();
+    await vi.advanceTimersByTimeAsync(31000);
+
+    // All 10 should have started
+    expect(mockCheckMonitor.mock.calls.length).toBe(10);
+
+    // Complete all checks
+    resolvers.forEach((r) => r());
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Second iteration: a new monitor should now be able to start
+    mockCheckMonitor.mockClear();
+    const newMonitor = [makeMonitor({ id: 11, name: "Monitor 11", lastChecked: null })];
+    mockGetAllActiveMonitors.mockResolvedValueOnce(newMonitor);
+    resolvers = [];
+    mockCheckMonitor.mockImplementation(
+      () => new Promise<void>((resolve) => resolvers.push(resolve))
+    );
+
+    await cronCallbacks["* * * * *"]();
+    await vi.advanceTimersByTimeAsync(31000);
+
+    // Should have started since active count is back to 0
+    expect(mockCheckMonitor.mock.calls.length).toBe(1);
+    resolvers.forEach((r) => r());
+  });
+
+  it("decrements active count even when checkMonitor throws", async () => {
+    const monitors = [makeMonitor({ id: 1, lastChecked: null })];
+    mockGetAllActiveMonitors
+      .mockResolvedValueOnce(monitors)
+      .mockResolvedValueOnce(monitors);
+
+    // First call throws
+    mockCheckMonitor.mockRejectedValueOnce(new Error("crash"));
+
+    await startScheduler();
+    await cronCallbacks["* * * * *"]();
+    await vi.advanceTimersByTimeAsync(31000);
+
+    expect(mockCheckMonitor).toHaveBeenCalledTimes(1);
+
+    // Second iteration: should still be able to start (active count decremented via finally)
+    mockCheckMonitor.mockClear();
+    mockCheckMonitor.mockResolvedValueOnce({ changed: false, status: "ok" });
+
+    await cronCallbacks["* * * * *"]();
+    await vi.advanceTimersByTimeAsync(31000);
+
+    expect(mockCheckMonitor).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("daily metrics cleanup", () => {
