@@ -14,92 +14,32 @@ vi.mock("fs/promises", () => ({
     devDependencies: { typescript: "5.6.3" },
   })),
 }));
-vi.mock("child_process", () => ({
-  execSync: vi.fn(),
-}));
 
-import { execSync } from "child_process";
 import { build as viteBuild } from "vite";
 import { build as esbuild } from "esbuild";
 import { rm } from "fs/promises";
 
-describe("build script db:push integration", () => {
-  const originalDatabaseUrl = process.env.DATABASE_URL;
-  const originalNodeEnv = process.env.NODE_ENV;
+describe("build script", () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
 
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
-    // Prevent process.exit from actually exiting
     exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
   });
 
   afterEach(() => {
-    // Restore env
+    exitSpy.mockRestore();
     if (originalDatabaseUrl !== undefined) {
       process.env.DATABASE_URL = originalDatabaseUrl;
     } else {
       delete process.env.DATABASE_URL;
     }
-    process.env.NODE_ENV = originalNodeEnv;
-    exitSpy.mockRestore();
-    vi.resetModules();
   });
 
-  it("runs drizzle-kit push when DATABASE_URL is set", async () => {
-    process.env.DATABASE_URL = "postgresql://localhost:5432/testdb";
-
-    // Dynamically import to trigger buildAll()
-    await import("./build.ts");
-
-    // Wait for the async buildAll to complete
-    await vi.waitFor(() => {
-      expect(execSync).toHaveBeenCalledWith("npx drizzle-kit push", { stdio: "inherit", timeout: 300_000 });
-    });
-  });
-
-  it("skips drizzle-kit push when DATABASE_URL is not set", async () => {
-    delete process.env.DATABASE_URL;
-
-    await import("./build.ts");
-
-    await vi.waitFor(() => {
-      // viteBuild should still be called (build proceeds)
-      expect(viteBuild).toHaveBeenCalled();
-      expect(execSync).not.toHaveBeenCalled();
-    });
-  });
-
-  it("runs drizzle-kit push before vite and esbuild", async () => {
-    process.env.DATABASE_URL = "postgresql://localhost:5432/testdb";
-
-    const callOrder: string[] = [];
-    vi.mocked(rm).mockImplementation(async () => {
-      callOrder.push("rm");
-    });
-    vi.mocked(execSync).mockImplementation(() => {
-      callOrder.push("db:push");
-      return Buffer.from("");
-    });
-    vi.mocked(viteBuild).mockImplementation(async () => {
-      callOrder.push("vite");
-      return undefined as any;
-    });
-    vi.mocked(esbuild).mockImplementation(async () => {
-      callOrder.push("esbuild");
-      return undefined as any;
-    });
-
-    await import("./build.ts");
-
-    await vi.waitFor(() => {
-      expect(callOrder).toEqual(["rm", "db:push", "vite", "esbuild"]);
-    });
-  });
-
-  it("cleans dist directory before vite build", async () => {
-    delete process.env.DATABASE_URL;
-
+  it("cleans dist directory before building", async () => {
     const callOrder: string[] = [];
     vi.mocked(rm).mockImplementation(async () => {
       callOrder.push("rm");
@@ -117,14 +57,89 @@ describe("build script db:push integration", () => {
     });
   });
 
-  it("calls process.exit(1) if drizzle-kit push fails", async () => {
-    process.env.DATABASE_URL = "postgresql://localhost:5432/testdb";
-
-    vi.mocked(execSync).mockImplementation(() => {
-      throw new Error("drizzle-kit push failed: connection refused");
+  it("runs vite build then esbuild in order", async () => {
+    const callOrder: string[] = [];
+    vi.mocked(rm).mockImplementation(async () => {
+      callOrder.push("rm");
+    });
+    vi.mocked(viteBuild).mockImplementation(async () => {
+      callOrder.push("vite");
+      return undefined as any;
+    });
+    vi.mocked(esbuild).mockImplementation(async () => {
+      callOrder.push("esbuild");
+      return undefined as any;
     });
 
-    // Suppress error output and verify it's called
+    await import("./build.ts");
+
+    await vi.waitFor(() => {
+      expect(callOrder).toEqual(["rm", "vite", "esbuild"]);
+    });
+  });
+
+  it("does not run drizzle-kit push during build even with DATABASE_URL set", async () => {
+    process.env.DATABASE_URL = "postgresql://localhost:5432/testdb";
+    const execSyncMock = vi.fn();
+    vi.doMock("child_process", () => ({ execSync: execSyncMock }));
+
+    await import("./build.ts");
+
+    await vi.waitFor(() => {
+      expect(viteBuild).toHaveBeenCalled();
+    });
+
+    expect(esbuild).toHaveBeenCalled();
+    expect(execSyncMock).not.toHaveBeenCalled();
+  });
+
+  it("computes externals by excluding allowlisted deps", async () => {
+    await import("./build.ts");
+
+    await vi.waitFor(() => {
+      expect(esbuild).toHaveBeenCalled();
+    });
+
+    const esbuildCall = vi.mocked(esbuild).mock.calls[0][0] as any;
+    // "express" and "pg" are in the allowlist, so they should NOT be external
+    expect(esbuildCall.external).not.toContain("express");
+    expect(esbuildCall.external).not.toContain("pg");
+    // "typescript" is NOT in the allowlist, so it should be external
+    expect(esbuildCall.external).toContain("typescript");
+  });
+
+  it("configures esbuild with correct output settings", async () => {
+    await import("./build.ts");
+
+    await vi.waitFor(() => {
+      expect(esbuild).toHaveBeenCalled();
+    });
+
+    const esbuildCall = vi.mocked(esbuild).mock.calls[0][0] as any;
+    expect(esbuildCall.entryPoints).toEqual(["server/index.ts"]);
+    expect(esbuildCall.platform).toBe("node");
+    expect(esbuildCall.format).toBe("cjs");
+    expect(esbuildCall.outfile).toBe("dist/index.cjs");
+    expect(esbuildCall.bundle).toBe(true);
+    expect(esbuildCall.minify).toBe(true);
+  });
+
+  it("calls process.exit(1) if vite build fails", async () => {
+    vi.mocked(viteBuild).mockRejectedValueOnce(new Error("vite build failed"));
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await import("./build.ts");
+
+    await vi.waitFor(() => {
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(consoleSpy).toHaveBeenCalled();
+    });
+
+    consoleSpy.mockRestore();
+  });
+
+  it("calls process.exit(1) if esbuild fails", async () => {
+    vi.mocked(esbuild).mockRejectedValueOnce(new Error("esbuild failed"));
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await import("./build.ts");
