@@ -968,6 +968,495 @@ export async function registerRoutes(
     }
   });
 
+  // ------------------------------------------------------------------
+  // CAMPAIGN ROUTES
+  // ------------------------------------------------------------------
+
+  const { campaigns: campaignsTable, campaignRecipients: campaignRecipientsTable, users: usersTable } = await import("@shared/schema");
+  const campaignEmailService = await import("./services/campaignEmail");
+
+  // Campaign dashboard (aggregate stats) - must be before /:id routes
+  app.get("/api/admin/campaigns/dashboard", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const result = await db.execute(sql`
+        SELECT
+          COUNT(*)::int AS "totalCampaigns",
+          COALESCE(SUM(sent_count), 0)::int AS "totalSent",
+          COALESCE(SUM(opened_count), 0)::int AS "totalOpened",
+          COALESCE(SUM(clicked_count), 0)::int AS "totalClicked",
+          CASE WHEN COALESCE(SUM(sent_count), 0) > 0
+            THEN ROUND(COALESCE(SUM(opened_count), 0)::numeric / SUM(sent_count) * 100, 1)
+            ELSE 0
+          END AS "avgOpenRate",
+          CASE WHEN COALESCE(SUM(sent_count), 0) > 0
+            THEN ROUND(COALESCE(SUM(clicked_count), 0)::numeric / SUM(sent_count) * 100, 1)
+            ELSE 0
+          END AS "avgClickRate"
+        FROM campaigns
+        WHERE status != 'draft'
+      `);
+
+      const recentCampaigns = await db
+        .select()
+        .from(campaignsTable)
+        .orderBy(desc(campaignsTable.createdAt))
+        .limit(10);
+
+      const stats = result.rows[0] as any;
+      res.json({
+        totalCampaigns: Number(stats?.totalCampaigns ?? 0),
+        totalSent: Number(stats?.totalSent ?? 0),
+        totalOpened: Number(stats?.totalOpened ?? 0),
+        totalClicked: Number(stats?.totalClicked ?? 0),
+        avgOpenRate: Number(stats?.avgOpenRate ?? 0),
+        avgClickRate: Number(stats?.avgClickRate ?? 0),
+        recentCampaigns,
+      });
+    } catch (error: any) {
+      console.error("Error fetching campaign dashboard:", error);
+      res.status(500).json({ message: "Failed to fetch campaign dashboard" });
+    }
+  });
+
+  // List campaigns
+  app.get("/api/admin/campaigns", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const statusFilter = req.query.status as string | undefined;
+      let results;
+      if (statusFilter && ["draft", "sending", "sent", "partially_sent", "cancelled"].includes(statusFilter)) {
+        results = await db
+          .select()
+          .from(campaignsTable)
+          .where(eq(campaignsTable.status, statusFilter))
+          .orderBy(desc(campaignsTable.createdAt));
+      } else {
+        results = await db
+          .select()
+          .from(campaignsTable)
+          .orderBy(desc(campaignsTable.createdAt));
+      }
+
+      res.json(results);
+    } catch (error: any) {
+      console.error("Error fetching campaigns:", error);
+      res.status(500).json({ message: "Failed to fetch campaigns" });
+    }
+  });
+
+  // Get single campaign
+  app.get("/api/admin/campaigns/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const id = Number(req.params.id);
+      const [campaign] = await db
+        .select()
+        .from(campaignsTable)
+        .where(eq(campaignsTable.id, id))
+        .limit(1);
+
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+      res.json(campaign);
+    } catch (error: any) {
+      console.error("Error fetching campaign:", error);
+      res.status(500).json({ message: "Failed to fetch campaign" });
+    }
+  });
+
+  // Create campaign
+  app.post("/api/admin/campaigns", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const { name, subject, htmlBody, textBody, filters, scheduledAt } = req.body;
+      if (!name || !subject || !htmlBody) {
+        return res.status(400).json({ message: "Name, subject, and HTML body are required" });
+      }
+
+      const [campaign] = await db
+        .insert(campaignsTable)
+        .values({
+          name,
+          subject,
+          htmlBody,
+          textBody: textBody || null,
+          filters: filters || null,
+          scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+          status: "draft",
+        })
+        .returning();
+
+      res.status(201).json(campaign);
+    } catch (error: any) {
+      console.error("Error creating campaign:", error);
+      res.status(500).json({ message: "Failed to create campaign" });
+    }
+  });
+
+  // Update draft campaign
+  app.patch("/api/admin/campaigns/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const id = Number(req.params.id);
+      const [existing] = await db
+        .select()
+        .from(campaignsTable)
+        .where(eq(campaignsTable.id, id))
+        .limit(1);
+
+      if (!existing) return res.status(404).json({ message: "Campaign not found" });
+      if (existing.status !== "draft") return res.status(400).json({ message: "Only draft campaigns can be edited" });
+
+      const { name, subject, htmlBody, textBody, filters, scheduledAt } = req.body;
+      const updates: Record<string, any> = {};
+      if (name !== undefined) updates.name = name;
+      if (subject !== undefined) updates.subject = subject;
+      if (htmlBody !== undefined) updates.htmlBody = htmlBody;
+      if (textBody !== undefined) updates.textBody = textBody;
+      if (filters !== undefined) updates.filters = filters;
+      if (scheduledAt !== undefined) updates.scheduledAt = scheduledAt ? new Date(scheduledAt) : null;
+
+      const [updated] = await db
+        .update(campaignsTable)
+        .set(updates)
+        .where(eq(campaignsTable.id, id))
+        .returning();
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating campaign:", error);
+      res.status(500).json({ message: "Failed to update campaign" });
+    }
+  });
+
+  // Delete draft campaign
+  app.delete("/api/admin/campaigns/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const id = Number(req.params.id);
+      const [existing] = await db
+        .select()
+        .from(campaignsTable)
+        .where(eq(campaignsTable.id, id))
+        .limit(1);
+
+      if (!existing) return res.status(404).json({ message: "Campaign not found" });
+      if (existing.status !== "draft") return res.status(400).json({ message: "Only draft campaigns can be deleted" });
+
+      // Cascade delete recipients first
+      await db.delete(campaignRecipientsTable).where(eq(campaignRecipientsTable.campaignId, id));
+      await db.delete(campaignsTable).where(eq(campaignsTable.id, id));
+      res.status(204).send();
+    } catch (error: any) {
+      console.error("Error deleting campaign:", error);
+      res.status(500).json({ message: "Failed to delete campaign" });
+    }
+  });
+
+  // Preview campaign recipients
+  app.post("/api/admin/campaigns/:id/preview", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const { filters } = req.body;
+      const preview = await campaignEmailService.previewRecipients(filters || {});
+      res.json(preview);
+    } catch (error: any) {
+      console.error("Error previewing recipients:", error);
+      res.status(500).json({ message: "Failed to preview recipients" });
+    }
+  });
+
+  // Send test campaign email
+  app.post("/api/admin/campaigns/:id/send-test", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const id = Number(req.params.id);
+      const [campaign] = await db
+        .select()
+        .from(campaignsTable)
+        .where(eq(campaignsTable.id, id))
+        .limit(1);
+
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+
+      const testEmail = req.body.testEmail || user.notificationEmail || user.email;
+      if (!testEmail) return res.status(400).json({ message: "No email address available" });
+
+      const result = await campaignEmailService.sendTestCampaignEmail(campaign, testEmail);
+      if (result.success) {
+        res.json({ success: true, resendId: result.resendId, sentTo: testEmail });
+      } else {
+        res.status(400).json({ success: false, error: result.error });
+      }
+    } catch (error: any) {
+      console.error("Error sending test campaign:", error);
+      res.status(500).json({ message: "Failed to send test campaign" });
+    }
+  });
+
+  // Send campaign
+  app.post("/api/admin/campaigns/:id/send", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const id = Number(req.params.id);
+      const result = await campaignEmailService.triggerCampaignSend(id);
+      res.json({ success: true, totalRecipients: result.totalRecipients });
+    } catch (error: any) {
+      console.error("Error sending campaign:", error);
+      res.status(400).json({ message: error.message || "Failed to send campaign" });
+    }
+  });
+
+  // Cancel campaign
+  app.post("/api/admin/campaigns/:id/cancel", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const id = Number(req.params.id);
+      const result = await campaignEmailService.cancelCampaign(id);
+      res.json({ success: true, sentSoFar: result.sentSoFar, cancelled: result.cancelled });
+    } catch (error: any) {
+      console.error("Error cancelling campaign:", error);
+      res.status(500).json({ message: "Failed to cancel campaign" });
+    }
+  });
+
+  // Campaign analytics
+  app.get("/api/admin/campaigns/:id/analytics", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const id = Number(req.params.id);
+      const [campaign] = await db
+        .select()
+        .from(campaignsTable)
+        .where(eq(campaignsTable.id, id))
+        .limit(1);
+
+      if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+
+      // Get recipient breakdown
+      const breakdownResult = await db.execute(sql`
+        SELECT
+          status,
+          COUNT(*)::int AS count
+        FROM campaign_recipients
+        WHERE campaign_id = ${id}
+        GROUP BY status
+      `);
+
+      const breakdown: Record<string, number> = {};
+      for (const row of breakdownResult.rows as any[]) {
+        breakdown[row.status] = Number(row.count);
+      }
+
+      // Get recipients list (paginated)
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const limit = Math.min(100, Number(req.query.limit) || 50);
+      const offset = (page - 1) * limit;
+
+      const recipients = await db
+        .select()
+        .from(campaignRecipientsTable)
+        .where(eq(campaignRecipientsTable.campaignId, id))
+        .orderBy(desc(campaignRecipientsTable.sentAt))
+        .limit(limit)
+        .offset(offset);
+
+      const totalResult = await db.execute(sql`
+        SELECT COUNT(*)::int AS total FROM campaign_recipients WHERE campaign_id = ${id}
+      `);
+      const total = Number((totalResult.rows[0] as any)?.total ?? 0);
+
+      res.json({
+        campaign,
+        recipientBreakdown: breakdown,
+        recipients,
+        pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      });
+    } catch (error: any) {
+      console.error("Error fetching campaign analytics:", error);
+      res.status(500).json({ message: "Failed to fetch campaign analytics" });
+    }
+  });
+
+  // Public unsubscribe endpoint (no auth required)
+  // GET shows a confirmation page; POST performs the actual unsubscribe.
+  // This prevents link prefetchers / email scanners from triggering unsubscribes.
+  app.get("/api/campaigns/unsubscribe/:token", unauthenticatedRateLimiter, async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      if (!token) return res.status(400).send("Invalid unsubscribe link.");
+
+      const [user] = await db
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.unsubscribeToken, token))
+        .limit(1);
+
+      if (!user) {
+        return res.status(404).send(`
+          <!DOCTYPE html>
+          <html><head><title>Unsubscribe</title><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+          <body style="font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:20px;text-align:center;color:#333;">
+            <h2>Invalid Link</h2>
+            <p>This unsubscribe link is invalid or has expired.</p>
+          </body></html>
+        `);
+      }
+
+      const safeToken = encodeURIComponent(token);
+      res.send(`
+        <!DOCTYPE html>
+        <html><head><title>Unsubscribe</title><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+        <body style="font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:20px;text-align:center;color:#333;">
+          <h2>Unsubscribe</h2>
+          <p>Click the button below to unsubscribe from FetchTheChange campaign emails.</p>
+          <p style="color:#666;font-size:14px;">You will continue to receive monitor change notifications.</p>
+          <form method="POST" action="/api/campaigns/unsubscribe/${safeToken}/confirm">
+            <button type="submit" style="margin-top:16px;padding:10px 24px;background:#4f46e5;color:#fff;border:none;border-radius:6px;font-size:16px;cursor:pointer;">
+              Unsubscribe
+            </button>
+          </form>
+        </body></html>
+      `);
+    } catch (error: any) {
+      console.error("Error processing unsubscribe:", error);
+      res.status(500).send("An error occurred. Please try again.");
+    }
+  });
+
+  app.post("/api/campaigns/unsubscribe/:token/confirm", unauthenticatedRateLimiter, async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      if (!token) return res.status(400).send("Invalid unsubscribe link.");
+
+      const [user] = await db
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.unsubscribeToken, token))
+        .limit(1);
+
+      if (!user) {
+        return res.status(404).send(`
+          <!DOCTYPE html>
+          <html><head><title>Unsubscribe</title><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+          <body style="font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:20px;text-align:center;color:#333;">
+            <h2>Invalid Link</h2>
+            <p>This unsubscribe link is invalid or has expired.</p>
+          </body></html>
+        `);
+      }
+
+      await db
+        .update(usersTable)
+        .set({ campaignUnsubscribed: true })
+        .where(eq(usersTable.id, user.id));
+
+      const safeToken = encodeURIComponent(token);
+      res.send(`
+        <!DOCTYPE html>
+        <html><head><title>Unsubscribed</title><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+        <body style="font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:20px;text-align:center;color:#333;">
+          <h2>Unsubscribed</h2>
+          <p>You have been successfully unsubscribed from FetchTheChange campaign emails.</p>
+          <p style="color:#666;font-size:14px;">You will continue to receive monitor change notifications.</p>
+          <br/>
+          <p><a href="/api/campaigns/resubscribe/${safeToken}" style="color:#4f46e5;text-decoration:underline;">Re-subscribe to campaign emails</a></p>
+        </body></html>
+      `);
+    } catch (error: any) {
+      console.error("Error processing unsubscribe:", error);
+      res.status(500).send("An error occurred. Please try again.");
+    }
+  });
+
+  // Public resubscribe endpoint (no auth required)
+  app.post("/api/campaigns/resubscribe/:token", unauthenticatedRateLimiter, async (req: any, res) => {
+    try {
+      const { token } = req.params;
+      if (!token) return res.status(400).json({ message: "Invalid token" });
+
+      const [user] = await db
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.unsubscribeToken, token))
+        .limit(1);
+
+      if (!user) return res.status(404).json({ message: "Invalid token" });
+
+      await db
+        .update(usersTable)
+        .set({ campaignUnsubscribed: false })
+        .where(eq(usersTable.id, user.id));
+
+      res.send(`
+        <!DOCTYPE html>
+        <html><head><title>Re-subscribed</title><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+        <body style="font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:20px;text-align:center;color:#333;">
+          <h2>Re-subscribed</h2>
+          <p>You have been re-subscribed to FetchTheChange campaign emails.</p>
+        </body></html>
+      `);
+    } catch (error: any) {
+      console.error("Error processing resubscribe:", error);
+      res.status(500).send("An error occurred. Please try again.");
+    }
+  });
+
   // Catch-all error handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     ErrorLogger.error("api", err.message || "Unhandled API error", err instanceof Error ? err : null, { status: err.status || 500 });
