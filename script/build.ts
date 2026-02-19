@@ -39,8 +39,16 @@ async function buildAll() {
   // Apply database schema changes before building
   if (process.env.DATABASE_URL) {
     console.log("pushing database schema...");
-    execSync("npx drizzle-kit push", { stdio: "inherit" });
-    console.log("database schema up to date");
+    try {
+      execSync("npx drizzle-kit push", {
+        stdio: "inherit",
+        timeout: 300_000,
+      });
+      console.log("database schema up to date");
+    } catch (err) {
+      console.error("database schema push failed");
+      throw err;
+    }
   }
 
   console.log("building client...");

@@ -54,7 +54,7 @@ describe("build script db:push integration", () => {
 
     // Wait for the async buildAll to complete
     await vi.waitFor(() => {
-      expect(execSync).toHaveBeenCalledWith("npx drizzle-kit push", { stdio: "inherit" });
+      expect(execSync).toHaveBeenCalledWith("npx drizzle-kit push", { stdio: "inherit", timeout: 300_000 });
     });
   });
 
@@ -66,15 +66,17 @@ describe("build script db:push integration", () => {
     await vi.waitFor(() => {
       // viteBuild should still be called (build proceeds)
       expect(viteBuild).toHaveBeenCalled();
+      expect(execSync).not.toHaveBeenCalled();
     });
-
-    expect(execSync).not.toHaveBeenCalled();
   });
 
   it("runs drizzle-kit push before vite and esbuild", async () => {
     process.env.DATABASE_URL = "postgresql://localhost:5432/testdb";
 
     const callOrder: string[] = [];
+    vi.mocked(rm).mockImplementation(async () => {
+      callOrder.push("rm");
+    });
     vi.mocked(execSync).mockImplementation(() => {
       callOrder.push("db:push");
       return Buffer.from("");
@@ -91,11 +93,11 @@ describe("build script db:push integration", () => {
     await import("./build.ts");
 
     await vi.waitFor(() => {
-      expect(callOrder).toEqual(["db:push", "vite", "esbuild"]);
+      expect(callOrder).toEqual(["rm", "db:push", "vite", "esbuild"]);
     });
   });
 
-  it("cleans dist directory before doing anything else", async () => {
+  it("cleans dist directory before vite build", async () => {
     delete process.env.DATABASE_URL;
 
     const callOrder: string[] = [];
@@ -122,12 +124,14 @@ describe("build script db:push integration", () => {
       throw new Error("drizzle-kit push failed: connection refused");
     });
 
+    // Suppress error output and verify it's called
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await import("./build.ts");
 
     await vi.waitFor(() => {
       expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(consoleSpy).toHaveBeenCalled();
     });
 
     consoleSpy.mockRestore();
