@@ -1663,11 +1663,12 @@ describe("failure tracking and auto-pause", () => {
     // (browserlessInfraFailure=true means shouldPenalize=false)
     expect(mockDb.update).toHaveBeenCalled();
     const setArg = setFn.mock.calls[0]?.[0];
-    if (setArg) {
-      // When browserlessInfraFailure=true, consecutiveFailures should be the column ref (no increment)
-      // rather than a sql`` expression with + 1
-      expect(setArg.lastError).toBe("Browserless service unavailable");
-    }
+    expect(setArg).toBeDefined();
+    expect(setArg.lastError).toBe("Browserless service unavailable");
+    // When browserlessInfraFailure=true, consecutiveFailures should be the Drizzle column
+    // reference (no increment) rather than a sql`` expression with queryChunks
+    expect(setArg.consecutiveFailures).toBeDefined();
+    expect(setArg.consecutiveFailures).not.toHaveProperty("queryChunks");
 
     delete process.env.BROWSERLESS_TOKEN;
   });

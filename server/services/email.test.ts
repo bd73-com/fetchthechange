@@ -253,9 +253,15 @@ describe("sendAutoPauseEmail", () => {
     await sendAutoPauseEmail(monitor, 3, '<img onerror="hack()">');
 
     const call = mockSend.mock.calls[0][0];
-    // HTML body should have escaped content
+    // HTML body should have escaped monitor name
     expect(call.html).not.toContain("<script>");
     expect(call.html).toContain("&lt;script&gt;");
+    // URL should also be escaped in HTML
+    expect(call.html).not.toContain("https://example.com/<script>");
+    expect(call.html).toContain("https://example.com/&lt;script&gt;");
+    // lastError should be escaped in HTML
+    expect(call.html).not.toContain('<img onerror');
+    expect(call.html).toContain("&lt;img onerror");
     // Plain text should have sanitized newlines
     expect(call.text).not.toContain("\r");
   });
