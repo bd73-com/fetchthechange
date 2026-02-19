@@ -4,9 +4,10 @@ import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { validateUrlBeforeFetch, ssrfSafeFetch } from "../utils/ssrf";
-import { type Monitor, monitorMetrics } from "@shared/schema";
+import { type Monitor, monitorMetrics, monitors } from "@shared/schema";
 import { type UserTier, PAUSE_THRESHOLDS } from "@shared/models/auth";
 import { db } from "../db";
+import { eq, sql } from "drizzle-orm";
 
 interface SelectorSuggestion {
   selector: string;
@@ -45,29 +46,34 @@ async function handleMonitorFailure(
   browserlessInfraFailure: boolean
 ): Promise<{ newFailureCount: number; paused: boolean }> {
   const shouldPenalize = !browserlessInfraFailure;
-  const newFailureCount = shouldPenalize
-    ? (monitor.consecutiveFailures ?? 0) + 1
-    : (monitor.consecutiveFailures ?? 0);
+
+  // Use atomic SQL increment to avoid race conditions under concurrent checks
+  const [updated] = await db.update(monitors)
+    .set({
+      lastChecked: new Date(),
+      lastStatus: finalStatus,
+      lastError: errorMsg,
+      consecutiveFailures: shouldPenalize
+        ? sql`${monitors.consecutiveFailures} + 1`
+        : monitors.consecutiveFailures,
+    })
+    .where(eq(monitors.id, monitor.id))
+    .returning({ consecutiveFailures: monitors.consecutiveFailures });
+
+  const newFailureCount = updated?.consecutiveFailures ?? (monitor.consecutiveFailures ?? 0) + 1;
 
   const user = await storage.getUser(monitor.userId);
   const tier = (user?.tier || "free") as UserTier;
   const threshold = PAUSE_THRESHOLDS[tier] ?? PAUSE_THRESHOLDS.free;
   const shouldPause = newFailureCount >= threshold;
 
-  const updates: Record<string, any> = {
-    lastChecked: new Date(),
-    lastStatus: finalStatus,
-    lastError: errorMsg,
-    consecutiveFailures: newFailureCount,
-  };
-
   if (shouldPause) {
-    updates.active = false;
-    updates.pauseReason = `Auto-paused after ${newFailureCount} consecutive failures (last: ${errorMsg})`;
+    await storage.updateMonitor(monitor.id, {
+      active: false,
+      pauseReason: `Auto-paused after ${newFailureCount} consecutive failures (last: ${errorMsg})`,
+    } as any);
     console.log(`Monitor ${monitor.id} auto-paused after ${newFailureCount} consecutive failures`);
   }
-
-  await storage.updateMonitor(monitor.id, updates);
 
   if (shouldPause && monitor.emailEnabled) {
     await sendAutoPauseEmail(monitor, newFailureCount, errorMsg).catch(() => {});
@@ -470,7 +476,10 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     let finalError: string | null = null;
 
     if (!newValue) {
-      if (block.blocked) {
+      if (browserlessInfraFailure) {
+        finalStatus = "error";
+        finalError = "Browserless service unavailable";
+      } else if (block.blocked) {
         finalStatus = "blocked";
         finalError = block.reason || "Blocked";
       } else {

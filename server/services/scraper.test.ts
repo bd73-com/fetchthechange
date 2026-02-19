@@ -35,6 +35,21 @@ vi.mock("../utils/ssrf", () => ({
   }),
 }));
 
+vi.mock("../db", () => ({
+  db: {
+    insert: vi.fn().mockReturnValue({
+      values: vi.fn().mockResolvedValue(undefined),
+    }),
+    update: vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ consecutiveFailures: 1 }]),
+        }),
+      }),
+    }),
+  },
+}));
+
 import {
   normalizeValue,
   detectPageBlockReason,
@@ -1028,15 +1043,10 @@ describe("checkMonitor", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
 
     const monitor = makeMonitor();
-    await runWithTimers(monitor);
+    const result = await runWithTimers(monitor);
 
-    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({
-        lastStatus: "error",
-        lastError: "timeout",
-      })
-    );
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("timeout");
   });
 
   it("updates monitor with selector_missing when selector not found", async () => {
@@ -1046,14 +1056,10 @@ describe("checkMonitor", () => {
       .mockResolvedValueOnce(new Response(html, { status: 200 }));
 
     const monitor = makeMonitor({ selector: ".missing" });
-    await runWithTimers(monitor);
+    const result = await runWithTimers(monitor);
 
-    const calls = mockStorage.updateMonitor.mock.calls;
-    const lastCall = calls[calls.length - 1];
-    expect(lastCall[1]).toMatchObject({
-      lastStatus: "selector_missing",
-      lastError: "Selector not found",
-    });
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found");
   });
 
   it("records lastChanged when a value change is detected", async () => {

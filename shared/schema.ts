@@ -120,13 +120,15 @@ export const resendUsage = pgTable("resend_usage", {
 
 export type ResendUsageRecord = typeof resendUsage.$inferSelect;
 
-export const insertMonitorSchema = createInsertSchema(monitors).omit({ 
-  id: true, 
-  userId: true, 
-  lastChecked: true, 
-  lastChanged: true, 
+export const insertMonitorSchema = createInsertSchema(monitors).omit({
+  id: true,
+  userId: true,
+  lastChecked: true,
+  lastChanged: true,
   currentValue: true,
-  createdAt: true 
+  consecutiveFailures: true,
+  pauseReason: true,
+  createdAt: true
 });
 
 export type Monitor = typeof monitors.$inferSelect;

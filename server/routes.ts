@@ -147,6 +147,8 @@ export async function registerRoutes(
         lastError: null,
         active: true,
         emailEnabled: true,
+        consecutiveFailures: 0,
+        pauseReason: null,
         createdAt: new Date()
       };
 
