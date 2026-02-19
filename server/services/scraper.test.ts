@@ -1625,4 +1625,92 @@ describe("failure tracking and auto-pause", () => {
       })
     );
   });
+
+  it("does NOT increment failure count for browserless infrastructure failures", async () => {
+    // Set up: static extraction finds nothing and page is not blocked,
+    // then browserless throws an infra error
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    // Enable browserless
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    // Allow browserless usage
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    // Mock Playwright to throw an infra error (connectOverCDP)
+    vi.doMock("playwright-core", () => ({
+      chromium: {
+        connectOverCDP: vi.fn().mockRejectedValue(new Error("connectOverCDP failed: connection refused")),
+      },
+    }));
+
+    const { setFn } = mockDbUpdate(1);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+
+    const monitor = makeMonitor({ selector: ".missing" });
+    const result = await runWithTimers(monitor);
+
+    // The result should be an error about browserless being unavailable
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Browserless service unavailable");
+
+    // The db.update set call should NOT have the SQL increment for consecutiveFailures
+    // (browserlessInfraFailure=true means shouldPenalize=false)
+    expect(mockDb.update).toHaveBeenCalled();
+    const setArg = setFn.mock.calls[0]?.[0];
+    if (setArg) {
+      // When browserlessInfraFailure=true, consecutiveFailures should be the column ref (no increment)
+      // rather than a sql`` expression with + 1
+      expect(setArg.lastError).toBe("Browserless service unavailable");
+    }
+
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  it("falls back to free tier threshold when user tier is unknown", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
+    mockDbUpdate(3); // free threshold
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: undefined });
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    // Should auto-pause using free threshold (3)
+    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        active: false,
+        pauseReason: expect.stringContaining("Auto-paused after 3"),
+      })
+    );
+  });
+
+  it("falls back to in-memory count when db.update returns empty", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
+    // Simulate db.update returning empty array (no rows returned)
+    const returningFn = vi.fn().mockResolvedValue([]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+
+    // Monitor already has 2 consecutive failures; after +1 it should be 3 (free threshold)
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+
+    const monitor = makeMonitor({ consecutiveFailures: 2 });
+    await runWithTimers(monitor);
+
+    // Fallback calculation: shouldPenalize=true, so fallbackCount(2) + 1 = 3 >= free threshold
+    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        active: false,
+        pauseReason: expect.stringContaining("Auto-paused after 3"),
+      })
+    );
+  });
 });

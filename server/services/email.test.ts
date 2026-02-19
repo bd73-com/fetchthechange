@@ -135,6 +135,15 @@ describe("sendAutoPauseEmail", () => {
     expect(result.error).toBe("User has no email address");
   });
 
+  it("returns error when user is not found", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(null);
+
+    const result = await sendAutoPauseEmail(makeMonitor(), 3, "timeout");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("User has no email address");
+  });
+
   it("sends email with correct subject and failure count", async () => {
     mockSend.mockResolvedValueOnce({ data: { id: "email_456" }, error: null });
 
@@ -236,12 +245,18 @@ describe("sendAutoPauseEmail", () => {
     expect(call.subject).not.toMatch(/[\r\n]/);
   });
 
-  it("escapes HTML in monitor name for html email body", async () => {
-    const monitor = makeMonitor({ name: '<script>alert("xss")</script>' });
-    await sendAutoPauseEmail(monitor, 3, "timeout");
+  it("escapes HTML in monitor name and URL to prevent XSS", async () => {
+    const monitor = makeMonitor({
+      name: '<script>alert("xss")</script>',
+      url: "https://example.com/<script>",
+    });
+    await sendAutoPauseEmail(monitor, 3, '<img onerror="hack()">');
 
     const call = mockSend.mock.calls[0][0];
+    // HTML body should have escaped content
     expect(call.html).not.toContain("<script>");
     expect(call.html).toContain("&lt;script&gt;");
+    // Plain text should have sanitized newlines
+    expect(call.text).not.toContain("\r");
   });
 });
