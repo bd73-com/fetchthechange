@@ -1870,6 +1870,59 @@ describe("error message truncation", () => {
     const setArg = setFn.mock.calls[0]?.[0];
     expect(setArg.lastError).toBe("SSL/TLS error connecting to the target site");
   });
+
+  it("sanitizes ECONNRESET errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("read ECONNRESET"));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg.lastError).toBe("Connection was reset by the target site");
+  });
+
+  it("sanitizes 'socket hang up' errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("socket hang up"));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg.lastError).toBe("Connection was reset by the target site");
+  });
+
+  it("sanitizes EAI_AGAIN errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("getaddrinfo EAI_AGAIN some-internal-host.corp"));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg.lastError).toBe("Could not resolve the target hostname");
+  });
+
+  it("sanitizes errors in curl fallback catch path (UND_ERR_HEADERS_OVERFLOW then curl fails)", async () => {
+    // First fetch fails with UND_ERR_HEADERS_OVERFLOW → triggers curl fallback
+    const headersErr = new Error("UND_ERR_HEADERS_OVERFLOW");
+    (headersErr as any).code = "UND_ERR_HEADERS_OVERFLOW";
+    vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(headersErr)
+      // Curl fallback (ssrfSafeFetch) also fails with an internal error
+      .mockRejectedValueOnce(new Error("ECONNREFUSED 10.0.0.1:8080"));
+
+    delete process.env.BROWSERLESS_TOKEN;
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    // Curl fallback error is sanitized — no internal IP leaks
+    expect(setArg.lastError).toBe("Could not connect to the target site");
+  });
 });
 
 // ---------------------------------------------------------------------------

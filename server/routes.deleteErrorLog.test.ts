@@ -12,10 +12,12 @@ const {
   mockSelectWhereFn,
   mockSelectFromFn,
   mockDeleteWhereFn,
+  mockOrderByFn,
 } = vi.hoisted(() => {
   const mockLimitFn = vi.fn();
-  const mockSelectWhereFn = vi.fn(() => ({ limit: mockLimitFn }));
-  const mockSelectFromFn = vi.fn(() => ({ where: mockSelectWhereFn }));
+  const mockOrderByFn = vi.fn(() => ({ limit: mockLimitFn }));
+  const mockSelectWhereFn = vi.fn(() => ({ limit: mockLimitFn, orderBy: mockOrderByFn }));
+  const mockSelectFromFn = vi.fn(() => ({ where: mockSelectWhereFn, orderBy: mockOrderByFn }));
   const mockDbSelect = vi.fn(() => ({ from: mockSelectFromFn }));
 
   const mockDeleteWhereFn = vi.fn().mockResolvedValue(undefined);
@@ -30,6 +32,7 @@ const {
     mockSelectWhereFn,
     mockSelectFromFn,
     mockDeleteWhereFn,
+    mockOrderByFn,
   };
 });
 
@@ -189,8 +192,9 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     vi.clearAllMocks();
 
     // Reset db chain mocks after clearAllMocks
-    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
-    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
     mockDeleteWhereFn.mockResolvedValue(undefined);
     mockDbDelete.mockReturnValue({ where: mockDeleteWhereFn });
@@ -291,5 +295,171 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     const res = await callHandler("delete", ENDPOINT, req);
     expect(res._status).toBe(500);
     expect(res._json).toEqual({ message: "Failed to delete error log" });
+  });
+
+  // --- ID validation edge cases (Number.isInteger + id > 0) ---
+
+  it("returns 400 for id '0' (zero is not a valid serial ID)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    const req = { user: { claims: { sub: "owner-123" } }, params: { id: "0" } };
+    const res = await callHandler("delete", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "Invalid log ID" });
+  });
+
+  it("returns 400 for negative id", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    const req = { user: { claims: { sub: "owner-123" } }, params: { id: "-1" } };
+    const res = await callHandler("delete", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "Invalid log ID" });
+  });
+
+  it("returns 400 for float id", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    const req = { user: { claims: { sub: "owner-123" } }, params: { id: "1.5" } };
+    const res = await callHandler("delete", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "Invalid log ID" });
+  });
+
+  it("returns 400 for empty string id", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    const req = { user: { claims: { sub: "owner-123" } }, params: { id: "" } };
+    const res = await callHandler("delete", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "Invalid log ID" });
+  });
+
+  // --- Type guard on context.monitorId ---
+
+  it("treats string monitorId in context as missing (falls back to owner check)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 42 }]);
+    // monitorId is a string, not a number — the type guard should ignore it
+    mockLimitFn.mockResolvedValue([{ id: 10, context: { monitorId: "42" } }]);
+
+    // Non-owner: should be denied because string monitorId is treated as absent
+    const req = { user: { claims: { sub: "not-the-owner" } }, params: { id: "10" } };
+    const res = await callHandler("delete", ENDPOINT, req);
+    expect(res._status).toBe(403);
+    expect(res._json).toEqual({ message: "Not authorized to delete this log entry" });
+  });
+
+  it("treats boolean monitorId in context as missing (falls back to owner check)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockLimitFn.mockResolvedValue([{ id: 10, context: { monitorId: true } }]);
+
+    // Owner should still be able to delete
+    const req = { user: { claims: { sub: "owner-123" } }, params: { id: "10" } };
+    const res = await callHandler("delete", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "Deleted" });
+  });
+
+  it("treats context with empty object (no monitorId key) same as null context", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockLimitFn.mockResolvedValue([{ id: 10, context: {} }]);
+
+    // Non-owner with no monitorId in context: denied
+    const req = { user: { claims: { sub: "not-the-owner" } }, params: { id: "10" } };
+    const res = await callHandler("delete", ENDPOINT, req);
+    expect(res._status).toBe(403);
+    expect(res._json).toEqual({ message: "Not authorized to delete this log entry" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/error-logs — context.monitorId type guard filtering
+// ---------------------------------------------------------------------------
+describe("GET /api/admin/error-logs — context type guard filtering", () => {
+  const ENDPOINT = "/api/admin/error-logs";
+
+  beforeEach(async () => {
+    await ensureRoutes();
+    vi.clearAllMocks();
+
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+  });
+
+  it("includes logs with numeric monitorId matching user's monitors", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 10 }]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: 10 } },
+      { id: 2, context: { monitorId: 99 } },
+    ]);
+
+    const req = { user: { claims: { sub: "user-power" } }, query: {} };
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // Only log with monitorId 10 should be included
+    expect(res._json).toHaveLength(1);
+    expect(res._json[0].id).toBe(1);
+  });
+
+  it("excludes logs with string monitorId (non-owner user)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 42 }]);
+    // monitorId is a string "42" — type guard should treat it as undefined
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: "42" } },
+    ]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, query: {} };
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // String monitorId treated as missing → non-owner can't see it
+    expect(res._json).toHaveLength(0);
+  });
+
+  it("owner sees logs with string monitorId (treated as no-monitor system log)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    // monitorId is a string — type guard treats it as absent → falls through to isAppOwner
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: "injected" } },
+    ]);
+
+    const req = { user: { claims: { sub: "owner-123" } }, query: {} };
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toHaveLength(1);
+  });
+
+  it("excludes logs with boolean monitorId for non-owner", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 1 }]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: true } },
+    ]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, query: {} };
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toHaveLength(0);
+  });
+
+  it("correctly filters mixed context types", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 5 }]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: 5 } },          // numeric, matches → included
+      { id: 2, context: { monitorId: "5" } },         // string → excluded (non-owner)
+      { id: 3, context: null },                        // null context → excluded (non-owner)
+      { id: 4, context: { monitorId: 99 } },          // numeric, doesn't match → excluded
+      { id: 5, context: { other: "data" } },           // no monitorId key → excluded (non-owner)
+    ]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, query: {} };
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toHaveLength(1);
+    expect(res._json[0].id).toBe(1);
   });
 });
