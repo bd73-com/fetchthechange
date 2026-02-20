@@ -50,7 +50,7 @@ export const api = {
       path: '/api/monitors',
       input: insertMonitorSchema,
       responses: {
-        201: z.custom<typeof monitors.$inferSelect>(),
+        201: z.custom<typeof monitors.$inferSelect & { selectorWarning?: string }>(),
         400: errorSchemas.validation,
         401: errorSchemas.unauthorized,
       },

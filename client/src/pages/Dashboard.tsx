@@ -13,6 +13,7 @@ import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
 import { useState, useEffect } from "react";
 import { useSearch } from "wouter";
 
+// TODO: Remove banner code after 2026-02-27 (cutoff date)
 const BANNER_CUTOFF = new Date("2026-02-27T00:00:00Z");
 const BANNER_KEY = "ftc-free-tier-banner-dismissed";
 
@@ -26,8 +27,8 @@ export default function Dashboard() {
   const [bannerDismissed, setBannerDismissed] = useState(() => {
     try { return localStorage.getItem(BANNER_KEY) === "1"; } catch { return false; }
   });
-  const bannerTier = ((user as any)?.tier || "free") as UserTier;
-  const showBanner = bannerTier === "free" && new Date() < BANNER_CUTOFF && !bannerDismissed;
+  const userTier = (user?.tier || "free") as UserTier;
+  const showBanner = userTier === "free" && new Date() < BANNER_CUTOFF && !bannerDismissed;
 
   // Handle checkout success/cancel from Stripe redirect
   useEffect(() => {
@@ -143,7 +144,7 @@ export default function Dashboard() {
             </div>
             {/* Tier usage info */}
             {(() => {
-              const tier = ((user as any)?.tier || "free") as UserTier;
+              const tier = (user?.tier || "free") as UserTier;
               const limit = TIER_LIMITS[tier] ?? TIER_LIMITS.free;
               const count = monitors?.length ?? 0;
               const isAtLimit = count >= limit;

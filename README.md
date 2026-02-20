@@ -120,4 +120,6 @@ npm run start
 
 ## License
 
-MIT
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
+This means you can view, use, and modify the source code, but if you run a modified version as a network service, you must make your source code available to users of that service under the same license. See the [LICENSE](LICENSE) file for full terms.

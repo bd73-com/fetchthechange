@@ -78,10 +78,6 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   await initStripe();
 
-  // Ensure campaign-related columns/tables exist in the database
-  const { runAppMigrations } = await import("./db");
-  await runAppMigrations();
-
   // Stripe webhook route MUST be before express.json()
   app.post(
     '/api/stripe/webhook',

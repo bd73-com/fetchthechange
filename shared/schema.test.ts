@@ -268,6 +268,63 @@ describe("update input schema (api.monitors.update.input)", () => {
   });
 });
 
+describe("create monitor response schema", () => {
+  const createResponseSchema = api.monitors.create.responses[201];
+
+  it("passes through monitor data with selectorWarning", () => {
+    const payload = {
+      id: 1,
+      userId: "user1",
+      name: "Test",
+      url: "https://example.com",
+      selector: ".price",
+      frequency: "daily",
+      lastChecked: null,
+      lastChanged: null,
+      currentValue: null,
+      lastStatus: "ok",
+      lastError: null,
+      active: true,
+      emailEnabled: true,
+      consecutiveFailures: 0,
+      pauseReason: null,
+      createdAt: new Date().toISOString(),
+      selectorWarning: "The CSS selector didn't match any elements on the page's static HTML.",
+    };
+    const result = createResponseSchema.safeParse(payload);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.selectorWarning).toBe(payload.selectorWarning);
+    }
+  });
+
+  it("passes through monitor data without selectorWarning", () => {
+    const payload = {
+      id: 1,
+      userId: "user1",
+      name: "Test",
+      url: "https://example.com",
+      selector: ".price",
+      frequency: "daily",
+      lastChecked: null,
+      lastChanged: null,
+      currentValue: null,
+      lastStatus: "ok",
+      lastError: null,
+      active: true,
+      emailEnabled: true,
+      consecutiveFailures: 0,
+      pauseReason: null,
+      createdAt: new Date().toISOString(),
+    };
+    const result = createResponseSchema.safeParse(payload);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.selectorWarning).toBeUndefined();
+    }
+  });
+});
+
 describe("monitorMetrics table schema", () => {
   it("has monitorId column referencing monitors", () => {
     // Verify the table has the expected column names
