@@ -160,7 +160,7 @@ async function sendSingleCampaignEmail(
   unsubscribeToken: string
 ): Promise<{ success: boolean; resendId?: string; error?: string }> {
   if (!process.env.RESEND_API_KEY) {
-    console.log(`[Campaign] RESEND_API_KEY not set. Skipping email to ${recipientEmail}`);
+    console.log(`[Campaign] RESEND_API_KEY not set. Skipping campaign email send.`);
     return { success: false, error: "RESEND_API_KEY not configured" };
   }
 
@@ -426,8 +426,26 @@ async function sendCampaignBatch(
 
 /**
  * Finalize campaign status and set completedAt.
+ * When cancelled, also marks remaining pending recipients as failed.
  */
 async function finalizeCampaign(campaignId: number, status: string): Promise<void> {
+  // Mark remaining pending recipients when cancelling or partially sending
+  if (status === "cancelled" || status === "partially_sent") {
+    await db
+      .update(campaignRecipients)
+      .set({
+        status: "failed",
+        failedAt: new Date(),
+        failureReason: status === "cancelled" ? "Campaign cancelled" : "Campaign cap reached",
+      })
+      .where(
+        and(
+          eq(campaignRecipients.campaignId, campaignId),
+          eq(campaignRecipients.status, "pending")
+        )
+      );
+  }
+
   await db
     .update(campaigns)
     .set({

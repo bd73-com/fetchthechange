@@ -54,6 +54,7 @@ import {
   useCampaigns,
   useCampaignDashboard,
   useCreateCampaign,
+  useUpdateCampaign,
   useDeleteCampaign,
   usePreviewRecipients,
   useSendTestCampaign,
@@ -107,6 +108,7 @@ function CreateCampaignDialog() {
   const [createdCampaignId, setCreatedCampaignId] = useState<number | null>(null);
 
   const createCampaign = useCreateCampaign();
+  const updateCampaign = useUpdateCampaign();
   const previewRecipients = usePreviewRecipients();
   const sendTestCampaign = useSendTestCampaign();
   const sendCampaign = useSendCampaign();
@@ -122,14 +124,26 @@ function CreateCampaignDialog() {
   };
 
   const handleSaveDraft = async () => {
-    const result = await createCampaign.mutateAsync({
-      name,
-      subject,
-      htmlBody,
-      textBody: textBody || undefined,
-      filters: Object.keys(filters).length > 0 ? filters : undefined,
-    });
-    setCreatedCampaignId(result.id);
+    if (createdCampaignId) {
+      // Update existing draft instead of creating a duplicate
+      await updateCampaign.mutateAsync({
+        id: createdCampaignId,
+        name,
+        subject,
+        htmlBody,
+        textBody: textBody || undefined,
+        filters: Object.keys(filters).length > 0 ? filters : undefined,
+      });
+    } else {
+      const result = await createCampaign.mutateAsync({
+        name,
+        subject,
+        htmlBody,
+        textBody: textBody || undefined,
+        filters: Object.keys(filters).length > 0 ? filters : undefined,
+      });
+      setCreatedCampaignId(result.id);
+    }
   };
 
   const handlePreview = async () => {

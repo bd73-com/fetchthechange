@@ -227,6 +227,20 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
+    it("bypasses CSRF check for campaign resubscribe path", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/campaigns/resubscribe/some-uuid-token",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
     it("does NOT exempt /api/campaigns/ (non-unsubscribe paths)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({

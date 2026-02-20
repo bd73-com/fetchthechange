@@ -1336,10 +1336,12 @@ export async function registerRoutes(
   // Public unsubscribe endpoint (no auth required)
   // GET shows a confirmation page; POST performs the actual unsubscribe.
   // This prevents link prefetchers / email scanners from triggering unsubscribes.
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   app.get("/api/campaigns/unsubscribe/:token", unauthenticatedRateLimiter, async (req: any, res) => {
     try {
       const { token } = req.params;
-      if (!token) return res.status(400).send("Invalid unsubscribe link.");
+      if (!token || !UUID_REGEX.test(token)) return res.status(400).send("Invalid unsubscribe link.");
 
       const [user] = await db
         .select()
@@ -1382,7 +1384,7 @@ export async function registerRoutes(
   app.post("/api/campaigns/unsubscribe/:token/confirm", unauthenticatedRateLimiter, async (req: any, res) => {
     try {
       const { token } = req.params;
-      if (!token) return res.status(400).send("Invalid unsubscribe link.");
+      if (!token || !UUID_REGEX.test(token)) return res.status(400).send("Invalid unsubscribe link.");
 
       const [user] = await db
         .select()
@@ -1415,7 +1417,9 @@ export async function registerRoutes(
           <p>You have been successfully unsubscribed from FetchTheChange campaign emails.</p>
           <p style="color:#666;font-size:14px;">You will continue to receive monitor change notifications.</p>
           <br/>
-          <p><a href="/api/campaigns/resubscribe/${safeToken}" style="color:#4f46e5;text-decoration:underline;">Re-subscribe to campaign emails</a></p>
+          <form method="POST" action="/api/campaigns/resubscribe/${safeToken}" style="display:inline;">
+            <button type="submit" style="background:none;border:none;color:#4f46e5;text-decoration:underline;cursor:pointer;font-size:inherit;font-family:inherit;">Re-subscribe to campaign emails</button>
+          </form>
         </body></html>
       `);
     } catch (error: any) {
@@ -1428,7 +1432,7 @@ export async function registerRoutes(
   app.post("/api/campaigns/resubscribe/:token", unauthenticatedRateLimiter, async (req: any, res) => {
     try {
       const { token } = req.params;
-      if (!token) return res.status(400).json({ message: "Invalid token" });
+      if (!token || !UUID_REGEX.test(token)) return res.status(400).json({ message: "Invalid token" });
 
       const [user] = await db
         .select()

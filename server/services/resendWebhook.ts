@@ -41,8 +41,11 @@ export async function verifyResendWebhook(
     return payload;
   }
 
-  // No secret configured — parse without verification (development)
-  console.warn("[ResendWebhook] RESEND_WEBHOOK_SECRET is not set — skipping signature verification. Do not use this in production.");
+  // No secret configured — only allow in development
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("RESEND_WEBHOOK_SECRET must be configured in production — webhook signature verification is required.");
+  }
+  console.warn("[ResendWebhook] RESEND_WEBHOOK_SECRET is not set — skipping signature verification (development only).");
   return JSON.parse(rawBody.toString()) as ResendWebhookEvent;
 }
 
@@ -130,35 +133,41 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
       break;
 
     case "email.bounced":
-      await db
-        .update(campaignRecipients)
-        .set({
-          status: "bounced",
-          failedAt: now,
-          failureReason: "bounced",
-        })
-        .where(eq(campaignRecipients.id, recipient.id));
+      // Guard against duplicate webhook retries
+      if (!recipient.failedAt) {
+        await db
+          .update(campaignRecipients)
+          .set({
+            status: "bounced",
+            failedAt: now,
+            failureReason: "bounced",
+          })
+          .where(eq(campaignRecipients.id, recipient.id));
 
-      await db.execute(sql`
-        UPDATE campaigns SET failed_count = failed_count + 1
-        WHERE id = ${recipient.campaignId}
-      `);
+        await db.execute(sql`
+          UPDATE campaigns SET failed_count = failed_count + 1
+          WHERE id = ${recipient.campaignId}
+        `);
+      }
       break;
 
     case "email.complained":
-      await db
-        .update(campaignRecipients)
-        .set({
-          status: "complained",
-          failedAt: now,
-          failureReason: "spam complaint",
-        })
-        .where(eq(campaignRecipients.id, recipient.id));
+      // Guard against duplicate webhook retries
+      if (!recipient.failedAt) {
+        await db
+          .update(campaignRecipients)
+          .set({
+            status: "complained",
+            failedAt: now,
+            failureReason: "spam complaint",
+          })
+          .where(eq(campaignRecipients.id, recipient.id));
 
-      await db.execute(sql`
-        UPDATE campaigns SET failed_count = failed_count + 1
-        WHERE id = ${recipient.campaignId}
-      `);
+        await db.execute(sql`
+          UPDATE campaigns SET failed_count = failed_count + 1
+          WHERE id = ${recipient.campaignId}
+        `);
+      }
       break;
 
     default:

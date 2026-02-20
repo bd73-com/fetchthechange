@@ -281,6 +281,16 @@ describe("handleResendWebhookEvent", () => {
       );
       expect(mockExecute).toHaveBeenCalled();
     });
+
+    it("does NOT double-count on duplicate bounce webhook", async () => {
+      const recipient = makeRecipient({ status: "bounced", failedAt: new Date(), failureReason: "bounced" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      expect(mockSet).not.toHaveBeenCalled();
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
   });
 
   describe("email.complained", () => {
@@ -299,6 +309,16 @@ describe("handleResendWebhookEvent", () => {
         })
       );
       expect(mockExecute).toHaveBeenCalled();
+    });
+
+    it("does NOT double-count on duplicate complaint webhook", async () => {
+      const recipient = makeRecipient({ status: "complained", failedAt: new Date(), failureReason: "spam complaint" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+
+      await handleResendWebhookEvent(makeEvent("email.complained"));
+
+      expect(mockSet).not.toHaveBeenCalled();
+      expect(mockExecute).not.toHaveBeenCalled();
     });
   });
 
