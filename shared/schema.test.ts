@@ -211,6 +211,10 @@ describe("tier configuration constants", () => {
     for (const tier of tierKeys) {
       expect(PAUSE_THRESHOLDS).toHaveProperty(tier);
     }
+    const pauseKeys = Object.keys(PAUSE_THRESHOLDS) as Array<keyof typeof PAUSE_THRESHOLDS>;
+    for (const tier of pauseKeys) {
+      expect(TIER_LIMITS).toHaveProperty(tier);
+    }
   });
 });
 
