@@ -500,6 +500,7 @@ export default function AdminErrors() {
                             variant="ghost"
                             size="icon"
                             className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                            aria-label={`Delete log entry ${log.id}`}
                             onClick={(e) => {
                               e.stopPropagation();
                               if (confirm("Delete this log entry?")) {
