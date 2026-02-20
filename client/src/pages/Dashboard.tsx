@@ -13,12 +13,21 @@ import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
 import { useState, useEffect } from "react";
 import { useSearch } from "wouter";
 
+const BANNER_CUTOFF = new Date("2026-02-27T00:00:00Z");
+const BANNER_KEY = "ftc-free-tier-banner-dismissed";
+
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const { data: monitors, isLoading, error, refetch } = useMonitors();
   const { mutate: checkMonitor, isPending: isChecking } = useCheckMonitor();
   const { toast } = useToast();
   const searchString = useSearch();
+
+  const [bannerDismissed, setBannerDismissed] = useState(() => {
+    try { return localStorage.getItem(BANNER_KEY) === "1"; } catch { return false; }
+  });
+  const bannerTier = ((user as any)?.tier || "free") as UserTier;
+  const showBanner = bannerTier === "free" && new Date() < BANNER_CUTOFF && !bannerDismissed;
 
   // Handle checkout success/cancel from Stripe redirect
   useEffect(() => {
@@ -101,35 +110,26 @@ export default function Dashboard() {
       <DashboardNav />
 
       {/* Temporary announcement banner for free tier upgrade */}
-      {(() => {
-        const tier = ((user as any)?.tier || "free") as UserTier;
-        const BANNER_CUTOFF = new Date("2026-02-27T00:00:00Z");
-        const BANNER_KEY = "ftc-free-tier-banner-dismissed";
-        const [dismissed, setDismissed] = useState(() => {
-          try { return localStorage.getItem(BANNER_KEY) === "1"; } catch { return false; }
-        });
-        if (tier !== "free" || new Date() >= BANNER_CUTOFF || dismissed) return null;
-        return (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
-            <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-              <Megaphone className="h-5 w-5 text-primary flex-shrink-0" />
-              <p className="flex-1 text-sm">
-                <strong>Great news!</strong> The free plan now includes <strong>3 monitors</strong> — up from 1. Start tracking more pages today!
-              </p>
-              <button
-                onClick={() => {
-                  try { localStorage.setItem(BANNER_KEY, "1"); } catch {}
-                  setDismissed(true);
-                }}
-                className="text-muted-foreground hover:text-foreground flex-shrink-0"
-                aria-label="Dismiss announcement"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+      {showBanner && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+          <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+            <Megaphone className="h-5 w-5 text-primary flex-shrink-0" />
+            <p className="flex-1 text-sm">
+              <strong>Great news!</strong> The free plan now includes <strong>3 monitors</strong> — up from 1. Start tracking more pages today!
+            </p>
+            <button
+              onClick={() => {
+                try { localStorage.setItem(BANNER_KEY, "1"); } catch {}
+                setBannerDismissed(true);
+              }}
+              className="text-muted-foreground hover:text-foreground flex-shrink-0"
+              aria-label="Dismiss announcement"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
