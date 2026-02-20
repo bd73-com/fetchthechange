@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe, Mail, Users } from "lucide-react";
+import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe, Mail, Users, Trash2, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
 
@@ -119,6 +119,20 @@ export default function AdminErrors() {
       return res.json();
     },
     refetchInterval: 30000,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/admin/error-logs/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to delete log entry");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+    },
   });
 
   const formatTimestamp = (ts: string) => {
@@ -482,6 +496,26 @@ export default function AdminErrors() {
                           <span className="text-xs text-muted-foreground ml-auto shrink-0">
                             {formatTimestamp(log.timestamp)}
                           </span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                            aria-label={`Delete log entry ${log.id}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm("Delete this log entry?")) {
+                                deleteMutation.mutate(log.id);
+                              }
+                            }}
+                            disabled={deleteMutation.isPending && deleteMutation.variables === log.id}
+                            data-testid={`button-delete-log-${log.id}`}
+                          >
+                            {deleteMutation.isPending && deleteMutation.variables === log.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
                         </div>
                         <p className="text-sm truncate" data-testid={`text-message-${log.id}`}>
                           {log.message}
