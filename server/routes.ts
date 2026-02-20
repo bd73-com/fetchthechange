@@ -792,9 +792,9 @@ export async function registerRoutes(
       );
 
       const filtered = allResults.filter((log: any) => {
-        const ctx = log.context;
-        const monitorId = ctx?.monitorId;
-        if (monitorId != null) {
+        const ctx = log.context as Record<string, unknown> | null;
+        const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
+        if (monitorId !== undefined) {
           return userMonitorIds.has(monitorId);
         }
         return isAppOwner;
@@ -819,7 +819,7 @@ export async function registerRoutes(
       }
 
       const id = Number(req.params.id);
-      if (!id || isNaN(id)) {
+      if (!Number.isInteger(id) || id <= 0) {
         return res.status(400).json({ message: "Invalid log ID" });
       }
 
@@ -832,8 +832,9 @@ export async function registerRoutes(
       const userMonitorIds = new Set(
         (await storage.getMonitors(userId)).map((m: any) => m.id)
       );
-      const monitorId = (log.context as any)?.monitorId;
-      if (monitorId != null ? !userMonitorIds.has(monitorId) : !isAppOwner) {
+      const ctx = log.context as Record<string, unknown> | null;
+      const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
+      if (monitorId !== undefined ? !userMonitorIds.has(monitorId) : !isAppOwner) {
         return res.status(403).json({ message: "Not authorized to delete this log entry" });
       }
 

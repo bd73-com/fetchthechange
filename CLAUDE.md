@@ -1,17 +1,11 @@
 # CLAUDE.md — FetchTheChange
 
-## Project Overview
-FetchTheChange is a website change monitoring SaaS. Users create monitors that track CSS-selected elements on web pages and receive email notifications when values change. Built with React + Express + PostgreSQL (Drizzle ORM).
+See `README.md` for project overview, tech stack, structure, and setup.
 
-## Project Structure
-- `shared/` — Shared types, schemas, and constants used by both client and server
+## Key Files
 - `shared/models/auth.ts` — Tier configuration constants (`TIER_LIMITS`, `BROWSERLESS_CAPS`, `PAUSE_THRESHOLDS`, `RESEND_CAPS`), user table schema
 - `shared/schema.ts` — Database table definitions (monitors, monitorChanges, etc.)
 - `shared/routes.ts` — Zod validation schemas for API routes
-- `server/` — Express backend (routes, services, webhook handlers)
-- `client/src/` — React frontend (pages, components, hooks)
-- `client/src/pages/` — Page components (Dashboard, Pricing, LandingPage, Support, Blog*)
-- `client/src/components/` — Reusable UI components (shadcn/ui based)
 
 ## Conventions
 - **Shared types**: All types shared between client and server live in `shared/`. Import with `@shared/` alias.
@@ -35,6 +29,3 @@ FetchTheChange is a website change monitoring SaaS. Users create monitors that t
 - CodeRabbit auto-reviews all PRs (configured in `.coderabbit.yaml`).
 - PR titles should be concise (<70 chars); use the body for details.
 - Run `npm run check && npm run test` before pushing.
-
-## Specs
-- `update-free-tier-monitors` — Increase free tier from 1 to 3 monitors: `.claude/specs/update-free-tier-monitors.md`

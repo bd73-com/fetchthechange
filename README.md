@@ -118,6 +118,26 @@ npm run start
 | JS rendering | No | 200 checks/month | 500 checks/month |
 | Email notifications | 1 per day per monitor | Unlimited | Unlimited |
 
+## Web Scraping
+
+The scraping service uses two methods depending on page complexity:
+
+- **Static HTML** — Cheerio parses server-rendered pages directly (fast, no browser needed)
+- **JS-rendered pages** — Browserless (headless Chrome via Playwright) handles SPAs and dynamic content
+
+Additional capabilities:
+- **Anti-bot bypass** — Detects and handles Cloudflare challenges
+- **Cookie consent** — Dismisses consent dialogs (e.g., OneTrust) before scraping
+- **Change detection statuses** — Each check records a status: `ok`, `blocked`, `selector_missing`, or `error`
+- **Safe value preservation** — Failed checks preserve the existing `currentValue` to prevent false change notifications
+
+## Security
+
+- SSRF protection on user-supplied URLs
+- CORS configuration for API endpoints
+- Session fixation prevention
+- Log sanitization (no PII or secrets in logs)
+
 ## License
 
 This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
