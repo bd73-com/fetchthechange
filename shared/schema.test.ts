@@ -162,8 +162,8 @@ describe("insertMonitorSchema", () => {
 });
 
 describe("tier configuration constants", () => {
-  it("defines free tier with 1 monitor limit", () => {
-    expect(TIER_LIMITS.free).toBe(1);
+  it("defines free tier with 3 monitor limit", () => {
+    expect(TIER_LIMITS.free).toBe(3);
   });
 
   it("defines pro tier with 100 monitor limit", () => {
@@ -195,6 +195,26 @@ describe("tier configuration constants", () => {
   it("pause thresholds are lower for free tier than pro and power", () => {
     expect(PAUSE_THRESHOLDS.free).toBeLessThan(PAUSE_THRESHOLDS.pro);
     expect(PAUSE_THRESHOLDS.pro).toBeLessThan(PAUSE_THRESHOLDS.power);
+  });
+
+  it("tier monitor limits are strictly ordered: free < pro < power", () => {
+    expect(TIER_LIMITS.free).toBeLessThan(TIER_LIMITS.pro);
+    expect(TIER_LIMITS.pro).toBeLessThan(TIER_LIMITS.power);
+  });
+
+  it("free tier allows at least 1 monitor", () => {
+    expect(TIER_LIMITS.free).toBeGreaterThanOrEqual(1);
+  });
+
+  it("all user tiers have a corresponding pause threshold", () => {
+    const tierKeys = Object.keys(TIER_LIMITS) as Array<keyof typeof TIER_LIMITS>;
+    for (const tier of tierKeys) {
+      expect(PAUSE_THRESHOLDS).toHaveProperty(tier);
+    }
+    const pauseKeys = Object.keys(PAUSE_THRESHOLDS) as Array<keyof typeof PAUSE_THRESHOLDS>;
+    for (const tier of pauseKeys) {
+      expect(TIER_LIMITS).toHaveProperty(tier);
+    }
   });
 });
 

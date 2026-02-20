@@ -68,7 +68,7 @@ const faqSections: FAQSection[] = [
       {
         question: "Is there a free plan?",
         answer:
-          "Yes. The free plan includes 1 monitor with daily checks and email notifications. You can upgrade to Pro or Power plans for more monitors and higher check frequencies.",
+          "Yes. The free plan includes 3 monitors with daily checks and email notifications. You can upgrade to Pro or Power plans for more monitors and higher check frequencies.",
       },
     ],
   },
