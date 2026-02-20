@@ -14,7 +14,7 @@ fi
 
 # Install npm dependencies (remote containers may not have them cached)
 if [ ! -d "$CLAUDE_PROJECT_DIR/node_modules" ]; then
-  cd "$CLAUDE_PROJECT_DIR" && npm install --prefer-offline 2>/dev/null
+  cd "$CLAUDE_PROJECT_DIR" && npm install --prefer-offline --loglevel=warn
 fi
 
 # Warn if gh is not authenticated (surface early, not on first gh pr create)
