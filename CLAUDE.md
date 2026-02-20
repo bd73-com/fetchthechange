@@ -24,5 +24,17 @@ FetchTheChange is a website change monitoring SaaS. Users create monitors that t
 - **Authentication**: Replit Auth with OpenID Connect via Passport.
 - **Database**: PostgreSQL with Drizzle ORM. Schema in `shared/schema.ts` and `shared/models/auth.ts`.
 
+## Verification
+- `npm run check` — TypeScript type checking (tsc)
+- `npm run test` — Run all tests (vitest run)
+- `npm run build` — Full production build (frontend Vite + server esbuild bundle)
+- Always run `check` and `test` before creating commits. Run `build` before creating PRs.
+
+## PR Workflow
+- Create PRs against `main` using `gh pr create`.
+- CodeRabbit auto-reviews all PRs (configured in `.coderabbit.yaml`).
+- PR titles should be concise (<70 chars); use the body for details.
+- Run `npm run check && npm run test` before pushing.
+
 ## Specs
 - `update-free-tier-monitors` — Increase free tier from 1 to 3 monitors: `.claude/specs/update-free-tier-monitors.md`
