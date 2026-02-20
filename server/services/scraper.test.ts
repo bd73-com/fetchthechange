@@ -2561,3 +2561,299 @@ describe("auto-heal selector recovery", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// discoverSelectors (direct unit tests)
+// ---------------------------------------------------------------------------
+describe("discoverSelectors", () => {
+  const originalToken = process.env.BROWSERLESS_TOKEN;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalToken !== undefined) {
+      process.env.BROWSERLESS_TOKEN = originalToken;
+    } else {
+      delete process.env.BROWSERLESS_TOKEN;
+    }
+  });
+
+  it("throws when BROWSERLESS_TOKEN is not set", async () => {
+    delete process.env.BROWSERLESS_TOKEN;
+    await expect(discoverSelectors("https://example.com", ".price")).rejects.toThrow(
+      "BROWSERLESS_TOKEN not configured"
+    );
+  });
+
+  it("validates URL against SSRF before connecting", async () => {
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    const { validateUrlBeforeFetch } = await import("../utils/ssrf");
+    (validateUrlBeforeFetch as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("URL targets a private IP")
+    );
+
+    await expect(
+      discoverSelectors("http://169.254.169.254/metadata", ".data")
+    ).rejects.toThrow("URL targets a private IP");
+  });
+
+  it("returns current selector validity and suggestions when expectedText matches", async () => {
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const makeLocator = (count: number, text: string) => ({
+      count: vi.fn().mockResolvedValue(count),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(text),
+      }),
+      innerText: vi.fn().mockResolvedValue(text),
+    });
+    const roleBtn = { count: vi.fn().mockResolvedValue(0) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue("<html><body>$99.99</body></html>"),
+      locator: vi.fn().mockImplementation((sel: string) => {
+        if (sel === ".price") return makeLocator(1, "$99.99");
+        if (sel === ".new-price") return makeLocator(1, "$99.99");
+        return makeLocator(0, "");
+      }),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      evaluate: vi.fn().mockResolvedValue([
+        { text: "$99.99", selector: ".new-price" },
+      ]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const result = await discoverSelectors("https://example.com", ".price", "$99.99");
+
+    expect(result.currentSelector.selector).toBe(".price");
+    expect(result.currentSelector.count).toBe(1);
+    expect(result.currentSelector.valid).toBe(true);
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0].selector).toBe(".new-price");
+    expect(result.suggestions[0].sampleText).toBe("$99.99");
+  });
+
+  it("returns empty suggestions with debug info when no elements match expectedText", async () => {
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const makeLocator = (count: number) => ({
+      count: vi.fn().mockResolvedValue(count),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(""),
+      }),
+      innerText: vi.fn().mockResolvedValue(""),
+    });
+    const roleBtn = { count: vi.fn().mockResolvedValue(0) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue("<html><body><p>No prices here</p></body></html>"),
+      locator: vi.fn().mockReturnValue(makeLocator(0)),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("No Prices Page"),
+      evaluate: vi.fn().mockResolvedValue([]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const result = await discoverSelectors("https://example.com", ".price", "$50.00");
+
+    expect(result.suggestions).toHaveLength(0);
+    expect(result.debug).toBeDefined();
+    expect(result.debug!.note).toContain("No element matched expectedText");
+    expect(result.debug!.pageTitle).toBe("No Prices Page");
+  });
+
+  it("scans common selectors when no expectedText is provided", async () => {
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const makeLocator = (sel: string) => {
+      // Simulate .price matching and others not
+      if (sel === ".price") {
+        return {
+          count: vi.fn().mockResolvedValue(2),
+          first: vi.fn().mockReturnValue({
+            innerText: vi.fn().mockResolvedValue("$15.00"),
+          }),
+          innerText: vi.fn().mockResolvedValue("$15.00"),
+        };
+      }
+      return {
+        count: vi.fn().mockResolvedValue(0),
+        first: vi.fn().mockReturnValue({
+          innerText: vi.fn().mockResolvedValue(""),
+        }),
+        innerText: vi.fn().mockResolvedValue(""),
+      };
+    };
+    const roleBtn = { count: vi.fn().mockResolvedValue(0) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue("<html><body><span class='price'>$15.00</span></body></html>"),
+      locator: vi.fn().mockImplementation(makeLocator),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Product Page"),
+      evaluate: vi.fn().mockResolvedValue([]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    // No expectedText → scans common selectors
+    const result = await discoverSelectors("https://example.com", ".old-price");
+
+    expect(result.currentSelector.selector).toBe(".old-price");
+    expect(result.currentSelector.valid).toBe(false); // .old-price not found
+    expect(result.suggestions.length).toBeGreaterThanOrEqual(1);
+    expect(result.suggestions[0].selector).toBe(".price");
+    expect(result.suggestions[0].count).toBe(2);
+    expect(result.suggestions[0].sampleText).toBe("$15.00");
+  });
+
+  it("closes browser even when page operations throw", async () => {
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const closeFn = vi.fn().mockResolvedValue(undefined);
+    const pageMock = {
+      goto: vi.fn().mockRejectedValue(new Error("Page crashed")),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: closeFn,
+    };
+
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    await expect(
+      discoverSelectors("https://example.com", ".price", "$99")
+    ).rejects.toThrow("Page crashed");
+
+    expect(closeFn).toHaveBeenCalled();
+  });
+
+  it("normalizes bare class names (auto-prefixes with dot)", async () => {
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const locatorCalls: string[] = [];
+    const makeLocator = () => ({
+      count: vi.fn().mockResolvedValue(0),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(""),
+      }),
+      innerText: vi.fn().mockResolvedValue(""),
+    });
+    const roleBtn = { count: vi.fn().mockResolvedValue(0) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue("<html><body></body></html>"),
+      locator: vi.fn().mockImplementation((sel: string) => {
+        locatorCalls.push(sel);
+        return makeLocator();
+      }),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test"),
+      evaluate: vi.fn().mockResolvedValue([]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    // "price" without dot prefix → should be auto-prefixed to ".price"
+    await discoverSelectors("https://example.com", "price");
+
+    // The effective selector ".price" should appear in locator calls
+    // (other locator calls may precede it from the consent-dismiss logic)
+    expect(locatorCalls).toContain(".price");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateCssSelector additional edge cases
+// ---------------------------------------------------------------------------
+describe("validateCssSelector additional edge cases", () => {
+  it("returns null for selector with child combinator", () => {
+    expect(validateCssSelector("div > .price")).toBeNull();
+  });
+
+  it("returns null for selector with nth-child", () => {
+    expect(validateCssSelector("ul li:nth-child(2)")).toBeNull();
+  });
+
+  it("returns null for selector with multiple classes", () => {
+    expect(validateCssSelector(".product.active")).toBeNull();
+  });
+
+  it("returns null for data attribute selector with compound", () => {
+    expect(validateCssSelector('div [data-testid="price"]')).toBeNull();
+  });
+
+  it("returns error for selector with unmatched bracket", () => {
+    const result = validateCssSelector(".price[attr=");
+    expect(result).toContain("Invalid CSS selector syntax");
+  });
+
+  it("returns null for selector at boundary (499 chars)", () => {
+    // Use a valid compound selector under the limit
+    const selector = "." + "a".repeat(498); // 499 chars, valid class selector
+    expect(validateCssSelector(selector)).toBeNull();
+  });
+
+  it("returns error at 501 chars", () => {
+    const selector = "a".repeat(501);
+    expect(validateCssSelector(selector)).toBe("Selector is too long (max 500 characters)");
+  });
+});

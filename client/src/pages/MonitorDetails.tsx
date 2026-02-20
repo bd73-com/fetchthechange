@@ -291,7 +291,7 @@ export default function MonitorDetails() {
                       {monitor.selector}
                     </code>
                     {monitor.lastStatus && monitor.lastStatus !== "ok" && monitor.lastError && (
-                      <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive dark:text-red-400">
+                      <div role="alert" className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive dark:text-red-400">
                         <p className="font-medium mb-1">{monitor.lastError}</p>
                         <p className="text-muted-foreground">
                           {monitor.lastStatus === "selector_missing"

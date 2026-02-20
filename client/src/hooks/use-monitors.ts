@@ -71,8 +71,10 @@ export function useCreateMonitor() {
         throw new Error("Failed to create monitor");
       }
       const json = await res.json();
-      const selectorWarning = json.selectorWarning as string | undefined;
       const monitor = api.monitors.create.responses[201].parse(json);
+      const selectorWarning: string | undefined = typeof json.selectorWarning === 'string'
+        ? json.selectorWarning
+        : undefined;
       return { monitor, selectorWarning };
     },
     onSuccess: ({ selectorWarning }) => {
