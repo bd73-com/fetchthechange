@@ -2560,6 +2560,209 @@ describe("auto-heal selector recovery", () => {
       expect.objectContaining({ selector: ".exact-price" })
     );
   });
+
+  it("re-extracts full value from static HTML instead of using truncated sampleText", async () => {
+    // The static fetch HTML contains the healed selector with a long value (>80 chars).
+    // discoverSelectors returns a truncated sampleText (80 chars), but the auto-heal
+    // code should re-extract from the static HTML to get the full value.
+    const longValue = "This is a very long product description that exceeds eighty characters and should not be truncated by the auto-heal process at all";
+    const html = `<html><body><span class="new-price">${longValue}</span></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+
+    const truncatedSample = longValue.substring(0, 80);
+    const makeLocator = (count = 1) => ({
+      count: vi.fn().mockResolvedValue(count),
+      innerText: vi.fn().mockResolvedValue(truncatedSample),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(truncatedSample),
+        click: vi.fn().mockResolvedValue(undefined),
+        count: vi.fn().mockResolvedValue(count),
+      }),
+    });
+    const roleBtn = { count: vi.fn().mockResolvedValue(0), click: vi.fn(), first: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0), click: vi.fn().mockResolvedValue(undefined) }) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(html),
+      locator: vi.fn().mockImplementation(() => makeLocator(1)),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      evaluate: vi.fn().mockResolvedValue([
+        { text: truncatedSample, selector: ".new-price" },
+      ]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockResolvedValueOnce(browserMock);
+
+    const monitor = makeMonitor({ selector: ".old-price", currentValue: truncatedSample });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    // Should contain the full value from extractValueFromHtml, not the truncated sampleText
+    expect(result.currentValue).toBe(longValue);
+    expect(result.currentValue!.length).toBeGreaterThan(80);
+  });
+
+  it("falls back to sampleText when static HTML does not contain the healed selector", async () => {
+    // The static fetch HTML does NOT contain the healed selector.
+    // extractValueFromHtml returns null, so the fallback to sampleText kicks in.
+    const html = `<html><body><p>Static page without new selector</p></body></html>`;
+    const pageHtml = `<html><body><span class="js-price">$42.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+
+    const makeLocator = (count = 1) => ({
+      count: vi.fn().mockResolvedValue(count),
+      innerText: vi.fn().mockResolvedValue("$42.99"),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue("$42.99"),
+        click: vi.fn().mockResolvedValue(undefined),
+        count: vi.fn().mockResolvedValue(count),
+      }),
+    });
+    const roleBtn = { count: vi.fn().mockResolvedValue(0), click: vi.fn(), first: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0), click: vi.fn().mockResolvedValue(undefined) }) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(pageHtml),
+      locator: vi.fn().mockImplementation(() => makeLocator(1)),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      evaluate: vi.fn().mockResolvedValue([
+        { text: "$42.99", selector: ".js-price" },
+      ]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockResolvedValueOnce(browserMock);
+
+    const monitor = makeMonitor({ selector: ".old-price", currentValue: "$42.99" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    // extractValueFromHtml(html, ".js-price") returns null because static HTML lacks .js-price
+    // Falls back to normalizeValue(best.sampleText) = "$42.99"
+    expect(result.currentValue).toBe("$42.99");
+    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ selector: ".js-price" })
+    );
+  });
+
+  it("breaks ties alphabetically when suggestions have same count and length", async () => {
+    const html = `<html><body><p>No match</p></body></html>`;
+    const pageHtml = `<html><body><span class="b-price">$10</span><span class="a-price">$10</span></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+
+    // Both selectors: count=1, length=8 (.a-price and .b-price) — localeCompare breaks tie
+    const locatorCountMap: Record<string, number> = {
+      ".a-price": 1,
+      ".b-price": 1,
+    };
+    const roleBtn = { count: vi.fn().mockResolvedValue(0), click: vi.fn(), first: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0), click: vi.fn().mockResolvedValue(undefined) }) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(pageHtml),
+      locator: vi.fn().mockImplementation((sel: string) => ({
+        count: vi.fn().mockResolvedValue(locatorCountMap[sel] ?? 0),
+        innerText: vi.fn().mockResolvedValue("$10"),
+        first: vi.fn().mockReturnValue({
+          innerText: vi.fn().mockResolvedValue("$10"),
+          click: vi.fn().mockResolvedValue(undefined),
+          count: vi.fn().mockResolvedValue(locatorCountMap[sel] ?? 0),
+        }),
+      })),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      evaluate: vi.fn().mockResolvedValue([
+        { text: "$10", selector: ".b-price" },
+        { text: "$10", selector: ".a-price" },
+      ]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockRejectedValueOnce(new Error("Navigation timeout exceeded"))
+      .mockResolvedValueOnce(browserMock);
+
+    const monitor = makeMonitor({ selector: ".old-price", currentValue: "$10" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    // .a-price sorts before .b-price alphabetically (localeCompare tiebreaker)
+    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ selector: ".a-price" })
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
