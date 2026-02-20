@@ -348,7 +348,7 @@ export default function BlogComparison() {
           <div className="bg-secondary/50 rounded-lg p-6 mt-10 border border-border">
             <h3 className="text-xl font-display font-bold mb-3">Try FetchTheChange</h3>
             <p className="text-muted-foreground mb-4">
-              Start free with up to 3 monitors. No credit card required.
+              Start free with 3 monitors. No credit card required.
             </p>
             <Button asChild data-testid="button-cta-start-monitoring">
               <a href="/api/login">
