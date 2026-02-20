@@ -114,7 +114,7 @@ npm run start
 
 | Feature | Free | Pro | Power |
 |---------|------|-----|-------|
-| Monitors | 1 | 100 | Unlimited |
+| Monitors | 5 | 100 | Unlimited |
 | JS rendering | No | 200 checks/month | 500 checks/month |
 | Email notifications | 1 per day per monitor | Unlimited | Unlimited |
 

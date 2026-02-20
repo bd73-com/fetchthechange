@@ -395,13 +395,13 @@ export default function LandingPage() {
                   <span className="text-4xl font-bold">$0</span>
                   <span className="text-muted-foreground">forever</span>
                 </div>
-                <p className="text-primary font-medium mt-2">1 monitor</p>
+                <p className="text-primary font-medium mt-2">5 monitors</p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <ul className="space-y-3">
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                    <span className="text-sm">1 website monitor</span>
+                    <span className="text-sm">5 website monitors</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
