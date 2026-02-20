@@ -807,6 +807,44 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/admin/error-logs/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = Number(req.params.id);
+      if (!id || isNaN(id)) {
+        return res.status(400).json({ message: "Invalid log ID" });
+      }
+
+      const [log] = await db.select().from(errorLogs).where(eq(errorLogs.id, id)).limit(1);
+      if (!log) {
+        return res.status(404).json({ message: "Log entry not found" });
+      }
+
+      const isAppOwner = userId === APP_OWNER_ID;
+      const userMonitorIds = new Set(
+        (await storage.getMonitors(userId)).map((m: any) => m.id)
+      );
+      const monitorId = (log.context as any)?.monitorId;
+      if (monitorId != null ? !userMonitorIds.has(monitorId) : !isAppOwner) {
+        return res.status(403).json({ message: "Not authorized to delete this log entry" });
+      }
+
+      await db.delete(errorLogs).where(eq(errorLogs.id, id));
+      res.json({ message: "Deleted" });
+    } catch (error: any) {
+      console.error("Error deleting error log:", error);
+      res.status(500).json({ message: "Failed to delete error log" });
+    }
+  });
+
   // Admin users overview endpoint (owner-only)
   app.get("/api/admin/users-overview", isAuthenticated, async (req: any, res) => {
     try {
