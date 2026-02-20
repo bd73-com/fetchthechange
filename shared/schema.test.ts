@@ -196,6 +196,22 @@ describe("tier configuration constants", () => {
     expect(PAUSE_THRESHOLDS.free).toBeLessThan(PAUSE_THRESHOLDS.pro);
     expect(PAUSE_THRESHOLDS.pro).toBeLessThan(PAUSE_THRESHOLDS.power);
   });
+
+  it("tier monitor limits are strictly ordered: free < pro < power", () => {
+    expect(TIER_LIMITS.free).toBeLessThan(TIER_LIMITS.pro);
+    expect(TIER_LIMITS.pro).toBeLessThan(TIER_LIMITS.power);
+  });
+
+  it("free tier allows at least 1 monitor", () => {
+    expect(TIER_LIMITS.free).toBeGreaterThanOrEqual(1);
+  });
+
+  it("all user tiers have a corresponding pause threshold", () => {
+    const tierKeys = Object.keys(TIER_LIMITS) as Array<keyof typeof TIER_LIMITS>;
+    for (const tier of tierKeys) {
+      expect(PAUSE_THRESHOLDS).toHaveProperty(tier);
+    }
+  });
 });
 
 describe("update input schema (api.monitors.update.input)", () => {
