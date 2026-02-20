@@ -1033,7 +1033,7 @@ describe("checkMonitor", () => {
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
-    expect(result.error).toBe("Failed to fetch page");
+    expect(result.error).toBe("Page returned empty response");
   });
 
   it("updates monitor lastChecked and lastStatus in storage on success", async () => {
@@ -1062,7 +1062,7 @@ describe("checkMonitor", () => {
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
-    expect(result.error).toBe("timeout");
+    expect(result.error).toBe("Page took too long to respond");
   });
 
   it("updates monitor with selector_missing when selector not found", async () => {
@@ -1230,7 +1230,7 @@ describe("checkMonitor", () => {
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
-    expect(result.error).toBe("Unknown error");
+    expect(result.error).toBe("Fetch failed");
   });
 
   it("blocked page with challenge element detected", async () => {
@@ -1430,7 +1430,7 @@ describe("failure tracking and auto-pause", () => {
     expect(setFn).toHaveBeenCalledWith(
       expect.objectContaining({
         lastStatus: "error",
-        lastError: "timeout",
+        lastError: "Page took too long to respond",
       })
     );
   });
@@ -1448,7 +1448,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "timeout"
+      "Page took too long to respond"
     );
   });
 
@@ -1489,7 +1489,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       5,
-      "timeout"
+      "Page took too long to respond"
     );
   });
 
@@ -1504,7 +1504,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "site down"
+      expect.stringContaining("site down")
     );
   });
 
@@ -1542,7 +1542,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "DNS resolution failed"
+      expect.stringContaining("DNS resolution failed")
     );
   });
 
@@ -1660,7 +1660,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       10,
-      "timeout"
+      "Page took too long to respond"
     );
   });
 
@@ -1720,7 +1720,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "timeout"
+      "Page took too long to respond"
     );
   });
 
@@ -1743,7 +1743,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "timeout"
+      "Page took too long to respond"
     );
   });
 });

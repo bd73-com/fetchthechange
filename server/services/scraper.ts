@@ -392,6 +392,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
     
     let html = "";
+    let staticFetchError: string | null = null;
     try {
       const response = await ssrfSafeFetch(monitor.url, {
         headers: {
@@ -406,34 +407,42 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       html = await response.text();
     } catch (e: any) {
       if (e.code === 'UND_ERR_HEADERS_OVERFLOW' || (e.cause && e.cause.code === 'UND_ERR_HEADERS_OVERFLOW')) {
-        html = await fetchWithCurl(monitor.url, monitor.id, monitor.name);
+        try {
+          html = await fetchWithCurl(monitor.url, monitor.id, monitor.name);
+        } catch (curlErr: any) {
+          staticFetchError = curlErr instanceof Error ? curlErr.message : "Fallback fetch failed";
+        }
       } else {
-        throw e;
+        // Don't re-throw: let the pipeline continue to browserless fallback
+        staticFetchError = e instanceof Error ? e.message : "Fetch failed";
+        console.log(`[Scraper] Monitor ${monitor.id}: static fetch failed — ${staticFetchError}`);
       }
     }
 
-    if (!html) {
-      await recordMetric(monitor.id, "static", 0, "error");
-      await handleMonitorFailure(monitor, "error", "Failed to fetch page", false);
-      return {
-        changed: false,
-        currentValue: monitor.currentValue,
-        previousValue: monitor.currentValue,
-        status: "error" as const,
-        error: "Failed to fetch page"
-      };
+    let newValue: string | null = null;
+    let block: { blocked: boolean; reason?: string } = { blocked: false };
+
+    if (html) {
+      // Stage: Static extraction
+      const staticStart = Date.now();
+      newValue = extractValueFromHtml(html, monitor.selector);
+      block = detectPageBlockReason(html);
+      const staticDuration = Date.now() - staticStart;
+      const staticStatus = newValue ? "ok" : (block.blocked ? "blocked" : "selector_missing");
+      await recordMetric(monitor.id, "static", staticDuration, staticStatus, newValue ? 1 : 0, block.blocked, block.reason);
+      console.log(`stage=static selectorCount=${newValue ? 1 : 0} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
+    } else if (staticFetchError) {
+      // Static fetch failed (timeout, network error, etc.) — record metric and continue to fallbacks
+      await recordMetric(monitor.id, "static", 0, "error", undefined, false, staticFetchError);
+      console.log(`stage=static fetch_failed reason="${staticFetchError}"`);
+    } else {
+      // Fetch returned empty body — record metric and continue to fallbacks
+      staticFetchError = "Page returned empty response";
+      await recordMetric(monitor.id, "static", 0, "error", undefined, false, staticFetchError);
+      console.log(`stage=static empty_response`);
     }
 
-    // Stage: Static
-    const staticStart = Date.now();
-    let newValue = extractValueFromHtml(html, monitor.selector);
-    let block = detectPageBlockReason(html);
-    const staticDuration = Date.now() - staticStart;
-    const staticStatus = newValue ? "ok" : (block.blocked ? "blocked" : "selector_missing");
-    await recordMetric(monitor.id, "static", staticDuration, staticStatus, newValue ? 1 : 0, block.blocked, block.reason);
-    console.log(`stage=static selectorCount=${newValue ? 1 : 0} blocked=${block.blocked}${block.blocked ? ` reason="${block.reason}"` : ""}`);
-
-    if (!newValue && !block.blocked) {
+    if (!newValue && !block.blocked && html) {
       console.log(`Retry: static extraction found no value, retrying fetch once...`);
       await new Promise(r => setTimeout(r, 2000));
       const retryStart = Date.now();
@@ -548,6 +557,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       } else if (block.blocked) {
         finalStatus = "blocked";
         finalError = block.reason || "Blocked";
+      } else if (staticFetchError) {
+        finalStatus = "error";
+        finalError = /abort|timeout/i.test(staticFetchError)
+          ? "Page took too long to respond"
+          : staticFetchError;
       } else {
         finalStatus = "selector_missing";
         finalError = "Selector not found";
