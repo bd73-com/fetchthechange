@@ -10,9 +10,9 @@ const plans = [
     price: "$0",
     period: "forever",
     description: "Perfect for getting started",
-    monitors: "5 monitors",
+    monitors: "3 monitors",
     features: [
-      "5 website monitors",
+      "3 website monitors",
       "1 check per 24 hours",
       "1 email notification per 24 hours",
       "JavaScript-rendered pages",

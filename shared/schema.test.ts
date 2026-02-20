@@ -162,8 +162,8 @@ describe("insertMonitorSchema", () => {
 });
 
 describe("tier configuration constants", () => {
-  it("defines free tier with 5 monitor limit", () => {
-    expect(TIER_LIMITS.free).toBe(5);
+  it("defines free tier with 3 monitor limit", () => {
+    expect(TIER_LIMITS.free).toBe(3);
   });
 
   it("defines pro tier with 100 monitor limit", () => {
