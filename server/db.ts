@@ -21,6 +21,8 @@ export const db = drizzle(pool, { schema });
 export async function runAppMigrations(): Promise<void> {
   const client = await pool.connect();
   try {
+    await client.query("BEGIN");
+
     await client.query(`
       ALTER TABLE users
         ADD COLUMN IF NOT EXISTS campaign_unsubscribed BOOLEAN NOT NULL DEFAULT false,
@@ -74,8 +76,10 @@ export async function runAppMigrations(): Promise<void> {
     await client.query(`CREATE INDEX IF NOT EXISTS campaign_recipients_resend_id_idx ON campaign_recipients(resend_id);`);
     await client.query(`CREATE INDEX IF NOT EXISTS campaign_recipients_status_idx ON campaign_recipients(status);`);
 
+    await client.query("COMMIT");
     console.log("App schema migrations applied successfully");
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
     console.error("Failed to run app migrations:", err);
     throw err;
   } finally {
