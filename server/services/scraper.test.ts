@@ -1033,7 +1033,7 @@ describe("checkMonitor", () => {
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
-    expect(result.error).toBe("Failed to fetch page");
+    expect(result.error).toBe("Page returned empty response");
   });
 
   it("updates monitor lastChecked and lastStatus in storage on success", async () => {
@@ -1062,7 +1062,7 @@ describe("checkMonitor", () => {
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
-    expect(result.error).toBe("timeout");
+    expect(result.error).toBe("Page took too long to respond");
   });
 
   it("updates monitor with selector_missing when selector not found", async () => {
@@ -1230,7 +1230,7 @@ describe("checkMonitor", () => {
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
-    expect(result.error).toBe("Unknown error");
+    expect(result.error).toBe("Fetch failed");
   });
 
   it("blocked page with challenge element detected", async () => {
@@ -1430,7 +1430,7 @@ describe("failure tracking and auto-pause", () => {
     expect(setFn).toHaveBeenCalledWith(
       expect.objectContaining({
         lastStatus: "error",
-        lastError: "timeout",
+        lastError: "Page took too long to respond",
       })
     );
   });
@@ -1448,7 +1448,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "timeout"
+      "Page took too long to respond"
     );
   });
 
@@ -1489,7 +1489,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       5,
-      "timeout"
+      "Page took too long to respond"
     );
   });
 
@@ -1504,7 +1504,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "site down"
+      expect.stringContaining("site down")
     );
   });
 
@@ -1542,7 +1542,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "DNS resolution failed"
+      expect.stringContaining("DNS resolution failed")
     );
   });
 
@@ -1660,7 +1660,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       10,
-      "timeout"
+      "Page took too long to respond"
     );
   });
 
@@ -1720,7 +1720,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "timeout"
+      "Page took too long to respond"
     );
   });
 
@@ -1743,7 +1743,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "timeout"
+      "Page took too long to respond"
     );
   });
 });
@@ -3058,5 +3058,271 @@ describe("validateCssSelector additional edge cases", () => {
   it("returns error at 501 chars", () => {
     const selector = "a".repeat(501);
     expect(validateCssSelector(selector)).toBe("Selector is too long (max 500 characters)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fetch timeout → browserless fallback pipeline
+// ---------------------------------------------------------------------------
+describe("fetch timeout falls through to browserless fallback", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+
+  function mockDbUpdate(returnedFailureCount: number, returnedActive = true) {
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+    return { setFn, whereFn, returningFn };
+  }
+
+  function createPlaywrightMock(pageContentHtml: string, selectorCount: number, extractedText: string | null) {
+    const locatorMock = {
+      count: vi.fn().mockResolvedValue(selectorCount),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(extractedText || ""),
+      }),
+    };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(pageContentHtml),
+      locator: vi.fn().mockReturnValue(locatorMock),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      getByRole: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0) }),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    return { browserMock, contextMock, pageMock, locatorMock };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "pro" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    return promise;
+  }
+
+  it("recovers via browserless when static fetch times out", async () => {
+    // Static fetch fails with timeout
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+      new DOMException("The operation was aborted due to timeout", "TimeoutError")
+    );
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    const fullHtml = `<html><body><span class="price">$42.00</span></body></html>`;
+    const { browserMock } = createPlaywrightMock(fullHtml, 1, "$42.00");
+    mockConnectOverCDP.mockResolvedValue(browserMock);
+
+    const monitor = makeMonitor({ selector: ".price", currentValue: "$42.00" });
+    const result = await runWithTimers(monitor);
+
+    // Should succeed via browserless despite static fetch timeout
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$42.00");
+    expect(result.error).toBeNull();
+    // Browserless should have been called
+    expect(mockConnectOverCDP).toHaveBeenCalled();
+  });
+
+  it("skips static retry when fetch itself timed out", async () => {
+    // Static fetch fails with timeout — fetch should NOT be called again for retry
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("The operation was aborted due to timeout"));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    const fullHtml = `<html><body><span class="price">$10.00</span></body></html>`;
+    const { browserMock } = createPlaywrightMock(fullHtml, 1, "$10.00");
+    mockConnectOverCDP.mockResolvedValue(browserMock);
+
+    const monitor = makeMonitor({ selector: ".price" });
+    await runWithTimers(monitor);
+
+    // fetch should only be called once (the initial attempt), NOT retried
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 'Page took too long to respond' when both static and browserless fail on timeout", async () => {
+    // Static fetch fails with timeout
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+      new Error("The operation was aborted due to timeout")
+    );
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    // Browserless also fails (page timeout)
+    mockConnectOverCDP.mockRejectedValue(new Error("Page load timeout"));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Page took too long to respond");
+  });
+
+  it("falls through to browserless when fetch returns empty body", async () => {
+    // Fetch returns empty body
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("", { status: 200 })
+    );
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    const fullHtml = `<html><body><span class="price">$99.00</span></body></html>`;
+    const { browserMock } = createPlaywrightMock(fullHtml, 1, "$99.00");
+    mockConnectOverCDP.mockResolvedValue(browserMock);
+
+    const monitor = makeMonitor({ selector: ".price", currentValue: "$99.00" });
+    const result = await runWithTimers(monitor);
+
+    // Should recover via browserless
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$99.00");
+    expect(mockConnectOverCDP).toHaveBeenCalled();
+  });
+
+  it("falls through to browserless when curl fallback also fails (UND_ERR_HEADERS_OVERFLOW)", async () => {
+    // Initial fetch fails with UND_ERR_HEADERS_OVERFLOW
+    const headersErr = new Error("UND_ERR_HEADERS_OVERFLOW");
+    (headersErr as any).code = "UND_ERR_HEADERS_OVERFLOW";
+    vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(headersErr)
+      // fetchWithCurl calls ssrfSafeFetch which calls fetch again — make it also fail
+      .mockRejectedValueOnce(new Error("curl also failed"));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    const fullHtml = `<html><body><span class="price">$15.00</span></body></html>`;
+    const { browserMock } = createPlaywrightMock(fullHtml, 1, "$15.00");
+    mockConnectOverCDP.mockResolvedValue(browserMock);
+
+    const monitor = makeMonitor({ selector: ".price", currentValue: "$15.00" });
+    const result = await runWithTimers(monitor);
+
+    // Should recover via browserless despite both static fetches failing
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$15.00");
+  });
+
+  it("preserves raw error message for non-timeout fetch failures", async () => {
+    // Static fetch fails with a non-timeout error
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+      new Error("ECONNREFUSED 192.168.1.1:443")
+    );
+
+    // No browserless available
+    delete process.env.BROWSERLESS_TOKEN;
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    // Raw error preserved (not transformed to "Page took too long to respond")
+    expect(result.error).toBe("ECONNREFUSED 192.168.1.1:443");
+  });
+
+  it("shows 'Page took too long to respond' for AbortError", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+      new DOMException("The operation was aborted", "AbortError")
+    );
+
+    delete process.env.BROWSERLESS_TOKEN;
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Page took too long to respond");
+  });
+
+  it("does not penalize failure when browserless recovers after fetch timeout", async () => {
+    // Static fetch fails with timeout
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+      new Error("The operation was aborted due to timeout")
+    );
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    const fullHtml = `<html><body><span class="price">$50.00</span></body></html>`;
+    const { browserMock } = createPlaywrightMock(fullHtml, 1, "$50.00");
+    mockConnectOverCDP.mockResolvedValue(browserMock);
+
+    const monitor = makeMonitor({ selector: ".price", currentValue: "$50.00" });
+    await runWithTimers(monitor);
+
+    // On success, consecutiveFailures should be reset to 0 (not incremented)
+    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        consecutiveFailures: 0,
+        lastStatus: "ok",
+        lastError: null,
+      })
+    );
+  });
+
+  it("returns 'Page returned empty response' when empty body and no browserless", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("", { status: 200 })
+    );
+
+    // No browserless
+    delete process.env.BROWSERLESS_TOKEN;
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Page returned empty response");
   });
 });
