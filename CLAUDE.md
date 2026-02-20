@@ -19,7 +19,7 @@ FetchTheChange is a website change monitoring SaaS. Users create monitors that t
 - **UI components**: Use shadcn/ui primitives (Card, Badge, Button, Dialog, etc.) from `@/components/ui/`.
 - **Styling**: Tailwind CSS with dark mode as default. Use semantic color tokens (`text-primary`, `text-muted-foreground`, `bg-secondary`, etc.).
 - **State management**: TanStack React Query for server state. No Redux or Zustand.
-- **Testing**: Vitest with `expect` assertions. Test files co-located as `*.test.ts` in `shared/`.
+- **Testing**: Vitest with `expect` assertions. Test files co-located as `*.test.ts` next to source files.
 - **API patterns**: Express routes in `server/routes.ts`. JSON responses with `{ message, code }` for errors.
 - **Authentication**: Replit Auth with OpenID Connect via Passport.
 - **Database**: PostgreSQL with Drizzle ORM. Schema in `shared/schema.ts` and `shared/models/auth.ts`.
