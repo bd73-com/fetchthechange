@@ -572,14 +572,17 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           if (discovery.suggestions.length > 0) {
             // Pick the best suggestion: prefer single-match selectors, then shortest
             const best = discovery.suggestions
-              .sort((a, b) => (a.count === 1 ? 0 : 1) - (b.count === 1 ? 0 : 1) || a.selector.length - b.selector.length)[0];
+              .sort((a, b) => (a.count === 1 ? 0 : 1) - (b.count === 1 ? 0 : 1) || a.selector.length - b.selector.length || a.selector.localeCompare(b.selector))[0];
 
             console.log(`[AutoHeal] Monitor ${monitor.id}: found replacement selector "${best.selector}" (matches=${best.count}, sample="${best.sampleText}")`);
             await recordMetric(monitor.id, "auto_heal", healDuration, "ok", best.count);
 
-            // Update the monitor with the new selector and re-extract the value
+            // Update the monitor with the new selector and re-extract the full (untruncated) value
             await storage.updateMonitor(monitor.id, { selector: best.selector });
-            newValue = normalizeValue(best.sampleText) || null;
+            // Re-extract from the already-fetched HTML to get the full text,
+            // since best.sampleText is truncated to 80 chars by discoverSelectors
+            const healedValue = extractValueFromHtml(html, best.selector);
+            newValue = healedValue ?? (normalizeValue(best.sampleText) || null);
             finalStatus = "ok";
             finalError = null;
 
