@@ -37,6 +37,22 @@ export function validateCssSelector(selector: string): string | null {
   }
 }
 
+/**
+ * Sanitizes raw error messages before they are stored in the DB or returned to clients.
+ * Strips internal hostnames, IP addresses, file paths, and stack traces that could
+ * leak infrastructure details.
+ */
+function sanitizeErrorForClient(raw: string): string {
+  if (/abort|timeout/i.test(raw)) return "Page took too long to respond";
+  if (/ECONNREFUSED/i.test(raw)) return "Could not connect to the target site";
+  if (/ENOTFOUND|EAI_AGAIN/i.test(raw)) return "Could not resolve the target hostname";
+  if (/ECONNRESET|socket hang up/i.test(raw)) return "Connection was reset by the target site";
+  if (/SSRF blocked/i.test(raw)) return "URL is not allowed";
+  if (/certificate|ssl|tls/i.test(raw)) return "SSL/TLS error connecting to the target site";
+  if (/UND_ERR_HEADERS_OVERFLOW/i.test(raw)) return "Response headers from the target site were too large";
+  return "Failed to fetch page";
+}
+
 async function recordMetric(
   monitorId: number,
   stage: string,
@@ -410,11 +426,12 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         try {
           html = await fetchWithCurl(monitor.url, monitor.id, monitor.name);
         } catch (curlErr: any) {
-          staticFetchError = curlErr instanceof Error ? curlErr.message : "Fallback fetch failed";
+          staticFetchError = sanitizeErrorForClient(curlErr instanceof Error ? curlErr.message : "Fallback fetch failed");
         }
       } else {
         // Don't re-throw: let the pipeline continue to browserless fallback
-        staticFetchError = e instanceof Error ? e.message : "Fetch failed";
+        const rawError = e instanceof Error ? e.message : "Fetch failed";
+        staticFetchError = sanitizeErrorForClient(rawError);
         console.log(`[Scraper] Monitor ${monitor.id}: static fetch failed — ${staticFetchError}`);
       }
     }
@@ -559,9 +576,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         finalError = block.reason || "Blocked";
       } else if (staticFetchError) {
         finalStatus = "error";
-        finalError = /abort|timeout/i.test(staticFetchError)
-          ? "Page took too long to respond"
-          : staticFetchError;
+        finalError = staticFetchError;
       } else {
         finalStatus = "selector_missing";
         finalError = "Selector not found";
@@ -657,7 +672,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{
   } catch (error) {
     await ErrorLogger.error("scraper", `"${monitor.name}" failed to check — the page could not be fetched or parsed. Verify the URL is accessible and the CSS selector is correct.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
 
-    const errorMsg = error instanceof Error ? error.message : "Unknown error";
+    const rawMsg = error instanceof Error ? error.message : "Unknown error";
+    const errorMsg = sanitizeErrorForClient(rawMsg);
     await handleMonitorFailure(monitor, "error", errorMsg, false);
 
     return {

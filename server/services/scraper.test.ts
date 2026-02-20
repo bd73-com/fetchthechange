@@ -1020,7 +1020,7 @@ describe("checkMonitor", () => {
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
-    expect(result.error).toBe("Network failure");
+    expect(result.error).toBe("Failed to fetch page");
     expect(result.changed).toBe(false);
   });
 
@@ -1230,7 +1230,7 @@ describe("checkMonitor", () => {
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
-    expect(result.error).toBe("Fetch failed");
+    expect(result.error).toBe("Failed to fetch page");
   });
 
   it("blocked page with challenge element detected", async () => {
@@ -1319,7 +1319,8 @@ describe("checkMonitor", () => {
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
-    expect(result.error).toBe("SSRF blocked: This hostname is not allowed");
+    // Raw SSRF error is sanitized to prevent leaking internal details
+    expect(result.error).toBe("URL is not allowed");
     expect(mockSafeFetch).toHaveBeenCalledWith(
       "http://127.0.0.1/admin",
       expect.objectContaining({ headers: expect.any(Object) })
@@ -1504,7 +1505,7 @@ describe("failure tracking and auto-pause", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      expect.stringContaining("site down")
+      "Failed to fetch page"
     );
   });
 
@@ -1531,18 +1532,18 @@ describe("failure tracking and auto-pause", () => {
   });
 
   it("includes last error message in auto-pause email", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("DNS resolution failed"));
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("ECONNREFUSED 10.0.0.1:443"));
     mockDbUpdate(3, false);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
     const monitor = makeMonitor({ emailEnabled: true });
     await runWithTimers(monitor);
 
-    // The error message is passed to sendAutoPauseEmail
+    // Raw error is sanitized before being passed to sendAutoPauseEmail
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      expect.stringContaining("DNS resolution failed")
+      "Could not connect to the target site"
     );
   });
 
@@ -1793,9 +1794,8 @@ describe("error message truncation", () => {
     return promise;
   }
 
-  it("truncates error messages longer than 200 chars in lastError", async () => {
-    const longError = "A".repeat(300);
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error(longError));
+  it("sanitizes raw error messages in lastError", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("ECONNREFUSED 10.0.0.1:443"));
     const { setFn } = mockDbUpdate(1, true);
 
     const monitor = makeMonitor();
@@ -1803,25 +1803,23 @@ describe("error message truncation", () => {
 
     const setArg = setFn.mock.calls[0]?.[0];
     expect(setArg).toBeDefined();
-    expect(setArg.lastError).toHaveLength(200);
-    expect(setArg.lastError).toBe("A".repeat(200));
+    // Raw error containing internal IP is sanitized
+    expect(setArg.lastError).toBe("Could not connect to the target site");
   });
 
-  it("preserves error messages shorter than 200 chars", async () => {
-    const shortError = "Connection refused";
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error(shortError));
+  it("sanitizes unknown error patterns to generic message", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Connection refused"));
     const { setFn } = mockDbUpdate(1, true);
 
     const monitor = makeMonitor();
     await runWithTimers(monitor);
 
     const setArg = setFn.mock.calls[0]?.[0];
-    expect(setArg.lastError).toBe("Connection refused");
+    expect(setArg.lastError).toBe("Failed to fetch page");
   });
 
-  it("passes truncated error to sendAutoPauseEmail", async () => {
-    const longError = "X".repeat(500);
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error(longError));
+  it("passes sanitized error to sendAutoPauseEmail", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("ENOTFOUND internal.corp.example.com"));
     mockDbUpdate(3, false);
 
     const monitor = makeMonitor({ emailEnabled: true });
@@ -1830,7 +1828,7 @@ describe("error message truncation", () => {
     expect(mockAutoPauseEmail).toHaveBeenCalledWith(
       expect.objectContaining({ id: 1 }),
       3,
-      "X".repeat(200)
+      "Could not resolve the target hostname"
     );
   });
 
@@ -1851,30 +1849,79 @@ describe("error message truncation", () => {
     expect(setArg.lastError.length).toBeLessThanOrEqual(200);
   });
 
-  it("truncates exactly at 200 chars for boundary-length errors", async () => {
-    const exactly200 = "B".repeat(200);
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error(exactly200));
+  it("sanitizes timeout errors to user-friendly message", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("The operation was aborted due to timeout"));
     const { setFn } = mockDbUpdate(1, true);
 
     const monitor = makeMonitor();
     await runWithTimers(monitor);
 
     const setArg = setFn.mock.calls[0]?.[0];
-    expect(setArg.lastError).toHaveLength(200);
-    expect(setArg.lastError).toBe(exactly200);
+    expect(setArg.lastError).toBe("Page took too long to respond");
   });
 
-  it("truncates 201-char error to 200 chars", async () => {
-    const error201 = "C".repeat(201);
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error(error201));
+  it("sanitizes SSL errors to user-friendly message", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("unable to verify the first certificate"));
     const { setFn } = mockDbUpdate(1, true);
 
     const monitor = makeMonitor();
     await runWithTimers(monitor);
 
     const setArg = setFn.mock.calls[0]?.[0];
-    expect(setArg.lastError).toHaveLength(200);
-    expect(setArg.lastError).toBe("C".repeat(200));
+    expect(setArg.lastError).toBe("SSL/TLS error connecting to the target site");
+  });
+
+  it("sanitizes ECONNRESET errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("read ECONNRESET"));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg.lastError).toBe("Connection was reset by the target site");
+  });
+
+  it("sanitizes 'socket hang up' errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("socket hang up"));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg.lastError).toBe("Connection was reset by the target site");
+  });
+
+  it("sanitizes EAI_AGAIN errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("getaddrinfo EAI_AGAIN some-internal-host.corp"));
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    expect(setArg.lastError).toBe("Could not resolve the target hostname");
+  });
+
+  it("sanitizes errors in curl fallback catch path (UND_ERR_HEADERS_OVERFLOW then curl fails)", async () => {
+    // First fetch fails with UND_ERR_HEADERS_OVERFLOW → triggers curl fallback
+    const headersErr = new Error("UND_ERR_HEADERS_OVERFLOW");
+    (headersErr as any).code = "UND_ERR_HEADERS_OVERFLOW";
+    vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(headersErr)
+      // Curl fallback (ssrfSafeFetch) also fails with an internal error
+      .mockRejectedValueOnce(new Error("ECONNREFUSED 10.0.0.1:8080"));
+
+    delete process.env.BROWSERLESS_TOKEN;
+    const { setFn } = mockDbUpdate(1, true);
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    const setArg = setFn.mock.calls[0]?.[0];
+    // Curl fallback error is sanitized — no internal IP leaks
+    expect(setArg.lastError).toBe("Could not connect to the target site");
   });
 });
 
@@ -3252,8 +3299,8 @@ describe("fetch timeout falls through to browserless fallback", () => {
     expect(result.currentValue).toBe("$15.00");
   });
 
-  it("preserves raw error message for non-timeout fetch failures", async () => {
-    // Static fetch fails with a non-timeout error
+  it("sanitizes raw error message for non-timeout fetch failures", async () => {
+    // Static fetch fails with a non-timeout error containing internal details
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
       new Error("ECONNREFUSED 192.168.1.1:443")
     );
@@ -3265,8 +3312,8 @@ describe("fetch timeout falls through to browserless fallback", () => {
     const result = await runWithTimers(monitor);
 
     expect(result.status).toBe("error");
-    // Raw error preserved (not transformed to "Page took too long to respond")
-    expect(result.error).toBe("ECONNREFUSED 192.168.1.1:443");
+    // Raw error is sanitized — no internal IPs leak to client
+    expect(result.error).toBe("Could not connect to the target site");
   });
 
   it("shows 'Page took too long to respond' for AbortError", async () => {
