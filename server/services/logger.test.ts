@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock variables
@@ -50,8 +50,17 @@ vi.mock("../db", () => ({
 import { ErrorLogger } from "./logger";
 
 describe("ErrorLogger deduplication", () => {
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Suppress expected logger output during tests
+    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     // Reset chain mocks
     mockSelectWhereFn.mockReturnValue({ limit: mockSelectLimitFn });
@@ -65,6 +74,12 @@ describe("ErrorLogger deduplication", () => {
 
     // Default: no existing entry found
     mockSelectLimitFn.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
+    consoleWarnSpy.mockRestore();
+    consoleLogSpy.mockRestore();
   });
 
   it("inserts a new entry when no duplicate exists", async () => {

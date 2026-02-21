@@ -69,8 +69,14 @@ function makeRecipient(overrides: Record<string, any> = {}) {
 
 describe("verifyResendWebhook", () => {
   const originalSecret = process.env.RESEND_WEBHOOK_SECRET;
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
 
   afterEach(() => {
+    consoleWarnSpy.mockRestore();
     if (originalSecret !== undefined) {
       process.env.RESEND_WEBHOOK_SECRET = originalSecret;
     } else {

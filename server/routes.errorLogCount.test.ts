@@ -260,6 +260,7 @@ describe("GET /api/admin/error-logs/count", () => {
   });
 
   it("returns count 0 when database throws an error", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockLimitFn.mockRejectedValue(new Error("DB connection lost"));
 
@@ -267,6 +268,7 @@ describe("GET /api/admin/error-logs/count", () => {
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(res._json).toEqual({ count: 0 });
+    errorSpy.mockRestore();
   });
 
   it("treats string monitorId as missing (non-owner gets 0)", async () => {
