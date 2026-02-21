@@ -288,6 +288,7 @@ describe("DELETE /api/admin/error-logs/:id", () => {
   });
 
   it("returns 500 when database throws an error", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockLimitFn.mockRejectedValue(new Error("DB connection lost"));
 
@@ -295,6 +296,7 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     const res = await callHandler("delete", ENDPOINT, req);
     expect(res._status).toBe(500);
     expect(res._json).toEqual({ message: "Failed to delete error log" });
+    errorSpy.mockRestore();
   });
 
   // --- ID validation edge cases (Number.isInteger + id > 0) ---
