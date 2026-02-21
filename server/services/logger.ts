@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { errorLogs } from "@shared/schema";
+import { and, eq, sql } from "drizzle-orm";
 
 type LogLevel = "error" | "warning" | "info";
 type LogSource = "scraper" | "email" | "api" | "scheduler" | "stripe";
@@ -69,15 +70,49 @@ export class ErrorLogger {
       console.log(logMsg);
     }
 
+    const sanitizedMessage = sanitizeString(message);
+
     try {
-      await db.insert(errorLogs).values({
-        level,
-        source,
-        message: sanitizeString(message),
-        errorType: error?.constructor?.name || null,
-        stackTrace: error?.stack ? sanitizeString(error.stack) : null,
-        context: context ? sanitizeContext(context) : null,
-      });
+      // Check for existing unresolved entry with same level+source+message
+      const [existing] = await db
+        .select({ id: errorLogs.id })
+        .from(errorLogs)
+        .where(
+          and(
+            eq(errorLogs.level, level),
+            eq(errorLogs.source, source),
+            eq(errorLogs.message, sanitizedMessage),
+            eq(errorLogs.resolved, false)
+          )
+        )
+        .limit(1);
+
+      if (existing) {
+        // Update existing entry: bump timestamp, increment count, update stack/context
+        await db
+          .update(errorLogs)
+          .set({
+            timestamp: new Date(),
+            occurrenceCount: sql`${errorLogs.occurrenceCount} + 1`,
+            stackTrace: error?.stack ? sanitizeString(error.stack) : undefined,
+            context: context ? sanitizeContext(context) : undefined,
+          })
+          .where(eq(errorLogs.id, existing.id));
+      } else {
+        // Insert new entry
+        const now = new Date();
+        await db.insert(errorLogs).values({
+          level,
+          source,
+          message: sanitizedMessage,
+          errorType: error?.constructor?.name || null,
+          stackTrace: error?.stack ? sanitizeString(error.stack) : null,
+          context: context ? sanitizeContext(context) : null,
+          firstOccurrence: now,
+          timestamp: now,
+          occurrenceCount: 1,
+        });
+      }
     } catch (dbError) {
       console.error(`[ErrorLogger] Failed to write log to database:`, dbError);
     }

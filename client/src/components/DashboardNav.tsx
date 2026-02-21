@@ -3,9 +3,23 @@ import { NotificationEmailDialog } from "@/components/NotificationEmailDialog";
 import { Button } from "@/components/ui/button";
 import { LogOut, LayoutDashboard, FileWarning, HelpCircle, Send } from "lucide-react";
 import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 
 export default function DashboardNav() {
   const { user, logout } = useAuth();
+
+  const { data: errorCountData } = useQuery<{ count: number }>({
+    queryKey: ["/api/admin/error-logs/count"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/error-logs/count", { credentials: "include" });
+      if (!res.ok) return { count: 0 };
+      return res.json();
+    },
+    enabled: user?.tier === "power",
+    refetchInterval: 60000,
+  });
+
+  const errorCount = errorCountData?.count ?? 0;
 
   if (!user) return null;
 
@@ -24,7 +38,7 @@ export default function DashboardNav() {
           <div className="hidden sm:block text-sm text-muted-foreground">
             Welcome, <span className="font-medium text-foreground">{user?.firstName || user?.email}</span>
           </div>
-          {((user as any)?.tier === "power") && (
+          {(user?.tier === "power") && (
             <>
               <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
                 <Link href="/admin/campaigns">
@@ -32,10 +46,19 @@ export default function DashboardNav() {
                   <span className="hidden sm:inline">Campaigns</span>
                 </Link>
               </Button>
-              <Button variant="ghost" size="sm" asChild className="text-muted-foreground" data-testid="link-error-logs">
+              <Button variant="ghost" size="sm" asChild className="text-muted-foreground relative" data-testid="link-error-logs">
                 <Link href="/admin/errors">
                   <FileWarning className="h-4 w-4 mr-2" />
                   <span className="hidden sm:inline">Event Log</span>
+                  {errorCount > 0 && (
+                    <span
+                      className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold px-1"
+                      data-testid="badge-error-count"
+                      aria-label={`${errorCount > 99 ? "99+" : errorCount} unresolved errors`}
+                    >
+                      {errorCount > 99 ? "99+" : errorCount}
+                    </span>
+                  )}
                 </Link>
               </Button>
             </>
