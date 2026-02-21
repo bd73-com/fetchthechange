@@ -76,7 +76,7 @@ export type MonitorMetric = typeof monitorMetrics.$inferSelect;
 
 export const errorLogs = pgTable("error_logs", {
   id: serial("id").primaryKey(),
-  timestamp: timestamp("timestamp").defaultNow().notNull(),
+  timestamp: timestamp("timestamp").defaultNow().notNull(), // last occurrence
   level: text("level").notNull(), // 'error' | 'warning' | 'info'
   source: text("source").notNull(), // 'scraper' | 'email' | 'api' | 'scheduler' | 'stripe'
   errorType: text("error_type"),
@@ -86,6 +86,8 @@ export const errorLogs = pgTable("error_logs", {
   resolved: boolean("resolved").default(false).notNull(),
   resolvedAt: timestamp("resolved_at"),
   resolvedBy: text("resolved_by"),
+  firstOccurrence: timestamp("first_occurrence").defaultNow().notNull(),
+  occurrenceCount: integer("occurrence_count").default(1).notNull(),
 }, (table) => ({
   levelIdx: index("error_logs_level_idx").on(table.level),
   sourceIdx: index("error_logs_source_idx").on(table.source),

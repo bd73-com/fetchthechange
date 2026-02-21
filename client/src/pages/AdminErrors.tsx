@@ -19,6 +19,8 @@ interface ErrorLogEntry {
   stack_trace: string | null;
   context: any;
   resolved: boolean;
+  first_occurrence: string | null;
+  occurrence_count: number;
 }
 
 interface BrowserlessUsageData {
@@ -493,8 +495,15 @@ export default function AdminErrors() {
                           {log.error_type && (
                             <span className="text-xs text-muted-foreground">{log.error_type}</span>
                           )}
+                          {log.occurrence_count > 1 && (
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0" data-testid={`badge-count-${log.id}`}>
+                              {log.occurrence_count}x
+                            </Badge>
+                          )}
                           <span className="text-xs text-muted-foreground ml-auto shrink-0">
-                            {formatTimestamp(log.timestamp)}
+                            {log.occurrence_count > 1 && log.first_occurrence
+                              ? `${formatTimestamp(log.first_occurrence)} — ${formatTimestamp(log.timestamp)}`
+                              : formatTimestamp(log.timestamp)}
                           </span>
                           <Button
                             variant="ghost"
