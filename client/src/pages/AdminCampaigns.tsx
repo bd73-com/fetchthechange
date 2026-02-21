@@ -167,11 +167,13 @@ function CreateCampaignDialog() {
 
   const handleSendTest = async () => {
     if (!createdCampaignId) return;
+    await handleSaveDraft();
     await sendTestCampaign.mutateAsync({ id: createdCampaignId });
   };
 
   const handleSendCampaign = async () => {
     if (!createdCampaignId) return;
+    await handleSaveDraft();
     await sendCampaign.mutateAsync(createdCampaignId);
     setConfirmSendOpen(false);
     setOpen(false);
