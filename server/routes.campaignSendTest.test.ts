@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+
+const previousAppOwnerId = process.env.APP_OWNER_ID;
 
 // ---------------------------------------------------------------------------
 // Hoisted mock variables
@@ -200,6 +202,14 @@ async function ensureRoutes() {
   await registerRoutes(app as any, app as any);
   routesRegistered = true;
 }
+
+afterAll(() => {
+  if (previousAppOwnerId === undefined) {
+    delete process.env.APP_OWNER_ID;
+  } else {
+    process.env.APP_OWNER_ID = previousAppOwnerId;
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Tests: POST /api/admin/campaigns/:id/send-test
