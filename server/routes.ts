@@ -69,6 +69,16 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  // Ensure error_logs deduplication columns exist (added in PR #56).
+  // Without this, db.select().from(errorLogs) fails when the schema
+  // references columns the database doesn't have yet.
+  try {
+    await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS first_occurrence TIMESTAMP NOT NULL DEFAULT NOW()`);
+    await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS occurrence_count INTEGER NOT NULL DEFAULT 1`);
+  } catch (e) {
+    console.warn("Could not ensure error_logs dedup columns:", e);
+  }
+
   // Setup Auth (must be before rate limiter so req.user is populated)
   await setupAuth(app);
 
