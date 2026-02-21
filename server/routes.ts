@@ -756,7 +756,9 @@ export async function registerRoutes(
   if (!APP_OWNER_ID) {
     console.warn("APP_OWNER_ID not set; owner-only admin endpoints will be inaccessible.");
   }
-  // Lightweight count endpoint for notification badge
+  // Lightweight count endpoint for notification badge.
+  // Returns { count: 0 } instead of { message, code } on auth errors so the
+  // client badge can consume every response shape uniformly without error handling.
   app.get("/api/admin/error-logs/count", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
