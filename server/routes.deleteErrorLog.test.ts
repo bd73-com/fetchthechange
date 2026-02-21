@@ -705,9 +705,11 @@ describe("POST /api/admin/error-logs/restore", () => {
     await ensureRoutes();
     vi.clearAllMocks();
 
+    // restore uses .where(...).limit(500), so chain through mockLimitFn
+    mockLimitFn.mockResolvedValue([]);
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
-    mockSelectWhereFn.mockResolvedValue([]);
 
     mockUpdateWhereFn.mockResolvedValue(undefined);
     mockUpdateSetFn.mockReturnValue({ where: mockUpdateWhereFn });
@@ -732,7 +734,7 @@ describe("POST /api/admin/error-logs/restore", () => {
   it("restores authorized soft-deleted entries for app owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([
+    mockLimitFn.mockResolvedValue([
       { id: 1, context: null, deletedAt: new Date() },
       { id: 2, context: null, deletedAt: new Date() },
     ]);
@@ -748,7 +750,7 @@ describe("POST /api/admin/error-logs/restore", () => {
   it("excludes entries not owned by non-owner user", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 10 }]);
-    mockSelectWhereFn.mockResolvedValue([
+    mockLimitFn.mockResolvedValue([
       { id: 1, context: { monitorId: 10 }, deletedAt: new Date() },
       { id: 2, context: { monitorId: 99 }, deletedAt: new Date() },
       { id: 3, context: null, deletedAt: new Date() },
@@ -763,7 +765,7 @@ describe("POST /api/admin/error-logs/restore", () => {
   it("returns count 0 when no soft-deleted entries exist", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([]);
+    mockLimitFn.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
@@ -776,7 +778,7 @@ describe("POST /api/admin/error-logs/restore", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockRejectedValue(new Error("DB error"));
+    mockLimitFn.mockRejectedValue(new Error("DB error"));
 
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
@@ -796,9 +798,11 @@ describe("POST /api/admin/error-logs/finalize", () => {
     await ensureRoutes();
     vi.clearAllMocks();
 
+    // finalize uses .where(...).limit(500), so chain through mockLimitFn
+    mockLimitFn.mockResolvedValue([]);
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
-    mockSelectWhereFn.mockResolvedValue([]);
 
     mockDeleteWhereFn.mockResolvedValue(undefined);
     mockDbDelete.mockReturnValue({ where: mockDeleteWhereFn });
@@ -822,7 +826,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
   it("hard-deletes authorized soft-deleted entries for app owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([
+    mockLimitFn.mockResolvedValue([
       { id: 1, context: null, deletedAt: new Date() },
       { id: 2, context: null, deletedAt: new Date() },
     ]);
@@ -838,7 +842,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
   it("excludes entries not owned by non-owner user", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 5 }]);
-    mockSelectWhereFn.mockResolvedValue([
+    mockLimitFn.mockResolvedValue([
       { id: 1, context: { monitorId: 5 }, deletedAt: new Date() },
       { id: 2, context: { monitorId: 99 }, deletedAt: new Date() },
       { id: 3, context: null, deletedAt: new Date() },
@@ -853,7 +857,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
   it("returns count 0 when no soft-deleted entries exist", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([]);
+    mockLimitFn.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
@@ -866,7 +870,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockRejectedValue(new Error("DB error"));
+    mockLimitFn.mockRejectedValue(new Error("DB error"));
 
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);

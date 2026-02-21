@@ -159,14 +159,7 @@ export default function AdminErrors() {
         method: "POST",
         credentials: "include",
       });
-      if (!res.ok) {
-        const retryRes = await fetch("/api/admin/error-logs/finalize", {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!retryRes.ok) throw new Error("Failed to finalize deletion");
-        return retryRes.json();
-      }
+      if (!res.ok) throw new Error("Failed to finalize deletion");
       return res.json();
     },
     onSuccess: () => {
@@ -184,14 +177,7 @@ export default function AdminErrors() {
         method: "POST",
         credentials: "include",
       });
-      if (!res.ok) {
-        const retryRes = await fetch("/api/admin/error-logs/restore", {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!retryRes.ok) throw new Error("Failed to restore entries");
-        return retryRes.json();
-      }
+      if (!res.ok) throw new Error("Failed to restore entries");
       return res.json();
     },
     onSuccess: () => {

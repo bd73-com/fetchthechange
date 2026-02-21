@@ -61,6 +61,8 @@ async function checkMonitor(monitor: any) {
   }
 }
 
+let softDeleteCleanupInterval: ReturnType<typeof setInterval> | null = null;
+
 // ------------------------------------------------------------------
 // 3. ROUTE REGISTRATION
 // ------------------------------------------------------------------
@@ -995,7 +997,7 @@ export async function registerRoutes(
         (await storage.getMonitors(userId)).map((m: any) => m.id)
       );
 
-      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt));
+      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).limit(500);
 
       const authorized = softDeleted.filter((log: any) => {
         const ctx = log.context as Record<string, unknown> | null;
@@ -1032,7 +1034,7 @@ export async function registerRoutes(
         (await storage.getMonitors(userId)).map((m: any) => m.id)
       );
 
-      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt));
+      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).limit(500);
 
       const authorized = softDeleted.filter((log: any) => {
         const ctx = log.context as Record<string, unknown> | null;
@@ -1053,7 +1055,10 @@ export async function registerRoutes(
   });
 
   // Server-side safety net: clean up orphaned soft-deleted entries older than 5 minutes
-  setInterval(async () => {
+  if (softDeleteCleanupInterval) {
+    clearInterval(softDeleteCleanupInterval);
+  }
+  softDeleteCleanupInterval = setInterval(async () => {
     try {
       const threshold = new Date(Date.now() - 5 * 60 * 1000);
       const result = await db.delete(errorLogs).where(
