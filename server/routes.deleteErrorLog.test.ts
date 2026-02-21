@@ -8,10 +8,13 @@ const {
   mockGetMonitors,
   mockDbSelect,
   mockDbDelete,
+  mockDbUpdate,
   mockLimitFn,
   mockSelectWhereFn,
   mockSelectFromFn,
   mockDeleteWhereFn,
+  mockUpdateSetFn,
+  mockUpdateWhereFn,
   mockOrderByFn,
 } = vi.hoisted(() => {
   const mockLimitFn = vi.fn();
@@ -23,15 +26,22 @@ const {
   const mockDeleteWhereFn = vi.fn().mockResolvedValue(undefined);
   const mockDbDelete = vi.fn(() => ({ where: mockDeleteWhereFn }));
 
+  const mockUpdateWhereFn = vi.fn().mockResolvedValue(undefined);
+  const mockUpdateSetFn = vi.fn(() => ({ where: mockUpdateWhereFn }));
+  const mockDbUpdate = vi.fn(() => ({ set: mockUpdateSetFn }));
+
   return {
     mockGetUser: vi.fn(),
     mockGetMonitors: vi.fn(),
     mockDbSelect,
     mockDbDelete,
+    mockDbUpdate,
     mockLimitFn,
     mockSelectWhereFn,
     mockSelectFromFn,
     mockDeleteWhereFn,
+    mockUpdateSetFn,
+    mockUpdateWhereFn,
     mockOrderByFn,
   };
 });
@@ -67,7 +77,7 @@ vi.mock("./db", () => ({
     select: (...args: any[]) => mockDbSelect(...args),
     delete: (...args: any[]) => mockDbDelete(...args),
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }),
-    update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }) }),
+    update: (...args: any[]) => mockDbUpdate(...args),
     execute: vi.fn().mockResolvedValue({ rows: [] }),
   },
 }));
@@ -198,6 +208,9 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
     mockDeleteWhereFn.mockResolvedValue(undefined);
     mockDbDelete.mockReturnValue({ where: mockDeleteWhereFn });
+    mockUpdateWhereFn.mockResolvedValue(undefined);
+    mockUpdateSetFn.mockReturnValue({ where: mockUpdateWhereFn });
+    mockDbUpdate.mockReturnValue({ set: mockUpdateSetFn });
   });
 
   it("returns 401 when user is not authenticated", async () => {
@@ -241,7 +254,7 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     expect(res._json).toEqual({ message: "Log entry not found" });
   });
 
-  it("deletes log entry when user is app owner (no monitorId in context)", async () => {
+  it("soft-deletes log entry when user is app owner (no monitorId in context)", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
     mockLimitFn.mockResolvedValue([{ id: 5, context: null }]);
@@ -250,8 +263,9 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     const res = await callHandler("delete", ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(res._json).toEqual({ message: "Deleted" });
-    expect(mockDbDelete).toHaveBeenCalled();
-    expect(mockDeleteWhereFn).toHaveBeenCalled();
+    expect(mockDbUpdate).toHaveBeenCalled();
+    expect(mockUpdateSetFn).toHaveBeenCalled();
+    expect(mockUpdateWhereFn).toHaveBeenCalled();
   });
 
   it("deletes log entry when user owns the monitor referenced in context", async () => {
@@ -463,5 +477,405 @@ describe("GET /api/admin/error-logs — context type guard filtering", () => {
     expect(res._status).toBe(200);
     expect(res._json).toHaveLength(1);
     expect(res._json[0].id).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/error-logs/batch-delete
+// ---------------------------------------------------------------------------
+describe("POST /api/admin/error-logs/batch-delete", () => {
+  const ENDPOINT = "/api/admin/error-logs/batch-delete";
+
+  beforeEach(async () => {
+    await ensureRoutes();
+    vi.clearAllMocks();
+
+    // For batch endpoints, the select chain ends at .where() (no .limit/.orderBy)
+    // so mockSelectWhereFn must resolve to data directly.
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    mockSelectWhereFn.mockResolvedValue([]);
+
+    mockUpdateWhereFn.mockResolvedValue(undefined);
+    mockUpdateSetFn.mockReturnValue({ where: mockUpdateWhereFn });
+    mockDbUpdate.mockReturnValue({ set: mockUpdateSetFn });
+  });
+
+  it("returns 401 when user is not authenticated", async () => {
+    const req = { user: null, body: { ids: [1] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(401);
+    expect(res._json).toEqual({ message: "Unauthorized" });
+  });
+
+  it("returns 403 when user is not power tier", async () => {
+    mockGetUser.mockResolvedValue({ tier: "pro" });
+    const req = { user: { claims: { sub: "user-1" } }, body: { ids: [1] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(403);
+    expect(res._json).toEqual({ message: "Admin access required" });
+  });
+
+  it("returns 400 when neither ids nor filters provided", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    const req = { user: { claims: { sub: "owner-123" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "Must provide ids or filters" });
+  });
+
+  it("returns 400 when both ids and filters provided", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [1], filters: { level: "error" } } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "Provide either ids or filters, not both" });
+  });
+
+  it("returns 400 for empty ids array", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "ids must be a non-empty array of positive integers" });
+  });
+
+  it("returns 400 for ids containing non-integers", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [1, "abc", 3] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "ids must be a non-empty array of positive integers" });
+  });
+
+  it("returns 400 for ids containing zero or negative values", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [0, -1] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "ids must be a non-empty array of positive integers" });
+  });
+
+  it("soft-deletes authorized entries by IDs for app owner", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockSelectWhereFn.mockResolvedValue([
+      { id: 1, context: null },
+      { id: 2, context: null },
+    ]);
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [1, 2] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "2 entries deleted", count: 2 });
+    expect(mockDbUpdate).toHaveBeenCalled();
+    expect(mockUpdateSetFn).toHaveBeenCalled();
+  });
+
+  it("excludes unauthorized entries when deleting by IDs (non-owner)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 10 }]);
+    mockSelectWhereFn.mockResolvedValue([
+      { id: 1, context: { monitorId: 10 } },  // authorized
+      { id: 2, context: { monitorId: 99 } },  // not authorized
+      { id: 3, context: null },                // no monitorId, non-owner → excluded
+    ]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, body: { ids: [1, 2, 3] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "1 entries deleted", count: 1 });
+  });
+
+  it("returns count 0 when no entries are authorized", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 10 }]);
+    mockSelectWhereFn.mockResolvedValue([
+      { id: 1, context: { monitorId: 99 } },
+    ]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, body: { ids: [1] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "0 entries deleted", count: 0 });
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("soft-deletes entries matching filters for app owner", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockSelectWhereFn.mockResolvedValue([
+      { id: 1, context: null },
+      { id: 2, context: null },
+      { id: 3, context: null },
+    ]);
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: { filters: { level: "error" } } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "3 entries deleted", count: 3 });
+    expect(mockDbUpdate).toHaveBeenCalled();
+  });
+
+  it("soft-deletes with filter and excludeIds", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockSelectWhereFn.mockResolvedValue([
+      { id: 1, context: null },
+      { id: 3, context: null },
+    ]);
+
+    const req = {
+      user: { claims: { sub: "owner-123" } },
+      body: { filters: { source: "scraper" }, excludeIds: [2] },
+    };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "2 entries deleted", count: 2 });
+  });
+
+  it("applies ownership filtering with filters mode", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 10 }]);
+    mockSelectWhereFn.mockResolvedValue([
+      { id: 1, context: { monitorId: 10 } },
+      { id: 2, context: null },
+    ]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, body: { filters: {} } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "1 entries deleted", count: 1 });
+  });
+
+  it("ignores invalid filter values (uses only valid level/source)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockSelectWhereFn.mockResolvedValue([]);
+
+    const req = {
+      user: { claims: { sub: "owner-123" } },
+      body: { filters: { level: "critical", source: "unknown" } },
+    };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "0 entries deleted", count: 0 });
+  });
+
+  it("ignores non-integer excludeIds", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockSelectWhereFn.mockResolvedValue([
+      { id: 1, context: null },
+    ]);
+
+    const req = {
+      user: { claims: { sub: "owner-123" } },
+      body: { filters: {}, excludeIds: ["abc", -1, 0] },
+    };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json.count).toBe(1);
+  });
+
+  it("returns 500 when database throws", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockSelectWhereFn.mockRejectedValue(new Error("DB error"));
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [1] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(500);
+    expect(res._json).toEqual({ message: "Failed to batch delete error logs" });
+    errorSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/error-logs/restore
+// ---------------------------------------------------------------------------
+describe("POST /api/admin/error-logs/restore", () => {
+  const ENDPOINT = "/api/admin/error-logs/restore";
+
+  beforeEach(async () => {
+    await ensureRoutes();
+    vi.clearAllMocks();
+
+    // restore uses .where(...).limit(500), so chain through mockLimitFn
+    mockLimitFn.mockResolvedValue([]);
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+
+    mockUpdateWhereFn.mockResolvedValue(undefined);
+    mockUpdateSetFn.mockReturnValue({ where: mockUpdateWhereFn });
+    mockDbUpdate.mockReturnValue({ set: mockUpdateSetFn });
+  });
+
+  it("returns 401 when user is not authenticated", async () => {
+    const req = { user: null, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(401);
+    expect(res._json).toEqual({ message: "Unauthorized" });
+  });
+
+  it("returns 403 when user is not power tier", async () => {
+    mockGetUser.mockResolvedValue({ tier: "free" });
+    const req = { user: { claims: { sub: "user-1" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(403);
+    expect(res._json).toEqual({ message: "Admin access required" });
+  });
+
+  it("restores authorized soft-deleted entries for app owner", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: null, deletedAt: new Date() },
+      { id: 2, context: null, deletedAt: new Date() },
+    ]);
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "2 entries restored", count: 2 });
+    expect(mockDbUpdate).toHaveBeenCalled();
+    expect(mockUpdateSetFn).toHaveBeenCalled();
+  });
+
+  it("excludes entries not owned by non-owner user", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 10 }]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: 10 }, deletedAt: new Date() },
+      { id: 2, context: { monitorId: 99 }, deletedAt: new Date() },
+      { id: 3, context: null, deletedAt: new Date() },
+    ]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "1 entries restored", count: 1 });
+  });
+
+  it("returns count 0 when no soft-deleted entries exist", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockLimitFn.mockResolvedValue([]);
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "0 entries restored", count: 0 });
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when database throws", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockLimitFn.mockRejectedValue(new Error("DB error"));
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(500);
+    expect(res._json).toEqual({ message: "Failed to restore error logs" });
+    errorSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/admin/error-logs/finalize
+// ---------------------------------------------------------------------------
+describe("POST /api/admin/error-logs/finalize", () => {
+  const ENDPOINT = "/api/admin/error-logs/finalize";
+
+  beforeEach(async () => {
+    await ensureRoutes();
+    vi.clearAllMocks();
+
+    // finalize uses .where(...).limit(500), so chain through mockLimitFn
+    mockLimitFn.mockResolvedValue([]);
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+
+    mockDeleteWhereFn.mockResolvedValue(undefined);
+    mockDbDelete.mockReturnValue({ where: mockDeleteWhereFn });
+  });
+
+  it("returns 401 when user is not authenticated", async () => {
+    const req = { user: null, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(401);
+    expect(res._json).toEqual({ message: "Unauthorized" });
+  });
+
+  it("returns 403 when user is not power tier", async () => {
+    mockGetUser.mockResolvedValue({ tier: "pro" });
+    const req = { user: { claims: { sub: "user-1" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(403);
+    expect(res._json).toEqual({ message: "Admin access required" });
+  });
+
+  it("hard-deletes authorized soft-deleted entries for app owner", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: null, deletedAt: new Date() },
+      { id: 2, context: null, deletedAt: new Date() },
+    ]);
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "2 entries finalized", count: 2 });
+    expect(mockDbDelete).toHaveBeenCalled();
+    expect(mockDeleteWhereFn).toHaveBeenCalled();
+  });
+
+  it("excludes entries not owned by non-owner user", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 5 }]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: 5 }, deletedAt: new Date() },
+      { id: 2, context: { monitorId: 99 }, deletedAt: new Date() },
+      { id: 3, context: null, deletedAt: new Date() },
+    ]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "1 entries finalized", count: 1 });
+  });
+
+  it("returns count 0 when no soft-deleted entries exist", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockLimitFn.mockResolvedValue([]);
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "0 entries finalized", count: 0 });
+    expect(mockDbDelete).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when database throws", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockLimitFn.mockRejectedValue(new Error("DB error"));
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(500);
+    expect(res._json).toEqual({ message: "Failed to finalize error logs" });
+    errorSpy.mockRestore();
   });
 });

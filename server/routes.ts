@@ -10,7 +10,7 @@ import { TIER_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS, PAUSE_THRESHOLDS, type User
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
-import { sql, desc, eq, and } from "drizzle-orm";
+import { sql, desc, eq, and, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
@@ -61,6 +61,8 @@ async function checkMonitor(monitor: any) {
   }
 }
 
+let softDeleteCleanupInterval: ReturnType<typeof setInterval> | null = null;
+
 // ------------------------------------------------------------------
 // 3. ROUTE REGISTRATION
 // ------------------------------------------------------------------
@@ -75,8 +77,9 @@ export async function registerRoutes(
   try {
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS first_occurrence TIMESTAMP NOT NULL DEFAULT NOW()`);
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS occurrence_count INTEGER NOT NULL DEFAULT 1`);
+    await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP`);
   } catch (e) {
-    console.warn("Could not ensure error_logs dedup columns:", e);
+    console.warn("Could not ensure error_logs columns:", e);
   }
 
   // Setup Auth (must be before rate limiter so req.user is populated)
@@ -785,7 +788,7 @@ export async function registerRoutes(
       const allResults = await db
         .select({ id: errorLogs.id, context: errorLogs.context })
         .from(errorLogs)
-        .where(eq(errorLogs.resolved, false))
+        .where(and(eq(errorLogs.resolved, false), isNull(errorLogs.deletedAt)))
         .limit(500);
 
       const userMonitorIds = new Set(
@@ -823,7 +826,7 @@ export async function registerRoutes(
       const source = req.query.source as string | undefined;
       const limitNum = Math.min(Number(req.query.limit) || 100, 500);
 
-      const conditions = [];
+      const conditions = [isNull(errorLogs.deletedAt)];
       if (level && ["error", "warning", "info"].includes(level)) {
         conditions.push(eq(errorLogs.level, level));
       }
@@ -831,9 +834,7 @@ export async function registerRoutes(
         conditions.push(eq(errorLogs.source, source));
       }
 
-      let query = conditions.length > 0
-        ? db.select().from(errorLogs).where(and(...conditions)).orderBy(desc(errorLogs.timestamp)).limit(limitNum)
-        : db.select().from(errorLogs).orderBy(desc(errorLogs.timestamp)).limit(limitNum);
+      let query = db.select().from(errorLogs).where(and(...conditions)).orderBy(desc(errorLogs.timestamp)).limit(limitNum);
 
       const allResults = await query;
 
@@ -890,13 +891,187 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Not authorized to delete this log entry" });
       }
 
-      await db.delete(errorLogs).where(eq(errorLogs.id, id));
+      await db.update(errorLogs).set({ deletedAt: new Date() }).where(eq(errorLogs.id, id));
       res.json({ message: "Deleted" });
     } catch (error: any) {
       console.error("Error deleting error log:", error);
       res.status(500).json({ message: "Failed to delete error log" });
     }
   });
+
+  // Batch soft-delete error log entries
+  app.post("/api/admin/error-logs/batch-delete", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const { ids, filters, excludeIds } = req.body;
+      if (!ids && !filters) {
+        return res.status(400).json({ message: "Must provide ids or filters" });
+      }
+      if (ids && filters) {
+        return res.status(400).json({ message: "Provide either ids or filters, not both" });
+      }
+
+      const isAppOwner = userId === APP_OWNER_ID;
+      const userMonitorIds = new Set(
+        (await storage.getMonitors(userId)).map((m: any) => m.id)
+      );
+
+      const now = new Date();
+
+      if (ids) {
+        if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id: any) => Number.isInteger(id) && id > 0)) {
+          return res.status(400).json({ message: "ids must be a non-empty array of positive integers" });
+        }
+
+        const entries = await db.select().from(errorLogs)
+          .where(and(inArray(errorLogs.id, ids), isNull(errorLogs.deletedAt)));
+
+        const authorized = entries.filter((log: any) => {
+          const ctx = log.context as Record<string, unknown> | null;
+          const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
+          if (monitorId !== undefined) return userMonitorIds.has(monitorId);
+          return isAppOwner;
+        });
+
+        if (authorized.length > 0) {
+          const authorizedIds = authorized.map((e: any) => e.id);
+          await db.update(errorLogs).set({ deletedAt: now }).where(inArray(errorLogs.id, authorizedIds));
+        }
+        res.json({ message: `${authorized.length} entries deleted`, count: authorized.length });
+      } else {
+        const conditions = [isNull(errorLogs.deletedAt)];
+        if (filters.level && ["error", "warning", "info"].includes(filters.level)) {
+          conditions.push(eq(errorLogs.level, filters.level));
+        }
+        if (filters.source && ["scraper", "email", "scheduler", "api"].includes(filters.source)) {
+          conditions.push(eq(errorLogs.source, filters.source));
+        }
+        const excludeList = Array.isArray(excludeIds) ? excludeIds.filter((id: any) => Number.isInteger(id) && id > 0) : [];
+        if (excludeList.length > 0) {
+          conditions.push(notInArray(errorLogs.id, excludeList));
+        }
+
+        const entries = await db.select().from(errorLogs).where(and(...conditions));
+
+        const authorized = entries.filter((log: any) => {
+          const ctx = log.context as Record<string, unknown> | null;
+          const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
+          if (monitorId !== undefined) return userMonitorIds.has(monitorId);
+          return isAppOwner;
+        });
+
+        if (authorized.length > 0) {
+          const authorizedIds = authorized.map((e: any) => e.id);
+          await db.update(errorLogs).set({ deletedAt: now }).where(inArray(errorLogs.id, authorizedIds));
+        }
+        res.json({ message: `${authorized.length} entries deleted`, count: authorized.length });
+      }
+    } catch (error: any) {
+      console.error("Error batch deleting error logs:", error);
+      res.status(500).json({ message: "Failed to batch delete error logs" });
+    }
+  });
+
+  // Restore soft-deleted error log entries (undo)
+  app.post("/api/admin/error-logs/restore", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const isAppOwner = userId === APP_OWNER_ID;
+      const userMonitorIds = new Set(
+        (await storage.getMonitors(userId)).map((m: any) => m.id)
+      );
+
+      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).limit(500);
+
+      const authorized = softDeleted.filter((log: any) => {
+        const ctx = log.context as Record<string, unknown> | null;
+        const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
+        if (monitorId !== undefined) return userMonitorIds.has(monitorId);
+        return isAppOwner;
+      });
+
+      if (authorized.length > 0) {
+        const authorizedIds = authorized.map((e: any) => e.id);
+        await db.update(errorLogs).set({ deletedAt: null }).where(inArray(errorLogs.id, authorizedIds));
+      }
+      res.json({ message: `${authorized.length} entries restored`, count: authorized.length });
+    } catch (error: any) {
+      console.error("Error restoring error logs:", error);
+      res.status(500).json({ message: "Failed to restore error logs" });
+    }
+  });
+
+  // Finalize soft-deleted error log entries (hard-delete)
+  app.post("/api/admin/error-logs/finalize", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const isAppOwner = userId === APP_OWNER_ID;
+      const userMonitorIds = new Set(
+        (await storage.getMonitors(userId)).map((m: any) => m.id)
+      );
+
+      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).limit(500);
+
+      const authorized = softDeleted.filter((log: any) => {
+        const ctx = log.context as Record<string, unknown> | null;
+        const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
+        if (monitorId !== undefined) return userMonitorIds.has(monitorId);
+        return isAppOwner;
+      });
+
+      if (authorized.length > 0) {
+        const authorizedIds = authorized.map((e: any) => e.id);
+        await db.delete(errorLogs).where(inArray(errorLogs.id, authorizedIds));
+      }
+      res.json({ message: `${authorized.length} entries finalized`, count: authorized.length });
+    } catch (error: any) {
+      console.error("Error finalizing error logs:", error);
+      res.status(500).json({ message: "Failed to finalize error logs" });
+    }
+  });
+
+  // Server-side safety net: clean up orphaned soft-deleted entries older than 5 minutes
+  if (softDeleteCleanupInterval) {
+    clearInterval(softDeleteCleanupInterval);
+  }
+  softDeleteCleanupInterval = setInterval(async () => {
+    try {
+      const threshold = new Date(Date.now() - 5 * 60 * 1000);
+      const result = await db.delete(errorLogs).where(
+        and(isNotNull(errorLogs.deletedAt), sql`${errorLogs.deletedAt} < ${threshold}`)
+      );
+      const count = (result as any).rowCount ?? 0;
+      if (count > 0) {
+        console.warn(`Safety net: cleaned up ${count} orphaned soft-deleted error log entries`);
+      }
+    } catch (error) {
+      console.error("Safety net cleanup error:", error);
+    }
+  }, 60 * 1000);
 
   // Admin users overview endpoint (owner-only)
   app.get("/api/admin/users-overview", isAuthenticated, async (req: any, res) => {
