@@ -88,6 +88,7 @@ export const errorLogs = pgTable("error_logs", {
   resolvedBy: text("resolved_by"),
   firstOccurrence: timestamp("first_occurrence").defaultNow().notNull(),
   occurrenceCount: integer("occurrence_count").default(1).notNull(),
+  deletedAt: timestamp("deleted_at"),
 }, (table) => ({
   levelIdx: index("error_logs_level_idx").on(table.level),
   sourceIdx: index("error_logs_source_idx").on(table.source),

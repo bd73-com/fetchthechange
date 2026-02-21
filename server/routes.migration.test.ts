@@ -158,7 +158,7 @@ describe("error_logs dedup column migration at startup", () => {
     }
   });
 
-  it("calls db.execute for the two ALTER TABLE migration statements", async () => {
+  it("calls db.execute for the ALTER TABLE migration statements", async () => {
     vi.clearAllMocks();
     mockDbExecute.mockResolvedValue({ rows: [] });
     process.env.APP_OWNER_ID = "owner-123";
@@ -167,8 +167,9 @@ describe("error_logs dedup column migration at startup", () => {
     const app = makeMockApp();
     await registerRoutes(app as any, app as any);
 
-    // db.execute should have been called at least 2 times for the ALTER TABLE statements
-    expect(mockDbExecute).toHaveBeenCalledTimes(2);
+    // db.execute should have been called 3 times for the ALTER TABLE statements
+    // (first_occurrence, occurrence_count, deleted_at)
+    expect(mockDbExecute).toHaveBeenCalledTimes(3);
   });
 
   it("still registers all route groups when migration succeeds", async () => {
@@ -219,7 +220,7 @@ describe("error_logs dedup column migration at startup", () => {
     await registerRoutes(app as any, app as any);
 
     expect(warnSpy).toHaveBeenCalledWith(
-      "Could not ensure error_logs dedup columns:",
+      "Could not ensure error_logs columns:",
       migrationError,
     );
     warnSpy.mockRestore();

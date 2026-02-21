@@ -8,10 +8,13 @@ const {
   mockGetMonitors,
   mockDbSelect,
   mockDbDelete,
+  mockDbUpdate,
   mockLimitFn,
   mockSelectWhereFn,
   mockSelectFromFn,
   mockDeleteWhereFn,
+  mockUpdateSetFn,
+  mockUpdateWhereFn,
   mockOrderByFn,
 } = vi.hoisted(() => {
   const mockLimitFn = vi.fn();
@@ -23,15 +26,22 @@ const {
   const mockDeleteWhereFn = vi.fn().mockResolvedValue(undefined);
   const mockDbDelete = vi.fn(() => ({ where: mockDeleteWhereFn }));
 
+  const mockUpdateWhereFn = vi.fn().mockResolvedValue(undefined);
+  const mockUpdateSetFn = vi.fn(() => ({ where: mockUpdateWhereFn }));
+  const mockDbUpdate = vi.fn(() => ({ set: mockUpdateSetFn }));
+
   return {
     mockGetUser: vi.fn(),
     mockGetMonitors: vi.fn(),
     mockDbSelect,
     mockDbDelete,
+    mockDbUpdate,
     mockLimitFn,
     mockSelectWhereFn,
     mockSelectFromFn,
     mockDeleteWhereFn,
+    mockUpdateSetFn,
+    mockUpdateWhereFn,
     mockOrderByFn,
   };
 });
@@ -67,7 +77,7 @@ vi.mock("./db", () => ({
     select: (...args: any[]) => mockDbSelect(...args),
     delete: (...args: any[]) => mockDbDelete(...args),
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }),
-    update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }) }),
+    update: (...args: any[]) => mockDbUpdate(...args),
     execute: vi.fn().mockResolvedValue({ rows: [] }),
   },
 }));
@@ -198,6 +208,9 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
     mockDeleteWhereFn.mockResolvedValue(undefined);
     mockDbDelete.mockReturnValue({ where: mockDeleteWhereFn });
+    mockUpdateWhereFn.mockResolvedValue(undefined);
+    mockUpdateSetFn.mockReturnValue({ where: mockUpdateWhereFn });
+    mockDbUpdate.mockReturnValue({ set: mockUpdateSetFn });
   });
 
   it("returns 401 when user is not authenticated", async () => {
@@ -241,7 +254,7 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     expect(res._json).toEqual({ message: "Log entry not found" });
   });
 
-  it("deletes log entry when user is app owner (no monitorId in context)", async () => {
+  it("soft-deletes log entry when user is app owner (no monitorId in context)", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
     mockLimitFn.mockResolvedValue([{ id: 5, context: null }]);
@@ -250,8 +263,9 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     const res = await callHandler("delete", ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(res._json).toEqual({ message: "Deleted" });
-    expect(mockDbDelete).toHaveBeenCalled();
-    expect(mockDeleteWhereFn).toHaveBeenCalled();
+    expect(mockDbUpdate).toHaveBeenCalled();
+    expect(mockUpdateSetFn).toHaveBeenCalled();
+    expect(mockUpdateWhereFn).toHaveBeenCalled();
   });
 
   it("deletes log entry when user owns the monitor referenced in context", async () => {

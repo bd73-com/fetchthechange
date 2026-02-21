@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe, Mail, Users, Trash2, Loader2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe, Mail, Users, Trash2, Loader2, X } from "lucide-react";
 import { Link } from "wouter";
 import { queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 
 interface ErrorLogEntry {
   id: number;
@@ -64,10 +67,32 @@ const levelConfig: Record<string, { icon: typeof XCircle; variant: "destructive"
   info: { icon: Info, variant: "outline", label: "Info" },
 };
 
+const UNDO_TIMEOUT_MS = 5000;
+
 export default function AdminErrors() {
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectAll, setSelectAll] = useState(false);
+  const [excludedIds, setExcludedIds] = useState<Set<number>>(new Set());
+  const { toast, dismiss } = useToast();
+
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeToastRef = useRef<string | null>(null);
+  const pendingFinalizeRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    };
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setSelectAll(false);
+    setExcludedIds(new Set());
+  }, []);
 
   const { data: browserlessData } = useQuery<BrowserlessUsageData>({
     queryKey: ["/api/admin/browserless-usage"],
@@ -123,19 +148,197 @@ export default function AdminErrors() {
     refetchInterval: 30000,
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(`/api/admin/error-logs/${id}`, {
-        method: "DELETE",
+  const invalidateAll = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/error-logs"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/error-logs/count"] });
+  }, []);
+
+  const finalizeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/error-logs/finalize", {
+        method: "POST",
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to delete log entry");
+      if (!res.ok) {
+        const retryRes = await fetch("/api/admin/error-logs/finalize", {
+          method: "POST",
+          credentials: "include",
+        });
+        if (!retryRes.ok) throw new Error("Failed to finalize deletion");
+        return retryRes.json();
+      }
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey });
+      invalidateAll();
+      clearSelection();
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to permanently delete entries", variant: "destructive" });
     },
   });
+
+  const restoreMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/error-logs/restore", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const retryRes = await fetch("/api/admin/error-logs/restore", {
+          method: "POST",
+          credentials: "include",
+        });
+        if (!retryRes.ok) throw new Error("Failed to restore entries");
+        return retryRes.json();
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      invalidateAll();
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to restore entries", variant: "destructive" });
+    },
+  });
+
+  const finalizePrevious = useCallback(() => {
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    if (activeToastRef.current) {
+      dismiss(activeToastRef.current);
+      activeToastRef.current = null;
+    }
+    if (pendingFinalizeRef.current) {
+      pendingFinalizeRef.current = false;
+      finalizeMutation.mutate();
+    }
+  }, [dismiss, finalizeMutation]);
+
+  const showUndoToast = useCallback((count: number) => {
+    pendingFinalizeRef.current = true;
+
+    const { id } = toast({
+      title: `${count} ${count === 1 ? "entry" : "entries"} deleted`,
+      action: (
+        <ToastAction altText="Undo" onClick={() => {
+          if (undoTimerRef.current) {
+            clearTimeout(undoTimerRef.current);
+            undoTimerRef.current = null;
+          }
+          pendingFinalizeRef.current = false;
+          activeToastRef.current = null;
+          restoreMutation.mutate();
+        }}>
+          Undo
+        </ToastAction>
+      ),
+      duration: UNDO_TIMEOUT_MS,
+    });
+
+    activeToastRef.current = id;
+
+    undoTimerRef.current = setTimeout(() => {
+      undoTimerRef.current = null;
+      activeToastRef.current = null;
+      pendingFinalizeRef.current = false;
+      finalizeMutation.mutate();
+    }, UNDO_TIMEOUT_MS);
+  }, [toast, restoreMutation, finalizeMutation]);
+
+  const batchDeleteMutation = useMutation({
+    mutationFn: async (body: { ids?: number[]; filters?: { level?: string; source?: string }; excludeIds?: number[] }) => {
+      const res = await fetch("/api/admin/error-logs/batch-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Failed to delete entries");
+      return res.json() as Promise<{ count: number }>;
+    },
+    onSuccess: (data) => {
+      invalidateAll();
+      clearSelection();
+      showUndoToast(data.count);
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to delete entries", variant: "destructive" });
+    },
+  });
+
+  const handleSingleDelete = useCallback((id: number) => {
+    finalizePrevious();
+    batchDeleteMutation.mutate({ ids: [id] });
+  }, [finalizePrevious, batchDeleteMutation]);
+
+  const handleBatchDelete = useCallback(() => {
+    finalizePrevious();
+    if (selectAll) {
+      const filters: { level?: string; source?: string } = {};
+      if (levelFilter !== "all") filters.level = levelFilter;
+      if (sourceFilter !== "all") filters.source = sourceFilter;
+      const excluded = Array.from(excludedIds);
+      batchDeleteMutation.mutate({
+        filters,
+        ...(excluded.length > 0 ? { excludeIds: excluded } : {}),
+      });
+    } else {
+      batchDeleteMutation.mutate({ ids: Array.from(selectedIds) });
+    }
+  }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter]);
+
+  const selectionCount = selectAll ? logs.length - excludedIds.size : selectedIds.size;
+  const hasSelection = selectionCount > 0;
+
+  const isEntrySelected = useCallback((id: number) => {
+    if (selectAll) return !excludedIds.has(id);
+    return selectedIds.has(id);
+  }, [selectAll, excludedIds, selectedIds]);
+
+  const toggleEntry = useCallback((id: number) => {
+    if (selectAll) {
+      setExcludedIds(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      });
+    }
+  }, [selectAll]);
+
+  const toggleSelectAll = useCallback((checked: boolean) => {
+    if (checked) {
+      setSelectAll(true);
+      setExcludedIds(new Set());
+      setSelectedIds(new Set());
+    } else {
+      clearSelection();
+    }
+  }, [clearSelection]);
+
+  const allVisibleSelected = selectAll
+    ? excludedIds.size === 0
+    : logs.length > 0 && logs.every(l => selectedIds.has(l.id));
+
+  const someVisibleSelected = selectAll
+    ? excludedIds.size > 0 && excludedIds.size < logs.length
+    : selectedIds.size > 0 && !allVisibleSelected;
 
   const formatTimestamp = (ts: string) => {
     const d = new Date(ts);
@@ -292,7 +495,7 @@ export default function AdminErrors() {
                                 day: "numeric",
                                 year: "numeric",
                               })
-                            : "—"}
+                            : "\u2014"}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -468,96 +671,145 @@ export default function AdminErrors() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-2">
-            {logs.map((log) => {
-              const config = levelConfig[log.level] || levelConfig.info;
-              const Icon = config.icon;
-              const isExpanded = expandedId === log.id;
+          <>
+            <div className="flex items-center gap-3 mb-3">
+              <Checkbox
+                checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
+                onCheckedChange={(checked) => toggleSelectAll(!!checked)}
+                data-testid="checkbox-select-all"
+                aria-label="Select all entries"
+              />
+              <span className="text-sm text-muted-foreground">
+                {selectAll ? "All matching entries selected" : "Select all"}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {logs.map((log) => {
+                const config = levelConfig[log.level] || levelConfig.info;
+                const Icon = config.icon;
+                const isExpanded = expandedId === log.id;
+                const checked = isEntrySelected(log.id);
 
-              return (
-                <Card
-                  key={log.id}
-                  className="hover-elevate cursor-pointer"
-                  onClick={() => setExpandedId(isExpanded ? null : log.id)}
-                  data-testid={`card-log-${log.id}`}
-                >
-                  <CardContent className="py-3 px-4">
-                    <div className="flex flex-wrap items-start gap-3">
-                      <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${log.level === "error" ? "text-destructive" : log.level === "warning" ? "text-yellow-500" : "text-muted-foreground"}`} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                          <Badge variant={config.variant} data-testid={`badge-level-${log.id}`}>
-                            {config.label}
-                          </Badge>
-                          <Badge variant="outline" data-testid={`badge-source-${log.id}`}>
-                            {log.source}
-                          </Badge>
-                          {log.error_type && (
-                            <span className="text-xs text-muted-foreground">{log.error_type}</span>
-                          )}
-                          {log.occurrence_count > 1 && (
-                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0" data-testid={`badge-count-${log.id}`}>
-                              {log.occurrence_count}x
+                return (
+                  <Card
+                    key={log.id}
+                    className={`hover-elevate cursor-pointer ${checked ? "ring-1 ring-primary/50" : ""}`}
+                    onClick={() => setExpandedId(isExpanded ? null : log.id)}
+                    data-testid={`card-log-${log.id}`}
+                  >
+                    <CardContent className="py-3 px-4">
+                      <div className="flex flex-wrap items-start gap-3">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => toggleEntry(log.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-0.5 shrink-0"
+                          data-testid={`checkbox-log-${log.id}`}
+                          aria-label={`Select log entry ${log.id}`}
+                        />
+                        <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${log.level === "error" ? "text-destructive" : log.level === "warning" ? "text-yellow-500" : "text-muted-foreground"}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <Badge variant={config.variant} data-testid={`badge-level-${log.id}`}>
+                              {config.label}
                             </Badge>
-                          )}
-                          <span className="text-xs text-muted-foreground ml-auto shrink-0">
-                            {log.occurrence_count > 1 && log.first_occurrence
-                              ? `${formatTimestamp(log.first_occurrence)} — ${formatTimestamp(log.timestamp)}`
-                              : formatTimestamp(log.timestamp)}
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
-                            aria-label={`Delete log entry ${log.id}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (confirm("Delete this log entry?")) {
-                                deleteMutation.mutate(log.id);
-                              }
-                            }}
-                            disabled={deleteMutation.isPending && deleteMutation.variables === log.id}
-                            data-testid={`button-delete-log-${log.id}`}
-                          >
-                            {deleteMutation.isPending && deleteMutation.variables === log.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
+                            <Badge variant="outline" data-testid={`badge-source-${log.id}`}>
+                              {log.source}
+                            </Badge>
+                            {log.error_type && (
+                              <span className="text-xs text-muted-foreground">{log.error_type}</span>
+                            )}
+                            {log.occurrence_count > 1 && (
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0" data-testid={`badge-count-${log.id}`}>
+                                {log.occurrence_count}x
+                              </Badge>
+                            )}
+                            <span className="text-xs text-muted-foreground ml-auto shrink-0">
+                              {log.occurrence_count > 1 && log.first_occurrence
+                                ? `${formatTimestamp(log.first_occurrence)} \u2014 ${formatTimestamp(log.timestamp)}`
+                                : formatTimestamp(log.timestamp)}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                              aria-label={`Delete log entry ${log.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSingleDelete(log.id);
+                              }}
+                              disabled={batchDeleteMutation.isPending}
+                              data-testid={`button-delete-log-${log.id}`}
+                            >
                               <Trash2 className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                        </div>
-                        <p className="text-sm truncate" data-testid={`text-message-${log.id}`}>
-                          {log.message}
-                        </p>
-                        {isExpanded && (
-                          <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
-                            {log.stack_trace && (
-                              <div>
-                                <p className="text-xs font-medium text-muted-foreground mb-1">Stack Trace</p>
-                                <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-48 overflow-y-auto select-text">
-                                  {log.stack_trace}
-                                </pre>
-                              </div>
-                            )}
-                            {log.context && (
-                              <div>
-                                <p className="text-xs font-medium text-muted-foreground mb-1">Context</p>
-                                <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-32 overflow-y-auto select-text">
-                                  {JSON.stringify(log.context, null, 2)}
-                                </pre>
-                              </div>
-                            )}
+                            </Button>
                           </div>
-                        )}
+                          <p className="text-sm truncate" data-testid={`text-message-${log.id}`}>
+                            {log.message}
+                          </p>
+                          {isExpanded && (
+                            <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                              {log.stack_trace && (
+                                <div>
+                                  <p className="text-xs font-medium text-muted-foreground mb-1">Stack Trace</p>
+                                  <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-48 overflow-y-auto select-text">
+                                    {log.stack_trace}
+                                  </pre>
+                                </div>
+                              )}
+                              {log.context && (
+                                <div>
+                                  <p className="text-xs font-medium text-muted-foreground mb-1">Context</p>
+                                  <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-32 overflow-y-auto select-text">
+                                    {JSON.stringify(log.context, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
+
+      {hasSelection && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50" data-testid="floating-action-bar">
+          <div className="flex items-center gap-3 bg-background border rounded-lg shadow-lg px-4 py-3">
+            <span className="text-sm font-medium" data-testid="text-selection-count">
+              {selectAll ? `All matching entries` : `${selectionCount} selected`}
+            </span>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleBatchDelete}
+              disabled={batchDeleteMutation.isPending}
+              data-testid="button-delete-selected"
+            >
+              {batchDeleteMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+              )}
+              Delete selected
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearSelection}
+              data-testid="button-clear-selection"
+            >
+              <X className="h-3.5 w-3.5 mr-1" />
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
