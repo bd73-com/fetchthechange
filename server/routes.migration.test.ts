@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const ORIGINAL_APP_OWNER_ID = process.env.APP_OWNER_ID;
 
 // ---------------------------------------------------------------------------
 // Hoisted mock variables
@@ -145,6 +147,14 @@ describe("error_logs dedup column migration at startup", () => {
     // Clear registered routes for fresh registration
     for (const method of Object.keys(registeredRoutes)) {
       delete registeredRoutes[method];
+    }
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_APP_OWNER_ID === undefined) {
+      delete process.env.APP_OWNER_ID;
+    } else {
+      process.env.APP_OWNER_ID = ORIGINAL_APP_OWNER_ID;
     }
   });
 
