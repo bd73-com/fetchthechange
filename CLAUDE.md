@@ -29,3 +29,10 @@ See `README.md` for project overview, tech stack, structure, and setup.
 - CodeRabbit auto-reviews all PRs (configured in `.coderabbit.yaml`).
 - PR titles should be concise (<70 chars); use the body for details.
 - Run `npm run check && npm run test` before pushing.
+## Environment Notes
+- Git remote uses a local proxy. `gh` CLI cannot infer the repo from remotes.
+- Always pass `--repo bd73-com/fetchthechange` when using `gh` commands:
+```
+  gh pr create --repo bd73-com/fetchthechange --title "..." --body "..."
+  gh pr list --repo bd73-com/fetchthechange
+```

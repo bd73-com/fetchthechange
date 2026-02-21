@@ -112,6 +112,7 @@ function CreateCampaignDialog() {
   const previewRecipients = usePreviewRecipients();
   const sendTestCampaign = useSendTestCampaign();
   const sendCampaign = useSendCampaign();
+  const isSavingDraft = createCampaign.isPending || updateCampaign.isPending;
 
   const resetForm = () => {
     setName("");
@@ -166,12 +167,14 @@ function CreateCampaignDialog() {
   };
 
   const handleSendTest = async () => {
-    if (!createdCampaignId) return;
+    if (!createdCampaignId || isSavingDraft || sendTestCampaign.isPending) return;
+    await handleSaveDraft();
     await sendTestCampaign.mutateAsync({ id: createdCampaignId });
   };
 
   const handleSendCampaign = async () => {
-    if (!createdCampaignId) return;
+    if (!createdCampaignId || isSavingDraft || sendCampaign.isPending) return;
+    await handleSaveDraft();
     await sendCampaign.mutateAsync(createdCampaignId);
     setConfirmSendOpen(false);
     setOpen(false);
@@ -421,7 +424,7 @@ function CreateCampaignDialog() {
               <Button
                 variant="outline"
                 onClick={handleSendTest}
-                disabled={sendTestCampaign.isPending}
+                disabled={sendTestCampaign.isPending || isSavingDraft}
               >
                 {sendTestCampaign.isPending ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -463,7 +466,7 @@ function CreateCampaignDialog() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSendCampaign} disabled={sendCampaign.isPending}>
+            <AlertDialogAction onClick={handleSendCampaign} disabled={sendCampaign.isPending || isSavingDraft}>
               {sendCampaign.isPending ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
