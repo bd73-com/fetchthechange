@@ -212,10 +212,6 @@ describe("ErrorLogger deduplication", () => {
     expect(insertedValues.level).toBe("error");
 
     vi.clearAllMocks();
-    // Re-suppress console after clearAllMocks wiped the spies
-    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     mockSelectWhereFn.mockReturnValue({ limit: mockSelectLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
@@ -227,9 +223,6 @@ describe("ErrorLogger deduplication", () => {
     expect(insertedValues.level).toBe("warning");
 
     vi.clearAllMocks();
-    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     mockSelectWhereFn.mockReturnValue({ limit: mockSelectLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
