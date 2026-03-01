@@ -133,7 +133,7 @@ export async function registerRoutes(
   });
 
   // Test Email Endpoint - verifies Resend email delivery
-  app.get("/api/test-email", isAuthenticated, async (req: any, res) => {
+  app.get("/api/test-email", isAuthenticated, emailUpdateRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const user = await authStorage.getUser(userId);
@@ -204,7 +204,7 @@ export async function registerRoutes(
   });
 
   // Selector Debug Mode Endpoint
-  app.post("/api/monitors/:id/debug", isAuthenticated, async (req: any, res) => {
+  app.post("/api/monitors/:id/debug", isAuthenticated, suggestSelectorsRateLimiter, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       console.log(`[Debug] monitorId=${id}`);
@@ -718,7 +718,7 @@ export async function registerRoutes(
         from: fromAddress,
         to: supportEmail,
         replyTo: input.email,
-        subject: `[Support - ${categoryLabels[input.category]}] ${input.subject}`,
+        subject: `[Support - ${categoryLabels[input.category]}] ${input.subject.replace(/[\r\n]+/g, ' ').trim()}`,
         text: [
           "Support Request from FetchTheChange",
           "",
