@@ -53,9 +53,12 @@ export class WebhookHandlers {
     const stripe = await getUncachableStripeClient();
     const event = stripe.webhooks.constructEvent(payload, signature, secret);
 
-    // Now that signature is verified, let StripeSync process for DB syncing
+    // Now that signature is verified, let StripeSync process for DB syncing.
+    // Use processEvent() instead of processWebhook() to avoid double signature
+    // verification — the cached StripeSync singleton may hold a stale webhook secret
+    // if the secret was updated after its creation (e.g., managed webhook setup).
     const sync = await getStripeSync();
-    await sync.processWebhook(payload, signature);
+    await sync.processEvent(event);
 
     await WebhookHandlers.handleStripeEvent(event);
   }
