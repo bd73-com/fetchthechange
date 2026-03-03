@@ -15,6 +15,7 @@ import Blog from "@/pages/Blog";
 import BlogWhyMonitorsFail from "@/pages/BlogWhyMonitorsFail";
 import BlogComparison from "@/pages/BlogComparison";
 import BlogPriceMonitoring from "@/pages/BlogPriceMonitoring";
+import BlogSelectorBreakage from "@/pages/BlogSelectorBreakage";
 import Pricing from "@/pages/Pricing";
 import Support from "@/pages/Support";
 import AdminErrors from "@/pages/AdminErrors";
@@ -60,6 +61,7 @@ function Router() {
       <Route path="/blog/why-website-change-monitors-fail-silently" component={BlogWhyMonitorsFail} />
       <Route path="/blog/fetchthechange-vs-distill-visualping-hexowatch" component={BlogComparison} />
       <Route path="/blog/monitor-competitor-prices-without-getting-blocked" component={BlogPriceMonitoring} />
+      <Route path="/blog/css-selectors-keep-breaking-why-and-how-to-fix" component={BlogSelectorBreakage} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/support" component={Support} />
       <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
