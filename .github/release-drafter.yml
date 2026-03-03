@@ -1,0 +1,79 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+
+version-resolver:
+  major:
+    labels:
+      - breaking
+  minor:
+    labels:
+      - feature
+  patch:
+    labels:
+      - fix
+      - chore
+      - docs
+      - security
+  default: patch
+
+categories:
+  - title: "Breaking Changes"
+    labels:
+      - breaking
+  - title: "Features"
+    labels:
+      - feature
+  - title: "Bug Fixes"
+    labels:
+      - fix
+  - title: "Security"
+    labels:
+      - security
+  - title: "Maintenance"
+    labels:
+      - chore
+      - docs
+
+autolabeler:
+  - label: feature
+    title:
+      - '/^Add\b/i'
+      - '/^Implement\b/i'
+      - '/^Create\b/i'
+      - '/^Introduce\b/i'
+      - '/\bfeat\b/i'
+  - label: fix
+    title:
+      - '/^Fix\b/i'
+      - '/^Resolve\b/i'
+      - '/^Patch\b/i'
+      - '/\bbug\b/i'
+  - label: breaking
+    title:
+      - '/\bbreaking\b/i'
+      - '/^Remove\b/i'
+  - label: chore
+    title:
+      - '/^Refactor\b/i'
+      - '/^Update\b/i'
+      - '/^Upgrade\b/i'
+      - '/^Clean\b/i'
+      - '/^Bump\b/i'
+      - '/\bchore\b/i'
+  - label: docs
+    title:
+      - '/\bdocs\b/i'
+      - '/\breadme\b/i'
+      - '/\bdocumentation\b/i'
+  - label: security
+    title:
+      - '/\bsecurity\b/i'
+      - '/\bvuln\b/i'
+      - '/\bCVE\b/i'
+
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  **Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
