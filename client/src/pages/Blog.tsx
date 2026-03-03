@@ -6,6 +6,13 @@ import PublicNav from "@/components/PublicNav";
 
 const blogPosts = [
   {
+    slug: "css-selectors-keep-breaking-why-and-how-to-fix",
+    title: "CSS Selectors Keep Breaking? Why It Happens and How to Fix It",
+    description: "CSS selectors in website monitors break constantly due to hashed class names, DOM restructuring, and framework re-renders. Learn why it happens and how to build resilient selectors.",
+    category: "CSS Selectors",
+    date: "2026-03-03",
+  },
+  {
     slug: "monitor-competitor-prices-without-getting-blocked",
     title: "How to Monitor Competitor Prices Without Getting Blocked (2026 Guide)",
     description: "Learn how to monitor competitor prices on modern JavaScript-heavy websites without getting blocked — and how to avoid silent monitoring failures.",
