@@ -143,7 +143,7 @@ describe("WebhookHandlers.processWebhook", () => {
     };
     mockGetUncachableStripeClient.mockResolvedValue(mockStripe);
     mockGetStripeSync.mockResolvedValue({
-      processWebhook: vi.fn().mockResolvedValue(undefined),
+      processEvent: vi.fn().mockResolvedValue(undefined),
     });
 
     // Should not throw — signature is "valid" (mocked)
