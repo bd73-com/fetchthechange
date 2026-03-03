@@ -355,13 +355,14 @@ describe("processDigestBatch", () => {
       makeChange({ id: 10, oldValue: "$10", newValue: "$15" }),
       makeChange({ id: 11, oldValue: "$15", newValue: "$20" }),
     ];
-    mockGetMonitorChanges.mockResolvedValue(changes);
+    mockGetMonitorChanges.mockResolvedValueOnce(changes);
 
     const monitor = makeMonitor();
     const prefs = makePrefs({ digestMode: true });
 
     const result = await processDigestBatch(monitor, prefs);
     expect(result).toEqual({ success: true });
+    expect(mockGetMonitorChanges).toHaveBeenCalledTimes(1);
     expect(mockSendDigestEmail).toHaveBeenCalledWith(
       monitor,
       expect.arrayContaining([
@@ -378,7 +379,7 @@ describe("processDigestBatch", () => {
       { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
     ];
     mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
-    mockGetMonitorChanges.mockResolvedValue([makeChange({ id: 10 })]);
+    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
 
     const monitor = makeMonitor();
     const prefs = makePrefs({ digestMode: true, notificationEmail: "custom@test.com" });
@@ -570,7 +571,7 @@ describe("processDigestBatch edge cases", () => {
     ];
     mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
     // Return changes that don't include changeId 999
-    mockGetMonitorChanges.mockResolvedValue([makeChange({ id: 1 })]);
+    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 1 })]);
 
     const monitor = makeMonitor();
     const prefs = makePrefs({ digestMode: true });
@@ -585,7 +586,7 @@ describe("processDigestBatch edge cases", () => {
       { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
     ];
     mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
-    mockGetMonitorChanges.mockResolvedValue([makeChange({ id: 10 })]);
+    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
     mockSendDigestEmail.mockResolvedValueOnce({ success: false, error: "Rate limited" });
 
     const monitor = makeMonitor();
@@ -680,16 +681,30 @@ describe("processQueuedNotifications edge cases", () => {
     mockGetStaleQueueEntries.mockResolvedValueOnce([]);
     mockGetMonitor.mockResolvedValueOnce(makeMonitor());
     mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
-    mockGetMonitorChanges
-      .mockResolvedValueOnce([makeChange({ id: 10, oldValue: "$10", newValue: "$15" })])
-      .mockResolvedValueOnce([makeChange({ id: 11, oldValue: "$15", newValue: "$20" })]);
+    // After N+1 fix, getMonitorChanges is called once per monitor
+    mockGetMonitorChanges.mockResolvedValueOnce([
+      makeChange({ id: 10, oldValue: "$10", newValue: "$15" }),
+      makeChange({ id: 11, oldValue: "$15", newValue: "$20" }),
+    ]);
     mockSendNotificationEmail.mockResolvedValue({ success: true });
 
     await processQueuedNotifications();
+    expect(mockGetMonitorChanges).toHaveBeenCalledTimes(1);
     expect(mockSendNotificationEmail).toHaveBeenCalledTimes(2);
     expect(mockMarkQueueEntryDelivered).toHaveBeenCalledTimes(2);
     expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(1);
     expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(2);
+  });
+
+  it("skips digest entries (they are handled by processDigestCron)", async () => {
+    const digestEntry = { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([digestEntry]);
+    mockGetStaleQueueEntries.mockResolvedValueOnce([]);
+
+    await processQueuedNotifications();
+    expect(mockGetMonitor).not.toHaveBeenCalled();
+    expect(mockSendNotificationEmail).not.toHaveBeenCalled();
+    expect(mockMarkQueueEntryDelivered).not.toHaveBeenCalled();
   });
 
   it("handles errors in individual monitor processing gracefully", async () => {

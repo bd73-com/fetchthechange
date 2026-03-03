@@ -968,7 +968,7 @@ describe("checkMonitor", () => {
     );
   });
 
-  it("does NOT process notification when emailEnabled is false", async () => {
+  it("calls processChangeNotification even when emailEnabled is false (decision is internal)", async () => {
     const html = `<html><body><span class="price">$24.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
@@ -977,7 +977,7 @@ describe("checkMonitor", () => {
     const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: false });
     await runWithTimers(monitor);
 
-    // processChangeNotification is called but returns null because emailEnabled is false
+    // processChangeNotification is called but returns null internally because emailEnabled is false
     expect(mockProcessNotification).toHaveBeenCalled();
   });
 

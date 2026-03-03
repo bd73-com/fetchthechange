@@ -649,7 +649,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
         const existingChanges = await storage.getMonitorChanges(monitor.id);
         const isFirstChange = existingChanges.length <= 1;
-        await processChangeNotification(monitor, change, isFirstChange);
+        try {
+          await processChangeNotification(monitor, change, isFirstChange);
+        } catch (notificationError) {
+          console.error(`[Scraper] Notification failed for monitor ${monitor.id}, change still recorded:`, notificationError);
+        }
       }
 
       return { 

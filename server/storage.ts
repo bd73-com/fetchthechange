@@ -86,18 +86,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertNotificationPreferences(monitorId: number, data: Partial<Omit<NotificationPreference, "id" | "monitorId" | "createdAt" | "updatedAt">>): Promise<NotificationPreference> {
-    const existing = await this.getNotificationPreferences(monitorId);
-    if (existing) {
-      const [updated] = await db.update(notificationPreferences)
-        .set({ ...data, updatedAt: new Date() })
-        .where(eq(notificationPreferences.monitorId, monitorId))
-        .returning();
-      return updated;
-    }
-    const [created] = await db.insert(notificationPreferences)
+    const [result] = await db.insert(notificationPreferences)
       .values({ monitorId, ...data })
+      .onConflictDoUpdate({
+        target: notificationPreferences.monitorId,
+        set: { ...data, updatedAt: new Date() },
+      })
       .returning();
-    return created;
+    return result;
   }
 
   async deleteNotificationPreferences(monitorId: number): Promise<void> {

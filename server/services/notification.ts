@@ -83,10 +83,10 @@ export function getQuietHoursEndDate(prefs: NotificationPreference, now: Date): 
 }
 
 function localDateToUTC(localDateStr: string, timezone: string): Date {
-  // Use a simple approach: create the date and adjust
+  // Create a rough UTC date and compute the offset at that point in time
+  // to correctly handle DST transitions
   const dt = new Date(localDateStr + "Z");
-  const utcNow = new Date();
-  const offsetMs = getTimezoneOffsetMs(timezone, utcNow);
+  const offsetMs = getTimezoneOffsetMs(timezone, dt);
   return new Date(dt.getTime() - offsetMs);
 }
 
@@ -190,10 +190,11 @@ export async function processDigestBatch(
     return null;
   }
 
+  const allChanges = await storage.getMonitorChanges(monitor.id);
+  const changesById = new Map(allChanges.map((c) => [c.id, c]));
   const changes: MonitorChange[] = [];
   for (const entry of entries) {
-    const monitorChanges = await storage.getMonitorChanges(monitor.id);
-    const change = monitorChanges.find((c) => c.id === entry.changeId);
+    const change = changesById.get(entry.changeId);
     if (change) {
       changes.push(change);
     }
@@ -217,8 +218,11 @@ export async function processQueuedNotifications(): Promise<void> {
   const now = new Date();
   const readyEntries = await storage.getReadyQueueEntries(now);
 
+  // Only process non-digest entries; digest entries are handled by processDigestCron
+  const nonDigestEntries = readyEntries.filter((e) => e.reason !== "digest");
+
   const monitorGroups = new Map<number, NotificationQueueEntry[]>();
-  for (const entry of readyEntries) {
+  for (const entry of nonDigestEntries) {
     const group = monitorGroups.get(entry.monitorId) || [];
     group.push(entry);
     monitorGroups.set(entry.monitorId, group);
@@ -239,15 +243,17 @@ export async function processQueuedNotifications(): Promise<void> {
         continue;
       }
 
+      const allChanges = await storage.getMonitorChanges(monitorId);
+      const changesById = new Map(allChanges.map((c) => [c.id, c]));
+      const emailOverride = prefs?.notificationEmail || undefined;
+
       for (const entry of entries) {
-        const allChanges = await storage.getMonitorChanges(monitorId);
-        const change = allChanges.find((c) => c.id === entry.changeId);
+        const change = changesById.get(entry.changeId);
         if (!change) {
           await storage.markQueueEntryDelivered(entry.id);
           continue;
         }
 
-        const emailOverride = prefs?.notificationEmail || undefined;
         const result = await sendNotificationEmail(monitor, change.oldValue, change.newValue, emailOverride);
         if (result.success) {
           await storage.markQueueEntryDelivered(entry.id);
