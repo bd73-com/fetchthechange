@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { ArrowLeft, RefreshCw, Trash2, ExternalLink, Calendar, Clock, Loader2, Edit2, X, Check, AlertTriangle } from "lucide-react";
 import { FixSelectorModal } from "@/components/FixSelectorModal";
+import { NotificationPreferencesForm } from "@/components/NotificationPreferencesForm";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -408,6 +409,10 @@ export default function MonitorDetails() {
             </div>
           </CardContent>
         </Card>
+
+        {!isEditing && monitor.emailEnabled && (
+          <NotificationPreferencesForm monitorId={monitor.id} />
+        )}
 
         <Card>
           <CardHeader>

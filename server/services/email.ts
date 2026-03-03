@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { type Monitor } from "@shared/schema";
+import { type Monitor, type MonitorChange } from "@shared/schema";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { type UserTier } from "@shared/models/auth";
 import { ErrorLogger } from "./logger";
@@ -76,7 +76,7 @@ async function canSendEmail(monitor: Monitor): Promise<{ allowed: boolean; reaso
   return { allowed: true };
 }
 
-export async function sendNotificationEmail(monitor: Monitor, oldValue: string | null, newValue: string | null): Promise<EmailResult> {
+export async function sendNotificationEmail(monitor: Monitor, oldValue: string | null, newValue: string | null, emailOverride?: string): Promise<EmailResult> {
   const emailCheck = await canSendEmail(monitor);
   if (!emailCheck.allowed) {
     console.log(`[Email] Rate limited for monitor ${monitor.id}: ${emailCheck.reason}`);
@@ -107,8 +107,8 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
       return { success: false, error: "User has no email address" };
     }
 
-    const recipientEmail = user.notificationEmail || user.email;
-    console.log(`[Email] Sending to ${recipientEmail} (custom: ${!!user.notificationEmail})`);
+    const recipientEmail = emailOverride || user.notificationEmail || user.email;
+    console.log(`[Email] Sending to ${recipientEmail} (override: ${!!emailOverride}, custom: ${!!user.notificationEmail})`);
 
     const response = await resend.emails.send({
       from: fromAddress,
@@ -220,6 +220,105 @@ FetchTheChange Team`,
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
     await ErrorLogger.error("email", `"${monitor.name}" — auto-pause email failed to send.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name });
+    return { success: false, error: error.message };
+  }
+}
+
+export async function sendDigestEmail(monitor: Monitor, changes: MonitorChange[], emailOverride?: string): Promise<EmailResult> {
+  if (changes.length === 0) {
+    return { success: false, error: "No changes to include in digest" };
+  }
+
+  const emailCheck = await canSendEmail(monitor);
+  if (!emailCheck.allowed) {
+    console.log(`[Email] Rate limited for digest, monitor ${monitor.id}: ${emailCheck.reason}`);
+    return { success: false, error: emailCheck.reason || "Email rate limit exceeded" };
+  }
+
+  const resendCapCheck = await ResendUsageTracker.canSendEmail();
+  if (!resendCapCheck.allowed) {
+    console.log(`[Email] Resend cap reached for digest, monitor ${monitor.id}: ${resendCapCheck.reason}`);
+    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
+  }
+
+  if (!process.env.RESEND_API_KEY) {
+    console.log(`[MOCK EMAIL] Digest for monitor ${monitor.id} "${monitor.name}" with ${changes.length} changes`);
+    return { success: false, error: "RESEND_API_KEY not configured" };
+  }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const fromAddress = process.env.RESEND_FROM || 'onboarding@resend.dev';
+
+  try {
+    const user = await authStorage.getUser(monitor.userId);
+    if (!user || !user.email) {
+      return { success: false, error: "User has no email address" };
+    }
+
+    const recipientEmail = emailOverride || user.notificationEmail || user.email;
+
+    const changesTextList = changes.map((c, i) => {
+      const dateStr = new Date(c.detectedAt).toLocaleString("en-US");
+      return `  ${i + 1}. [${dateStr}]\n     Old: ${sanitizePlainText(c.oldValue)}\n     New: ${sanitizePlainText(c.newValue)}`;
+    }).join("\n\n");
+
+    const changesHtmlList = changes.map((c) => {
+      const dateStr = new Date(c.detectedAt).toLocaleString("en-US");
+      return `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(dateStr)}</td>
+          <td style="padding: 8px; border: 1px solid #ddd;"><pre style="margin:0;white-space:pre-wrap;">${escapeHtml(c.oldValue)}</pre></td>
+          <td style="padding: 8px; border: 1px solid #ddd;"><pre style="margin:0;white-space:pre-wrap;">${escapeHtml(c.newValue)}</pre></td>
+        </tr>`;
+    }).join("");
+
+    const response = await resend.emails.send({
+      from: fromAddress,
+      to: recipientEmail,
+      subject: `FetchTheChange Digest: ${sanitizePlainText(monitor.name)} (${changes.length} change${changes.length === 1 ? "" : "s"})`,
+      text: `Hello,
+
+Here is your daily digest for "${sanitizePlainText(monitor.name)}".
+URL: ${sanitizePlainText(monitor.url)}
+
+${changes.length} change${changes.length === 1 ? " was" : "s were"} detected:
+
+${changesTextList}
+
+Check your dashboard for more details.
+
+FetchTheChange Team`,
+      html: `
+        <h2>Daily Digest: ${escapeHtml(monitor.name)}</h2>
+        <p><strong>URL:</strong> <a href="${safeHref(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
+        <p>${changes.length} change${changes.length === 1 ? " was" : "s were"} detected:</p>
+        <table style="border-collapse: collapse; width: 100%;">
+          <thead>
+            <tr>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Time</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Old Value</th>
+              <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">New Value</th>
+            </tr>
+          </thead>
+          <tbody>${changesHtmlList}</tbody>
+        </table>
+        <hr/>
+        <p><a href="https://fetch-the-change.replit.app">View Dashboard</a></p>
+        <br/>
+        <p>FetchTheChange Team</p>
+      `
+    });
+
+    if (response.error) {
+      await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, undefined, false).catch(() => {});
+      return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
+    }
+
+    await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, response.data?.id, true).catch(() => {});
+    console.log(`[Email] Sent digest to ${recipientEmail} for monitor ${monitor.id} (${changes.length} changes), id: ${response.data?.id}`);
+    return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
+  } catch (error: any) {
+    await ErrorLogger.error("email", `"${monitor.name}" — digest email failed to send.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name });
     return { success: false, error: error.message };
   }
 }

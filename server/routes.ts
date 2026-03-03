@@ -481,6 +481,69 @@ export async function registerRoutes(
   });
 
   // ---------------------------------------------------------------
+  // NOTIFICATION PREFERENCES ROUTES
+  // ---------------------------------------------------------------
+
+  app.get(api.monitors.notificationPreferences.get.path, isAuthenticated, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const monitor = await storage.getMonitor(id);
+    if (!monitor) return res.status(404).json({ message: "Not found" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+
+    const prefs = await storage.getNotificationPreferences(id);
+    if (!prefs) {
+      return res.json({
+        id: 0,
+        monitorId: id,
+        quietHoursStart: null,
+        quietHoursEnd: null,
+        timezone: null,
+        digestMode: false,
+        sensitivityThreshold: 0,
+        notificationEmail: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+    res.json(prefs);
+  });
+
+  app.put(api.monitors.notificationPreferences.put.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const monitor = await storage.getMonitor(id);
+      if (!monitor) return res.status(404).json({ message: "Not found" });
+      if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+
+      const input = api.monitors.notificationPreferences.put.input.parse(req.body);
+      const prefs = await storage.upsertNotificationPreferences(id, {
+        quietHoursStart: input.quietHoursStart ?? null,
+        quietHoursEnd: input.quietHoursEnd ?? null,
+        timezone: input.timezone ?? null,
+        digestMode: input.digestMode ?? false,
+        sensitivityThreshold: input.sensitivityThreshold ?? 0,
+        notificationEmail: input.notificationEmail ?? null,
+      });
+      res.json(prefs);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(422).json({ message: err.errors[0].message });
+      }
+      throw err;
+    }
+  });
+
+  app.delete(api.monitors.notificationPreferences.delete.path, isAuthenticated, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const monitor = await storage.getMonitor(id);
+    if (!monitor) return res.status(404).json({ message: "Not found" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+
+    await storage.deleteNotificationPreferences(id);
+    res.status(204).send();
+  });
+
+  // ---------------------------------------------------------------
   // STRIPE ROUTES
   // ---------------------------------------------------------------
 

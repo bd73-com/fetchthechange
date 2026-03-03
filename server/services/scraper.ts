@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
+import { processChangeNotification } from "./notification";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { validateUrlBeforeFetch, ssrfSafeFetch } from "../utils/ssrf";
@@ -644,11 +645,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       });
 
       if (changed) {
-        await storage.addMonitorChange(monitor.id, oldValue, newValue);
+        const change = await storage.addMonitorChange(monitor.id, oldValue, newValue);
         await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
-        if (monitor.emailEnabled) {
-          await sendNotificationEmail(monitor, oldValue, newValue);
-        }
+        const existingChanges = await storage.getMonitorChanges(monitor.id);
+        const isFirstChange = existingChanges.length <= 1;
+        await processChangeNotification(monitor, change, isFirstChange);
       }
 
       return { 

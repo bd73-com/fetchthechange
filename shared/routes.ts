@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertMonitorSchema, monitors, monitorChanges } from './schema';
+import { insertMonitorSchema, monitors, monitorChanges, notificationPreferences } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -25,6 +25,32 @@ export const contactFormSchema = z.object({
   subject: z.string().min(3, "Subject must be at least 3 characters").max(200, "Subject must be under 200 characters"),
   message: z.string().min(10, "Message must be at least 10 characters").max(5000, "Message must be under 5000 characters"),
 });
+
+const hhmmRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export const notificationPreferencesInputSchema = z.object({
+  quietHoursStart: z.string().regex(hhmmRegex, "Must be HH:MM format").nullable().optional(),
+  quietHoursEnd: z.string().regex(hhmmRegex, "Must be HH:MM format").nullable().optional(),
+  timezone: z.string().nullable().optional(),
+  digestMode: z.boolean().optional(),
+  sensitivityThreshold: z.number().int().min(0).max(10000).optional(),
+  notificationEmail: z.string().email("Must be a valid email").nullable().optional(),
+}).refine(
+  (data) => {
+    const hasStart = data.quietHoursStart != null;
+    const hasEnd = data.quietHoursEnd != null;
+    return hasStart === hasEnd;
+  },
+  { message: "Both quietHoursStart and quietHoursEnd must be set or both null" }
+).refine(
+  (data) => {
+    if (data.quietHoursStart != null && data.quietHoursEnd != null) {
+      return data.timezone != null && data.timezone !== "";
+    }
+    return true;
+  },
+  { message: "Timezone is required when quiet hours are set" }
+);
 
 export const api = {
   monitors: {
@@ -117,7 +143,38 @@ export const api = {
         404: errorSchemas.notFound,
         401: errorSchemas.unauthorized,
       }
-    }
+    },
+    notificationPreferences: {
+      get: {
+        method: 'GET' as const,
+        path: '/api/monitors/:id/notification-preferences',
+        responses: {
+          200: z.custom<typeof notificationPreferences.$inferSelect>(),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+        },
+      },
+      put: {
+        method: 'PUT' as const,
+        path: '/api/monitors/:id/notification-preferences',
+        input: notificationPreferencesInputSchema,
+        responses: {
+          200: z.custom<typeof notificationPreferences.$inferSelect>(),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+          422: errorSchemas.validation,
+        },
+      },
+      delete: {
+        method: 'DELETE' as const,
+        path: '/api/monitors/:id/notification-preferences',
+        responses: {
+          204: z.void(),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+        },
+      },
+    },
   },
   support: {
     contact: {

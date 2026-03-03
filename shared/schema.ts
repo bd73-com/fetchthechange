@@ -41,6 +41,8 @@ export const monitorsRelations = relations(monitors, ({ one, many }) => ({
     references: [users.id],
   }),
   changes: many(monitorChanges),
+  notificationPreferences: one(notificationPreferences),
+  notificationQueue: many(notificationQueue),
 }));
 
 export const monitorChangesRelations = relations(monitorChanges, ({ one }) => ({
@@ -199,6 +201,58 @@ export const insertCampaignSchema = createInsertSchema(campaigns).omit({
 export type Campaign = typeof campaigns.$inferSelect;
 export type InsertCampaign = z.infer<typeof insertCampaignSchema>;
 export type CampaignRecipient = typeof campaignRecipients.$inferSelect;
+
+export const notificationPreferences = pgTable("notification_preferences", {
+  id: serial("id").primaryKey(),
+  monitorId: integer("monitor_id").notNull().unique().references(() => monitors.id, { onDelete: "cascade" }),
+  quietHoursStart: text("quiet_hours_start"),
+  quietHoursEnd: text("quiet_hours_end"),
+  timezone: text("timezone"),
+  digestMode: boolean("digest_mode").default(false).notNull(),
+  sensitivityThreshold: integer("sensitivity_threshold").default(0).notNull(),
+  notificationEmail: text("notification_email"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  monitorIdx: index("notification_preferences_monitor_idx").on(table.monitorId),
+}));
+
+export const notificationQueue = pgTable("notification_queue", {
+  id: serial("id").primaryKey(),
+  monitorId: integer("monitor_id").notNull().references(() => monitors.id, { onDelete: "cascade" }),
+  changeId: integer("change_id").notNull().references(() => monitorChanges.id),
+  reason: text("reason").notNull(),
+  scheduledFor: timestamp("scheduled_for").notNull(),
+  delivered: boolean("delivered").default(false).notNull(),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  monitorIdx: index("notification_queue_monitor_idx").on(table.monitorId),
+  scheduledIdx: index("notification_queue_scheduled_idx").on(table.scheduledFor),
+  deliveredIdx: index("notification_queue_delivered_idx").on(table.delivered),
+}));
+
+export const notificationPreferencesRelations = relations(notificationPreferences, ({ one }) => ({
+  monitor: one(monitors, {
+    fields: [notificationPreferences.monitorId],
+    references: [monitors.id],
+  }),
+}));
+
+export const notificationQueueRelations = relations(notificationQueue, ({ one }) => ({
+  monitor: one(monitors, {
+    fields: [notificationQueue.monitorId],
+    references: [monitors.id],
+  }),
+  change: one(monitorChanges, {
+    fields: [notificationQueue.changeId],
+    references: [monitorChanges.id],
+  }),
+}));
+
+export type NotificationPreference = typeof notificationPreferences.$inferSelect;
+export type InsertNotificationPreference = typeof notificationPreferences.$inferInsert;
+export type NotificationQueueEntry = typeof notificationQueue.$inferSelect;
 
 export const insertMonitorSchema = createInsertSchema(monitors).omit({
   id: true,

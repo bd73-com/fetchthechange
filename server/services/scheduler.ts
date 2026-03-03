@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { storage } from "../storage";
 import { checkMonitor } from "./scraper";
+import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
@@ -67,6 +68,20 @@ export async function startScheduler() {
       }
     } catch (error) {
       await ErrorLogger.error("scheduler", "Scheduler iteration failed", error instanceof Error ? error : null);
+    }
+  });
+
+  // Process queued notifications (quiet hours + digest delivery) every minute
+  cron.schedule("*/1 * * * *", async () => {
+    try {
+      await processQueuedNotifications();
+    } catch (error) {
+      await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null);
+    }
+    try {
+      await processDigestCron();
+    } catch (error) {
+      await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null);
     }
   });
 
