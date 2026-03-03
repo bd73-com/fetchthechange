@@ -488,6 +488,25 @@ describe("sendNotificationEmail", () => {
       expect.objectContaining({ to: "custom@alerts.com" })
     );
   });
+
+  it("uses emailOverride parameter with highest priority", async () => {
+    vi.mocked(authStorage.getUser)
+      .mockResolvedValueOnce({
+        id: "user1", email: "user@example.com", tier: "free",
+        notificationEmail: null,
+      } as any)
+      .mockResolvedValueOnce({
+        id: "user1", email: "user@example.com", tier: "free",
+        notificationEmail: "custom@alerts.com",
+      } as any);
+
+    const result = await sendNotificationEmail(makeMonitor(), "old", "new", "override@test.com");
+
+    expect(result.success).toBe(true);
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "override@test.com" })
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -642,12 +661,9 @@ describe("sendDigestEmail", () => {
 
     expect(result.success).toBe(true);
     expect(result.id).toBe("email_digest");
-    expect(mockSend).toHaveBeenCalledWith(
-      expect.objectContaining({
-        subject: expect.stringContaining("Price Tracker"),
-        subject: expect.stringContaining("2 changes"),
-      })
-    );
+    const call = mockSend.mock.calls[0][0];
+    expect(call.subject).toContain("Price Tracker");
+    expect(call.subject).toContain("2 changes");
   });
 
   it("includes old and new values for each change in HTML", async () => {

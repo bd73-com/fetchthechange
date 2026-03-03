@@ -48,7 +48,12 @@ import {
   processChangeNotification,
   processDigestBatch,
   processQueuedNotifications,
+  processDigestCron,
+  getQuietHoursEndDate,
+  getNextDigestTime,
 } from "./notification";
+
+import { ErrorLogger } from "./logger";
 
 import type { Monitor, MonitorChange, NotificationPreference } from "@shared/schema";
 
@@ -475,5 +480,287 @@ describe("decision tree edge cases", () => {
     const result = await processChangeNotification(monitor, change, false);
     expect(result).toBeNull();
     expect(mockQueueNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe("getQuietHoursEndDate", () => {
+  it("returns now when quietHoursEnd is not set", () => {
+    const now = new Date("2024-01-15T10:00:00Z");
+    const prefs = makePrefs({ quietHoursEnd: null, timezone: "UTC" });
+    expect(getQuietHoursEndDate(prefs, now).getTime()).toBe(now.getTime());
+  });
+
+  it("returns now when timezone is not set", () => {
+    const now = new Date("2024-01-15T10:00:00Z");
+    const prefs = makePrefs({ quietHoursEnd: "08:00", timezone: null });
+    expect(getQuietHoursEndDate(prefs, now).getTime()).toBe(now.getTime());
+  });
+
+  it("returns end time later today when current time is before end (UTC)", () => {
+    // At 05:00 UTC, quiet hours end at 08:00 UTC → should return 08:00 today
+    const now = new Date("2024-01-15T05:00:00Z");
+    const prefs = makePrefs({ quietHoursEnd: "08:00", timezone: "UTC" });
+    const result = getQuietHoursEndDate(prefs, now);
+    expect(result.getUTCHours()).toBe(8);
+    expect(result.getUTCMinutes()).toBe(0);
+    expect(result.getUTCDate()).toBe(15);
+  });
+
+  it("returns end time tomorrow when current time is after end (UTC)", () => {
+    // At 10:00 UTC, quiet hours end at 08:00 → should return 08:00 tomorrow
+    const now = new Date("2024-01-15T10:00:00Z");
+    const prefs = makePrefs({ quietHoursEnd: "08:00", timezone: "UTC" });
+    const result = getQuietHoursEndDate(prefs, now);
+    expect(result.getUTCHours()).toBe(8);
+    expect(result.getUTCMinutes()).toBe(0);
+    expect(result.getUTCDate()).toBe(16);
+  });
+
+  it("handles non-UTC timezone", () => {
+    // 03:00 UTC = 22:00 EST (previous day). Quiet end = 08:00 EST = 13:00 UTC
+    const now = new Date("2024-01-15T03:00:00Z");
+    const prefs = makePrefs({ quietHoursEnd: "08:00", timezone: "America/New_York" });
+    const result = getQuietHoursEndDate(prefs, now);
+    // 08:00 EST = 13:00 UTC on Jan 15
+    expect(result.getUTCHours()).toBe(13);
+    expect(result.getUTCDate()).toBe(15);
+  });
+});
+
+describe("getNextDigestTime", () => {
+  it("returns 9 AM today (UTC) when current time is before 9 AM", () => {
+    const now = new Date("2024-01-15T05:00:00Z");
+    const result = getNextDigestTime("UTC", now);
+    expect(result.getUTCHours()).toBe(9);
+    expect(result.getUTCMinutes()).toBe(0);
+    expect(result.getUTCDate()).toBe(15);
+  });
+
+  it("returns 9 AM tomorrow (UTC) when current time is at or after 9 AM", () => {
+    const now = new Date("2024-01-15T14:00:00Z");
+    const result = getNextDigestTime("UTC", now);
+    expect(result.getUTCHours()).toBe(9);
+    expect(result.getUTCMinutes()).toBe(0);
+    expect(result.getUTCDate()).toBe(16);
+  });
+
+  it("returns 9 AM tomorrow when current hour is exactly 9", () => {
+    const now = new Date("2024-01-15T09:30:00Z");
+    const result = getNextDigestTime("UTC", now);
+    expect(result.getUTCDate()).toBe(16);
+  });
+
+  it("converts 9 AM in non-UTC timezone to correct UTC time", () => {
+    // 9 AM EST = 14:00 UTC. At 10:00 UTC (5 AM EST), digest should be today at 14:00 UTC
+    const now = new Date("2024-01-15T10:00:00Z");
+    const result = getNextDigestTime("America/New_York", now);
+    expect(result.getUTCHours()).toBe(14);
+    expect(result.getUTCDate()).toBe(15);
+  });
+});
+
+describe("processDigestBatch edge cases", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns null when queued changes can't be found in monitor changes", async () => {
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 999, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    // Return changes that don't include changeId 999
+    mockGetMonitorChanges.mockResolvedValue([makeChange({ id: 1 })]);
+
+    const monitor = makeMonitor();
+    const prefs = makePrefs({ digestMode: true });
+
+    const result = await processDigestBatch(monitor, prefs);
+    expect(result).toBeNull();
+    expect(mockSendDigestEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not mark entries as delivered when sendDigestEmail fails", async () => {
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChanges.mockResolvedValue([makeChange({ id: 10 })]);
+    mockSendDigestEmail.mockResolvedValueOnce({ success: false, error: "Rate limited" });
+
+    const monitor = makeMonitor();
+    const prefs = makePrefs({ digestMode: true });
+
+    const result = await processDigestBatch(monitor, prefs);
+    expect(result).toEqual({ success: false, error: "Rate limited" });
+    expect(mockMarkQueueEntriesDelivered).not.toHaveBeenCalled();
+  });
+});
+
+describe("processQueuedNotifications edge cases", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("marks entries as delivered when monitor has emailEnabled=false", async () => {
+    const entry = { id: 5, monitorId: 2, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetStaleQueueEntries.mockResolvedValueOnce([]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor({ id: 2, emailEnabled: false }));
+
+    await processQueuedNotifications();
+    expect(mockMarkQueueEntriesDelivered).toHaveBeenCalledWith([5]);
+    expect(mockSendNotificationEmail).not.toHaveBeenCalled();
+  });
+
+  it("marks entry as delivered when change no longer exists", async () => {
+    const entry = { id: 3, monitorId: 1, changeId: 999, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetStaleQueueEntries.mockResolvedValueOnce([]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    // Return changes that don't include changeId 999
+    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 1 })]);
+
+    await processQueuedNotifications();
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(3);
+    expect(mockSendNotificationEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not mark entry as delivered when email send fails", async () => {
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetStaleQueueEntries.mockResolvedValueOnce([]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
+    mockSendNotificationEmail.mockResolvedValueOnce({ success: false, error: "Rate limit" });
+
+    await processQueuedNotifications();
+    expect(mockSendNotificationEmail).toHaveBeenCalled();
+    expect(mockMarkQueueEntryDelivered).not.toHaveBeenCalled();
+  });
+
+  it("passes email override from preferences for queued notifications", async () => {
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetStaleQueueEntries.mockResolvedValueOnce([]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(
+      makePrefs({ notificationEmail: "override@test.com" })
+    );
+    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
+    mockSendNotificationEmail.mockResolvedValueOnce({ success: true });
+
+    await processQueuedNotifications();
+    expect(mockSendNotificationEmail).toHaveBeenCalledWith(
+      expect.any(Object), "$19.99", "$24.99", "override@test.com"
+    );
+  });
+
+  it("warns about stale queue entries older than 48 hours", async () => {
+    mockGetReadyQueueEntries.mockResolvedValueOnce([]);
+    const staleEntry = { id: 7, monitorId: 3, changeId: 5, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetStaleQueueEntries.mockResolvedValueOnce([staleEntry]);
+
+    await processQueuedNotifications();
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("older than 48 hours"),
+      expect.objectContaining({ notificationQueueId: 7, monitorId: 3 })
+    );
+  });
+
+  it("groups multiple entries by monitor and processes each", async () => {
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+      { id: 2, monitorId: 1, changeId: 11, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+    ];
+    mockGetReadyQueueEntries.mockResolvedValueOnce(entries);
+    mockGetStaleQueueEntries.mockResolvedValueOnce([]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChanges
+      .mockResolvedValueOnce([makeChange({ id: 10, oldValue: "$10", newValue: "$15" })])
+      .mockResolvedValueOnce([makeChange({ id: 11, oldValue: "$15", newValue: "$20" })]);
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+
+    await processQueuedNotifications();
+    expect(mockSendNotificationEmail).toHaveBeenCalledTimes(2);
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledTimes(2);
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(1);
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(2);
+  });
+
+  it("handles errors in individual monitor processing gracefully", async () => {
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetStaleQueueEntries.mockResolvedValueOnce([]);
+    mockGetMonitor.mockRejectedValueOnce(new Error("DB connection lost"));
+
+    await processQueuedNotifications();
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("Failed to process queued notifications"),
+      expect.any(Error),
+      expect.objectContaining({ monitorId: 1 })
+    );
+  });
+});
+
+describe("processDigestCron", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("does nothing when no digest preferences exist", async () => {
+    mockGetAllDigestMonitorPreferences.mockResolvedValueOnce([]);
+    await processDigestCron();
+    expect(mockGetMonitor).not.toHaveBeenCalled();
+  });
+
+  it("skips monitors that are not active", async () => {
+    mockGetAllDigestMonitorPreferences.mockResolvedValueOnce([
+      makePrefs({ monitorId: 1, digestMode: true, timezone: "UTC" }),
+    ]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor({ active: false }));
+
+    await processDigestCron();
+    expect(mockGetPendingDigestEntries).not.toHaveBeenCalled();
+  });
+
+  it("skips monitors that have emailEnabled=false", async () => {
+    mockGetAllDigestMonitorPreferences.mockResolvedValueOnce([
+      makePrefs({ monitorId: 1, digestMode: true, timezone: "UTC" }),
+    ]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor({ emailEnabled: false }));
+
+    await processDigestCron();
+    expect(mockGetPendingDigestEntries).not.toHaveBeenCalled();
+  });
+
+  it("skips monitors where monitor is not found", async () => {
+    mockGetAllDigestMonitorPreferences.mockResolvedValueOnce([
+      makePrefs({ monitorId: 99, digestMode: true, timezone: "UTC" }),
+    ]);
+    mockGetMonitor.mockResolvedValueOnce(undefined);
+
+    await processDigestCron();
+    expect(mockGetPendingDigestEntries).not.toHaveBeenCalled();
+  });
+
+  it("logs errors for individual monitor digest failures without crashing", async () => {
+    mockGetAllDigestMonitorPreferences.mockResolvedValueOnce([
+      makePrefs({ monitorId: 1, digestMode: true, timezone: "UTC" }),
+    ]);
+    mockGetMonitor.mockRejectedValueOnce(new Error("DB error"));
+
+    await processDigestCron();
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("Failed to process digest"),
+      expect.any(Error),
+      expect.objectContaining({ monitorId: 1 })
+    );
   });
 });
