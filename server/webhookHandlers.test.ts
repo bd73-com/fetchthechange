@@ -155,6 +155,55 @@ describe("WebhookHandlers.processWebhook", () => {
       "whsec_test_secret"
     );
   });
+
+  it("passes the verified event (not raw payload) to StripeSync.processEvent", async () => {
+    mockGetWebhookSecret.mockReturnValue("whsec_test_secret");
+
+    const verifiedEvent = {
+      id: "evt_verified",
+      type: "customer.subscription.updated",
+      data: { object: { customer: "cus_456" } },
+    };
+    const payload = Buffer.from("raw payload bytes");
+
+    const mockStripe = {
+      webhooks: {
+        constructEvent: vi.fn().mockReturnValue(verifiedEvent),
+      },
+    };
+    mockGetUncachableStripeClient.mockResolvedValue(mockStripe);
+
+    const mockProcessEvent = vi.fn().mockResolvedValue(undefined);
+    mockGetStripeSync.mockResolvedValue({
+      processEvent: mockProcessEvent,
+    });
+
+    await WebhookHandlers.processWebhook(payload, "sig_abc");
+
+    // processEvent must receive the verified event object, not the raw payload or signature
+    expect(mockProcessEvent).toHaveBeenCalledWith(verifiedEvent);
+    expect(mockProcessEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates errors thrown by StripeSync.processEvent", async () => {
+    mockGetWebhookSecret.mockReturnValue("whsec_test_secret");
+
+    const event = {
+      type: "invoice.payment_succeeded",
+      data: { object: {} },
+    };
+
+    mockGetUncachableStripeClient.mockResolvedValue({
+      webhooks: { constructEvent: vi.fn().mockReturnValue(event) },
+    });
+    mockGetStripeSync.mockResolvedValue({
+      processEvent: vi.fn().mockRejectedValue(new Error("DB connection failed")),
+    });
+
+    await expect(
+      WebhookHandlers.processWebhook(Buffer.from("{}"), "sig")
+    ).rejects.toThrow("DB connection failed");
+  });
 });
 
 describe("WebhookHandlers.handleStripeEvent", () => {
