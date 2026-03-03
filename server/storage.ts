@@ -1,7 +1,7 @@
-import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, type Monitor, type InsertMonitor, type MonitorChange } from "@shared/schema";
+import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry } from "@shared/schema";
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
-import { eq, desc, and, or, isNull, sql } from "drizzle-orm";
+import { eq, desc, and, or, isNull, lte, sql } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -51,6 +51,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteMonitor(id: number): Promise<void> {
+    await db.delete(notificationQueue).where(eq(notificationQueue.monitorId, id));
+    await db.delete(notificationPreferences).where(eq(notificationPreferences.monitorId, id));
     await db.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
     await db.delete(monitorMetrics).where(eq(monitorMetrics.monitorId, id));
     await db.delete(browserlessUsage).where(eq(browserlessUsage.monitorId, id));
@@ -76,6 +78,86 @@ export class DatabaseStorage implements IStorage {
 
   async getAllActiveMonitors(): Promise<Monitor[]> {
     return await db.select().from(monitors).where(eq(monitors.active, true));
+  }
+
+  async getNotificationPreferences(monitorId: number): Promise<NotificationPreference | undefined> {
+    const [prefs] = await db.select().from(notificationPreferences).where(eq(notificationPreferences.monitorId, monitorId));
+    return prefs;
+  }
+
+  async upsertNotificationPreferences(monitorId: number, data: Partial<Omit<NotificationPreference, "id" | "monitorId" | "createdAt" | "updatedAt">>): Promise<NotificationPreference> {
+    const [result] = await db.insert(notificationPreferences)
+      .values({ monitorId, ...data })
+      .onConflictDoUpdate({
+        target: notificationPreferences.monitorId,
+        set: { ...data, updatedAt: new Date() },
+      })
+      .returning();
+    return result;
+  }
+
+  async deleteNotificationPreferences(monitorId: number): Promise<void> {
+    await db.delete(notificationPreferences).where(eq(notificationPreferences.monitorId, monitorId));
+  }
+
+  async queueNotification(monitorId: number, changeId: number, reason: string, scheduledFor: Date): Promise<NotificationQueueEntry> {
+    const [entry] = await db.insert(notificationQueue)
+      .values({ monitorId, changeId, reason, scheduledFor })
+      .returning();
+    return entry;
+  }
+
+  async getUndeliveredQueueEntries(monitorId: number): Promise<NotificationQueueEntry[]> {
+    return await db.select().from(notificationQueue)
+      .where(and(
+        eq(notificationQueue.monitorId, monitorId),
+        eq(notificationQueue.delivered, false)
+      ))
+      .orderBy(notificationQueue.createdAt);
+  }
+
+  async getPendingDigestEntries(monitorId: number): Promise<NotificationQueueEntry[]> {
+    return await db.select().from(notificationQueue)
+      .where(and(
+        eq(notificationQueue.monitorId, monitorId),
+        eq(notificationQueue.reason, "digest"),
+        eq(notificationQueue.delivered, false)
+      ))
+      .orderBy(notificationQueue.createdAt);
+  }
+
+  async getReadyQueueEntries(before: Date): Promise<NotificationQueueEntry[]> {
+    return await db.select().from(notificationQueue)
+      .where(and(
+        eq(notificationQueue.delivered, false),
+        lte(notificationQueue.scheduledFor, before)
+      ))
+      .orderBy(notificationQueue.scheduledFor);
+  }
+
+  async markQueueEntryDelivered(id: number): Promise<void> {
+    await db.update(notificationQueue)
+      .set({ delivered: true, deliveredAt: new Date() })
+      .where(eq(notificationQueue.id, id));
+  }
+
+  async markQueueEntriesDelivered(ids: number[]): Promise<void> {
+    for (const id of ids) {
+      await this.markQueueEntryDelivered(id);
+    }
+  }
+
+  async getStaleQueueEntries(olderThan: Date): Promise<NotificationQueueEntry[]> {
+    return await db.select().from(notificationQueue)
+      .where(and(
+        eq(notificationQueue.delivered, false),
+        lte(notificationQueue.createdAt, olderThan)
+      ));
+  }
+
+  async getAllDigestMonitorPreferences(): Promise<NotificationPreference[]> {
+    return await db.select().from(notificationPreferences)
+      .where(eq(notificationPreferences.digestMode, true));
   }
 
   async cleanupPollutedValues(): Promise<number> {

@@ -5,8 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle } from "lucide-react";
+import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon } from "lucide-react";
 import { useUpdateMonitor, useMonitorHistory } from "@/hooks/use-monitors";
+import { useNotificationPreferences } from "@/hooks/use-notification-preferences";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { useForm } from "react-hook-form";
@@ -20,6 +21,7 @@ interface MonitorCardProps {
 export function MonitorCard({ monitor }: MonitorCardProps) {
   const { mutate: update } = useUpdateMonitor();
   const { data: history } = useMonitorHistory(monitor.id);
+  const { data: prefs } = useNotificationPreferences(monitor.id);
   const [isEditing, setIsEditing] = useState(false);
 
   const lastChange = history?.[0];
@@ -167,6 +169,16 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
            {monitor.emailEnabled && (
              <span title="Email alerts enabled">
                <Bell className="h-4 w-4 text-primary opacity-50" />
+             </span>
+           )}
+           {prefs?.quietHoursStart && prefs?.quietHoursEnd && (
+             <span title={`Quiet hours: ${prefs.quietHoursStart} - ${prefs.quietHoursEnd}`}>
+               <Moon className="h-4 w-4 text-muted-foreground opacity-50" />
+             </span>
+           )}
+           {prefs?.digestMode && (
+             <span title="Daily digest enabled">
+               <Inbox className="h-4 w-4 text-muted-foreground opacity-50" />
              </span>
            )}
           <Switch checked={monitor.active} onCheckedChange={toggleActive} />
