@@ -178,6 +178,9 @@ export function CreateMonitorDialog() {
                 )}
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              After creating your monitor, you can configure quiet hours, daily digests, and sensitivity thresholds from the monitor details page.
+            </p>
             <DialogFooter className="pt-4">
               <Button
                 type="button"

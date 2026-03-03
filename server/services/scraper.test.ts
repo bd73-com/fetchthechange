@@ -4,7 +4,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("../storage", () => ({
   storage: {
     updateMonitor: vi.fn().mockResolvedValue({}),
-    addMonitorChange: vi.fn().mockResolvedValue({}),
+    addMonitorChange: vi.fn().mockResolvedValue({ id: 1, monitorId: 1, oldValue: null, newValue: null, detectedAt: new Date() }),
+    getMonitorChanges: vi.fn().mockResolvedValue([]),
     getUser: vi.fn().mockResolvedValue({ id: "user1", tier: "free" }),
   },
 }));
@@ -12,6 +13,10 @@ vi.mock("../storage", () => ({
 vi.mock("./email", () => ({
   sendNotificationEmail: vi.fn().mockResolvedValue({ success: true }),
   sendAutoPauseEmail: vi.fn().mockResolvedValue({ success: true }),
+}));
+
+vi.mock("./notification", () => ({
+  processChangeNotification: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 vi.mock("./logger", () => ({
@@ -74,6 +79,7 @@ import {
 } from "./scraper";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
+import { processChangeNotification } from "./notification";
 import { db } from "../db";
 import type { Monitor } from "@shared/schema";
 
@@ -889,9 +895,10 @@ describe("checkMonitor", () => {
   const mockStorage = storage as unknown as {
     updateMonitor: ReturnType<typeof vi.fn>;
     addMonitorChange: ReturnType<typeof vi.fn>;
+    getMonitorChanges: ReturnType<typeof vi.fn>;
     getUser: ReturnType<typeof vi.fn>;
   };
-  const mockSendEmail = sendNotificationEmail as ReturnType<typeof vi.fn>;
+  const mockProcessNotification = processChangeNotification as ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -945,7 +952,7 @@ describe("checkMonitor", () => {
     expect(mockStorage.addMonitorChange).toHaveBeenCalledWith(1, "$19.99", "$24.99");
   });
 
-  it("sends email notification when value changes and emailEnabled is true", async () => {
+  it("processes notification when value changes and emailEnabled is true", async () => {
     const html = `<html><body><span class="price">$24.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
@@ -954,10 +961,14 @@ describe("checkMonitor", () => {
     const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: true });
     await runWithTimers(monitor);
 
-    expect(mockSendEmail).toHaveBeenCalledWith(monitor, "$19.99", "$24.99");
+    expect(mockProcessNotification).toHaveBeenCalledWith(
+      monitor,
+      expect.objectContaining({ monitorId: 1 }),
+      true
+    );
   });
 
-  it("does NOT send email when emailEnabled is false", async () => {
+  it("calls processChangeNotification even when emailEnabled is false (decision is internal)", async () => {
     const html = `<html><body><span class="price">$24.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
@@ -966,10 +977,11 @@ describe("checkMonitor", () => {
     const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: false });
     await runWithTimers(monitor);
 
-    expect(mockSendEmail).not.toHaveBeenCalled();
+    // processChangeNotification is called but returns null internally because emailEnabled is false
+    expect(mockProcessNotification).toHaveBeenCalled();
   });
 
-  it("does NOT send email when value has not changed", async () => {
+  it("does NOT process notification when value has not changed", async () => {
     const html = `<html><body><span class="price">$19.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(html, { status: 200 })
@@ -978,7 +990,7 @@ describe("checkMonitor", () => {
     const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: true });
     await runWithTimers(monitor);
 
-    expect(mockSendEmail).not.toHaveBeenCalled();
+    expect(mockProcessNotification).not.toHaveBeenCalled();
   });
 
   it("returns selector_missing when selector matches nothing on an unblocked page", async () => {

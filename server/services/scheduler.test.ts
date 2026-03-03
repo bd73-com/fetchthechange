@@ -28,6 +28,11 @@ vi.mock("./scraper", () => ({
   checkMonitor: (...args: any[]) => mockCheckMonitor(...args),
 }));
 
+vi.mock("./notification", () => ({
+  processQueuedNotifications: vi.fn().mockResolvedValue(undefined),
+  processDigestCron: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("./logger", () => ({
   ErrorLogger: {
     error: vi.fn().mockResolvedValue(undefined),
@@ -95,9 +100,10 @@ describe("startScheduler", () => {
     expect(mockCleanupPollutedValues).toHaveBeenCalledOnce();
   });
 
-  it("registers both cron schedules (every-minute and daily cleanup)", async () => {
+  it("registers all cron schedules (every-minute, notification queue, and daily cleanup)", async () => {
     await startScheduler();
     expect(cronCallbacks["* * * * *"]).toBeDefined();
+    expect(cronCallbacks["*/1 * * * *"]).toBeDefined();
     expect(cronCallbacks["0 3 * * *"]).toBeDefined();
   });
 

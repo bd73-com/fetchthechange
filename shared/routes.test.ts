@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { api, buildUrl } from "./routes";
+import { api, buildUrl, notificationPreferencesInputSchema } from "./routes";
 
 describe("buildUrl", () => {
   it("replaces a single :param placeholder", () => {
@@ -175,5 +175,153 @@ describe("api route definitions", () => {
       });
       expect(result.success).toBe(true);
     });
+  });
+
+  describe("notificationPreferences route definitions", () => {
+    it("defines get as GET /api/monitors/:id/notification-preferences", () => {
+      expect(api.monitors.notificationPreferences.get.method).toBe("GET");
+      expect(api.monitors.notificationPreferences.get.path).toBe("/api/monitors/:id/notification-preferences");
+    });
+
+    it("defines put as PUT /api/monitors/:id/notification-preferences", () => {
+      expect(api.monitors.notificationPreferences.put.method).toBe("PUT");
+      expect(api.monitors.notificationPreferences.put.path).toBe("/api/monitors/:id/notification-preferences");
+    });
+
+    it("defines delete as DELETE /api/monitors/:id/notification-preferences", () => {
+      expect(api.monitors.notificationPreferences.delete.method).toBe("DELETE");
+      expect(api.monitors.notificationPreferences.delete.path).toBe("/api/monitors/:id/notification-preferences");
+    });
+  });
+});
+
+describe("notificationPreferencesInputSchema", () => {
+  it("accepts valid input with all fields", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      quietHoursStart: "22:00",
+      quietHoursEnd: "08:00",
+      timezone: "America/New_York",
+      digestMode: true,
+      sensitivityThreshold: 50,
+      notificationEmail: "test@example.com",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts empty object (all fields optional)", () => {
+    const result = notificationPreferencesInputSchema.safeParse({});
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts null quiet hours (both null)", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      quietHoursStart: null,
+      quietHoursEnd: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects quietHoursStart without quietHoursEnd", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      quietHoursStart: "22:00",
+      quietHoursEnd: null,
+      timezone: "UTC",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects quietHoursEnd without quietHoursStart", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      quietHoursStart: null,
+      quietHoursEnd: "08:00",
+      timezone: "UTC",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects quiet hours without timezone", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      quietHoursStart: "22:00",
+      quietHoursEnd: "08:00",
+      timezone: null,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects quiet hours with empty timezone string", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      quietHoursStart: "22:00",
+      quietHoursEnd: "08:00",
+      timezone: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid HH:MM format for quietHoursStart", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      quietHoursStart: "25:00",
+      quietHoursEnd: "08:00",
+      timezone: "UTC",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid HH:MM format for quietHoursEnd", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      quietHoursStart: "22:00",
+      quietHoursEnd: "8:00",
+      timezone: "UTC",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects sensitivityThreshold below 0", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      sensitivityThreshold: -1,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects sensitivityThreshold above 10000", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      sensitivityThreshold: 10001,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects non-integer sensitivityThreshold", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      sensitivityThreshold: 5.5,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects invalid email format for notificationEmail", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      notificationEmail: "not-an-email",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts null notificationEmail", () => {
+    const result = notificationPreferencesInputSchema.safeParse({
+      notificationEmail: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts boundary values for sensitivityThreshold", () => {
+    expect(notificationPreferencesInputSchema.safeParse({ sensitivityThreshold: 0 }).success).toBe(true);
+    expect(notificationPreferencesInputSchema.safeParse({ sensitivityThreshold: 10000 }).success).toBe(true);
+  });
+
+  it("accepts digestMode as boolean", () => {
+    expect(notificationPreferencesInputSchema.safeParse({ digestMode: true }).success).toBe(true);
+    expect(notificationPreferencesInputSchema.safeParse({ digestMode: false }).success).toBe(true);
+  });
+
+  it("rejects digestMode as non-boolean", () => {
+    const result = notificationPreferencesInputSchema.safeParse({ digestMode: "yes" });
+    expect(result.success).toBe(false);
   });
 });

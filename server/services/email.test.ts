@@ -44,12 +44,12 @@ vi.mock("drizzle-orm", () => ({
   sql: (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
 }));
 
-import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
+import { sendNotificationEmail, sendAutoPauseEmail, sendDigestEmail } from "./email";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { ResendUsageTracker } from "./resendTracker";
 import { ErrorLogger } from "./logger";
 import { db } from "../db";
-import type { Monitor } from "@shared/schema";
+import type { Monitor, MonitorChange } from "@shared/schema";
 
 function makeMonitor(overrides: Partial<Monitor> = {}): Monitor {
   return {
@@ -488,6 +488,25 @@ describe("sendNotificationEmail", () => {
       expect.objectContaining({ to: "custom@alerts.com" })
     );
   });
+
+  it("uses emailOverride parameter with highest priority", async () => {
+    vi.mocked(authStorage.getUser)
+      .mockResolvedValueOnce({
+        id: "user1", email: "user@example.com", tier: "free",
+        notificationEmail: null,
+      } as any)
+      .mockResolvedValueOnce({
+        id: "user1", email: "user@example.com", tier: "free",
+        notificationEmail: "custom@alerts.com",
+      } as any);
+
+    const result = await sendNotificationEmail(makeMonitor(), "old", "new", "override@test.com");
+
+    expect(result.success).toBe(true);
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "override@test.com" })
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -588,5 +607,145 @@ describe("sendAutoPauseEmail edge cases", () => {
     const call = mockSend.mock.calls[0][0];
     // sanitizePlainText replaces \r\n with space
     expect(call.text).not.toMatch(/\r\n.*line2/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sendDigestEmail
+// ---------------------------------------------------------------------------
+describe("sendDigestEmail", () => {
+  const originalResendKey = process.env.RESEND_API_KEY;
+  const mockDb = db as unknown as { execute: ReturnType<typeof vi.fn> };
+
+  function makeChange(overrides: Partial<MonitorChange> = {}): MonitorChange {
+    return {
+      id: 1,
+      monitorId: 1,
+      oldValue: "$10.00",
+      newValue: "$15.00",
+      detectedAt: new Date("2024-01-15T10:00:00Z"),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.RESEND_API_KEY = "re_test_key";
+    mockSend.mockResolvedValue({ data: { id: "email_digest" }, error: null });
+    mockDb.execute.mockResolvedValue({ rows: [{ count: 0 }] });
+  });
+
+  afterEach(() => {
+    if (originalResendKey !== undefined) {
+      process.env.RESEND_API_KEY = originalResendKey;
+    } else {
+      delete process.env.RESEND_API_KEY;
+    }
+  });
+
+  it("returns error when no changes are provided", async () => {
+    const result = await sendDigestEmail(makeMonitor(), []);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("No changes to include in digest");
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("sends digest email with multiple changes", async () => {
+    const changes = [
+      makeChange({ id: 1, oldValue: "$10", newValue: "$15", detectedAt: new Date("2024-01-15T10:00:00Z") }),
+      makeChange({ id: 2, oldValue: "$15", newValue: "$20", detectedAt: new Date("2024-01-15T14:00:00Z") }),
+    ];
+
+    const monitor = makeMonitor({ name: "Price Tracker" });
+    const result = await sendDigestEmail(monitor, changes);
+
+    expect(result.success).toBe(true);
+    expect(result.id).toBe("email_digest");
+    const call = mockSend.mock.calls[0][0];
+    expect(call.subject).toContain("Price Tracker");
+    expect(call.subject).toContain("2 changes");
+  });
+
+  it("includes old and new values for each change in HTML", async () => {
+    const changes = [
+      makeChange({ oldValue: "$10", newValue: "$15" }),
+      makeChange({ oldValue: "$15", newValue: "$20" }),
+    ];
+
+    await sendDigestEmail(makeMonitor(), changes);
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.html).toContain("$10");
+    expect(call.html).toContain("$15");
+    expect(call.html).toContain("$20");
+  });
+
+  it("includes old and new values for each change in plain text", async () => {
+    const changes = [
+      makeChange({ oldValue: "$10", newValue: "$15" }),
+    ];
+
+    await sendDigestEmail(makeMonitor(), changes);
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).toContain("$10");
+    expect(call.text).toContain("$15");
+  });
+
+  it("escapes HTML in change values", async () => {
+    const changes = [
+      makeChange({ oldValue: '<script>evil()</script>', newValue: '<img onerror="hack()">' }),
+    ];
+
+    await sendDigestEmail(makeMonitor(), changes);
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.html).not.toContain("<script>");
+    expect(call.html).toContain("&lt;script&gt;");
+  });
+
+  it("uses email override when provided", async () => {
+    const changes = [makeChange()];
+    await sendDigestEmail(makeMonitor(), changes, "custom@alerts.com");
+
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "custom@alerts.com" })
+    );
+  });
+
+  it("returns early when RESEND_API_KEY is not set", async () => {
+    delete process.env.RESEND_API_KEY;
+
+    const result = await sendDigestEmail(makeMonitor(), [makeChange()]);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("RESEND_API_KEY not configured");
+  });
+
+  it("returns early when Resend cap is reached", async () => {
+    vi.mocked(ResendUsageTracker.canSendEmail).mockResolvedValueOnce({
+      allowed: false,
+      reason: "Cap reached",
+    });
+
+    const result = await sendDigestEmail(makeMonitor(), [makeChange()]);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Cap reached");
+  });
+
+  it("singular change uses correct grammar in subject", async () => {
+    const changes = [makeChange()];
+    await sendDigestEmail(makeMonitor({ name: "Single" }), changes);
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.subject).toContain("1 change)");
+  });
+
+  it("records usage on successful send", async () => {
+    const changes = [makeChange()];
+    await sendDigestEmail(makeMonitor(), changes);
+
+    expect(ResendUsageTracker.recordUsage).toHaveBeenCalledWith(
+      "user1", 1, "user@example.com", "email_digest", true
+    );
   });
 });
