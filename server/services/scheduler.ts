@@ -10,6 +10,16 @@ const MAX_CONCURRENT_CHECKS = 10;
 const ACCELERATED_RETRY_MS = 5 * 60 * 1000; // 5 minutes
 let activeChecks = 0;
 
+async function notificationTablesExist(): Promise<boolean> {
+  try {
+    await db.execute(sql`SELECT 1 FROM notification_preferences LIMIT 0`);
+    await db.execute(sql`SELECT 1 FROM notification_queue LIMIT 0`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]) {
   if (activeChecks >= MAX_CONCURRENT_CHECKS) {
     console.debug(`[Scheduler] Concurrency limit reached, deferring monitor ${monitor.id}`);
@@ -80,23 +90,29 @@ export async function startScheduler() {
     }
   });
 
-  // Process queued notifications (quiet hours + digest delivery) every minute
-  cron.schedule("*/1 * * * *", async () => {
-    try {
-      await processQueuedNotifications();
-    } catch (error) {
-      await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
-    }
-    try {
-      await processDigestCron();
-    } catch (error) {
-      await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
+  // Process queued notifications (quiet hours + digest delivery) every minute,
+  // but only if the notification tables have been migrated
+  const hasNotificationTables = await notificationTablesExist();
+  if (!hasNotificationTables) {
+    console.warn("[Scheduler] Notification tables (notification_preferences, notification_queue) do not exist yet — skipping notification cron. Run `npm run schema:push` to create them.");
+  } else {
+    cron.schedule("*/1 * * * *", async () => {
+      try {
+        await processQueuedNotifications();
+      } catch (error) {
+        await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null, {
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+      try {
+        await processDigestCron();
+      } catch (error) {
+        await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null, {
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+  }
 
   // Daily cleanup: prune monitor_metrics older than 90 days to prevent unbounded growth
   cron.schedule("0 3 * * *", async () => {
