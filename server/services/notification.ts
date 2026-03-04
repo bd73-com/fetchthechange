@@ -150,7 +150,12 @@ export async function processChangeNotification(
     return null;
   }
 
-  const prefs = await storage.getNotificationPreferences(monitor.id);
+  let prefs: NotificationPreference | undefined;
+  try {
+    prefs = await storage.getNotificationPreferences(monitor.id);
+  } catch {
+    // Notification tables may not be migrated yet — fall through to send immediate email
+  }
 
   if (!prefs) {
     return await sendNotificationEmail(monitor, change.oldValue, change.newValue);
