@@ -17,6 +17,7 @@ See `README.md` for project overview, tech stack, structure, and setup.
 - **API patterns**: Express routes in `server/routes.ts`. JSON responses with `{ message, code }` for errors.
 - **Authentication**: Replit Auth with OpenID Connect via Passport.
 - **Database**: PostgreSQL with Drizzle ORM. Schema in `shared/schema.ts` and `shared/models/auth.ts`.
+- **Release labels**: PRs should carry one of: `feature`, `fix`, `breaking`, `chore`, `docs`, `security`. Auto-applied from PR title by release-drafter, but verify before merging.
 
 ## Verification
 - `npm run check` — TypeScript type checking (tsc)
