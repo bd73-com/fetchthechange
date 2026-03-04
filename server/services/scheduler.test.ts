@@ -198,7 +198,12 @@ describe("startScheduler", () => {
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
       "Scheduler iteration failed",
-      expect.any(Error)
+      expect.any(Error),
+      expect.objectContaining({
+        errorMessage: "DB down",
+        activeChecks: 0,
+        phase: "fetching active monitors",
+      })
     );
   });
 });
@@ -431,7 +436,12 @@ describe("daily metrics cleanup", () => {
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
       "monitor_metrics cleanup failed",
-      expect.any(Error)
+      expect.any(Error),
+      expect.objectContaining({
+        errorMessage: "DB timeout",
+        retentionDays: 90,
+        table: "monitor_metrics",
+      })
     );
   });
 });
@@ -473,7 +483,10 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
       "Queued notification processing failed",
-      expect.any(Error)
+      expect.any(Error),
+      expect.objectContaining({
+        errorMessage: "Queue DB error",
+      })
     );
     expect(mockProcessDigestCron).toHaveBeenCalledOnce();
   });
@@ -487,7 +500,10 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
       "Digest processing failed",
-      expect.any(Error)
+      expect.any(Error),
+      expect.objectContaining({
+        errorMessage: "Digest error",
+      })
     );
   });
 
@@ -502,12 +518,18 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
       "Queued notification processing failed",
-      expect.any(Error)
+      expect.any(Error),
+      expect.objectContaining({
+        errorMessage: "Queue error",
+      })
     );
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
       "Digest processing failed",
-      expect.any(Error)
+      expect.any(Error),
+      expect.objectContaining({
+        errorMessage: "Digest error",
+      })
     );
   });
 });
