@@ -4015,6 +4015,7 @@ describe("checkMonitor outer catch resilience", () => {
 describe("classifyHttpStatus", () => {
   it("classifies 401 as permanent with authentication message", () => {
     const result = classifyHttpStatus(401);
+    expect(result.status).toBe(401);
     expect(result.message).toContain("HTTP 401");
     expect(result.message).toContain("authentication");
     expect(result.transient).toBe(false);
@@ -4186,5 +4187,27 @@ describe("checkMonitor HTTP status handling", () => {
     const result = classifyOuterError(new Error("Access denied by the target site (HTTP 403)"));
     expect(result.logContext).toBe("http status error");
     expect(result.userMessage).toContain("HTTP 403");
+  });
+
+  it("uses retry status when transient error becomes permanent (503 -> 404)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("<html>Error</html>", { status: 503 }))
+      .mockResolvedValueOnce(new Response("<html>Not Found</html>", { status: 404 }));
+
+    const result = await runWithTimers(makeMonitor());
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("HTTP 404");
+  });
+
+  it("treats retry 200-without-match as selector_missing, not stale HTTP error", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("<html>Error</html>", { status: 503 }))
+      .mockResolvedValueOnce(new Response("<html><body><p>No match</p></body></html>", { status: 200 }));
+
+    const result = await runWithTimers(makeMonitor({ selector: ".missing" }));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found");
   });
 });

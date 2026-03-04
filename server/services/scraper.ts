@@ -51,20 +51,30 @@ export function validateCssSelector(selector: string): string | null {
  * browserless/retry) or permanent (should skip retries).
  */
 export function classifyHttpStatus(status: number): {
+  status: number;
   message: string;
   transient: boolean;
 } {
-  if (status === 401) return { message: "Access denied by the target site (HTTP 401). The page may require authentication", transient: false };
-  if (status === 403) return { message: "Access denied by the target site (HTTP 403)", transient: false };
-  if (status === 404) return { message: "Page not found (HTTP 404). Check that the URL is correct", transient: false };
-  if (status === 410) return { message: "Page no longer exists (HTTP 410)", transient: false };
-  if (status === 429) return { message: "Rate limited by the target site (HTTP 429)", transient: true };
-  if (status >= 400 && status < 500) return { message: `Target site rejected the request (HTTP ${status})`, transient: false };
-  if (status === 502) return { message: "Target site is temporarily unavailable (HTTP 502)", transient: true };
-  if (status === 503) return { message: "Target site is temporarily unavailable (HTTP 503)", transient: true };
-  if (status === 504) return { message: "Target site took too long to respond (HTTP 504)", transient: true };
-  if (status >= 500) return { message: `Target site returned a server error (HTTP ${status})`, transient: true };
-  return { message: `Unexpected HTTP status ${status}`, transient: false };
+  if (status === 401) return { status, message: "Access denied by the target site (HTTP 401). The page may require authentication", transient: false };
+  if (status === 403) return { status, message: "Access denied by the target site (HTTP 403)", transient: false };
+  if (status === 404) return { status, message: "Page not found (HTTP 404). Check that the URL is correct", transient: false };
+  if (status === 410) return { status, message: "Page no longer exists (HTTP 410)", transient: false };
+  if (status === 429) return { status, message: "Rate limited by the target site (HTTP 429)", transient: true };
+  if (status >= 400 && status < 500) return { status, message: `Target site rejected the request (HTTP ${status})`, transient: false };
+  if (status === 502) return { status, message: "Target site is temporarily unavailable (HTTP 502)", transient: true };
+  if (status === 503) return { status, message: "Target site is temporarily unavailable (HTTP 503)", transient: true };
+  if (status === 504) return { status, message: "Target site took too long to respond (HTTP 504)", transient: true };
+  if (status >= 500) return { status, message: `Target site returned a server error (HTTP ${status})`, transient: true };
+  return { status, message: `Unexpected HTTP status ${status}`, transient: false };
+}
+
+/**
+ * Extracts an HTTP status code from an error message string.
+ * Returns null if no HTTP status code pattern is found.
+ */
+function extractHttpStatus(message: string): number | null {
+  const match = message.match(/\bHTTP\s+([45]\d{2})\b/i);
+  return match ? Number(match[1]) : null;
 }
 
 /**
@@ -81,7 +91,8 @@ function sanitizeErrorForClient(raw: string): string {
   if (/SSRF blocked/i.test(raw)) return "URL is not allowed";
   if (/certificate|ssl|tls/i.test(raw)) return "SSL/TLS error connecting to the target site";
   if (/UND_ERR_HEADERS_OVERFLOW/i.test(raw)) return "Response headers from the target site were too large";
-  if (/HTTP\s+[45]\d\d/i.test(raw)) return raw;
+  const httpStatus = extractHttpStatus(raw);
+  if (httpStatus !== null) return classifyHttpStatus(httpStatus).message;
   return "Failed to fetch page";
 }
 
@@ -111,8 +122,9 @@ export function classifyOuterError(error: unknown): { userMessage: string; logCo
   }
 
   // HTTP status errors (from classifyHttpStatus messages)
-  if (/HTTP\s+[45]\d\d/i.test(msg)) {
-    return { userMessage: msg, logContext: "http status error" };
+  const httpStatus = extractHttpStatus(msg);
+  if (httpStatus !== null) {
+    return { userMessage: classifyHttpStatus(httpStatus).message, logContext: "http status error" };
   }
 
   // Cheerio / parsing errors
@@ -482,7 +494,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     
     let html = "";
     let staticFetchError: string | null = null;
-    let httpStatusClassification: { message: string; transient: boolean } | null = null;
+    let httpStatusClassification: { status: number; message: string; transient: boolean } | null = null;
     try {
       const response = await ssrfSafeFetch(monitor.url, {
         headers: {
@@ -561,7 +573,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             signal: AbortSignal.timeout(20000)
           });
           if (!retryResponse.ok) {
-            console.log(`[Scraper] Monitor ${monitor.id}: retry also got HTTP ${retryResponse.status}`);
+            httpStatusClassification = classifyHttpStatus(retryResponse.status);
+            staticFetchError = httpStatusClassification.message;
+            console.log(`[Scraper] Monitor ${monitor.id}: retry also got HTTP ${retryResponse.status} — ${staticFetchError}`);
             retryHtml = "";
           } else {
             retryHtml = await retryResponse.text();
@@ -572,6 +586,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           }
         }
         if (retryHtml) {
+          html = retryHtml;
+          staticFetchError = null;
+          httpStatusClassification = null;
           const retryValue = extractValueFromHtml(retryHtml, monitor.selector);
           const retryBlock = detectPageBlockReason(retryHtml);
           const retryStatus = retryValue ? "ok" : (retryBlock.blocked ? "blocked" : "selector_missing");
@@ -579,9 +596,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           if (retryValue) {
             newValue = retryValue;
             block = retryBlock;
-            html = retryHtml;
-            staticFetchError = null;
-            httpStatusClassification = null;
             console.log(`Retry: succeeded on second attempt`);
           } else if (retryBlock.blocked) {
             block = retryBlock;
@@ -599,8 +613,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     // Skip browserless for permanent HTTP errors (404, 410) where rendering won't help,
     // but allow it for 403 (often bot detection that browserless can bypass).
     const isPermanentHttpError = httpStatusClassification && !httpStatusClassification.transient
-      && !httpStatusClassification.message.includes("HTTP 403")
-      && !httpStatusClassification.message.includes("HTTP 401");
+      && ![401, 403].includes(httpStatusClassification.status);
     let browserlessInfraFailure = false;
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN && !isPermanentHttpError) {
       // Circuit breaker: skip Browserless entirely when the service is known-down
