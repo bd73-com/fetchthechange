@@ -38,7 +38,7 @@ describe("notificationTablesExist", () => {
   });
 
   it("does not cache negative result — re-checks on next call", async () => {
-    mockExecute.mockRejectedValueOnce(new Error("missing table"));
+    mockExecute.mockRejectedValueOnce(new Error('relation "notification_preferences" does not exist'));
     expect(await notificationTablesExist()).toBe(false);
 
     mockExecute.mockResolvedValue([]);
@@ -50,5 +50,10 @@ describe("notificationTablesExist", () => {
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error('relation "notification_queue" does not exist'));
     expect(await notificationTablesExist()).toBe(false);
+  });
+
+  it("rethrows non-relation errors (connection, auth, timeout)", async () => {
+    mockExecute.mockRejectedValue(new Error("connection refused"));
+    await expect(notificationTablesExist()).rejects.toThrow("connection refused");
   });
 });

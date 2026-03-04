@@ -15,8 +15,9 @@ export async function notificationTablesExist(): Promise<boolean> {
     await db.execute(sql`SELECT 1 FROM notification_queue LIMIT 0`);
     tablesConfirmed = true;
     return true;
-  } catch {
-    return false;
+  } catch (error: any) {
+    if (error?.message?.includes("relation")) return false;
+    throw error;
   }
 }
 
