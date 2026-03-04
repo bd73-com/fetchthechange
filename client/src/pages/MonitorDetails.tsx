@@ -299,7 +299,17 @@ export default function MonitorDetails() {
                             ? "The CSS selector didn't match any elements on the page. The site may have changed its layout. Use \"Fix selector\" below to find a working selector."
                             : monitor.lastStatus === "blocked"
                             ? "The site is blocking automated access (CAPTCHA, rate limiting, or bot detection). Try checking again later."
-                            : "An error occurred while checking the page. Verify the URL is accessible and try again."}
+                            : monitor.lastError.includes("temporary server error") || monitor.lastError.includes("server error prevented saving")
+                            ? "This is a temporary issue on our end. The monitor will be retried automatically."
+                            : monitor.lastError.includes("SSL") || monitor.lastError.includes("TLS")
+                            ? "The site has an SSL certificate issue. Check that the URL is correct and the site's certificate is valid."
+                            : monitor.lastError.includes("resolve") || monitor.lastError.includes("hostname")
+                            ? "The domain could not be resolved. Check that the URL is spelled correctly."
+                            : monitor.lastError.includes("too long") || monitor.lastError.includes("timeout")
+                            ? "The page is taking too long to load. The site may be experiencing issues, or it may require JavaScript rendering."
+                            : monitor.lastError.includes("Could not connect")
+                            ? "The target site appears to be down or unreachable. Verify the URL is correct and the site is accessible."
+                            : "Verify the URL is accessible and the CSS selector matches content on the page. Try \"Fix selector\" below if the site layout changed."}
                         </p>
                       </div>
                     )}

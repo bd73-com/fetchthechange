@@ -61,6 +61,39 @@ function sanitizeErrorForClient(raw: string): string {
   return "Failed to fetch page";
 }
 
+/**
+ * Classifies errors caught by the outer checkMonitor catch block.
+ * Unlike sanitizeErrorForClient (which handles fetch errors specifically),
+ * this handles the full range of errors including DB and parsing failures.
+ */
+export function classifyOuterError(error: unknown): { userMessage: string; logContext: string } {
+  if (!(error instanceof Error)) {
+    return { userMessage: "An unexpected error occurred", logContext: "non-Error thrown" };
+  }
+
+  const msg = error.message;
+
+  // DB / storage errors (Drizzle, pg)
+  if (/relation|column|constraint|violates|duplicate key|deadlock|pg_|drizzle/i.test(msg)) {
+    return { userMessage: "A temporary server error occurred. The check will be retried automatically.", logContext: "database error" };
+  }
+  if (/ECONNREFUSED.*5432|connection.*postgres|connection.*database/i.test(msg)) {
+    return { userMessage: "A temporary server error occurred. The check will be retried automatically.", logContext: "database connection error" };
+  }
+
+  // Network errors — delegate to the existing fetch-error sanitizer
+  if (/abort|timeout|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|socket hang up|certificate|ssl|tls|SSRF|UND_ERR_HEADERS_OVERFLOW/i.test(msg)) {
+    return { userMessage: sanitizeErrorForClient(msg), logContext: "network error" };
+  }
+
+  // Cheerio / parsing errors
+  if (/cheerio|parse|SyntaxError|Unexpected token/i.test(msg)) {
+    return { userMessage: "Failed to parse the page content. The page structure may be incompatible.", logContext: "parsing error" };
+  }
+
+  return { userMessage: "Failed to fetch or parse the page. Verify the URL is accessible and the selector is correct.", logContext: "unclassified error" };
+}
+
 async function recordMetric(
   monitorId: number,
   stage: string,
@@ -690,35 +723,53 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     if (finalStatus === "ok") {
       const changed = newValue !== oldValue;
 
-      await storage.updateMonitor(monitor.id, {
-        lastChecked: new Date(),
-        currentValue: newValue,
-        lastStatus: finalStatus,
-        lastError: null,
-        consecutiveFailures: 0,
-      });
+      try {
+        await storage.updateMonitor(monitor.id, {
+          lastChecked: new Date(),
+          currentValue: newValue,
+          lastStatus: finalStatus,
+          lastError: null,
+          consecutiveFailures: 0,
+        });
 
-      if (changed) {
-        const change = await storage.addMonitorChange(monitor.id, oldValue, newValue);
-        await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
-        const existingChanges = await storage.getMonitorChanges(monitor.id);
-        const isFirstChange = existingChanges.length <= 1;
-        try {
-          await processChangeNotification(monitor, change, isFirstChange);
-        } catch (notificationError) {
-          console.error(`[Scraper] Notification failed for monitor ${monitor.id}, change still recorded:`, notificationError);
+        if (changed) {
+          const change = await storage.addMonitorChange(monitor.id, oldValue, newValue);
+          await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
+          const existingChanges = await storage.getMonitorChanges(monitor.id);
+          const isFirstChange = existingChanges.length <= 1;
+          try {
+            await processChangeNotification(monitor, change, isFirstChange);
+          } catch (notificationError) {
+            console.error(`[Scraper] Notification failed for monitor ${monitor.id}, change still recorded:`, notificationError);
+          }
         }
+      } catch (dbError) {
+        // The scrape succeeded but persisting the result failed.
+        // Log specifically so the user isn't confused by "Failed to fetch page".
+        await ErrorLogger.error("scraper", `"${monitor.name}" check succeeded but failed to save result`, dbError instanceof Error ? dbError : null, { monitorId: monitor.id, monitorName: monitor.name }).catch(() => {});
+
+        return {
+          changed,
+          currentValue: newValue,
+          previousValue: oldValue,
+          status: "ok" as const,
+          error: "Check succeeded but a server error prevented saving the result. It will be retried automatically."
+        };
       }
 
-      return { 
-        changed, 
+      return {
+        changed,
         currentValue: newValue,
         previousValue: oldValue,
         status: finalStatus,
         error: null
       };
     } else {
-      await handleMonitorFailure(monitor, finalStatus, finalError!, browserlessInfraFailure);
+      try {
+        await handleMonitorFailure(monitor, finalStatus, finalError!, browserlessInfraFailure);
+      } catch (failureErr) {
+        console.error(`[Scraper] handleMonitorFailure threw for monitor ${monitor.id}:`, failureErr);
+      }
 
       return {
         changed: false,
@@ -729,18 +780,27 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       };
     }
   } catch (error) {
-    await ErrorLogger.error("scraper", `"${monitor.name}" failed to check — the page could not be fetched or parsed. Verify the URL is accessible and the CSS selector is correct.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+    const { userMessage, logContext } = classifyOuterError(error);
 
-    const rawMsg = error instanceof Error ? error.message : "Unknown error";
-    const errorMsg = sanitizeErrorForClient(rawMsg);
-    await handleMonitorFailure(monitor, "error", errorMsg, false);
+    await ErrorLogger.error(
+      "scraper",
+      `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`,
+      error instanceof Error ? error : null,
+      { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }
+    ).catch(() => {});
+
+    try {
+      await handleMonitorFailure(monitor, "error", userMessage, false);
+    } catch (failureErr) {
+      console.error(`[Scraper] handleMonitorFailure threw in outer catch for monitor ${monitor.id}:`, failureErr);
+    }
 
     return {
       changed: false,
       currentValue: monitor.currentValue,
       previousValue: monitor.currentValue,
       status: "error" as const,
-      error: errorMsg
+      error: userMessage
     };
   }
 }

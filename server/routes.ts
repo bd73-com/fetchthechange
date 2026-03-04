@@ -38,28 +38,8 @@ import { isPrivateUrl, ssrfSafeFetch } from './utils/ssrf';
 // 1. CHECK MONITOR FUNCTION
 // ------------------------------------------------------------------
 async function checkMonitor(monitor: any) {
-  try {
-    console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
-
-    // Use the robust scraper service instead of broken Playwright setup
-    const result = await scraperCheckMonitor(monitor);
-
-    if (!result) {
-      throw new Error("Could not fetch value from page");
-    }
-
-    return {
-      changed: result.changed,
-      currentValue: result.currentValue,
-      previousValue: result.previousValue,
-      status: result.status,
-      error: result.error
-    };
-
-  } catch (error) {
-    console.error("Error in checkMonitor:", error);
-    throw error;
-  }
+  console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
+  return scraperCheckMonitor(monitor);
 }
 
 let softDeleteCleanupInterval: ReturnType<typeof setInterval> | null = null;
@@ -472,13 +452,18 @@ export async function registerRoutes(
   });
 
   app.post(api.monitors.check.path, isAuthenticated, checkMonitorRateLimiter, async (req: any, res) => {
-    const id = Number(req.params.id);
-    const existing = await storage.getMonitor(id);
-    if (!existing) return res.status(404).json({ message: "Not found" });
-    if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const id = Number(req.params.id);
+      const existing = await storage.getMonitor(id);
+      if (!existing) return res.status(404).json({ message: "Not found" });
+      if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
-    const result = await checkMonitor(existing);
-    res.json(result);
+      const result = await checkMonitor(existing);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[Check Monitor] Error:", error.message);
+      res.status(500).json({ message: "Server error while checking monitor" });
+    }
   });
 
   // ---------------------------------------------------------------

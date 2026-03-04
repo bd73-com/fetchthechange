@@ -87,6 +87,7 @@ import {
   validateCssSelector,
   discoverSelectors,
   monitorsNeedingRetry,
+  classifyOuterError,
 } from "./scraper";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
@@ -3781,5 +3782,228 @@ describe("self-healing recovery", () => {
     expect(result.status).toBe("selector_missing");
     expect(result.currentValue).toBe("$50.00");
     expect(result.error).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyOuterError
+// ---------------------------------------------------------------------------
+describe("classifyOuterError", () => {
+  it("classifies DB relation errors as server errors", () => {
+    const result = classifyOuterError(new Error('relation "monitors" does not exist'));
+    expect(result.logContext).toBe("database error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies DB constraint violations as server errors", () => {
+    const result = classifyOuterError(new Error("violates unique constraint"));
+    expect(result.logContext).toBe("database error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies DB connection errors", () => {
+    const result = classifyOuterError(new Error("ECONNREFUSED 127.0.0.1:5432"));
+    expect(result.logContext).toBe("database connection error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies network timeout errors", () => {
+    const result = classifyOuterError(new Error("The operation was aborted due to timeout"));
+    expect(result.logContext).toBe("network error");
+    expect(result.userMessage).toBe("Page took too long to respond");
+  });
+
+  it("classifies ENOTFOUND errors", () => {
+    const result = classifyOuterError(new Error("getaddrinfo ENOTFOUND example.com"));
+    expect(result.logContext).toBe("network error");
+    expect(result.userMessage).toBe("Could not resolve the target hostname");
+  });
+
+  it("classifies SSL/TLS errors", () => {
+    const result = classifyOuterError(new Error("unable to verify the first certificate"));
+    expect(result.logContext).toBe("network error");
+    expect(result.userMessage).toBe("SSL/TLS error connecting to the target site");
+  });
+
+  it("classifies cheerio parsing errors", () => {
+    const result = classifyOuterError(new Error("cheerio: unrecognized selector"));
+    expect(result.logContext).toBe("parsing error");
+    expect(result.userMessage).toContain("Failed to parse");
+  });
+
+  it("returns generic message for unknown errors", () => {
+    const result = classifyOuterError(new Error("something completely unexpected"));
+    expect(result.logContext).toBe("unclassified error");
+    expect(result.userMessage).toContain("Failed to fetch or parse");
+  });
+
+  it("handles non-Error thrown values", () => {
+    const result = classifyOuterError("string error");
+    expect(result.logContext).toBe("non-Error thrown");
+    expect(result.userMessage).toBe("An unexpected error occurred");
+  });
+
+  it("classifies deadlock errors as database errors", () => {
+    const result = classifyOuterError(new Error("deadlock detected"));
+    expect(result.logContext).toBe("database error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies drizzle errors as database errors", () => {
+    const result = classifyOuterError(new Error("DrizzleError: column not found"));
+    expect(result.logContext).toBe("database error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies postgres connection string as database connection error", () => {
+    const result = classifyOuterError(new Error("connection to postgres server refused"));
+    expect(result.logContext).toBe("database connection error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies ECONNRESET as network error", () => {
+    const result = classifyOuterError(new Error("read ECONNRESET"));
+    expect(result.logContext).toBe("network error");
+    expect(result.userMessage).toBe("Connection was reset by the target site");
+  });
+
+  it("classifies SSRF blocked errors as network error", () => {
+    const result = classifyOuterError(new Error("SSRF blocked: This URL resolves to a private address"));
+    expect(result.logContext).toBe("network error");
+    expect(result.userMessage).toBe("URL is not allowed");
+  });
+
+  it("classifies UND_ERR_HEADERS_OVERFLOW as network error", () => {
+    const result = classifyOuterError(new Error("UND_ERR_HEADERS_OVERFLOW"));
+    expect(result.logContext).toBe("network error");
+  });
+
+  it("classifies SyntaxError messages as parsing error", () => {
+    const result = classifyOuterError(new Error("SyntaxError: Unexpected token < in JSON"));
+    expect(result.logContext).toBe("parsing error");
+    expect(result.userMessage).toContain("Failed to parse");
+  });
+
+  it("classifies Unexpected token messages as parsing error", () => {
+    const result = classifyOuterError(new Error("Unexpected token } at position 42"));
+    expect(result.logContext).toBe("parsing error");
+    expect(result.userMessage).toContain("Failed to parse");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkMonitor — outer catch resilience
+// ---------------------------------------------------------------------------
+describe("checkMonitor outer catch resilience", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getMonitorChanges: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    await vi.advanceTimersByTimeAsync(3000);
+    return promise;
+  }
+
+  it("returns structured result when handleMonitorFailure throws in the failure path", async () => {
+    const html = `<html><body><p>No matching selector here</p></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(html, { status: 200 }));
+
+    // Make db.update throw to simulate handleMonitorFailure failing
+    const mockDb = db as any;
+    mockDb.update.mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockRejectedValue(new Error("DB connection lost")),
+        }),
+      }),
+    });
+
+    const monitor = makeMonitor({ selector: ".nonexistent" });
+    const result = await runWithTimers(monitor);
+
+    // Should still return a valid result object, not throw
+    expect(result).toBeDefined();
+    expect(result.status).toBe("selector_missing");
+  });
+
+  it("returns structured result when DB write fails in the success path", async () => {
+    const html = `<html><body><span class="price">$19.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    // Make storage.updateMonitor throw to simulate DB failure after successful extraction
+    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("connection terminated"));
+
+    const monitor = makeMonitor({ currentValue: "$19.99" });
+    const result = await runWithTimers(monitor);
+
+    // Should return ok status with a save-failure error message
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$19.99");
+    expect(result.error).toContain("server error prevented saving");
+  });
+
+  it("returns save-failure error when addMonitorChange throws in changed-value path", async () => {
+    const html = `<html><body><span class="price">$29.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    // updateMonitor succeeds but addMonitorChange throws
+    mockStorage.updateMonitor.mockResolvedValueOnce({});
+    mockStorage.addMonitorChange.mockRejectedValueOnce(new Error("duplicate key violates unique constraint"));
+
+    const monitor = makeMonitor({ currentValue: "$19.99" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(result.changed).toBe(true);
+    expect(result.currentValue).toBe("$29.99");
+    expect(result.error).toContain("server error prevented saving");
+  });
+
+  it("returns result even when ErrorLogger.error rejects in outer catch", async () => {
+    // Force an error that reaches the outer catch by making fetch throw unexpectedly
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("getaddrinfo ENOTFOUND bad.example.com"));
+
+    // Make ErrorLogger.error reject
+    const { ErrorLogger } = await import("./logger");
+    (ErrorLogger.error as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("logging DB down"));
+
+    const monitor = makeMonitor();
+    const result = await runWithTimers(monitor);
+
+    // Should still return a valid result thanks to .catch(() => {})
+    expect(result).toBeDefined();
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Could not resolve the target hostname");
+  });
+
+  it("returns classified error message from outer catch, not generic 'Failed to fetch page'", async () => {
+    // Make fetch reject with a network error that will reach the outer catch
+    // by having ssrfSafeFetch reject (goes through internal catch to set staticFetchError),
+    // then ensure the pipeline ultimately returns the classified error
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("getaddrinfo ENOTFOUND nonexistent.example.com"));
+
+    const monitor = makeMonitor();
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    // classifyOuterError (or sanitizeErrorForClient) should produce a specific message
+    expect(result.error).toBe("Could not resolve the target hostname");
+    // Must NOT be the old generic message
+    expect(result.error).not.toBe("Failed to fetch page");
   });
 });
