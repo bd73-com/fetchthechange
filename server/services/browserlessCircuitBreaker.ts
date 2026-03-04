@@ -22,6 +22,7 @@ export class BrowserlessCircuitBreaker {
   private state: CircuitState = "closed";
   private failures: number[] = []; // timestamps of recent infra failures
   private openedAt = 0;
+  private halfOpenProbeConsumed = false;
 
   /** Returns true if Browserless calls should proceed. */
   isAvailable(): boolean {
@@ -31,12 +32,15 @@ export class BrowserlessCircuitBreaker {
       // Check if cooldown has elapsed → transition to half_open
       if (Date.now() - this.openedAt >= COOLDOWN_MS) {
         this.state = "half_open";
-        return true; // allow one probe
+        this.halfOpenProbeConsumed = false;
+      } else {
+        return false;
       }
-      return false;
     }
 
-    // half_open: allow one probe
+    // half_open: allow exactly one probe until success/failure is recorded
+    if (this.halfOpenProbeConsumed) return false;
+    this.halfOpenProbeConsumed = true;
     return true;
   }
 
@@ -45,6 +49,7 @@ export class BrowserlessCircuitBreaker {
     this.state = "closed";
     this.failures = [];
     this.openedAt = 0;
+    this.halfOpenProbeConsumed = false;
   }
 
   /** Record an infrastructure failure. May open the circuit. */
@@ -55,6 +60,7 @@ export class BrowserlessCircuitBreaker {
       // Probe failed — re-open
       this.state = "open";
       this.openedAt = now;
+      this.halfOpenProbeConsumed = false;
       return;
     }
 
@@ -73,6 +79,7 @@ export class BrowserlessCircuitBreaker {
     // Re-evaluate in case cooldown elapsed since last check
     if (this.state === "open" && Date.now() - this.openedAt >= COOLDOWN_MS) {
       this.state = "half_open";
+      this.halfOpenProbeConsumed = false;
     }
     return this.state;
   }
@@ -82,6 +89,7 @@ export class BrowserlessCircuitBreaker {
     this.state = "closed";
     this.failures = [];
     this.openedAt = 0;
+    this.halfOpenProbeConsumed = false;
   }
 }
 

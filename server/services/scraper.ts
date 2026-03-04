@@ -681,9 +681,14 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       }
     }
 
+    // Clear accelerated retry when the check ran without Browserless infra failure,
+    // regardless of outcome. This prevents permanent 5-minute polling after outage clears.
+    if (!browserlessInfraFailure) {
+      monitorsNeedingRetry.delete(monitor.id);
+    }
+
     if (finalStatus === "ok") {
       const changed = newValue !== oldValue;
-      monitorsNeedingRetry.delete(monitor.id);
 
       await storage.updateMonitor(monitor.id, {
         lastChecked: new Date(),

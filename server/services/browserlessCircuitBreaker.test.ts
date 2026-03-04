@@ -49,6 +49,19 @@ describe("BrowserlessCircuitBreaker", () => {
     expect(cb.isAvailable()).toBe(true);
   });
 
+  it("allows only one probe while half_open", () => {
+    for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+    vi.advanceTimersByTime(5 * 60 * 1000);
+    expect(cb.getState()).toBe("half_open");
+
+    expect(cb.isAvailable()).toBe(true);   // first probe
+    expect(cb.isAvailable()).toBe(false);  // subsequent probes blocked
+
+    cb.recordSuccess();
+    expect(cb.getState()).toBe("closed");
+    expect(cb.isAvailable()).toBe(true);
+  });
+
   it("closes on success in half_open state", () => {
     for (let i = 0; i < 3; i++) cb.recordInfraFailure();
     vi.advanceTimersByTime(5 * 60 * 1000);

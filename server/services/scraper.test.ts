@@ -3692,6 +3692,27 @@ describe("self-healing recovery", () => {
     expect(monitorsNeedingRetry.has(55)).toBe(true);
   });
 
+  it("clears retry set on non-ok result when infra failure is no longer active", async () => {
+    // Monitor was previously in retry set, but this check has no infra failure
+    // (e.g., Browserless recovered but selector is genuinely missing)
+    const emptyHtml = `<html><body><p>No match here</p></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(emptyHtml, { status: 200 })
+    );
+
+    // No BROWSERLESS_TOKEN → no Browserless attempt → no infra failure
+    delete process.env.BROWSERLESS_TOKEN;
+
+    monitorsNeedingRetry.add(99);
+
+    const monitor = makeMonitor({ id: 99, selector: ".missing", currentValue: null });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    // Should be removed from retry set even though status is not "ok"
+    expect(monitorsNeedingRetry.has(99)).toBe(false);
+  });
+
   it("preserves lastStatus from monitor on graceful degradation", async () => {
     const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
     vi.spyOn(globalThis, "fetch")
