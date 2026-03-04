@@ -46,6 +46,38 @@ export function validateCssSelector(selector: string): string | null {
 }
 
 /**
+ * Classifies a non-2xx HTTP response status into a user-facing message
+ * and indicates whether the error is transient (should fall through to
+ * browserless/retry) or permanent (should skip retries).
+ */
+export function classifyHttpStatus(status: number): {
+  status: number;
+  message: string;
+  transient: boolean;
+} {
+  if (status === 401) return { status, message: "Access denied by the target site (HTTP 401). The page may require authentication", transient: false };
+  if (status === 403) return { status, message: "Access denied by the target site (HTTP 403)", transient: false };
+  if (status === 404) return { status, message: "Page not found (HTTP 404). Check that the URL is correct", transient: false };
+  if (status === 410) return { status, message: "Page no longer exists (HTTP 410)", transient: false };
+  if (status === 429) return { status, message: "Rate limited by the target site (HTTP 429)", transient: true };
+  if (status >= 400 && status < 500) return { status, message: `Target site rejected the request (HTTP ${status})`, transient: false };
+  if (status === 502) return { status, message: "Target site is temporarily unavailable (HTTP 502)", transient: true };
+  if (status === 503) return { status, message: "Target site is temporarily unavailable (HTTP 503)", transient: true };
+  if (status === 504) return { status, message: "Target site took too long to respond (HTTP 504)", transient: true };
+  if (status >= 500) return { status, message: `Target site returned a server error (HTTP ${status})`, transient: true };
+  return { status, message: `Unexpected HTTP status ${status}`, transient: false };
+}
+
+/**
+ * Extracts an HTTP status code from an error message string.
+ * Returns null if no HTTP status code pattern is found.
+ */
+function extractHttpStatus(message: string): number | null {
+  const match = message.match(/\bHTTP\s+([45]\d{2})\b/i);
+  return match ? Number(match[1]) : null;
+}
+
+/**
  * Sanitizes raw error messages before they are stored in the DB or returned to clients.
  * Strips internal hostnames, IP addresses, file paths, and stack traces that could
  * leak infrastructure details.
@@ -55,9 +87,12 @@ function sanitizeErrorForClient(raw: string): string {
   if (/ECONNREFUSED/i.test(raw)) return "Could not connect to the target site";
   if (/ENOTFOUND|EAI_AGAIN/i.test(raw)) return "Could not resolve the target hostname";
   if (/ECONNRESET|socket hang up/i.test(raw)) return "Connection was reset by the target site";
+  if (/SSRF blocked.*Too many redirects/i.test(raw)) return "Too many redirects while fetching the page";
   if (/SSRF blocked/i.test(raw)) return "URL is not allowed";
   if (/certificate|ssl|tls/i.test(raw)) return "SSL/TLS error connecting to the target site";
   if (/UND_ERR_HEADERS_OVERFLOW/i.test(raw)) return "Response headers from the target site were too large";
+  const httpStatus = extractHttpStatus(raw);
+  if (httpStatus !== null) return classifyHttpStatus(httpStatus).message;
   return "Failed to fetch page";
 }
 
@@ -84,6 +119,12 @@ export function classifyOuterError(error: unknown): { userMessage: string; logCo
   // Network errors — delegate to the existing fetch-error sanitizer
   if (/abort|timeout|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|socket hang up|certificate|ssl|tls|SSRF|UND_ERR_HEADERS_OVERFLOW/i.test(msg)) {
     return { userMessage: sanitizeErrorForClient(msg), logContext: "network error" };
+  }
+
+  // HTTP status errors (from classifyHttpStatus messages)
+  const httpStatus = extractHttpStatus(msg);
+  if (httpStatus !== null) {
+    return { userMessage: classifyHttpStatus(httpStatus).message, logContext: "http status error" };
   }
 
   // Cheerio / parsing errors
@@ -427,6 +468,9 @@ async function fetchWithCurl(url: string, monitorId?: number, monitorName?: stri
       signal: controller.signal,
     });
     clearTimeout(timeout);
+    if (!response.ok) {
+      throw new Error(classifyHttpStatus(response.status).message);
+    }
     return await response.text();
   } catch (error) {
     const label = monitorName ? `"${monitorName}" — page` : "Page";
@@ -450,6 +494,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     
     let html = "";
     let staticFetchError: string | null = null;
+    let httpStatusClassification: { status: number; message: string; transient: boolean } | null = null;
     try {
       const response = await ssrfSafeFetch(monitor.url, {
         headers: {
@@ -461,7 +506,15 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         },
         signal: AbortSignal.timeout(20000)
       });
-      html = await response.text();
+      if (!response.ok) {
+        httpStatusClassification = classifyHttpStatus(response.status);
+        staticFetchError = httpStatusClassification.message;
+        console.log(`[Scraper] Monitor ${monitor.id}: HTTP ${response.status} — ${httpStatusClassification.message}`);
+        // Don't parse error page HTML as content for permanent errors
+        html = "";
+      } else {
+        html = await response.text();
+      }
     } catch (e: any) {
       if (e.code === 'UND_ERR_HEADERS_OVERFLOW' || (e.cause && e.cause.code === 'UND_ERR_HEADERS_OVERFLOW')) {
         try {
@@ -500,8 +553,10 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       console.log(`stage=static empty_response`);
     }
 
-    if (!newValue && !block.blocked && html) {
-      console.log(`Retry: static extraction found no value, retrying fetch once...`);
+    // Retry static fetch: on selector-not-found OR transient HTTP errors (429, 5xx)
+    const isTransientHttpError = httpStatusClassification?.transient === true;
+    if ((!newValue && !block.blocked && html) || isTransientHttpError) {
+      console.log(`Retry: ${isTransientHttpError ? "transient HTTP error" : "static extraction found no value"}, retrying fetch once...`);
       await new Promise(r => setTimeout(r, 2000));
       const retryStart = Date.now();
       try {
@@ -517,13 +572,23 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             },
             signal: AbortSignal.timeout(20000)
           });
-          retryHtml = await retryResponse.text();
+          if (!retryResponse.ok) {
+            httpStatusClassification = classifyHttpStatus(retryResponse.status);
+            staticFetchError = httpStatusClassification.message;
+            console.log(`[Scraper] Monitor ${monitor.id}: retry also got HTTP ${retryResponse.status} — ${staticFetchError}`);
+            retryHtml = "";
+          } else {
+            retryHtml = await retryResponse.text();
+          }
         } catch (e: any) {
           if (e.code === 'UND_ERR_HEADERS_OVERFLOW' || (e.cause && e.cause.code === 'UND_ERR_HEADERS_OVERFLOW')) {
             retryHtml = await fetchWithCurl(monitor.url, monitor.id, monitor.name);
           }
         }
         if (retryHtml) {
+          html = retryHtml;
+          staticFetchError = null;
+          httpStatusClassification = null;
           const retryValue = extractValueFromHtml(retryHtml, monitor.selector);
           const retryBlock = detectPageBlockReason(retryHtml);
           const retryStatus = retryValue ? "ok" : (retryBlock.blocked ? "blocked" : "selector_missing");
@@ -544,9 +609,13 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       }
     }
 
-    // Fallback to Rendered if static failed or blocked
+    // Fallback to Rendered if static failed or blocked.
+    // Skip browserless for permanent HTTP errors (404, 410) where rendering won't help,
+    // but allow it for 403 (often bot detection that browserless can bypass).
+    const isPermanentHttpError = httpStatusClassification && !httpStatusClassification.transient
+      && ![401, 403].includes(httpStatusClassification.status);
     let browserlessInfraFailure = false;
-    if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
+    if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN && !isPermanentHttpError) {
       // Circuit breaker: skip Browserless entirely when the service is known-down
       if (!browserlessCircuitBreaker.isAvailable()) {
         browserlessInfraFailure = true;
