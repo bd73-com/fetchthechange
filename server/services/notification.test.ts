@@ -947,4 +947,171 @@ describe("multi-channel delivery", () => {
       })
     );
   });
+
+  it("skips webhook delivery when config is missing url", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "webhook", enabled: true, config: { secret: "whsec_test" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+
+    await processChangeNotification(makeMonitor(), makeChange(), false);
+    expect(mockWebhookDeliver).not.toHaveBeenCalled();
+  });
+
+  it("skips webhook delivery when config is missing secret", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://hooks.example.com" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+
+    await processChangeNotification(makeMonitor(), makeChange(), false);
+    expect(mockWebhookDeliver).not.toHaveBeenCalled();
+  });
+
+  it("skips slack delivery when channelId is missing", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "slack", enabled: true, config: { channelName: "#alerts" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+
+    await processChangeNotification(makeMonitor(), makeChange(), false);
+    expect(mockSlackDeliver).not.toHaveBeenCalled();
+  });
+
+  it("skips slack delivery when no slack connection exists for user", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "slack", enabled: true, config: { channelId: "C0123" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockGetSlackConnection.mockResolvedValue(undefined);
+
+    await processChangeNotification(makeMonitor(), makeChange(), false);
+    expect(mockSlackDeliver).not.toHaveBeenCalled();
+  });
+
+  it("logs delivery failure when slack token decryption throws", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "slack", enabled: true, config: { channelId: "C0123" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockGetSlackConnection.mockResolvedValue({
+      id: 1, userId: "user1", teamId: "T001", teamName: "Test", botToken: "corrupted",
+      scope: "chat:write", createdAt: new Date(), updatedAt: new Date(),
+    });
+    mockDecryptToken.mockImplementation(() => { throw new Error("Bad key"); });
+
+    await processChangeNotification(makeMonitor(), makeChange(), false);
+    expect(mockSlackDeliver).not.toHaveBeenCalled();
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "slack",
+        status: "failed",
+        response: expect.objectContaining({ error: "Bad key" }),
+      })
+    );
+  });
+
+  it("hasActiveChannels returns false when all channels are disabled", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "email", enabled: false, config: {}, createdAt: new Date(), updatedAt: new Date() },
+      { id: 2, monitorId: 1, channel: "webhook", enabled: false, config: {}, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    const monitor = makeMonitor({ emailEnabled: true }); // emailEnabled ignored when channel rows exist
+
+    const result = await processChangeNotification(monitor, makeChange(), false);
+    expect(result).toBeNull();
+    expect(mockSendNotificationEmail).not.toHaveBeenCalled();
+    expect(mockWebhookDeliver).not.toHaveBeenCalled();
+  });
+
+  it("getMonitorChannels error gracefully falls back to empty channels", async () => {
+    mockGetMonitorChannels.mockRejectedValue(new Error("relation does not exist"));
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange();
+
+    await processChangeNotification(monitor, change, false);
+    // Falls back to emailEnabled behavior
+    expect(mockSendNotificationEmail).toHaveBeenCalled();
+  });
+
+  it("backwards compat: logs delivery to delivery_log table on email send", async () => {
+    mockGetMonitorChannels.mockResolvedValue([]);
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange();
+
+    await processChangeNotification(monitor, change, false);
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "email",
+        status: "success",
+      })
+    );
+  });
+
+  it("backwards compat: swallows delivery_log write errors (table may not exist)", async () => {
+    mockGetMonitorChannels.mockResolvedValue([]);
+    mockAddDeliveryLog.mockRejectedValue(new Error("relation does not exist"));
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange();
+
+    // Should not throw even when log write fails
+    await expect(processChangeNotification(monitor, change, false)).resolves.not.toThrow();
+    expect(mockSendNotificationEmail).toHaveBeenCalled();
+  });
+});
+
+describe("multi-channel digest delivery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockWebhookDeliver.mockResolvedValue({ success: true, statusCode: 200 });
+    mockSlackDeliver.mockResolvedValue({ success: true, slackTs: "123" });
+    mockGetSlackConnection.mockResolvedValue(undefined);
+    mockDecryptToken.mockReturnValue("xoxb-decrypted-token");
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+    mockSendDigestEmail.mockResolvedValue({ success: true });
+  });
+
+  it("sends digest to webhook channel (one per change)", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://hooks.example.com", secret: "whsec_test" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+      { id: 2, monitorId: 1, changeId: 11, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    const changes = [
+      makeChange({ id: 10, oldValue: "$10", newValue: "$15" }),
+      makeChange({ id: 11, oldValue: "$15", newValue: "$20" }),
+    ];
+    mockGetMonitorChanges.mockResolvedValueOnce(changes);
+
+    const monitor = makeMonitor();
+    const prefs = makePrefs({ digestMode: true });
+
+    await processDigestBatch(monitor, prefs);
+    // Webhook should be called once per change
+    expect(mockWebhookDeliver).toHaveBeenCalledTimes(2);
+    // Delivery log entries should be created for each
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "webhook", status: "success" })
+    );
+  });
+
+  it("sends digest to slack channel (one per change)", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "slack", enabled: true, config: { channelId: "C0123" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockGetSlackConnection.mockResolvedValue({
+      id: 1, userId: "user1", teamId: "T001", teamName: "Test", botToken: "encrypted",
+      scope: "chat:write", createdAt: new Date(), updatedAt: new Date(),
+    });
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    const monitor = makeMonitor();
+    const prefs = makePrefs({ digestMode: true });
+
+    await processDigestBatch(monitor, prefs);
+    expect(mockSlackDeliver).toHaveBeenCalledTimes(1);
+  });
 });

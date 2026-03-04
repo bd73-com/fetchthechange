@@ -184,5 +184,52 @@ describe("webhookDelivery", () => {
       const [, options] = mockFetch.mock.calls[0];
       expect(options.headers["X-Custom"]).toBe("value");
     });
+
+    it("custom headers can override built-in headers", async () => {
+      const config: WebhookConfig = {
+        ...testConfig,
+        headers: { "Content-Type": "text/plain", "User-Agent": "CustomAgent" },
+      };
+      await deliver(makeMonitor(), makeChange(), config);
+
+      const [, options] = mockFetch.mock.calls[0];
+      // Spread puts custom headers last, so they override
+      expect(options.headers["Content-Type"]).toBe("text/plain");
+      expect(options.headers["User-Agent"]).toBe("CustomAgent");
+    });
+
+    it("handles 3xx redirect response as non-ok", async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 301 });
+
+      const result = await deliver(makeMonitor(), makeChange(), testConfig);
+      expect(result.success).toBe(false);
+      expect(result.statusCode).toBe(301);
+      expect(result.error).toBe("HTTP 301");
+    });
+
+    it("uses redirect: manual to prevent auto-following redirects", async () => {
+      await deliver(makeMonitor(), makeChange(), testConfig);
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.redirect).toBe("manual");
+    });
+
+    it("sends POST with abort signal", async () => {
+      await deliver(makeMonitor(), makeChange(), testConfig);
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.method).toBe("POST");
+      expect(options.signal).toBeDefined();
+    });
+
+    it("handles null oldValue and newValue in payload", async () => {
+      const change = makeChange();
+      change.oldValue = null;
+      change.newValue = null;
+
+      await deliver(makeMonitor(), change, testConfig);
+      const [, options] = mockFetch.mock.calls[0];
+      const body = JSON.parse(options.body);
+      expect(body.oldValue).toBeNull();
+      expect(body.newValue).toBeNull();
+    });
   });
 });

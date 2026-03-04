@@ -130,5 +130,61 @@ describe("slackDelivery", () => {
 
       await expect(listChannels("bad-token")).rejects.toThrow("Slack API error: invalid_auth");
     });
+
+    it("returns empty array when channels key is missing from response", async () => {
+      mockFetch.mockResolvedValue({
+        json: () => Promise.resolve({ ok: true }),
+      });
+
+      const channels = await listChannels("xoxb-token");
+      expect(channels).toEqual([]);
+    });
+
+    it("returns empty array when channels is empty", async () => {
+      mockFetch.mockResolvedValue({
+        json: () => Promise.resolve({ ok: true, channels: [] }),
+      });
+
+      const channels = await listChannels("xoxb-token");
+      expect(channels).toEqual([]);
+    });
+  });
+
+  describe("deliver edge cases", () => {
+    it("handles null oldValue and newValue", async () => {
+      mockFetch.mockResolvedValue({
+        json: () => Promise.resolve({ ok: true }),
+      });
+
+      const change = makeChange();
+      change.oldValue = null;
+      change.newValue = null;
+
+      const result = await deliver(makeMonitor(), change, "C0123", "xoxb-token");
+      expect(result.success).toBe(true);
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      // null values should display as "(empty)" in blocks
+      const blockTexts = body.blocks.map((b: any) => JSON.stringify(b));
+      expect(blockTexts.some((t: string) => t.includes("(empty)"))).toBe(true);
+    });
+
+    it("handles missing error field in Slack response", async () => {
+      mockFetch.mockResolvedValue({
+        json: () => Promise.resolve({ ok: false }),
+      });
+
+      const result = await deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Unknown Slack API error");
+    });
+
+    it("handles non-Error thrown by fetch", async () => {
+      mockFetch.mockRejectedValue("string error");
+
+      const result = await deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("string error");
+    });
   });
 });
