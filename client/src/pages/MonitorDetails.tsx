@@ -309,6 +309,18 @@ export default function MonitorDetails() {
                             ? "The page is taking too long to load. The site may be experiencing issues, or it may require JavaScript rendering."
                             : monitor.lastError.includes("Could not connect")
                             ? "The target site appears to be down or unreachable. Verify the URL is correct and the site is accessible."
+                            : monitor.lastError.includes("HTTP 403") || monitor.lastError.includes("HTTP 401")
+                            ? "The target site is denying access. This often happens with sites that block automated requests or require authentication."
+                            : monitor.lastError.includes("HTTP 404")
+                            ? "The page was not found. Double-check the URL is correct and the page still exists."
+                            : monitor.lastError.includes("HTTP 410")
+                            ? "The page has been permanently removed. You may want to update or delete this monitor."
+                            : monitor.lastError.includes("HTTP 429")
+                            ? "The target site is rate-limiting requests. The monitor will retry automatically on the next check."
+                            : monitor.lastError.includes("HTTP 5")
+                            ? "The target site is experiencing server issues. This is usually temporary and the monitor will retry automatically."
+                            : monitor.lastError.includes("Too many redirects")
+                            ? "The page is redirecting too many times. Check that the URL is correct and doesn't require authentication."
                             : "Verify the URL is accessible and the CSS selector matches content on the page. Try \"Fix selector\" below if the site layout changed."}
                         </p>
                       </div>
