@@ -206,6 +206,58 @@ describe("startScheduler", () => {
       })
     );
   });
+
+  it("handles non-Error thrown in scheduler iteration (uses String coercion)", async () => {
+    mockGetAllActiveMonitors.mockRejectedValueOnce("connection reset");
+
+    await startScheduler();
+    await cronCallbacks["* * * * *"]();
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "Scheduler iteration failed",
+      null,
+      expect.objectContaining({
+        errorMessage: "connection reset",
+        activeChecks: 0,
+        phase: "fetching active monitors",
+      })
+    );
+  });
+
+  it("reports activeChecks > 0 when prior checks are still in-flight", async () => {
+    // First iteration: start a check that never resolves (stays in-flight)
+    const monitor = makeMonitor({ id: 1, lastChecked: null });
+    mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
+    let resolver: () => void;
+    mockCheckMonitor.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { resolver = resolve; })
+    );
+
+    await startScheduler();
+    await cronCallbacks["* * * * *"]();
+    await vi.advanceTimersByTimeAsync(31000);
+
+    // One check is now in-flight (activeChecks === 1)
+    expect(mockCheckMonitor).toHaveBeenCalledTimes(1);
+
+    // Second iteration: getAllActiveMonitors fails while check is still running
+    mockGetAllActiveMonitors.mockRejectedValueOnce(new Error("DB pool exhausted"));
+    await cronCallbacks["* * * * *"]();
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "Scheduler iteration failed",
+      expect.any(Error),
+      expect.objectContaining({
+        errorMessage: "DB pool exhausted",
+        activeChecks: 1,
+      })
+    );
+
+    // Clean up: resolve the hanging check
+    resolver!();
+  });
 });
 
 describe("concurrency limiting (runCheckWithLimit)", () => {
@@ -444,6 +496,24 @@ describe("daily metrics cleanup", () => {
       })
     );
   });
+
+  it("handles non-Error thrown in cleanup (uses String coercion)", async () => {
+    mockDbExecute.mockRejectedValueOnce("disk full");
+
+    await startScheduler();
+    await cronCallbacks["0 3 * * *"]();
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "monitor_metrics cleanup failed",
+      null,
+      expect.objectContaining({
+        errorMessage: "disk full",
+        retentionDays: 90,
+        table: "monitor_metrics",
+      })
+    );
+  });
 });
 
 describe("notification queue and digest cron (*/1 * * * *)", () => {
@@ -503,6 +573,38 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
       expect.any(Error),
       expect.objectContaining({
         errorMessage: "Digest error",
+      })
+    );
+  });
+
+  it("handles non-Error thrown in notification processing (uses String coercion)", async () => {
+    mockProcessQueuedNotifications.mockRejectedValueOnce(42);
+
+    await startScheduler();
+    await cronCallbacks["*/1 * * * *"]();
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "Queued notification processing failed",
+      null,
+      expect.objectContaining({
+        errorMessage: "42",
+      })
+    );
+  });
+
+  it("handles non-Error thrown in digest processing (uses String coercion)", async () => {
+    mockProcessDigestCron.mockRejectedValueOnce({ code: "TIMEOUT" });
+
+    await startScheduler();
+    await cronCallbacks["*/1 * * * *"]();
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "Digest processing failed",
+      null,
+      expect.objectContaining({
+        errorMessage: "[object Object]",
       })
     );
   });
