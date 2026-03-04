@@ -87,6 +87,7 @@ import {
   validateCssSelector,
   discoverSelectors,
   monitorsNeedingRetry,
+  classifyOuterError,
 } from "./scraper";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
@@ -3781,5 +3782,131 @@ describe("self-healing recovery", () => {
     expect(result.status).toBe("selector_missing");
     expect(result.currentValue).toBe("$50.00");
     expect(result.error).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyOuterError
+// ---------------------------------------------------------------------------
+describe("classifyOuterError", () => {
+  it("classifies DB relation errors as server errors", () => {
+    const result = classifyOuterError(new Error('relation "monitors" does not exist'));
+    expect(result.logContext).toBe("database error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies DB constraint violations as server errors", () => {
+    const result = classifyOuterError(new Error("violates unique constraint"));
+    expect(result.logContext).toBe("database error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies DB connection errors", () => {
+    const result = classifyOuterError(new Error("ECONNREFUSED 127.0.0.1:5432"));
+    expect(result.logContext).toBe("database connection error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies network timeout errors", () => {
+    const result = classifyOuterError(new Error("The operation was aborted due to timeout"));
+    expect(result.logContext).toBe("network error");
+    expect(result.userMessage).toBe("Page took too long to respond");
+  });
+
+  it("classifies ENOTFOUND errors", () => {
+    const result = classifyOuterError(new Error("getaddrinfo ENOTFOUND example.com"));
+    expect(result.logContext).toBe("network error");
+    expect(result.userMessage).toBe("Could not resolve the target hostname");
+  });
+
+  it("classifies SSL/TLS errors", () => {
+    const result = classifyOuterError(new Error("unable to verify the first certificate"));
+    expect(result.logContext).toBe("network error");
+    expect(result.userMessage).toBe("SSL/TLS error connecting to the target site");
+  });
+
+  it("classifies cheerio parsing errors", () => {
+    const result = classifyOuterError(new Error("cheerio: unrecognized selector"));
+    expect(result.logContext).toBe("parsing error");
+    expect(result.userMessage).toContain("Failed to parse");
+  });
+
+  it("returns generic message for unknown errors", () => {
+    const result = classifyOuterError(new Error("something completely unexpected"));
+    expect(result.logContext).toBe("unclassified error");
+    expect(result.userMessage).toContain("Failed to fetch or parse");
+  });
+
+  it("handles non-Error thrown values", () => {
+    const result = classifyOuterError("string error");
+    expect(result.logContext).toBe("non-Error thrown");
+    expect(result.userMessage).toBe("An unexpected error occurred");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkMonitor — outer catch resilience
+// ---------------------------------------------------------------------------
+describe("checkMonitor outer catch resilience", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getMonitorChanges: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    await vi.advanceTimersByTimeAsync(3000);
+    return promise;
+  }
+
+  it("returns structured result when handleMonitorFailure throws in the failure path", async () => {
+    const html = `<html><body><p>No matching selector here</p></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(html, { status: 200 }));
+
+    // Make db.update throw to simulate handleMonitorFailure failing
+    const mockDb = db as any;
+    mockDb.update.mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockRejectedValue(new Error("DB connection lost")),
+        }),
+      }),
+    });
+
+    const monitor = makeMonitor({ selector: ".nonexistent" });
+    const result = await runWithTimers(monitor);
+
+    // Should still return a valid result object, not throw
+    expect(result).toBeDefined();
+    expect(result.status).toBe("selector_missing");
+  });
+
+  it("returns structured result when DB write fails in the success path", async () => {
+    const html = `<html><body><span class="price">$19.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    // Make storage.updateMonitor throw to simulate DB failure after successful extraction
+    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("connection terminated"));
+
+    const monitor = makeMonitor({ currentValue: "$19.99" });
+    const result = await runWithTimers(monitor);
+
+    // Should return ok status with a save-failure error message
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$19.99");
+    expect(result.error).toContain("server error prevented saving");
   });
 });
