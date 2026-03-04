@@ -255,8 +255,9 @@ describe("startScheduler", () => {
       })
     );
 
-    // Clean up: resolve the hanging check
+    // Clean up: resolve the hanging check and flush microtask so .finally() decrements activeChecks
     resolver!();
+    await Promise.resolve();
   });
 });
 
