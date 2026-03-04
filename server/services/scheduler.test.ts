@@ -63,6 +63,7 @@ vi.mock("node-cron", () => ({
 import { startScheduler } from "./scheduler";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
+import { _resetCache } from "./notificationReady";
 import type { Monitor } from "@shared/schema";
 
 function makeMonitor(overrides: Partial<Monitor> = {}): Monitor {
@@ -91,6 +92,7 @@ describe("startScheduler", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetCache();
     // Clear captured cron callbacks
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });
@@ -109,6 +111,22 @@ describe("startScheduler", () => {
     expect(cronCallbacks["* * * * *"]).toBeDefined();
     expect(cronCallbacks["*/1 * * * *"]).toBeDefined();
     expect(cronCallbacks["0 3 * * *"]).toBeDefined();
+  });
+
+  it("skips notification cron when notification tables do not exist", async () => {
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockDbExecute.mockRejectedValue(new Error('relation "notification_preferences" does not exist'));
+
+    await startScheduler();
+
+    expect(cronCallbacks["*/1 * * * *"]).toBeUndefined();
+    expect(cronCallbacks["* * * * *"]).toBeDefined();
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Notification tables")
+    );
+    consoleSpy.mockRestore();
+    // Restore default so other tests work
+    mockDbExecute.mockResolvedValue({ rowCount: 0 });
   });
 
   it("schedules checks for monitors that have never been checked", async () => {
@@ -265,6 +283,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });
 
@@ -368,6 +387,7 @@ describe("accelerated retry for Browserless infra failures", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });
 
@@ -446,6 +466,7 @@ describe("daily metrics cleanup", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });
 
@@ -522,6 +543,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });
 

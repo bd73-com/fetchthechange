@@ -2,6 +2,7 @@ import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
 import { eq, desc, and, or, isNull, lte, sql } from "drizzle-orm";
+import { notificationTablesExist } from "./services/notificationReady";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -51,8 +52,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteMonitor(id: number): Promise<void> {
-    await db.delete(notificationQueue).where(eq(notificationQueue.monitorId, id));
-    await db.delete(notificationPreferences).where(eq(notificationPreferences.monitorId, id));
+    if (await notificationTablesExist()) {
+      await db.delete(notificationQueue).where(eq(notificationQueue.monitorId, id));
+      await db.delete(notificationPreferences).where(eq(notificationPreferences.monitorId, id));
+    }
     await db.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
     await db.delete(monitorMetrics).where(eq(monitorMetrics.monitorId, id));
     await db.delete(browserlessUsage).where(eq(browserlessUsage.monitorId, id));

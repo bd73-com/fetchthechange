@@ -3,22 +3,13 @@ import { storage } from "../storage";
 import { checkMonitor, monitorsNeedingRetry } from "./scraper";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
+import { notificationTablesExist } from "./notificationReady";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
 const MAX_CONCURRENT_CHECKS = 10;
 const ACCELERATED_RETRY_MS = 5 * 60 * 1000; // 5 minutes
 let activeChecks = 0;
-
-async function notificationTablesExist(): Promise<boolean> {
-  try {
-    await db.execute(sql`SELECT 1 FROM notification_preferences LIMIT 0`);
-    await db.execute(sql`SELECT 1 FROM notification_queue LIMIT 0`);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]) {
   if (activeChecks >= MAX_CONCURRENT_CHECKS) {
