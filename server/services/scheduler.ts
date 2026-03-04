@@ -72,7 +72,11 @@ export async function startScheduler() {
         }
       }
     } catch (error) {
-      await ErrorLogger.error("scheduler", "Scheduler iteration failed", error instanceof Error ? error : null);
+      await ErrorLogger.error("scheduler", "Scheduler iteration failed", error instanceof Error ? error : null, {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        activeChecks,
+        phase: "fetching active monitors",
+      });
     }
   });
 
@@ -81,12 +85,16 @@ export async function startScheduler() {
     try {
       await processQueuedNotifications();
     } catch (error) {
-      await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null);
+      await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null, {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
     }
     try {
       await processDigestCron();
     } catch (error) {
-      await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null);
+      await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null, {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
     }
   });
 
@@ -101,7 +109,11 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${deleted} monitor_metrics rows older than 90 days`);
       }
     } catch (error) {
-      await ErrorLogger.error("scheduler", "monitor_metrics cleanup failed", error instanceof Error ? error : null);
+      await ErrorLogger.error("scheduler", "monitor_metrics cleanup failed", error instanceof Error ? error : null, {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        retentionDays: 90,
+        table: "monitor_metrics",
+      });
     }
   });
 }
