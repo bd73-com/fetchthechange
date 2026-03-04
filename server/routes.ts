@@ -14,6 +14,7 @@ import { sql, desc, eq, and, isNull, isNotNull, inArray, notInArray } from "driz
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
+import { notificationTablesExist } from "./services/notificationReady";
 import { BrowserlessUsageTracker, getMonthResetDate } from "./services/browserlessTracker";
 import { ResendUsageTracker, getResendResetDate } from "./services/resendTracker";
 import { errorLogs, monitorMetrics } from "@shared/schema";
@@ -490,20 +491,26 @@ export async function registerRoutes(
     if (!monitor) return res.status(404).json({ message: "Not found" });
     if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
+    const defaults = {
+      id: 0,
+      monitorId: id,
+      quietHoursStart: null,
+      quietHoursEnd: null,
+      timezone: null,
+      digestMode: false,
+      sensitivityThreshold: 0,
+      notificationEmail: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    if (!(await notificationTablesExist())) {
+      return res.json(defaults);
+    }
+
     const prefs = await storage.getNotificationPreferences(id);
     if (!prefs) {
-      return res.json({
-        id: 0,
-        monitorId: id,
-        quietHoursStart: null,
-        quietHoursEnd: null,
-        timezone: null,
-        digestMode: false,
-        sensitivityThreshold: 0,
-        notificationEmail: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
+      return res.json(defaults);
     }
     res.json(prefs);
   });
@@ -514,6 +521,10 @@ export async function registerRoutes(
       const monitor = await storage.getMonitor(id);
       if (!monitor) return res.status(404).json({ message: "Not found" });
       if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+
+      if (!(await notificationTablesExist())) {
+        return res.status(503).json({ message: "Notification preferences are not available yet" });
+      }
 
       const input = api.monitors.notificationPreferences.put.input.parse(req.body);
       const prefs = await storage.upsertNotificationPreferences(id, {
@@ -538,6 +549,10 @@ export async function registerRoutes(
     const monitor = await storage.getMonitor(id);
     if (!monitor) return res.status(404).json({ message: "Not found" });
     if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+
+    if (!(await notificationTablesExist())) {
+      return res.status(204).send();
+    }
 
     await storage.deleteNotificationPreferences(id);
     res.status(204).send();
