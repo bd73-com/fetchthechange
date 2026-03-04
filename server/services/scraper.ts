@@ -4,11 +4,18 @@ import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
 import { processChangeNotification } from "./notification";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
+import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { validateUrlBeforeFetch, ssrfSafeFetch } from "../utils/ssrf";
 import { type Monitor, monitorMetrics, monitors } from "@shared/schema";
 import { type UserTier, PAUSE_THRESHOLDS } from "@shared/models/auth";
 import { db } from "../db";
 import { eq, sql } from "drizzle-orm";
+
+/**
+ * In-memory set of monitor IDs that need accelerated retry due to
+ * Browserless infrastructure failures. Cleared on success or server restart.
+ */
+export const monitorsNeedingRetry = new Set<number>();
 
 interface SelectorSuggestion {
   selector: string;
@@ -507,9 +514,18 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     // Fallback to Rendered if static failed or blocked
     let browserlessInfraFailure = false;
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN) {
-      const user = await storage.getUser(monitor.userId);
+      // Circuit breaker: skip Browserless entirely when the service is known-down
+      if (!browserlessCircuitBreaker.isAvailable()) {
+        browserlessInfraFailure = true;
+        console.log(`[Browserless] Monitor ${monitor.id}: circuit breaker OPEN, skipping Browserless`);
+        await recordMetric(monitor.id, "browserless", 0, "error", undefined, false, "Circuit breaker open — Browserless skipped");
+      }
+
+      const user = !browserlessInfraFailure ? await storage.getUser(monitor.userId) : null;
       const tier = (user?.tier || "free") as UserTier;
-      const capCheck = await BrowserlessUsageTracker.canUseBrowserless(monitor.userId, tier);
+      const capCheck = !browserlessInfraFailure
+        ? await BrowserlessUsageTracker.canUseBrowserless(monitor.userId, tier)
+        : { allowed: false, reason: "circuit breaker open" };
 
       if (capCheck.allowed) {
         const startTime = Date.now();
@@ -525,6 +541,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             }
             const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
             browserlessSuccess = true;
+            browserlessCircuitBreaker.recordSuccess();
             const bStatus = result.value ? "ok" : (result.blocked ? "blocked" : "selector_missing");
             await recordMetric(monitor.id, attempt === 0 ? "browserless" : "browserless_retry", Date.now() - startTime, bStatus, result.selectorCount, result.blocked, result.reason);
             newValue = result.value;
@@ -538,6 +555,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             const isInfra = errMsg.includes("connectOverCDP") || errMsg.includes("websocket") || errMsg.includes("Playwright") || errMsg.includes("Browser is not connected") || errMsg.includes("Browser has been closed") || errMsg.includes("ECONNREFUSED") || errMsg.includes("Target page, context or browser has been closed");
             if (isInfra) {
               browserlessInfraFailure = true;
+              browserlessCircuitBreaker.recordInfraFailure();
               // Don't retry infra failures — the service itself is down
               await recordMetric(monitor.id, "browserless", Date.now() - startTime, "error", undefined, false, errMsg);
               break;
@@ -569,9 +587,39 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     let finalError: string | null = null;
 
     if (!newValue) {
-      if (browserlessInfraFailure) {
-        finalStatus = "error";
-        finalError = "Browserless service unavailable";
+      if (browserlessInfraFailure && monitor.currentValue) {
+        // Graceful degradation: preserve last known good state when Browserless
+        // is temporarily down. The monitor stays "healthy" with its cached value
+        // and gets retried sooner via the accelerated retry set.
+        monitorsNeedingRetry.add(monitor.id);
+        await storage.updateMonitor(monitor.id, { lastChecked: new Date() });
+        console.log(`[SelfHeal] Monitor ${monitor.id}: Browserless unavailable, preserving last known value`);
+        await ErrorLogger.info(
+          "scraper",
+          `"${monitor.name}" — Browserless temporarily unavailable, preserving last known value. Will retry shortly.`,
+          { monitorId: monitor.id, monitorName: monitor.name, circuitState: browserlessCircuitBreaker.getState() }
+        );
+        return {
+          changed: false,
+          currentValue: monitor.currentValue,
+          previousValue: monitor.currentValue,
+          status: (monitor.lastStatus as "ok" | "blocked" | "selector_missing" | "error") || "ok",
+          error: null
+        };
+      } else if (browserlessInfraFailure) {
+        // First check (no previous value) — fall through to underlying status
+        // but note that Browserless was a factor
+        monitorsNeedingRetry.add(monitor.id);
+        if (block.blocked) {
+          finalStatus = "blocked";
+          finalError = block.reason || "Blocked";
+        } else if (staticFetchError) {
+          finalStatus = "error";
+          finalError = staticFetchError;
+        } else {
+          finalStatus = "selector_missing";
+          finalError = "Selector not found (rendering service temporarily unavailable)";
+        }
       } else if (block.blocked) {
         finalStatus = "blocked";
         finalError = block.reason || "Blocked";
@@ -635,6 +683,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
 
     if (finalStatus === "ok") {
       const changed = newValue !== oldValue;
+      monitorsNeedingRetry.delete(monitor.id);
 
       await storage.updateMonitor(monitor.id, {
         lastChecked: new Date(),

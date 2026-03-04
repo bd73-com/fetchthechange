@@ -26,6 +26,7 @@ vi.mock("../storage", () => ({
 
 vi.mock("./scraper", () => ({
   checkMonitor: (...args: any[]) => mockCheckMonitor(...args),
+  monitorsNeedingRetry: new Set<number>(),
 }));
 
 vi.mock("./notification", () => ({

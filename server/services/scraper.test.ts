@@ -34,6 +34,16 @@ vi.mock("./browserlessTracker", () => ({
   },
 }));
 
+vi.mock("./browserlessCircuitBreaker", () => ({
+  browserlessCircuitBreaker: {
+    isAvailable: vi.fn().mockReturnValue(true),
+    recordSuccess: vi.fn(),
+    recordInfraFailure: vi.fn(),
+    getState: vi.fn().mockReturnValue("closed"),
+    reset: vi.fn(),
+  },
+}));
+
 vi.mock("../utils/ssrf", () => ({
   validateUrlBeforeFetch: vi.fn().mockResolvedValue(undefined),
   ssrfSafeFetch: vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
@@ -1702,16 +1712,17 @@ describe("failure tracking and auto-pause", () => {
     const monitor = makeMonitor({ selector: ".missing" });
     const result = await runWithTimers(monitor);
 
-    // The result should be an error about browserless being unavailable
-    expect(result.status).toBe("error");
-    expect(result.error).toBe("Browserless service unavailable");
+    // With self-healing: monitor has no currentValue, so it falls through to
+    // the actual underlying status (selector_missing) instead of generic "Browserless service unavailable"
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found (rendering service temporarily unavailable)");
 
     // The db.update set call should NOT have the SQL increment for consecutiveFailures
     // (browserlessInfraFailure=true means shouldPenalize=false)
     expect(mockDb.update).toHaveBeenCalled();
     const setArg = setFn.mock.calls[0]?.[0];
     expect(setArg).toBeDefined();
-    expect(setArg.lastError).toBe("Browserless service unavailable");
+    expect(setArg.lastError).toBe("Selector not found (rendering service temporarily unavailable)");
     // When browserlessInfraFailure=true, consecutiveFailures should be the Drizzle column
     // reference (no increment) rather than a sql`` expression with queryChunks
     expect(setArg.consecutiveFailures).toBeDefined();
@@ -2109,8 +2120,9 @@ describe("Browserless retry logic", () => {
     const monitor = makeMonitor({ selector: ".missing" });
     const result = await runWithTimers(monitor);
 
-    expect(result.status).toBe("error");
-    expect(result.error).toBe("Browserless service unavailable");
+    // With self-healing: no currentValue, falls through to actual status
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found (rendering service temporarily unavailable)");
     // connectOverCDP should only be called once (no retry for infra failures)
     expect(mockConnectOverCDP).toHaveBeenCalledTimes(1);
   });
@@ -2372,9 +2384,11 @@ describe("auto-heal selector recovery", () => {
     const monitor = makeMonitor({ selector: ".missing", currentValue: "$50.00" });
     const result = await runWithTimers(monitor);
 
-    // Should be error (infra failure), NOT selector_missing with auto-heal
-    expect(result.status).toBe("error");
-    expect(result.error).toBe("Browserless service unavailable");
+    // With self-healing: monitor has currentValue, so state is preserved
+    // (graceful degradation — no error shown, value kept intact)
+    expect(result.status).not.toBe("error");
+    expect(result.currentValue).toBe("$50.00");
+    expect(result.error).toBeNull();
   });
 
   it("catches errors from discoverSelectors and falls through to failure", async () => {
