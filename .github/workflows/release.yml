@@ -1,7 +1,8 @@
 name: Release Drafter
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches:
       - main
   workflow_dispatch:
@@ -12,6 +13,9 @@ permissions:
 
 jobs:
   update-release-draft:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: release-drafter/release-drafter@v6
