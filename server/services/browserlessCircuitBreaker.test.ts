@@ -103,4 +103,56 @@ describe("BrowserlessCircuitBreaker", () => {
     expect(cb.getState()).toBe("closed");
     expect(cb.isAvailable()).toBe(true);
   });
+
+  it("recording failure when already open does not change state", () => {
+    for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+    expect(cb.getState()).toBe("open");
+
+    // Additional failures while open should keep it open
+    cb.recordInfraFailure();
+    cb.recordInfraFailure();
+    expect(cb.getState()).toBe("open");
+  });
+
+  it("handles multiple open-halfopen-open cycles", () => {
+    // Cycle 1: open the circuit
+    for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+    expect(cb.getState()).toBe("open");
+
+    // Wait for cooldown → half_open
+    vi.advanceTimersByTime(5 * 60 * 1000);
+    expect(cb.getState()).toBe("half_open");
+
+    // Probe fails → open again
+    cb.recordInfraFailure();
+    expect(cb.getState()).toBe("open");
+    expect(cb.isAvailable()).toBe(false);
+
+    // Cycle 2: wait again
+    vi.advanceTimersByTime(5 * 60 * 1000);
+    expect(cb.getState()).toBe("half_open");
+    expect(cb.isAvailable()).toBe(true);
+
+    // Probe succeeds → closed
+    cb.recordSuccess();
+    expect(cb.getState()).toBe("closed");
+    expect(cb.isAvailable()).toBe(true);
+  });
+
+  it("isAvailable transitions open to half_open on call after cooldown", () => {
+    for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+    expect(cb.isAvailable()).toBe(false);
+
+    vi.advanceTimersByTime(5 * 60 * 1000);
+
+    // isAvailable should itself trigger the transition
+    expect(cb.isAvailable()).toBe(true);
+    expect(cb.getState()).toBe("half_open");
+  });
+
+  it("success in closed state has no adverse effects", () => {
+    cb.recordSuccess();
+    expect(cb.getState()).toBe("closed");
+    expect(cb.isAvailable()).toBe(true);
+  });
 });
