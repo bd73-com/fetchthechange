@@ -310,6 +310,17 @@ describe("processChangeNotification", () => {
     expect(mockSendNotificationEmail).toHaveBeenCalled();
   });
 
+  it("falls through to immediate email when getNotificationPreferences throws (tables missing)", async () => {
+    mockGetNotificationPreferences.mockRejectedValueOnce(
+      new Error('relation "notification_preferences" does not exist')
+    );
+    const monitor = makeMonitor();
+    const change = makeChange();
+
+    await processChangeNotification(monitor, change, false);
+    expect(mockSendNotificationEmail).toHaveBeenCalledWith(monitor, "$19.99", "$24.99");
+  });
+
   it("digest takes priority over quiet hours", async () => {
     mockGetNotificationPreferences.mockResolvedValueOnce(
       makePrefs({
