@@ -454,10 +454,10 @@ describe("daily metrics cleanup", () => {
   });
 
   it("executes DELETE for old metrics and logs when rows are deleted", async () => {
-    mockDbExecute.mockResolvedValueOnce({ rowCount: 42 });
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     await startScheduler();
+    mockDbExecute.mockResolvedValueOnce({ rowCount: 42 });
     await cronCallbacks["0 3 * * *"]();
 
     expect(mockDbExecute).toHaveBeenCalled();
@@ -468,10 +468,10 @@ describe("daily metrics cleanup", () => {
   });
 
   it("does not log when no rows are deleted", async () => {
-    mockDbExecute.mockResolvedValueOnce({ rowCount: 0 });
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     await startScheduler();
+    mockDbExecute.mockResolvedValueOnce({ rowCount: 0 });
     await cronCallbacks["0 3 * * *"]();
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
@@ -481,9 +481,8 @@ describe("daily metrics cleanup", () => {
   });
 
   it("logs error when cleanup query fails", async () => {
-    mockDbExecute.mockRejectedValueOnce(new Error("DB timeout"));
-
     await startScheduler();
+    mockDbExecute.mockRejectedValueOnce(new Error("DB timeout"));
     await cronCallbacks["0 3 * * *"]();
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
@@ -499,9 +498,8 @@ describe("daily metrics cleanup", () => {
   });
 
   it("handles non-Error thrown in cleanup (uses String coercion)", async () => {
-    mockDbExecute.mockRejectedValueOnce("disk full");
-
     await startScheduler();
+    mockDbExecute.mockRejectedValueOnce("disk full");
     await cronCallbacks["0 3 * * *"]();
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
