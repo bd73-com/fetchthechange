@@ -1,12 +1,13 @@
 import cron from "node-cron";
 import { storage } from "../storage";
-import { checkMonitor } from "./scraper";
+import { checkMonitor, monitorsNeedingRetry } from "./scraper";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
 const MAX_CONCURRENT_CHECKS = 10;
+const ACCELERATED_RETRY_MS = 5 * 60 * 1000; // 5 minutes
 let activeChecks = 0;
 
 async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]) {
@@ -51,7 +52,11 @@ export async function startScheduler() {
 
         let shouldCheck = false;
 
-        if (monitor.frequency === "hourly" && diffHours >= 1) {
+        // Accelerated retry: monitors affected by Browserless infra failures
+        // get retried every 5 minutes instead of their normal frequency
+        if (monitorsNeedingRetry.has(monitor.id) && diffMs >= ACCELERATED_RETRY_MS) {
+          shouldCheck = true;
+        } else if (monitor.frequency === "hourly" && diffHours >= 1) {
           shouldCheck = true;
         } else if (monitor.frequency === "daily" && diffHours >= 24) {
           shouldCheck = true;

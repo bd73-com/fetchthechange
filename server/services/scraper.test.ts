@@ -34,6 +34,16 @@ vi.mock("./browserlessTracker", () => ({
   },
 }));
 
+vi.mock("./browserlessCircuitBreaker", () => ({
+  browserlessCircuitBreaker: {
+    isAvailable: vi.fn().mockReturnValue(true),
+    recordSuccess: vi.fn(),
+    recordInfraFailure: vi.fn(),
+    getState: vi.fn().mockReturnValue("closed"),
+    reset: vi.fn(),
+  },
+}));
+
 vi.mock("../utils/ssrf", () => ({
   validateUrlBeforeFetch: vi.fn().mockResolvedValue(undefined),
   ssrfSafeFetch: vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
@@ -76,10 +86,12 @@ import {
   textMatches,
   validateCssSelector,
   discoverSelectors,
+  monitorsNeedingRetry,
 } from "./scraper";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
 import { processChangeNotification } from "./notification";
+import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { db } from "../db";
 import type { Monitor } from "@shared/schema";
 
@@ -1702,16 +1714,17 @@ describe("failure tracking and auto-pause", () => {
     const monitor = makeMonitor({ selector: ".missing" });
     const result = await runWithTimers(monitor);
 
-    // The result should be an error about browserless being unavailable
-    expect(result.status).toBe("error");
-    expect(result.error).toBe("Browserless service unavailable");
+    // With self-healing: monitor has no currentValue, so it falls through to
+    // the actual underlying status (selector_missing) instead of generic "Browserless service unavailable"
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found (rendering service temporarily unavailable)");
 
     // The db.update set call should NOT have the SQL increment for consecutiveFailures
     // (browserlessInfraFailure=true means shouldPenalize=false)
     expect(mockDb.update).toHaveBeenCalled();
     const setArg = setFn.mock.calls[0]?.[0];
     expect(setArg).toBeDefined();
-    expect(setArg.lastError).toBe("Browserless service unavailable");
+    expect(setArg.lastError).toBe("Selector not found (rendering service temporarily unavailable)");
     // When browserlessInfraFailure=true, consecutiveFailures should be the Drizzle column
     // reference (no increment) rather than a sql`` expression with queryChunks
     expect(setArg.consecutiveFailures).toBeDefined();
@@ -2109,8 +2122,9 @@ describe("Browserless retry logic", () => {
     const monitor = makeMonitor({ selector: ".missing" });
     const result = await runWithTimers(monitor);
 
-    expect(result.status).toBe("error");
-    expect(result.error).toBe("Browserless service unavailable");
+    // With self-healing: no currentValue, falls through to actual status
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found (rendering service temporarily unavailable)");
     // connectOverCDP should only be called once (no retry for infra failures)
     expect(mockConnectOverCDP).toHaveBeenCalledTimes(1);
   });
@@ -2372,9 +2386,11 @@ describe("auto-heal selector recovery", () => {
     const monitor = makeMonitor({ selector: ".missing", currentValue: "$50.00" });
     const result = await runWithTimers(monitor);
 
-    // Should be error (infra failure), NOT selector_missing with auto-heal
-    expect(result.status).toBe("error");
-    expect(result.error).toBe("Browserless service unavailable");
+    // With self-healing: monitor has currentValue, so state is preserved
+    // (graceful degradation — no error shown, value kept intact)
+    expect(result.status).not.toBe("error");
+    expect(result.currentValue).toBe("$50.00");
+    expect(result.error).toBeNull();
   });
 
   it("catches errors from discoverSelectors and falls through to failure", async () => {
@@ -3383,5 +3399,340 @@ describe("fetch timeout falls through to browserless fallback", () => {
 
     expect(result.status).toBe("error");
     expect(result.error).toBe("Page returned empty response");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Self-healing: circuit breaker integration, graceful degradation, retry set
+// ---------------------------------------------------------------------------
+describe("self-healing recovery", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+    getMonitorChanges: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+
+  function mockDbUpdate(returnedFailureCount: number, returnedActive = true) {
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+    return { setFn, whereFn, returningFn };
+  }
+
+  function createPlaywrightMock(pageContentHtml: string, selectorCount: number, extractedText: string | null) {
+    const locatorMock = {
+      count: vi.fn().mockResolvedValue(selectorCount),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(extractedText || ""),
+      }),
+    };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(pageContentHtml),
+      locator: vi.fn().mockReturnValue(locatorMock),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      getByRole: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0) }),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    return { browserMock, contextMock, pageMock, locatorMock };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+    // Ensure circuit breaker mock is reset to defaults
+    const cbMock = browserlessCircuitBreaker as unknown as {
+      isAvailable: ReturnType<typeof vi.fn>;
+      recordSuccess: ReturnType<typeof vi.fn>;
+      recordInfraFailure: ReturnType<typeof vi.fn>;
+      getState: ReturnType<typeof vi.fn>;
+    };
+    cbMock.isAvailable.mockReturnValue(true);
+    cbMock.getState.mockReturnValue("closed");
+    // Clear the retry set
+    monitorsNeedingRetry.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    for (let i = 0; i < 30; i++) {
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    return promise;
+  }
+
+  it("skips Browserless when circuit breaker is open and preserves state for existing monitors", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    // Circuit breaker is OPEN
+    const cbMock = browserlessCircuitBreaker as unknown as { isAvailable: ReturnType<typeof vi.fn>; recordSuccess: ReturnType<typeof vi.fn>; recordInfraFailure: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
+    cbMock.isAvailable.mockReturnValue(false);
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+
+    const monitor = makeMonitor({ selector: ".missing", currentValue: "$99.99", lastStatus: "ok" });
+    const result = await runWithTimers(monitor);
+
+    // Monitor preserves its healthy state
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$99.99");
+    expect(result.error).toBeNull();
+
+    // Browserless was never attempted (canUseBrowserless not called)
+    expect(BrowserlessUsageTracker.canUseBrowserless).not.toHaveBeenCalled();
+    // connectOverCDP was never called
+    expect(mockConnectOverCDP).not.toHaveBeenCalled();
+  });
+
+  it("adds monitor to monitorsNeedingRetry on graceful degradation", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    // Circuit breaker is OPEN
+    const cbMock = browserlessCircuitBreaker as unknown as { isAvailable: ReturnType<typeof vi.fn>; recordSuccess: ReturnType<typeof vi.fn>; recordInfraFailure: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
+    cbMock.isAvailable.mockReturnValue(false);
+
+    // monitorsNeedingRetry is imported at top level from the mocked "./scraper"
+
+    const monitor = makeMonitor({ id: 42, selector: ".missing", currentValue: "$50.00" });
+    await runWithTimers(monitor);
+
+    expect(monitorsNeedingRetry.has(42)).toBe(true);
+  });
+
+  it("only updates lastChecked on graceful degradation (no status/error change)", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const cbMock = browserlessCircuitBreaker as unknown as { isAvailable: ReturnType<typeof vi.fn>; recordSuccess: ReturnType<typeof vi.fn>; recordInfraFailure: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
+    cbMock.isAvailable.mockReturnValue(false);
+
+    const monitor = makeMonitor({ selector: ".missing", currentValue: "$50.00" });
+    await runWithTimers(monitor);
+
+    // storage.updateMonitor is called with only lastChecked (graceful degradation path)
+    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ lastChecked: expect.any(Date) })
+    );
+    // Should NOT contain lastStatus or lastError in the same call
+    const updateCall = mockStorage.updateMonitor.mock.calls[0][1];
+    expect(updateCall).not.toHaveProperty("lastStatus");
+    expect(updateCall).not.toHaveProperty("lastError");
+  });
+
+  it("falls through to selector_missing when no currentValue and circuit breaker open", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const cbMock = browserlessCircuitBreaker as unknown as { isAvailable: ReturnType<typeof vi.fn>; recordSuccess: ReturnType<typeof vi.fn>; recordInfraFailure: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
+    cbMock.isAvailable.mockReturnValue(false);
+
+    const monitor = makeMonitor({ selector: ".missing", currentValue: null });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found (rendering service temporarily unavailable)");
+  });
+
+  it("falls through to blocked when no currentValue, infra failure, and page is blocked", async () => {
+    // Page has a captcha element (triggers block detection)
+    const blockedHtml = `<html><body><div class="captcha-container">Please verify</div></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(blockedHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(blockedHtml, { status: 200 }));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    mockConnectOverCDP.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const monitor = makeMonitor({ selector: ".price", currentValue: null });
+    const result = await runWithTimers(monitor);
+
+    // Should be blocked (the actual underlying status), not "Browserless service unavailable"
+    expect(result.status).toBe("blocked");
+    expect(result.error).toContain("captcha");
+  });
+
+  it("falls through to static fetch error when no currentValue and fetch fails with infra failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    mockConnectOverCDP.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const monitor = makeMonitor({ selector: ".price", currentValue: null });
+    const result = await runWithTimers(monitor);
+
+    // Should show the actual static fetch error
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Page took too long to respond");
+  });
+
+  it("calls browserlessCircuitBreaker.recordSuccess on successful Browserless extraction", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    const fullHtml = `<html><body><span class="price">$19.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    const { browserMock } = createPlaywrightMock(fullHtml, 1, "$19.99");
+    mockConnectOverCDP.mockResolvedValue(browserMock);
+
+    const cbMock = browserlessCircuitBreaker as unknown as { isAvailable: ReturnType<typeof vi.fn>; recordSuccess: ReturnType<typeof vi.fn>; recordInfraFailure: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(cbMock.recordSuccess).toHaveBeenCalled();
+  });
+
+  it("calls browserlessCircuitBreaker.recordInfraFailure on infrastructure error", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    mockConnectOverCDP.mockRejectedValue(new Error("connectOverCDP failed: ECONNREFUSED"));
+
+    const cbMock = browserlessCircuitBreaker as unknown as { isAvailable: ReturnType<typeof vi.fn>; recordSuccess: ReturnType<typeof vi.fn>; recordInfraFailure: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
+
+    const monitor = makeMonitor({ selector: ".missing" });
+    await runWithTimers(monitor);
+
+    expect(cbMock.recordInfraFailure).toHaveBeenCalled();
+  });
+
+  it("removes monitor from monitorsNeedingRetry on successful check", async () => {
+    const html = `<html><body><span class="price">$25.00</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(html, { status: 200 })
+    );
+
+    // monitorsNeedingRetry is imported at top level from the mocked "./scraper"
+    monitorsNeedingRetry.add(7);
+
+    const monitor = makeMonitor({ id: 7, selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(monitorsNeedingRetry.has(7)).toBe(false);
+  });
+
+  it("adds to retry set for first-time monitors (no currentValue) on infra failure", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+
+    mockConnectOverCDP.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    // monitorsNeedingRetry is imported at top level from the mocked "./scraper"
+
+    const monitor = makeMonitor({ id: 55, selector: ".missing", currentValue: null });
+    await runWithTimers(monitor);
+
+    expect(monitorsNeedingRetry.has(55)).toBe(true);
+  });
+
+  it("clears retry set on non-ok result when infra failure is no longer active", async () => {
+    // Monitor was previously in retry set, but this check has no infra failure
+    // (e.g., Browserless recovered but selector is genuinely missing)
+    const emptyHtml = `<html><body><p>No match here</p></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(emptyHtml, { status: 200 })
+    );
+
+    // No BROWSERLESS_TOKEN → no Browserless attempt → no infra failure
+    delete process.env.BROWSERLESS_TOKEN;
+
+    monitorsNeedingRetry.add(99);
+
+    const monitor = makeMonitor({ id: 99, selector: ".missing", currentValue: null });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    // Should be removed from retry set even though status is not "ok"
+    expect(monitorsNeedingRetry.has(99)).toBe(false);
+  });
+
+  it("preserves lastStatus from monitor on graceful degradation", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const cbMock = browserlessCircuitBreaker as unknown as { isAvailable: ReturnType<typeof vi.fn>; recordSuccess: ReturnType<typeof vi.fn>; recordInfraFailure: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
+    cbMock.isAvailable.mockReturnValue(false);
+
+    // Monitor was previously in selector_missing state but had a value
+    const monitor = makeMonitor({
+      selector: ".old-selector",
+      currentValue: "$50.00",
+      lastStatus: "selector_missing",
+    });
+    const result = await runWithTimers(monitor);
+
+    // Should preserve the original lastStatus, not override to "ok"
+    expect(result.status).toBe("selector_missing");
+    expect(result.currentValue).toBe("$50.00");
+    expect(result.error).toBeNull();
   });
 });
