@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { storage } from "../storage";
 import { checkMonitor, monitorsNeedingRetry } from "./scraper";
 import { processQueuedNotifications, processDigestCron } from "./notification";
+import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery";
 import { ErrorLogger } from "./logger";
 import { notificationTablesExist } from "./notificationReady";
 import { db } from "../db";
@@ -103,6 +104,80 @@ export async function startScheduler() {
         });
       }
     });
+
+    // Webhook retry cron: every minute, process pending webhook deliveries
+    cron.schedule("*/1 * * * *", async () => {
+      try {
+        const pendingRetries = await storage.getPendingWebhookRetries();
+        const now = Date.now();
+
+        // Backoff windows: attempt 1 → 5s, attempt 2 → 30s, attempt 3 → 120s
+        const backoffMs: Record<number, number> = { 1: 5000, 2: 30000, 3: 120000 };
+
+        for (const entry of pendingRetries) {
+          const elapsed = now - new Date(entry.createdAt).getTime();
+          const requiredWait = backoffMs[entry.attempt] || 120000;
+          if (elapsed < requiredWait) continue;
+
+          const monitor = await storage.getMonitor(entry.monitorId);
+          if (!monitor) {
+            await storage.updateDeliveryLog(entry.id, { status: "failed" });
+            continue;
+          }
+
+          const channels = await storage.getMonitorChannels(monitor.id);
+          const webhookChannel = channels.find((c) => c.channel === "webhook" && c.enabled);
+          if (!webhookChannel) {
+            await storage.updateDeliveryLog(entry.id, { status: "failed" });
+            continue;
+          }
+
+          const config = webhookChannel.config as unknown as WebhookConfig;
+          if (!config?.url || !config?.secret) {
+            await storage.updateDeliveryLog(entry.id, { status: "failed" });
+            continue;
+          }
+
+          const allChanges = await storage.getMonitorChanges(monitor.id);
+          const change = allChanges.find((c) => c.id === entry.changeId);
+          if (!change) {
+            await storage.updateDeliveryLog(entry.id, { status: "failed" });
+            continue;
+          }
+
+          const result = await deliverWebhook(monitor, change, config);
+          const nextAttempt = entry.attempt + 1;
+
+          if (result.success) {
+            await storage.updateDeliveryLog(entry.id, {
+              status: "success",
+              attempt: nextAttempt,
+              deliveredAt: new Date(),
+              response: { statusCode: result.statusCode } as Record<string, unknown>,
+            });
+          } else if (nextAttempt >= 3) {
+            const urlDomain = new URL(config.url).hostname;
+            await storage.updateDeliveryLog(entry.id, {
+              status: "failed",
+              attempt: nextAttempt,
+              response: { error: result.error } as Record<string, unknown>,
+            });
+            console.error(`[Webhook] Delivery failed after all retries (monitorId=${monitor.id}, domain=${urlDomain})`);
+          } else {
+            await storage.updateDeliveryLog(entry.id, {
+              status: "pending",
+              attempt: nextAttempt,
+              response: { error: result.error } as Record<string, unknown>,
+            });
+            console.warn(`[Webhook] Delivery failed, scheduling retry (monitorId=${monitor.id}, attempt=${nextAttempt}, error=${result.error})`);
+          }
+        }
+      } catch (error) {
+        await ErrorLogger.error("scheduler", "Webhook retry processing failed", error instanceof Error ? error : null, {
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
   }
 
   // Daily cleanup: prune monitor_metrics older than 90 days to prevent unbounded growth
@@ -120,6 +195,21 @@ export async function startScheduler() {
         errorMessage: error instanceof Error ? error.message : String(error),
         retentionDays: 90,
         table: "monitor_metrics",
+      });
+    }
+
+    // Delivery log cleanup: prune entries older than 30 days
+    try {
+      const olderThan = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const entriesDeleted = await storage.cleanupOldDeliveryLogs(olderThan);
+      if (entriesDeleted > 0) {
+        console.log(`[Cleanup] Pruned ${entriesDeleted} delivery_log rows older than 30 days`);
+      }
+    } catch (error) {
+      await ErrorLogger.error("scheduler", "delivery_log cleanup failed", error instanceof Error ? error : null, {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        retentionDays: 30,
+        table: "delivery_log",
       });
     }
   });

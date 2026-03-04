@@ -1,7 +1,7 @@
-import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry } from "@shared/schema";
+import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection } from "@shared/schema";
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
-import { eq, desc, and, or, isNull, lte, sql } from "drizzle-orm";
+import { eq, desc, and, or, isNull, lte, lt, sql } from "drizzle-orm";
 import { notificationTablesExist } from "./services/notificationReady";
 
 export interface IStorage {
@@ -56,6 +56,8 @@ export class DatabaseStorage implements IStorage {
       await db.delete(notificationQueue).where(eq(notificationQueue.monitorId, id));
       await db.delete(notificationPreferences).where(eq(notificationPreferences.monitorId, id));
     }
+    await db.delete(deliveryLog).where(eq(deliveryLog.monitorId, id));
+    await db.delete(notificationChannels).where(eq(notificationChannels.monitorId, id));
     await db.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
     await db.delete(monitorMetrics).where(eq(monitorMetrics.monitorId, id));
     await db.delete(browserlessUsage).where(eq(browserlessUsage.monitorId, id));
@@ -195,6 +197,108 @@ export class DatabaseStorage implements IStorage {
       console.log(`[Cleanup] Cleaned ${cleanedCount} polluted records total`);
     }
     return cleanedCount;
+  }
+
+  // Notification channels
+  async getMonitorChannels(monitorId: number): Promise<NotificationChannel[]> {
+    return await db.select().from(notificationChannels)
+      .where(eq(notificationChannels.monitorId, monitorId));
+  }
+
+  async upsertMonitorChannel(monitorId: number, channel: string, enabled: boolean, config: Record<string, unknown>): Promise<NotificationChannel> {
+    const [result] = await db.insert(notificationChannels)
+      .values({ monitorId, channel, enabled, config })
+      .onConflictDoUpdate({
+        target: [notificationChannels.monitorId, notificationChannels.channel],
+        set: { enabled, config, updatedAt: new Date() },
+      })
+      .returning();
+    return result;
+  }
+
+  async deleteMonitorChannel(monitorId: number, channel: string): Promise<void> {
+    await db.delete(notificationChannels).where(
+      and(eq(notificationChannels.monitorId, monitorId), eq(notificationChannels.channel, channel))
+    );
+  }
+
+  // Delivery log
+  async addDeliveryLog(entry: { monitorId: number; changeId: number; channel: string; status: string; attempt?: number; response?: Record<string, unknown> | null; deliveredAt?: Date | null }): Promise<DeliveryLogEntry> {
+    const [result] = await db.insert(deliveryLog)
+      .values({
+        monitorId: entry.monitorId,
+        changeId: entry.changeId,
+        channel: entry.channel,
+        status: entry.status,
+        attempt: entry.attempt ?? 1,
+        response: entry.response ?? null,
+        deliveredAt: entry.deliveredAt ?? null,
+      })
+      .returning();
+    return result;
+  }
+
+  async getDeliveryLog(monitorId: number, limit: number, channelFilter?: string): Promise<DeliveryLogEntry[]> {
+    const conditions = [eq(deliveryLog.monitorId, monitorId)];
+    if (channelFilter) {
+      conditions.push(eq(deliveryLog.channel, channelFilter));
+    }
+    return await db.select().from(deliveryLog)
+      .where(and(...conditions))
+      .orderBy(desc(deliveryLog.createdAt))
+      .limit(limit);
+  }
+
+  async updateDeliveryLog(id: number, updates: Partial<Pick<DeliveryLogEntry, "status" | "attempt" | "response" | "deliveredAt">>): Promise<void> {
+    await db.update(deliveryLog).set(updates).where(eq(deliveryLog.id, id));
+  }
+
+  async getPendingWebhookRetries(): Promise<DeliveryLogEntry[]> {
+    return await db.select().from(deliveryLog)
+      .where(and(
+        eq(deliveryLog.channel, "webhook"),
+        eq(deliveryLog.status, "pending"),
+        lt(deliveryLog.attempt, 3)
+      ))
+      .orderBy(deliveryLog.createdAt);
+  }
+
+  async cleanupOldDeliveryLogs(olderThan: Date): Promise<number> {
+    const result = await db.delete(deliveryLog)
+      .where(lt(deliveryLog.createdAt, olderThan));
+    return (result as any).rowCount ?? 0;
+  }
+
+  // Slack connections
+  async getSlackConnection(userId: string): Promise<SlackConnection | undefined> {
+    const [conn] = await db.select().from(slackConnections)
+      .where(eq(slackConnections.userId, userId));
+    return conn;
+  }
+
+  async upsertSlackConnection(data: { userId: string; teamId: string; teamName: string; botToken: string; scope: string }): Promise<SlackConnection> {
+    const [result] = await db.insert(slackConnections)
+      .values(data)
+      .onConflictDoUpdate({
+        target: slackConnections.userId,
+        set: { teamId: data.teamId, teamName: data.teamName, botToken: data.botToken, scope: data.scope, updatedAt: new Date() },
+      })
+      .returning();
+    return result;
+  }
+
+  async deleteSlackConnection(userId: string): Promise<void> {
+    await db.delete(slackConnections).where(eq(slackConnections.userId, userId));
+  }
+
+  async deleteSlackChannelsForUser(userId: string): Promise<void> {
+    const userMonitors = await db.select({ id: monitors.id }).from(monitors)
+      .where(eq(monitors.userId, userId));
+    for (const m of userMonitors) {
+      await db.delete(notificationChannels).where(
+        and(eq(notificationChannels.monitorId, m.id), eq(notificationChannels.channel, "slack"))
+      );
+    }
   }
 }
 
