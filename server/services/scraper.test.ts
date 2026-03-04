@@ -88,6 +88,7 @@ import {
   discoverSelectors,
   monitorsNeedingRetry,
   classifyOuterError,
+  classifyHttpStatus,
 } from "./scraper";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
@@ -4005,5 +4006,208 @@ describe("checkMonitor outer catch resilience", () => {
     expect(result.error).toBe("Could not resolve the target hostname");
     // Must NOT be the old generic message
     expect(result.error).not.toBe("Failed to fetch page");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyHttpStatus
+// ---------------------------------------------------------------------------
+describe("classifyHttpStatus", () => {
+  it("classifies 401 as permanent with authentication message", () => {
+    const result = classifyHttpStatus(401);
+    expect(result.status).toBe(401);
+    expect(result.message).toContain("HTTP 401");
+    expect(result.message).toContain("authentication");
+    expect(result.transient).toBe(false);
+  });
+
+  it("classifies 403 as permanent", () => {
+    const result = classifyHttpStatus(403);
+    expect(result.message).toContain("HTTP 403");
+    expect(result.transient).toBe(false);
+  });
+
+  it("classifies 404 as permanent with URL check message", () => {
+    const result = classifyHttpStatus(404);
+    expect(result.message).toContain("HTTP 404");
+    expect(result.message).toContain("URL");
+    expect(result.transient).toBe(false);
+  });
+
+  it("classifies 410 as permanent", () => {
+    const result = classifyHttpStatus(410);
+    expect(result.message).toContain("HTTP 410");
+    expect(result.transient).toBe(false);
+  });
+
+  it("classifies 429 as transient", () => {
+    const result = classifyHttpStatus(429);
+    expect(result.message).toContain("HTTP 429");
+    expect(result.transient).toBe(true);
+  });
+
+  it("classifies unknown 4xx as permanent", () => {
+    const result = classifyHttpStatus(418);
+    expect(result.message).toContain("HTTP 418");
+    expect(result.transient).toBe(false);
+  });
+
+  it("classifies 500 as transient", () => {
+    const result = classifyHttpStatus(500);
+    expect(result.message).toContain("HTTP 500");
+    expect(result.transient).toBe(true);
+  });
+
+  it("classifies 502 as transient", () => {
+    const result = classifyHttpStatus(502);
+    expect(result.message).toContain("HTTP 502");
+    expect(result.transient).toBe(true);
+  });
+
+  it("classifies 503 as transient", () => {
+    const result = classifyHttpStatus(503);
+    expect(result.message).toContain("HTTP 503");
+    expect(result.transient).toBe(true);
+  });
+
+  it("classifies 504 as transient", () => {
+    const result = classifyHttpStatus(504);
+    expect(result.message).toContain("HTTP 504");
+    expect(result.transient).toBe(true);
+  });
+
+  it("classifies unknown 5xx as transient", () => {
+    const result = classifyHttpStatus(599);
+    expect(result.message).toContain("HTTP 599");
+    expect(result.transient).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkMonitor HTTP status handling
+// ---------------------------------------------------------------------------
+describe("checkMonitor HTTP status handling", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getMonitorChanges: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    await vi.advanceTimersByTimeAsync(3000);
+    return promise;
+  }
+
+  it("returns specific error for HTTP 404", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>Not Found</html>", { status: 404 })
+    );
+
+    const monitor = makeMonitor();
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("HTTP 404");
+    expect(result.error).not.toBe("Failed to fetch page");
+  });
+
+  it("returns specific error for HTTP 403", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>Forbidden</html>", { status: 403 })
+    );
+
+    const monitor = makeMonitor();
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("HTTP 403");
+  });
+
+  it("returns specific error for HTTP 429 (rate limited)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>Too Many Requests</html>", { status: 429 })
+    );
+
+    const monitor = makeMonitor();
+    const result = await runWithTimers(monitor);
+
+    expect(result.error).toContain("HTTP 429");
+  });
+
+  it("returns specific error for HTTP 500", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>Internal Server Error</html>", { status: 500 })
+    );
+
+    const monitor = makeMonitor();
+    const result = await runWithTimers(monitor);
+
+    expect(result.error).toContain("HTTP 500");
+  });
+
+  it("does not retry on permanent HTTP 404", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>Not Found</html>", { status: 404 })
+    );
+
+    const monitor = makeMonitor();
+    await runWithTimers(monitor);
+
+    // Should only call fetch once (no retry for permanent errors)
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries on transient HTTP 503 and succeeds", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("<html>Error</html>", { status: 503 }))
+      .mockResolvedValueOnce(new Response('<html><body><span class="price">$19.99</span></body></html>', { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$19.99");
+  });
+
+  it("classifyOuterError recognizes HTTP status messages", () => {
+    const result = classifyOuterError(new Error("Access denied by the target site (HTTP 403)"));
+    expect(result.logContext).toBe("http status error");
+    expect(result.userMessage).toContain("HTTP 403");
+  });
+
+  it("uses retry status when transient error becomes permanent (503 -> 404)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("<html>Error</html>", { status: 503 }))
+      .mockResolvedValueOnce(new Response("<html>Not Found</html>", { status: 404 }));
+
+    const result = await runWithTimers(makeMonitor());
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("HTTP 404");
+  });
+
+  it("treats retry 200-without-match as selector_missing, not stale HTTP error", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("<html>Error</html>", { status: 503 }))
+      .mockResolvedValueOnce(new Response("<html><body><p>No match</p></body></html>", { status: 200 }));
+
+    const result = await runWithTimers(makeMonitor({ selector: ".missing" }));
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("selector_missing");
+    expect(result.error).toBe("Selector not found");
   });
 });
