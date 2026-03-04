@@ -3842,6 +3842,53 @@ describe("classifyOuterError", () => {
     expect(result.logContext).toBe("non-Error thrown");
     expect(result.userMessage).toBe("An unexpected error occurred");
   });
+
+  it("classifies deadlock errors as database errors", () => {
+    const result = classifyOuterError(new Error("deadlock detected"));
+    expect(result.logContext).toBe("database error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies drizzle errors as database errors", () => {
+    const result = classifyOuterError(new Error("DrizzleError: column not found"));
+    expect(result.logContext).toBe("database error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies postgres connection string as database connection error", () => {
+    const result = classifyOuterError(new Error("connection to postgres server refused"));
+    expect(result.logContext).toBe("database connection error");
+    expect(result.userMessage).toContain("temporary server error");
+  });
+
+  it("classifies ECONNRESET as network error", () => {
+    const result = classifyOuterError(new Error("read ECONNRESET"));
+    expect(result.logContext).toBe("network error");
+    expect(result.userMessage).toBe("Connection was reset by the target site");
+  });
+
+  it("classifies SSRF blocked errors as network error", () => {
+    const result = classifyOuterError(new Error("SSRF blocked: This URL resolves to a private address"));
+    expect(result.logContext).toBe("network error");
+    expect(result.userMessage).toBe("URL is not allowed");
+  });
+
+  it("classifies UND_ERR_HEADERS_OVERFLOW as network error", () => {
+    const result = classifyOuterError(new Error("UND_ERR_HEADERS_OVERFLOW"));
+    expect(result.logContext).toBe("network error");
+  });
+
+  it("classifies SyntaxError messages as parsing error", () => {
+    const result = classifyOuterError(new Error("SyntaxError: Unexpected token < in JSON"));
+    expect(result.logContext).toBe("parsing error");
+    expect(result.userMessage).toContain("Failed to parse");
+  });
+
+  it("classifies Unexpected token messages as parsing error", () => {
+    const result = classifyOuterError(new Error("Unexpected token } at position 42"));
+    expect(result.logContext).toBe("parsing error");
+    expect(result.userMessage).toContain("Failed to parse");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -3908,5 +3955,55 @@ describe("checkMonitor outer catch resilience", () => {
     expect(result.status).toBe("ok");
     expect(result.currentValue).toBe("$19.99");
     expect(result.error).toContain("server error prevented saving");
+  });
+
+  it("returns save-failure error when addMonitorChange throws in changed-value path", async () => {
+    const html = `<html><body><span class="price">$29.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    // updateMonitor succeeds but addMonitorChange throws
+    mockStorage.updateMonitor.mockResolvedValueOnce({});
+    mockStorage.addMonitorChange.mockRejectedValueOnce(new Error("duplicate key violates unique constraint"));
+
+    const monitor = makeMonitor({ currentValue: "$19.99" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(result.changed).toBe(true);
+    expect(result.currentValue).toBe("$29.99");
+    expect(result.error).toContain("server error prevented saving");
+  });
+
+  it("returns result even when ErrorLogger.error rejects in outer catch", async () => {
+    // Force an error that reaches the outer catch by making fetch throw unexpectedly
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("getaddrinfo ENOTFOUND bad.example.com"));
+
+    // Make ErrorLogger.error reject
+    const { ErrorLogger } = await import("./logger");
+    (ErrorLogger.error as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("logging DB down"));
+
+    const monitor = makeMonitor();
+    const result = await runWithTimers(monitor);
+
+    // Should still return a valid result thanks to .catch(() => {})
+    expect(result).toBeDefined();
+    expect(result.status).toBe("error");
+    expect(result.error).toBe("Could not resolve the target hostname");
+  });
+
+  it("returns classified error message from outer catch, not generic 'Failed to fetch page'", async () => {
+    // Make fetch reject with a network error that will reach the outer catch
+    // by having ssrfSafeFetch reject (goes through internal catch to set staticFetchError),
+    // then ensure the pipeline ultimately returns the classified error
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("getaddrinfo ENOTFOUND nonexistent.example.com"));
+
+    const monitor = makeMonitor();
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    // classifyOuterError (or sanitizeErrorForClient) should produce a specific message
+    expect(result.error).toBe("Could not resolve the target hostname");
+    // Must NOT be the old generic message
+    expect(result.error).not.toBe("Failed to fetch page");
   });
 });
