@@ -1005,6 +1005,53 @@ describe("checkMonitor", () => {
     expect(mockProcessNotification).not.toHaveBeenCalled();
   });
 
+  it("passes isFirstChange=false when multiple changes already exist", async () => {
+    const html = `<html><body><span class="price">$29.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(html, { status: 200 })
+    );
+
+    // Simulate existing changes so isFirstChange is false
+    mockStorage.getMonitorChanges.mockResolvedValueOnce([
+      { id: 1, monitorId: 1, oldValue: null, newValue: "$19.99", detectedAt: new Date() },
+      { id: 2, monitorId: 1, oldValue: "$19.99", newValue: "$29.99", detectedAt: new Date() },
+    ]);
+
+    const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: true });
+    await runWithTimers(monitor);
+
+    expect(mockProcessNotification).toHaveBeenCalledWith(
+      monitor,
+      expect.objectContaining({ monitorId: 1 }),
+      false
+    );
+  });
+
+  it("still records change and returns ok when processChangeNotification throws", async () => {
+    const html = `<html><body><span class="price">$24.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(html, { status: 200 })
+    );
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockProcessNotification.mockRejectedValueOnce(new Error("Email service down"));
+
+    const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: true });
+    const result = await runWithTimers(monitor);
+
+    // Change was still recorded despite notification failure
+    expect(mockStorage.addMonitorChange).toHaveBeenCalledWith(1, "$19.99", "$24.99");
+    expect(result.status).toBe("ok");
+    expect(result.changed).toBe(true);
+    expect(result.currentValue).toBe("$24.99");
+
+    // Error was logged but not propagated
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Notification failed for monitor 1"),
+      expect.any(Error)
+    );
+    consoleSpy.mockRestore();
+  });
+
   it("returns selector_missing when selector matches nothing on an unblocked page", async () => {
     const html = `<html><body><span class="title">Hello</span></body></html>`;
     // Both initial and retry get the same non-matching HTML
