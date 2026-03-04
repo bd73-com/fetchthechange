@@ -61,6 +61,7 @@ vi.mock("node-cron", () => ({
 }));
 
 import { startScheduler } from "./scheduler";
+import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
 import type { Monitor } from "@shared/schema";
 
@@ -430,6 +431,82 @@ describe("daily metrics cleanup", () => {
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
       "monitor_metrics cleanup failed",
+      expect.any(Error)
+    );
+  });
+});
+
+describe("notification queue and digest cron (*/1 * * * *)", () => {
+  const mockProcessQueuedNotifications = vi.mocked(processQueuedNotifications);
+  const mockProcessDigestCron = vi.mocked(processDigestCron);
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("calls processQueuedNotifications on each tick", async () => {
+    await startScheduler();
+    await cronCallbacks["*/1 * * * *"]();
+
+    expect(mockProcessQueuedNotifications).toHaveBeenCalledOnce();
+  });
+
+  it("calls processDigestCron on each tick", async () => {
+    await startScheduler();
+    await cronCallbacks["*/1 * * * *"]();
+
+    expect(mockProcessDigestCron).toHaveBeenCalledOnce();
+  });
+
+  it("still calls processDigestCron when processQueuedNotifications throws", async () => {
+    mockProcessQueuedNotifications.mockRejectedValueOnce(new Error("Queue DB error"));
+
+    await startScheduler();
+    await cronCallbacks["*/1 * * * *"]();
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "Queued notification processing failed",
+      expect.any(Error)
+    );
+    expect(mockProcessDigestCron).toHaveBeenCalledOnce();
+  });
+
+  it("logs error when processDigestCron throws", async () => {
+    mockProcessDigestCron.mockRejectedValueOnce(new Error("Digest error"));
+
+    await startScheduler();
+    await cronCallbacks["*/1 * * * *"]();
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "Digest processing failed",
+      expect.any(Error)
+    );
+  });
+
+  it("logs both errors when both processQueuedNotifications and processDigestCron throw", async () => {
+    mockProcessQueuedNotifications.mockRejectedValueOnce(new Error("Queue error"));
+    mockProcessDigestCron.mockRejectedValueOnce(new Error("Digest error"));
+
+    await startScheduler();
+    await cronCallbacks["*/1 * * * *"]();
+
+    expect(ErrorLogger.error).toHaveBeenCalledTimes(2);
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "Queued notification processing failed",
+      expect.any(Error)
+    );
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "Digest processing failed",
       expect.any(Error)
     );
   });
