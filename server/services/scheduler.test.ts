@@ -62,6 +62,21 @@ vi.mock("drizzle-orm", () => ({
   sql: (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
 }));
 
+const { mockOnClose } = vi.hoisted(() => ({
+  mockOnClose: vi.fn(),
+}));
+
+vi.mock("./browserlessCircuitBreaker", () => ({
+  browserlessCircuitBreaker: {
+    onClose: (...args: any[]) => mockOnClose(...args),
+    isAvailable: vi.fn().mockReturnValue(true),
+    recordSuccess: vi.fn(),
+    recordInfraFailure: vi.fn(),
+    getState: vi.fn().mockReturnValue("closed"),
+    reset: vi.fn(),
+  },
+}));
+
 vi.mock("node-cron", () => ({
   default: {
     schedule: vi.fn((expression: string, callback: () => Promise<void>) => {
@@ -71,7 +86,7 @@ vi.mock("node-cron", () => ({
   },
 }));
 
-import { startScheduler } from "./scheduler";
+import { startScheduler, retryBackoff } from "./scheduler";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
 import { _resetCache } from "./notificationReady";
@@ -413,20 +428,22 @@ describe("accelerated retry for Browserless infra failures", () => {
     vi.clearAllMocks();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    retryBackoff.clear();
   });
 
   afterEach(() => {
     vi.useRealTimers();
     // Clear the retry set after each test
     mockMonitorsNeedingRetry.clear();
+    retryBackoff.clear();
   });
 
-  it("triggers check for monitor in retry set after 5 minutes", async () => {
+  it("triggers check for monitor in retry set after 2 minutes (base interval)", async () => {
     mockMonitorsNeedingRetry.add(1);
 
-    // Last checked 6 minutes ago (> 5 min accelerated threshold)
-    const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
-    const monitor = makeMonitor({ id: 1, frequency: "daily", lastChecked: sixMinutesAgo });
+    // Last checked 3 minutes ago (> 2 min accelerated threshold)
+    const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000);
+    const monitor = makeMonitor({ id: 1, frequency: "daily", lastChecked: threeMinutesAgo });
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
@@ -437,12 +454,12 @@ describe("accelerated retry for Browserless infra failures", () => {
     expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);
   });
 
-  it("does NOT trigger accelerated check before 5 minutes", async () => {
+  it("does NOT trigger accelerated check before 2 minutes", async () => {
     mockMonitorsNeedingRetry.add(1);
 
-    // Last checked 3 minutes ago (< 5 min threshold)
-    const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000);
-    const monitor = makeMonitor({ id: 1, frequency: "daily", lastChecked: threeMinutesAgo });
+    // Last checked 1 minute ago (< 2 min threshold)
+    const oneMinuteAgo = new Date(Date.now() - 1 * 60 * 1000);
+    const monitor = makeMonitor({ id: 1, frequency: "daily", lastChecked: oneMinuteAgo });
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
@@ -483,6 +500,48 @@ describe("accelerated retry for Browserless infra failures", () => {
     expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);
     // Should only be called once (not double-scheduled)
     expect(mockCheckMonitor).toHaveBeenCalledTimes(1);
+  });
+
+  it("backs off retry interval: 2 min → 4 min after first retry", async () => {
+    mockMonitorsNeedingRetry.add(1);
+
+    // First retry — set backoff.attempts to 1 (simulating prior retry)
+    retryBackoff.set(1, { attempts: 1 });
+
+    // Last checked 3 minutes ago — enough for base (2 min) but not backoff (4 min)
+    const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000);
+    const monitor = makeMonitor({ id: 1, frequency: "daily", lastChecked: threeMinutesAgo });
+    mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
+
+    await startScheduler();
+    await runCron("* * * * *");
+    await vi.advanceTimersByTimeAsync(31000);
+
+    // 3 min < 4 min backoff interval — should NOT be checked
+    expect(mockCheckMonitor).not.toHaveBeenCalled();
+  });
+
+  it("cleans up backoff entry when monitor leaves retry set", async () => {
+    // Monitor was in retry set with backoff, now removed
+    retryBackoff.set(1, { attempts: 3 });
+    // NOT in retry set
+
+    const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000);
+    const monitor = makeMonitor({ id: 1, frequency: "daily", lastChecked: threeMinutesAgo });
+    mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
+
+    await startScheduler();
+    await runCron("* * * * *");
+    await vi.advanceTimersByTimeAsync(31000);
+
+    // Backoff should be cleaned up
+    expect(retryBackoff.has(1)).toBe(false);
+  });
+
+  it("registers onClose callback with circuit breaker", async () => {
+    await startScheduler();
+    expect(mockOnClose).toHaveBeenCalledOnce();
+    expect(typeof mockOnClose.mock.calls[0][0]).toBe("function");
   });
 });
 

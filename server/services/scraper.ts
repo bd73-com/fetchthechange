@@ -17,6 +17,19 @@ import { eq, sql } from "drizzle-orm";
  */
 export const monitorsNeedingRetry = new Set<number>();
 
+/** Shared browser-like headers for static fetches to reduce bot detection. */
+const BROWSER_LIKE_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Cache-Control': 'no-cache',
+  'Upgrade-Insecure-Requests': '1',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1',
+} as const;
+
 interface SelectorSuggestion {
   selector: string;
   count: number;
@@ -330,6 +343,93 @@ export function extractValueFromHtml(html: string, selector: string): string | n
 }
 
 /**
+ * Extracts a price/value from JSON-LD structured data embedded in the page.
+ * Many e-commerce sites include `<script type="application/ld+json">` blocks
+ * with Product schema data, allowing extraction without a headless browser.
+ */
+export function extractFromJsonLd(html: string): string | null {
+  const $ = cheerio.load(html);
+  const scripts = $('script[type="application/ld+json"]');
+  if (scripts.length === 0) return null;
+
+  for (let i = 0; i < scripts.length; i++) {
+    const raw = $(scripts[i]).html();
+    if (!raw) continue;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+
+    const objects = Array.isArray(parsed) ? parsed : [parsed];
+    for (const obj of objects) {
+      const price = extractPriceFromSchema(obj);
+      if (price) return price;
+    }
+  }
+
+  return null;
+}
+
+function extractPriceFromSchema(obj: any): string | null {
+  if (!obj || typeof obj !== "object") return null;
+
+  const rawType = obj["@type"];
+  const types: string[] = Array.isArray(rawType) ? rawType : [rawType];
+
+  if (types.includes("Product") || types.includes("IndividualProduct")) {
+    const offers = obj.offers;
+    if (!offers) return null;
+
+    // Single offer object
+    if (!Array.isArray(offers)) {
+      return extractPriceFromOffer(offers);
+    }
+    // Array of offers — take the first with a price
+    for (const offer of offers) {
+      const price = extractPriceFromOffer(offer);
+      if (price) return price;
+    }
+    return null;
+  }
+
+  if (types.includes("Offer") || types.includes("AggregateOffer")) {
+    return extractPriceFromOffer(obj);
+  }
+
+  // Recurse into @graph arrays (common in JSON-LD)
+  if (Array.isArray(obj["@graph"])) {
+    for (const node of obj["@graph"]) {
+      const price = extractPriceFromSchema(node);
+      if (price) return price;
+    }
+  }
+
+  return null;
+}
+
+function extractPriceFromOffer(offer: any): string | null {
+  if (!offer || typeof offer !== "object") return null;
+
+  // AggregateOffer: prefer lowPrice
+  const raw = offer.price ?? offer.lowPrice ?? offer.highPrice;
+  if (raw == null) return null;
+
+  const str = String(raw);
+  const normalized = normalizeValue(str);
+  if (!normalized) return null;
+
+  // Format with currency if available
+  const currency = offer.priceCurrency;
+  if (currency && typeof currency === "string") {
+    return normalizeValue(`${currency} ${normalized}`);
+  }
+  return normalized;
+}
+
+/**
  * Attempts to dismiss cookie consent banners generically.
  */
 async function tryDismissConsent(page: any): Promise<boolean> {
@@ -418,11 +518,13 @@ export async function extractWithBrowserless(url: string, selector: string, moni
     });
     const page = await context.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
 
-    await tryDismissConsent(page);
-    await page.waitForTimeout(1200);
-    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+    const consentDismissed = await tryDismissConsent(page);
+    if (consentDismissed) {
+      await page.waitForTimeout(800);
+      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+    }
 
     const content = await page.content();
     const block = detectPageBlockReason(content);
@@ -462,9 +564,7 @@ async function fetchWithCurl(url: string, monitorId?: number, monitorName?: stri
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
     const response = await ssrfSafeFetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-      },
+      headers: BROWSER_LIKE_HEADERS,
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -497,13 +597,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     let httpStatusClassification: { status: number; message: string; transient: boolean } | null = null;
     try {
       const response = await ssrfSafeFetch(monitor.url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Cache-Control': 'no-cache',
-          'Upgrade-Insecure-Requests': '1'
-        },
+        headers: BROWSER_LIKE_HEADERS,
         signal: AbortSignal.timeout(20000)
       });
       if (!response.ok) {
@@ -563,13 +657,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         let retryHtml = "";
         try {
           const retryResponse = await ssrfSafeFetch(monitor.url, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-              'Accept-Language': 'en-US,en;q=0.9',
-              'Cache-Control': 'no-cache',
-              'Upgrade-Insecure-Requests': '1'
-            },
+            headers: BROWSER_LIKE_HEADERS,
             signal: AbortSignal.timeout(20000)
           });
           if (!retryResponse.ok) {
@@ -606,6 +694,16 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       } catch (e) {
         await recordMetric(monitor.id, "static_retry", Date.now() - retryStart, "error");
         console.log(`Retry: second attempt failed, continuing with original result`);
+      }
+    }
+
+    // JSON-LD structured data fallback (before Browserless)
+    if (!newValue && !block.blocked && html) {
+      const jsonLdValue = extractFromJsonLd(html);
+      if (jsonLdValue) {
+        newValue = jsonLdValue;
+        await recordMetric(monitor.id, "json_ld", 0, "ok", 1);
+        console.log(`stage=json_ld value="${jsonLdValue.substring(0, 50)}"`);
       }
     }
 
@@ -1012,12 +1110,14 @@ export async function discoverSelectors(
     });
     const page = await context.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
 
     // Dismiss consent and wait for content
     const consentClicked = await tryDismissConsent(page);
-    await page.waitForTimeout(1200);
-    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+    if (consentClicked) {
+      await page.waitForTimeout(800);
+      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+    }
     
     // Logging
     const pageTitle = await page.title();
