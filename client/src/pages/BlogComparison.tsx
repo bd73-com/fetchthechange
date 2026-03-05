@@ -206,7 +206,7 @@ export default function BlogComparison() {
                 </tr>
                 <tr className="border-b border-border/50">
                   <td className="py-3 px-4">Integrations (email, webhook, Slack)</td>
-                  <td className="text-center py-3 px-4">Email</td>
+                  <td className="text-center py-3 px-4">Email, webhooks, Slack</td>
                   <td className="text-center py-3 px-4">Email, Slack, webhooks</td>
                   <td className="text-center py-3 px-4">Email, Slack, webhooks</td>
                   <td className="text-center py-3 px-4">Email, Slack, webhooks</td>
@@ -237,9 +237,10 @@ export default function BlogComparison() {
             <li>The "<a href="/#how-it-works" className="text-primary underline">Fix Selector</a>" tool to recover when a site changes structure</li>
             <li>Value-level monitoring (text content, not screenshots)</li>
             <li>JavaScript-rendered page support without complex configuration</li>
+            <li>Webhook and Slack integrations on top of email (Pro and Power plans)</li>
           </ul>
           <p className="text-muted-foreground mt-4">
-            FetchTheChange is not the best choice if you need visual diff screenshots, recorded login flows, or Slack/webhook integrations (email only for now).
+            FetchTheChange is not the best choice if you need visual diff screenshots, recorded login flows, or browser extension-based monitoring. Slack and webhook integrations are available on Pro and Power plans.
           </p>
 
           <h2 className="text-2xl font-display font-bold mt-10 mb-4">When Distill is better</h2>
