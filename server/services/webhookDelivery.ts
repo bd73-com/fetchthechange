@@ -1,5 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { isPrivateUrl } from "../utils/ssrf";
+import { isPrivateUrl, ssrfSafeFetch } from "../utils/ssrf";
 import type { Monitor, MonitorChange } from "@shared/schema";
 
 export interface WebhookConfig {
@@ -67,23 +67,24 @@ export async function deliver(
   const body = JSON.stringify(payload);
   const signature = signPayload(body, config.secret);
 
+  // Spread custom headers first so they cannot override security headers
   const headers: Record<string, string> = {
+    ...(config.headers || {}),
     "Content-Type": "application/json",
     "X-FTC-Signature-256": signature,
     "User-Agent": "FetchTheChange-Webhook/1.0",
-    ...(config.headers || {}),
   };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
 
   try {
-    const response = await fetch(config.url, {
+    // Use ssrfSafeFetch to close the TOCTOU / DNS-rebinding gap
+    const response = await ssrfSafeFetch(config.url, {
       method: "POST",
       headers,
       body,
       signal: controller.signal,
-      redirect: "manual",
     });
 
     const urlDomain = new URL(config.url).hostname;

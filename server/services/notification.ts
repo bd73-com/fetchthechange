@@ -339,10 +339,28 @@ async function deliverDigestToChannels(
           try {
             const botToken = decryptToken(connection.botToken);
             for (const change of changes) {
-              await deliverSlack(monitor, change, slackConfig.channelId, botToken);
+              const slackResult = await deliverSlack(monitor, change, slackConfig.channelId, botToken);
+              await storage.addDeliveryLog({
+                monitorId: monitor.id,
+                changeId: change.id,
+                channel: "slack",
+                status: slackResult.success ? "success" : "failed",
+                deliveredAt: slackResult.success ? new Date() : null,
+                response: slackResult.success ? { ts: slackResult.slackTs } : { error: slackResult.error },
+              });
             }
-          } catch {
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
             console.error(`[Notification] Slack token decryption failed (monitorId=${monitor.id})`);
+            for (const change of changes) {
+              await storage.addDeliveryLog({
+                monitorId: monitor.id,
+                changeId: change.id,
+                channel: "slack",
+                status: "failed",
+                response: { error: msg },
+              });
+            }
           }
           break;
         }

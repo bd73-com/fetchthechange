@@ -69,9 +69,14 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
       setRevealedSecret(null);
       return;
     }
-    const result = await revealSecret.mutateAsync();
-    setRevealedSecret(result.secret);
-    setShowSecret(true);
+    try {
+      const result = await revealSecret.mutateAsync();
+      setRevealedSecret(result.secret);
+      setShowSecret(true);
+    } catch {
+      setShowSecret(false);
+      setRevealedSecret(null);
+    }
   };
 
   const handleSaveSlack = () => {

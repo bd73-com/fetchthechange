@@ -528,7 +528,7 @@ export async function registerRoutes(
       res.json(prefs);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(422).json({ message: err.errors[0].message });
+        return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       throw err;
     }
@@ -578,7 +578,7 @@ export async function registerRoutes(
 
       const channelParsed = channelTypeSchema.safeParse(channelParam);
       if (!channelParsed.success) {
-        return res.status(400).json({ message: "Invalid channel type. Must be email, webhook, or slack." });
+        return res.status(400).json({ message: "Invalid channel type. Must be email, webhook, or slack.", code: "INVALID_CHANNEL" });
       }
       const channel = channelParsed.data;
 
@@ -607,7 +607,7 @@ export async function registerRoutes(
         // SSRF check on webhook URL
         const ssrfError = await isPrivateUrl(webhookInput.url);
         if (ssrfError) {
-          return res.status(422).json({ message: `Invalid webhook URL: ${ssrfError}` });
+          return res.status(422).json({ message: `Invalid webhook URL: ${ssrfError}`, code: "INVALID_WEBHOOK_URL" });
         }
         // Check if this is a new webhook (no existing secret)
         const existing = await storage.getMonitorChannels(id);
@@ -630,7 +630,7 @@ export async function registerRoutes(
       res.json({ ...result, config: responseConfig });
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(422).json({ message: err.errors[0].message });
+        return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       throw err;
     }
@@ -639,7 +639,11 @@ export async function registerRoutes(
   // DELETE /api/monitors/:id/channels/:channel
   app.delete(api.monitors.channels.delete.path, isAuthenticated, async (req: any, res) => {
     const id = Number(req.params.id);
-    const channel = req.params.channel;
+    const parsed = channelTypeSchema.safeParse(req.params.channel);
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Invalid channel type", code: "INVALID_CHANNEL" });
+    }
+    const channel = parsed.data;
     const monitor = await storage.getMonitor(id);
     if (!monitor) return res.status(404).json({ message: "Not found" });
     if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
@@ -662,10 +666,10 @@ export async function registerRoutes(
 
     const channels = await storage.getMonitorChannels(id);
     const webhook = channels.find((c) => c.channel === "webhook");
-    if (!webhook) return res.status(404).json({ message: "No webhook channel configured" });
+    if (!webhook) return res.status(404).json({ message: "No webhook channel configured", code: "NOT_FOUND" });
 
     const secret = (webhook.config as any)?.secret;
-    if (!secret) return res.status(404).json({ message: "No webhook secret found" });
+    if (!secret) return res.status(404).json({ message: "No webhook secret found", code: "NOT_FOUND" });
 
     res.json({ secret });
   });
@@ -688,7 +692,10 @@ export async function registerRoutes(
   // ---------------------------------------------------------------
 
   function signSlackState(userId: string): string {
-    const secret = process.env.SLACK_CLIENT_SECRET || "";
+    const secret = process.env.SLACK_CLIENT_SECRET;
+    if (!secret) {
+      throw new Error("SLACK_CLIENT_SECRET is not configured");
+    }
     return createHmac("sha256", secret).update(userId).digest("hex");
   }
 
@@ -705,7 +712,7 @@ export async function registerRoutes(
 
     const clientId = process.env.SLACK_CLIENT_ID;
     if (!clientId) {
-      return res.status(501).json({ message: "Slack integration is not configured on this server." });
+      return res.status(501).json({ message: "Slack integration is not configured on this server.", code: "NOT_CONFIGURED" });
     }
 
     const state = `${userId}:${signSlackState(userId)}`;
@@ -800,21 +807,22 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/integrations/slack/channels
+  const slackChannelsCache = new Map<string, { data: any[]; timestamp: number }>();
+
   // DELETE /api/integrations/slack
   app.delete(api.integrations.slack.disconnect.path, isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
+    slackChannelsCache.delete(userId);
     await storage.deleteSlackChannelsForUser(userId);
     await storage.deleteSlackConnection(userId);
     res.status(204).send();
   });
-
-  // GET /api/integrations/slack/channels
-  const slackChannelsCache = new Map<string, { data: any[]; timestamp: number }>();
   app.get(api.integrations.slack.channels.path, isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     const connection = await storage.getSlackConnection(userId);
     if (!connection) {
-      return res.status(404).json({ message: "No Slack connection found. Connect Slack first." });
+      return res.status(404).json({ message: "No Slack connection found. Connect Slack first.", code: "NOT_FOUND" });
     }
 
     // Check cache (5 min)
@@ -830,7 +838,7 @@ export async function registerRoutes(
       res.json(channels);
     } catch (err) {
       console.error(`[Slack] Token decryption failed (userId=${userId})`);
-      res.status(500).json({ message: "Failed to fetch Slack channels. Please reconnect Slack." });
+      res.status(500).json({ message: "Failed to fetch Slack channels. Please reconnect Slack.", code: "SLACK_ERROR" });
     }
   });
 

@@ -3,13 +3,14 @@ import { createHmac } from "node:crypto";
 
 // Mock ssrf module
 const mockIsPrivateUrl = vi.fn().mockResolvedValue(null);
+const mockSsrfSafeFetch = vi.fn();
 vi.mock("../utils/ssrf", () => ({
   isPrivateUrl: (...args: any[]) => mockIsPrivateUrl(...args),
+  ssrfSafeFetch: (...args: any[]) => mockSsrfSafeFetch(...args),
 }));
 
-// Mock global fetch
-const mockFetch = vi.fn();
-vi.stubGlobal("fetch", mockFetch);
+// Alias for tests that reference mockFetch
+const mockFetch = mockSsrfSafeFetch;
 
 import {
   deliver,
@@ -185,17 +186,18 @@ describe("webhookDelivery", () => {
       expect(options.headers["X-Custom"]).toBe("value");
     });
 
-    it("custom headers can override built-in headers", async () => {
+    it("security headers cannot be overridden by custom headers", async () => {
       const config: WebhookConfig = {
         ...testConfig,
-        headers: { "Content-Type": "text/plain", "User-Agent": "CustomAgent" },
+        headers: { "Content-Type": "text/plain", "User-Agent": "CustomAgent", "X-FTC-Signature-256": "forged" },
       };
       await deliver(makeMonitor(), makeChange(), config);
 
       const [, options] = mockFetch.mock.calls[0];
-      // Spread puts custom headers last, so they override
-      expect(options.headers["Content-Type"]).toBe("text/plain");
-      expect(options.headers["User-Agent"]).toBe("CustomAgent");
+      // Security headers are applied after custom headers and cannot be overridden
+      expect(options.headers["Content-Type"]).toBe("application/json");
+      expect(options.headers["User-Agent"]).toBe("FetchTheChange-Webhook/1.0");
+      expect(options.headers["X-FTC-Signature-256"]).toMatch(/^sha256=[a-f0-9]+$/);
     });
 
     it("handles 3xx redirect response as non-ok", async () => {
@@ -207,10 +209,9 @@ describe("webhookDelivery", () => {
       expect(result.error).toBe("HTTP 301");
     });
 
-    it("uses redirect: manual to prevent auto-following redirects", async () => {
+    it("uses ssrfSafeFetch for SSRF-safe request handling", async () => {
       await deliver(makeMonitor(), makeChange(), testConfig);
-      const [, options] = mockFetch.mock.calls[0];
-      expect(options.redirect).toBe("manual");
+      expect(mockSsrfSafeFetch).toHaveBeenCalledOnce();
     });
 
     it("sends POST with abort signal", async () => {

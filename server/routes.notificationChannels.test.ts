@@ -749,6 +749,7 @@ describe("GET /api/integrations/slack/install", () => {
 
   it("redirects to Slack OAuth URL for pro tier with client ID set", async () => {
     process.env.SLACK_CLIENT_ID = "test-client-id";
+    process.env.SLACK_CLIENT_SECRET = "test-client-secret";
     mockGetUser.mockResolvedValueOnce({ tier: "pro" });
     delete process.env.REPLIT_DOMAINS;
 
