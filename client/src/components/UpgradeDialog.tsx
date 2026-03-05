@@ -94,6 +94,7 @@ export function UpgradeDialog({ currentTier, children }: UpgradeDialogProps) {
         "Quiet hours & daily digest mode",
         "Per-monitor notification email override",
         "Change sensitivity threshold",
+        "REST API access (300 req/min)",
         "JavaScript-rendered pages",
         "Fix Selector tool",
         "Full change history",

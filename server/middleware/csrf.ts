@@ -11,8 +11,8 @@ import type { Request, Response, NextFunction } from 'express';
  * Exempts paths that use their own authentication (e.g. Stripe webhooks with
  * signature verification).
  */
-const EXEMPT_PATHS = new Set(['/api/stripe/webhook', '/api/webhooks/resend']);
-const EXEMPT_PREFIXES = ['/api/campaigns/unsubscribe/', '/api/campaigns/resubscribe/'];
+const EXEMPT_PATHS = new Set(['/api/stripe/webhook', '/api/webhooks/resend', '/api/v1/openapi.json', '/api/v1/ping']);
+const EXEMPT_PREFIXES = ['/api/campaigns/unsubscribe/', '/api/campaigns/resubscribe/', '/api/v1/'];
 const STATE_CHANGING_METHODS = new Set(['POST', 'PATCH', 'DELETE', 'PUT']);
 
 export function csrfProtection(allowedOrigins: string[], isDev: boolean) {

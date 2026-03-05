@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertMonitorSchema, monitors, monitorChanges, notificationPreferences, notificationChannels, deliveryLog, slackConnections } from './schema';
+import { insertMonitorSchema, monitors, monitorChanges, notificationPreferences, notificationChannels, deliveryLog, slackConnections, apiKeys } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -305,6 +305,61 @@ export const api = {
         401: errorSchemas.unauthorized,
       },
     },
+  },
+};
+
+// --------------------------------------------------------------------------
+// API v1 — public REST API (Bearer token auth)
+// --------------------------------------------------------------------------
+
+export const apiV1PaginationSchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export const apiV1ChangesPaginationSchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+});
+
+export const apiV1CreateMonitorSchema = z.object({
+  name: z.string().min(1, "Name is required").max(255),
+  url: z.string().url("Must be a valid URL"),
+  selector: z.string().min(1, "Selector is required"),
+  frequency: z.enum(["daily", "hourly"]).optional().default("daily"),
+  active: z.boolean().optional().default(true),
+});
+
+export const apiV1UpdateMonitorSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  url: z.string().url("Must be a valid URL").optional(),
+  selector: z.string().min(1).optional(),
+  frequency: z.enum(["daily", "hourly"]).optional(),
+  active: z.boolean().optional(),
+  emailEnabled: z.boolean().optional(),
+});
+
+export const apiV1CreateKeySchema = z.object({
+  name: z.string().min(1, "Name is required").max(64, "Name must be 64 characters or fewer"),
+});
+
+export const apiV1 = {
+  ping: { method: 'GET' as const, path: '/api/v1/ping' },
+  openapi: { method: 'GET' as const, path: '/api/v1/openapi.json' },
+  monitors: {
+    list: { method: 'GET' as const, path: '/api/v1/monitors' },
+    create: { method: 'POST' as const, path: '/api/v1/monitors' },
+    get: { method: 'GET' as const, path: '/api/v1/monitors/:id' },
+    update: { method: 'PATCH' as const, path: '/api/v1/monitors/:id' },
+    delete: { method: 'DELETE' as const, path: '/api/v1/monitors/:id' },
+    changes: { method: 'GET' as const, path: '/api/v1/monitors/:id/changes' },
+  },
+  keys: {
+    list: { method: 'GET' as const, path: '/api/keys' },
+    create: { method: 'POST' as const, path: '/api/keys' },
+    revoke: { method: 'DELETE' as const, path: '/api/keys/:id' },
   },
 };
 
