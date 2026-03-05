@@ -1,8 +1,9 @@
 import rateLimit from "express-rate-limit";
+import { API_RATE_LIMITS } from "@shared/models/auth";
 
 export const apiRateLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 300,
+  max: API_RATE_LIMITS.perMinute,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req: any) => {

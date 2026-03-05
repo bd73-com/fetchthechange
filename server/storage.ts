@@ -320,7 +320,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined> {
-    const [key] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, keyHash));
+    const [key] = await db.select().from(apiKeys)
+      .where(and(eq(apiKeys.keyHash, keyHash), isNull(apiKeys.revokedAt)));
     return key;
   }
 
@@ -347,7 +348,7 @@ export class DatabaseStorage implements IStorage {
   async touchApiKey(id: number): Promise<void> {
     await db.update(apiKeys)
       .set({ lastUsedAt: new Date() })
-      .where(eq(apiKeys.id, id));
+      .where(and(eq(apiKeys.id, id), isNull(apiKeys.revokedAt)));
   }
 
   // Monitor changes with date filtering (for API v1)
@@ -374,7 +375,7 @@ export class DatabaseStorage implements IStorage {
     const data = await db.select()
       .from(monitorChanges)
       .where(where)
-      .orderBy(desc(monitorChanges.detectedAt))
+      .orderBy(desc(monitorChanges.detectedAt), desc(monitorChanges.id))
       .limit(options.limit)
       .offset((options.page - 1) * options.limit);
 
@@ -391,7 +392,7 @@ export class DatabaseStorage implements IStorage {
     const data = await db.select()
       .from(monitors)
       .where(eq(monitors.userId, userId))
-      .orderBy(desc(monitors.createdAt))
+      .orderBy(desc(monitors.createdAt), desc(monitors.id))
       .limit(limit)
       .offset((page - 1) * limit);
 

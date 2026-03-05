@@ -18,6 +18,12 @@ import { openApiSpec } from "../openapi";
 
 const router = Router();
 
+/** Parse and validate a numeric route param. Returns the number or null. */
+function parseId(raw: string): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 // -------------------------------------------------------------------
 // OpenAPI spec — public, no auth, no rate limit
 // -------------------------------------------------------------------
@@ -108,7 +114,9 @@ router.post("/monitors", async (req: any, res) => {
 
 // GET /api/v1/monitors/:id
 router.get("/monitors/:id", async (req: any, res) => {
-  const monitor = await storage.getMonitor(Number(req.params.id));
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid monitor ID", code: "VALIDATION_ERROR" });
+  const monitor = await storage.getMonitor(id);
   if (!monitor || monitor.userId !== req.apiUser.id) {
     return res.status(404).json({ error: "Monitor not found", code: "NOT_FOUND" });
   }
@@ -118,7 +126,8 @@ router.get("/monitors/:id", async (req: any, res) => {
 // PATCH /api/v1/monitors/:id
 router.patch("/monitors/:id", async (req: any, res) => {
   try {
-    const id = Number(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid monitor ID", code: "VALIDATION_ERROR" });
     const existing = await storage.getMonitor(id);
     if (!existing || existing.userId !== req.apiUser.id) {
       return res.status(404).json({ error: "Monitor not found", code: "NOT_FOUND" });
@@ -158,7 +167,8 @@ router.patch("/monitors/:id", async (req: any, res) => {
 
 // DELETE /api/v1/monitors/:id
 router.delete("/monitors/:id", async (req: any, res) => {
-  const id = Number(req.params.id);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid monitor ID", code: "VALIDATION_ERROR" });
   const existing = await storage.getMonitor(id);
   if (!existing || existing.userId !== req.apiUser.id) {
     return res.status(404).json({ error: "Monitor not found", code: "NOT_FOUND" });
@@ -174,7 +184,8 @@ router.delete("/monitors/:id", async (req: any, res) => {
 // GET /api/v1/monitors/:id/changes
 router.get("/monitors/:id/changes", async (req: any, res) => {
   try {
-    const id = Number(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid monitor ID", code: "VALIDATION_ERROR" });
     const monitor = await storage.getMonitor(id);
     if (!monitor || monitor.userId !== req.apiUser.id) {
       return res.status(404).json({ error: "Monitor not found", code: "NOT_FOUND" });

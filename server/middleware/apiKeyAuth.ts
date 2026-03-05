@@ -51,7 +51,14 @@ export default async function apiKeyAuth(
     return;
   }
 
-  const user = await authStorage.getUser(apiKey.userId);
+  let user;
+  try {
+    user = await authStorage.getUser(apiKey.userId);
+  } catch (err) {
+    console.error("[API Auth] User lookup failed:", err);
+    res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+    return;
+  }
   if (!user) {
     res.status(401).json({ error: "Invalid API key", code: "INVALID_API_KEY" });
     return;

@@ -5,7 +5,7 @@ import { authStorage } from "../replit_integrations/auth/storage";
 import { isAuthenticated } from "../replit_integrations/auth";
 import { generateRawKey, hashApiKey, extractKeyPrefix } from "../utils/apiKey";
 import { apiV1CreateKeySchema } from "@shared/routes";
-import type { UserTier } from "@shared/models/auth";
+import { API_RATE_LIMITS, type UserTier } from "@shared/models/auth";
 
 const router = Router();
 
@@ -44,8 +44,8 @@ router.post("/", isAuthenticated, async (req: any, res) => {
     const input = apiV1CreateKeySchema.parse(req.body);
 
     const activeCount = await storage.countActiveApiKeys(userId);
-    if (activeCount >= 5) {
-      return res.status(400).json({ message: "You can have at most 5 active API keys. Revoke an existing key before creating a new one.", code: "KEY_LIMIT_REACHED" });
+    if (activeCount >= API_RATE_LIMITS.maxKeysPerUser) {
+      return res.status(400).json({ message: `You can have at most ${API_RATE_LIMITS.maxKeysPerUser} active API keys. Revoke an existing key before creating a new one.`, code: "KEY_LIMIT_REACHED" });
     }
 
     const rawKey = generateRawKey();
