@@ -1,7 +1,7 @@
-import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection } from "@shared/schema";
+import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, apiKeys, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection, type ApiKey } from "@shared/schema";
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
-import { eq, desc, and, or, isNull, lte, lt, sql } from "drizzle-orm";
+import { eq, desc, and, or, isNull, lte, lt, gte, sql } from "drizzle-orm";
 import { notificationTablesExist } from "./services/notificationReady";
 
 export interface IStorage {
@@ -12,11 +12,23 @@ export interface IStorage {
   createMonitor(monitor: InsertMonitor): Promise<Monitor>;
   updateMonitor(id: number, updates: any): Promise<Monitor>;
   deleteMonitor(id: number): Promise<void>;
-  
+
   getMonitorChanges(monitorId: number): Promise<MonitorChange[]>;
   addMonitorChange(monitorId: number, oldValue: string | null, newValue: string | null): Promise<MonitorChange>;
-  
+
   getAllActiveMonitors(): Promise<Monitor[]>;
+
+  // API keys
+  createApiKey(userId: string, name: string, keyHash: string, keyPrefix: string): Promise<ApiKey>;
+  getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
+  listApiKeys(userId: string): Promise<ApiKey[]>;
+  countActiveApiKeys(userId: string): Promise<number>;
+  revokeApiKey(id: number, userId: string): Promise<boolean>;
+  touchApiKey(id: number): Promise<void>;
+
+  // Paginated queries
+  getMonitorsPaginated(userId: string, page: number, limit: number): Promise<{ data: Monitor[]; total: number }>;
+  getMonitorChangesPaginated(monitorId: number, options: { page: number; limit: number; from?: Date; to?: Date }): Promise<{ data: MonitorChange[]; total: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -299,6 +311,92 @@ export class DatabaseStorage implements IStorage {
         and(eq(notificationChannels.monitorId, m.id), eq(notificationChannels.channel, "slack"))
       );
     }
+  }
+
+  // API keys
+  async createApiKey(userId: string, name: string, keyHash: string, keyPrefix: string): Promise<ApiKey> {
+    const [key] = await db.insert(apiKeys).values({ userId, name, keyHash, keyPrefix }).returning();
+    return key;
+  }
+
+  async getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined> {
+    const [key] = await db.select().from(apiKeys)
+      .where(and(eq(apiKeys.keyHash, keyHash), isNull(apiKeys.revokedAt)));
+    return key;
+  }
+
+  async listApiKeys(userId: string): Promise<ApiKey[]> {
+    return await db.select().from(apiKeys)
+      .where(and(eq(apiKeys.userId, userId), isNull(apiKeys.revokedAt)))
+      .orderBy(desc(apiKeys.createdAt));
+  }
+
+  async countActiveApiKeys(userId: string): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` })
+      .from(apiKeys)
+      .where(and(eq(apiKeys.userId, userId), isNull(apiKeys.revokedAt)));
+    return Number(result[0]?.count ?? 0);
+  }
+
+  async revokeApiKey(id: number, userId: string): Promise<boolean> {
+    const result = await db.update(apiKeys)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, userId), isNull(apiKeys.revokedAt)));
+    return ((result as any).rowCount ?? 0) > 0;
+  }
+
+  async touchApiKey(id: number): Promise<void> {
+    await db.update(apiKeys)
+      .set({ lastUsedAt: new Date() })
+      .where(and(eq(apiKeys.id, id), isNull(apiKeys.revokedAt)));
+  }
+
+  // Monitor changes with date filtering (for API v1)
+  async getMonitorChangesPaginated(monitorId: number, options: {
+    page: number;
+    limit: number;
+    from?: Date;
+    to?: Date;
+  }): Promise<{ data: MonitorChange[]; total: number }> {
+    const conditions = [eq(monitorChanges.monitorId, monitorId)];
+    if (options.from) {
+      conditions.push(gte(monitorChanges.detectedAt, options.from));
+    }
+    if (options.to) {
+      conditions.push(lte(monitorChanges.detectedAt, options.to));
+    }
+    const where = and(...conditions);
+
+    const countResult = await db.select({ count: sql<number>`count(*)` })
+      .from(monitorChanges)
+      .where(where);
+    const total = Number(countResult[0]?.count ?? 0);
+
+    const data = await db.select()
+      .from(monitorChanges)
+      .where(where)
+      .orderBy(desc(monitorChanges.detectedAt), desc(monitorChanges.id))
+      .limit(options.limit)
+      .offset((options.page - 1) * options.limit);
+
+    return { data, total };
+  }
+
+  // Paginated monitors list (for API v1)
+  async getMonitorsPaginated(userId: string, page: number, limit: number): Promise<{ data: Monitor[]; total: number }> {
+    const countResult = await db.select({ count: sql<number>`count(*)` })
+      .from(monitors)
+      .where(eq(monitors.userId, userId));
+    const total = Number(countResult[0]?.count ?? 0);
+
+    const data = await db.select()
+      .from(monitors)
+      .where(eq(monitors.userId, userId))
+      .orderBy(desc(monitors.createdAt), desc(monitors.id))
+      .limit(limit)
+      .offset((page - 1) * limit);
+
+    return { data, total };
   }
 }
 

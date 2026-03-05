@@ -150,6 +150,37 @@ const faqSections: FAQSection[] = [
     ],
   },
   {
+    title: "API Access",
+    description: "Using the FetchTheChange REST API",
+    items: [
+      {
+        question: "Which plan includes API access?",
+        answer:
+          "API access is exclusive to the Power plan. Free and Pro users can see the API documentation at /developer but cannot generate API keys or call API endpoints.",
+      },
+      {
+        question: "How do I generate an API key?",
+        answer:
+          "Log in and go to your dashboard. Scroll down to the API Keys section and click \"Generate Key\". Give the key a name (e.g. \"CI pipeline\") and copy the full key — it is shown only once. You can have up to 5 active keys.",
+      },
+      {
+        question: "What can I do with the API?",
+        answer:
+          "You can create, update, and delete monitors programmatically, list all your monitors, and pull paginated change history with optional date range filtering. This makes it easy to integrate FetchTheChange into CI/CD pipelines, dashboards, and automation tools.",
+      },
+      {
+        question: "What are the API rate limits?",
+        answer:
+          "Each API key is limited to 300 requests per minute. Every response includes X-RateLimit-Limit, X-RateLimit-Remaining, and X-RateLimit-Reset headers so you can track your usage. See /developer for full details.",
+      },
+      {
+        question: "How do I keep my API key secure?",
+        answer:
+          "Treat your API key like a password. Store it in environment variables, never in source code or version control. If a key is exposed, revoke it immediately from your dashboard and generate a new one.",
+      },
+    ],
+  },
+  {
     title: "Troubleshooting",
     description: "Help with common issues",
     items: [

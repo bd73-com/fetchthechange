@@ -3,6 +3,7 @@ import { useMonitors, useCheckMonitor } from "@/hooks/use-monitors";
 import { CreateMonitorDialog } from "@/components/CreateMonitorDialog";
 import { MonitorCard } from "@/components/MonitorCard";
 import { UpgradeDialog } from "@/components/UpgradeDialog";
+import ApiKeysPanel from "@/components/ApiKeysPanel";
 import DashboardNav from "@/components/DashboardNav";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -213,6 +214,11 @@ export default function Dashboard() {
             ))}
           </div>
         )}
+
+        {/* API Keys section */}
+        <div className="mt-10">
+          <ApiKeysPanel />
+        </div>
       </main>
     </div>
   );

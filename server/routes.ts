@@ -2128,6 +2128,15 @@ export async function registerRoutes(
     }
   });
 
+  // ---------------------------------------------------------------
+  // API KEY MANAGEMENT & PUBLIC REST API v1 ROUTES
+  // ---------------------------------------------------------------
+  const { default: apiKeyManagementRouter } = await import("./routes/apiKeyManagement");
+  app.use("/api/keys", apiKeyManagementRouter);
+
+  const { default: v1Router } = await import("./routes/v1");
+  app.use("/api/v1", v1Router);
+
   // Catch-all error handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     ErrorLogger.error("api", err.message || "Unhandled API error", err instanceof Error ? err : null, { status: err.status || 500 });

@@ -40,6 +40,13 @@ export const RESEND_CAPS = {
   monthly: 3000,
 } as const;
 
+export const API_RATE_LIMITS = {
+  /** Maximum API requests per key per minute. */
+  perMinute: 300,
+  /** Maximum active API keys per user. */
+  maxKeysPerUser: 5,
+} as const;
+
 // User storage table.
 // (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
 export const users = pgTable("users", {
