@@ -5,9 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon } from "lucide-react";
+import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon, Globe, MessageSquare } from "lucide-react";
 import { useUpdateMonitor, useMonitorHistory } from "@/hooks/use-monitors";
 import { useNotificationPreferences } from "@/hooks/use-notification-preferences";
+import { useNotificationChannels } from "@/hooks/use-notification-channels";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { useForm } from "react-hook-form";
@@ -22,6 +23,9 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
   const { mutate: update } = useUpdateMonitor();
   const { data: history } = useMonitorHistory(monitor.id);
   const { data: prefs } = useNotificationPreferences(monitor.id);
+  const { data: channels = [] } = useNotificationChannels(monitor.id);
+  const hasWebhook = channels.some((c) => c.channel === "webhook" && c.enabled);
+  const hasSlack = channels.some((c) => c.channel === "slack" && c.enabled);
   const [isEditing, setIsEditing] = useState(false);
 
   const lastChange = history?.[0];
@@ -179,6 +183,16 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
            {prefs?.digestMode && (
              <span title="Daily digest enabled">
                <Inbox className="h-4 w-4 text-muted-foreground opacity-50" />
+             </span>
+           )}
+           {hasWebhook && (
+             <span title="Webhook enabled">
+               <Globe className="h-4 w-4 text-muted-foreground opacity-50" />
+             </span>
+           )}
+           {hasSlack && (
+             <span title="Slack enabled">
+               <MessageSquare className="h-4 w-4 text-muted-foreground opacity-50" />
              </span>
            )}
           <Switch checked={monitor.active} onCheckedChange={toggleActive} />

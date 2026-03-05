@@ -1,5 +1,5 @@
 // Schema defines all database tables - drizzle-kit push compares this against the DB
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { users } from "./models/auth";
@@ -43,6 +43,8 @@ export const monitorsRelations = relations(monitors, ({ one, many }) => ({
   changes: many(monitorChanges),
   notificationPreferences: one(notificationPreferences),
   notificationQueue: many(notificationQueue),
+  notificationChannels: many(notificationChannels),
+  deliveryLogs: many(deliveryLog),
 }));
 
 export const monitorChangesRelations = relations(monitorChanges, ({ one }) => ({
@@ -253,6 +255,78 @@ export const notificationQueueRelations = relations(notificationQueue, ({ one })
 export type NotificationPreference = typeof notificationPreferences.$inferSelect;
 export type InsertNotificationPreference = typeof notificationPreferences.$inferInsert;
 export type NotificationQueueEntry = typeof notificationQueue.$inferSelect;
+
+// Notification channels — per-monitor delivery channel configuration
+export const notificationChannels = pgTable("notification_channels", {
+  id: serial("id").primaryKey(),
+  monitorId: integer("monitor_id").notNull().references(() => monitors.id, { onDelete: "cascade" }),
+  channel: text("channel").notNull(), // "email" | "webhook" | "slack"
+  enabled: boolean("enabled").default(true).notNull(),
+  config: jsonb("config").notNull().$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  monitorIdx: index("notification_channels_monitor_idx").on(table.monitorId),
+  monitorChannelUniq: uniqueIndex("notification_channels_monitor_channel_uniq").on(table.monitorId, table.channel),
+}));
+
+export const notificationChannelsRelations = relations(notificationChannels, ({ one }) => ({
+  monitor: one(monitors, {
+    fields: [notificationChannels.monitorId],
+    references: [monitors.id],
+  }),
+}));
+
+export type NotificationChannel = typeof notificationChannels.$inferSelect;
+
+// Delivery log — records every notification delivery attempt across all channels
+export const deliveryLog = pgTable("delivery_log", {
+  id: serial("id").primaryKey(),
+  monitorId: integer("monitor_id").notNull().references(() => monitors.id, { onDelete: "cascade" }),
+  changeId: integer("change_id").notNull().references(() => monitorChanges.id),
+  channel: text("channel").notNull(), // "email" | "webhook" | "slack"
+  status: text("status").notNull(), // "success" | "failed" | "pending"
+  attempt: integer("attempt").default(1).notNull(),
+  response: jsonb("response").$type<Record<string, unknown> | null>(),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  monitorCreatedIdx: index("delivery_log_monitor_created_idx").on(table.monitorId, table.createdAt),
+}));
+
+export const deliveryLogRelations = relations(deliveryLog, ({ one }) => ({
+  monitor: one(monitors, {
+    fields: [deliveryLog.monitorId],
+    references: [monitors.id],
+  }),
+  change: one(monitorChanges, {
+    fields: [deliveryLog.changeId],
+    references: [monitorChanges.id],
+  }),
+}));
+
+export type DeliveryLogEntry = typeof deliveryLog.$inferSelect;
+
+// Slack connections — one per user, stores OAuth bot token
+export const slackConnections = pgTable("slack_connections", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().unique().references(() => users.id),
+  teamId: text("team_id").notNull(),
+  teamName: text("team_name").notNull(),
+  botToken: text("bot_token").notNull(), // encrypted with AES-256-GCM
+  scope: text("scope").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const slackConnectionsRelations = relations(slackConnections, ({ one }) => ({
+  user: one(users, {
+    fields: [slackConnections.userId],
+    references: [users.id],
+  }),
+}));
+
+export type SlackConnection = typeof slackConnections.$inferSelect;
 
 export const insertMonitorSchema = createInsertSchema(monitors).omit({
   id: true,

@@ -2,7 +2,7 @@ import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPage
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { api } from "@shared/routes";
+import { api, channelTypeSchema, webhookConfigInputSchema, slackConfigInputSchema } from "@shared/routes";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { authStorage } from "./replit_integrations/auth/storage";
@@ -27,6 +27,11 @@ import {
   contactFormRateLimiter,
   unauthenticatedRateLimiter
 } from "./middleware/rateLimiter";
+import { generateWebhookSecret, redactSecret } from "./services/webhookDelivery";
+import { listChannels as listSlackChannels } from "./services/slackDelivery";
+import { encryptToken, decryptToken } from "./utils/encryption";
+import { createHmac } from "node:crypto";
+import rateLimit from "express-rate-limit";
 
 
 // ------------------------------------------------------------------
@@ -523,7 +528,7 @@ export async function registerRoutes(
       res.json(prefs);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(422).json({ message: err.errors[0].message });
+        return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       throw err;
     }
@@ -541,6 +546,300 @@ export async function registerRoutes(
 
     await storage.deleteNotificationPreferences(id);
     res.status(204).send();
+  });
+
+  // ---------------------------------------------------------------
+  // NOTIFICATION CHANNELS ROUTES
+  // ---------------------------------------------------------------
+
+  // GET /api/monitors/:id/channels
+  app.get(api.monitors.channels.list.path, isAuthenticated, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const monitor = await storage.getMonitor(id);
+    if (!monitor) return res.status(404).json({ message: "Not found" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+
+    const channels = await storage.getMonitorChannels(id);
+    // Redact webhook secrets in GET responses
+    const redacted = channels.map((ch) => {
+      if (ch.channel === "webhook" && ch.config && (ch.config as any).secret) {
+        return { ...ch, config: { ...ch.config as object, secret: redactSecret((ch.config as any).secret) } };
+      }
+      return ch;
+    });
+    res.json(redacted);
+  });
+
+  // PUT /api/monitors/:id/channels/:channel
+  app.put(api.monitors.channels.put.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const channelParam = req.params.channel;
+
+      const channelParsed = channelTypeSchema.safeParse(channelParam);
+      if (!channelParsed.success) {
+        return res.status(400).json({ message: "Invalid channel type. Must be email, webhook, or slack.", code: "INVALID_CHANNEL" });
+      }
+      const channel = channelParsed.data;
+
+      const monitor = await storage.getMonitor(id);
+      if (!monitor) return res.status(404).json({ message: "Not found" });
+      if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+
+      // Tier gating: webhook and slack require Pro or Power
+      if (channel !== "email") {
+        const user = await authStorage.getUser(req.user.claims.sub);
+        const tier = ((user as any)?.tier || "free") as UserTier;
+        if (tier === "free") {
+          return res.status(403).json({
+            message: `Webhook and Slack channels require a Pro or Power plan. Upgrade to unlock this feature.`,
+            code: "TIER_LIMIT_REACHED",
+          });
+        }
+      }
+
+      const input = api.monitors.channels.put.input.parse(req.body);
+      let config: Record<string, unknown> = input.config as Record<string, unknown>;
+      let isNewWebhook = false;
+
+      if (channel === "webhook") {
+        const webhookInput = webhookConfigInputSchema.parse(input.config);
+        // SSRF check on webhook URL
+        const ssrfError = await isPrivateUrl(webhookInput.url);
+        if (ssrfError) {
+          return res.status(422).json({ message: `Invalid webhook URL: ${ssrfError}`, code: "INVALID_WEBHOOK_URL" });
+        }
+        // Check if this is a new webhook (no existing secret)
+        const existing = await storage.getMonitorChannels(id);
+        const existingWebhook = existing.find((c) => c.channel === "webhook");
+        const existingSecret = existingWebhook ? (existingWebhook.config as any)?.secret : null;
+        const secret = existingSecret || generateWebhookSecret();
+        isNewWebhook = !existingSecret;
+        config = { url: webhookInput.url, secret, headers: (input.config as any)?.headers || {} };
+      } else if (channel === "slack") {
+        slackConfigInputSchema.parse(input.config);
+      }
+
+      const result = await storage.upsertMonitorChannel(id, channel, input.enabled, config);
+
+      // Return secret only on first create, redacted afterwards
+      const responseConfig = channel === "webhook" && !isNewWebhook
+        ? { ...result.config as object, secret: redactSecret((result.config as any).secret) }
+        : result.config;
+
+      res.json({ ...result, config: responseConfig });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
+      }
+      throw err;
+    }
+  });
+
+  // DELETE /api/monitors/:id/channels/:channel
+  app.delete(api.monitors.channels.delete.path, isAuthenticated, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const parsed = channelTypeSchema.safeParse(req.params.channel);
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Invalid channel type", code: "INVALID_CHANNEL" });
+    }
+    const channel = parsed.data;
+    const monitor = await storage.getMonitor(id);
+    if (!monitor) return res.status(404).json({ message: "Not found" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+    await storage.deleteMonitorChannel(id, channel);
+    res.status(204).send();
+  });
+
+  // POST /api/monitors/:id/channels/webhook/reveal-secret
+  const revealSecretRateLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5,
+    keyGenerator: (req: any) => req.user?.claims?.sub || req.ip,
+    message: { message: "Too many secret reveal requests. Try again later." },
+  });
+  app.post(api.monitors.channels.revealSecret.path, isAuthenticated, revealSecretRateLimiter, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const monitor = await storage.getMonitor(id);
+    if (!monitor) return res.status(404).json({ message: "Not found" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+
+    const channels = await storage.getMonitorChannels(id);
+    const webhook = channels.find((c) => c.channel === "webhook");
+    if (!webhook) return res.status(404).json({ message: "No webhook channel configured", code: "NOT_FOUND" });
+
+    const secret = (webhook.config as any)?.secret;
+    if (!secret) return res.status(404).json({ message: "No webhook secret found", code: "NOT_FOUND" });
+
+    res.json({ secret });
+  });
+
+  // GET /api/monitors/:id/deliveries
+  app.get(api.monitors.channels.deliveries.path, isAuthenticated, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const monitor = await storage.getMonitor(id);
+    if (!monitor) return res.status(404).json({ message: "Not found" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const channel = req.query.channel as string | undefined;
+    const entries = await storage.getDeliveryLog(id, limit, channel);
+    res.json(entries);
+  });
+
+  // ---------------------------------------------------------------
+  // SLACK OAUTH ROUTES
+  // ---------------------------------------------------------------
+
+  function signSlackState(userId: string): string {
+    const secret = process.env.SLACK_CLIENT_SECRET;
+    if (!secret) {
+      throw new Error("SLACK_CLIENT_SECRET is not configured");
+    }
+    return createHmac("sha256", secret).update(userId).digest("hex");
+  }
+
+  // GET /api/integrations/slack/install
+  app.get(api.integrations.slack.install.path, isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+
+    // Tier check
+    const user = await authStorage.getUser(userId);
+    const tier = ((user as any)?.tier || "free") as UserTier;
+    if (tier === "free") {
+      return res.status(403).json({ message: "Slack integration requires a Pro or Power plan.", code: "TIER_LIMIT_REACHED" });
+    }
+
+    const clientId = process.env.SLACK_CLIENT_ID;
+    if (!clientId) {
+      return res.status(501).json({ message: "Slack integration is not configured on this server.", code: "NOT_CONFIGURED" });
+    }
+
+    const state = `${userId}:${signSlackState(userId)}`;
+    const scopes = "chat:write,channels:read,groups:read";
+    const appUrl = process.env.REPLIT_DOMAINS
+      ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
+      : `${req.protocol}://${req.get("host")}`;
+    const redirectUri = `${appUrl}/api/integrations/slack/callback`;
+
+    const url = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
+    res.redirect(url);
+  });
+
+  // GET /api/integrations/slack/callback
+  app.get(api.integrations.slack.callback.path, async (req: any, res) => {
+    try {
+      const { code, state, error } = req.query;
+
+      if (error) {
+        return res.redirect("/?slack=error&reason=" + encodeURIComponent(String(error)));
+      }
+
+      if (!state || !code) {
+        return res.redirect("/?slack=error&reason=missing_params");
+      }
+
+      const [userId, sig] = String(state).split(":");
+      if (!userId || sig !== signSlackState(userId)) {
+        return res.redirect("/?slack=error&reason=invalid_state");
+      }
+
+      const clientId = process.env.SLACK_CLIENT_ID;
+      const clientSecret = process.env.SLACK_CLIENT_SECRET;
+      if (!clientId || !clientSecret) {
+        return res.redirect("/?slack=error&reason=not_configured");
+      }
+
+      const appUrl = process.env.REPLIT_DOMAINS
+        ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
+        : `${req.protocol}://${req.get("host")}`;
+      const redirectUri = `${appUrl}/api/integrations/slack/callback`;
+
+      const tokenResp = await fetch("https://slack.com/api/oauth.v2.access", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code: String(code),
+          redirect_uri: redirectUri,
+        }),
+      });
+
+      const tokenData = await tokenResp.json() as {
+        ok: boolean;
+        error?: string;
+        access_token?: string;
+        team?: { id: string; name: string };
+        scope?: string;
+      };
+
+      if (!tokenData.ok || !tokenData.access_token) {
+        return res.redirect("/?slack=error&reason=" + encodeURIComponent(tokenData.error || "token_exchange_failed"));
+      }
+
+      // Encrypt bot token before storage
+      const encryptedToken = encryptToken(tokenData.access_token);
+
+      await storage.upsertSlackConnection({
+        userId,
+        teamId: tokenData.team?.id || "",
+        teamName: tokenData.team?.name || "",
+        botToken: encryptedToken,
+        scope: tokenData.scope || "",
+      });
+
+      res.redirect("/?slack=connected");
+    } catch (err) {
+      console.error("[Slack OAuth] Callback error:", err instanceof Error ? err.message : err);
+      res.redirect("/?slack=error&reason=internal");
+    }
+  });
+
+  // GET /api/integrations/slack/status
+  app.get(api.integrations.slack.status.path, isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const connection = await storage.getSlackConnection(userId);
+    if (connection) {
+      res.json({ connected: true, teamName: connection.teamName });
+    } else {
+      res.json({ connected: false });
+    }
+  });
+
+  // GET /api/integrations/slack/channels
+  const slackChannelsCache = new Map<string, { data: any[]; timestamp: number }>();
+
+  // DELETE /api/integrations/slack
+  app.delete(api.integrations.slack.disconnect.path, isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    slackChannelsCache.delete(userId);
+    await storage.deleteSlackChannelsForUser(userId);
+    await storage.deleteSlackConnection(userId);
+    res.status(204).send();
+  });
+  app.get(api.integrations.slack.channels.path, isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const connection = await storage.getSlackConnection(userId);
+    if (!connection) {
+      return res.status(404).json({ message: "No Slack connection found. Connect Slack first.", code: "NOT_FOUND" });
+    }
+
+    // Check cache (5 min)
+    const cached = slackChannelsCache.get(userId);
+    if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+      return res.json(cached.data);
+    }
+
+    try {
+      const botToken = decryptToken(connection.botToken);
+      const channels = await listSlackChannels(botToken);
+      slackChannelsCache.set(userId, { data: channels, timestamp: Date.now() });
+      res.json(channels);
+    } catch (err) {
+      console.error(`[Slack] Token decryption failed (userId=${userId})`);
+      res.status(500).json({ message: "Failed to fetch Slack channels. Please reconnect Slack.", code: "SLACK_ERROR" });
+    }
   });
 
   // ---------------------------------------------------------------

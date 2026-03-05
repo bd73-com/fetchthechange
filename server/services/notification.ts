@@ -1,6 +1,9 @@
-import { type Monitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry } from "@shared/schema";
+import { type Monitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel } from "@shared/schema";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendDigestEmail, type EmailResult } from "./email";
+import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery";
+import { deliver as deliverSlack } from "./slackDelivery";
+import { decryptToken } from "../utils/encryption";
 import { ErrorLogger } from "./logger";
 
 export function isInQuietHours(prefs: NotificationPreference, now: Date): boolean {
@@ -141,12 +144,260 @@ export function meetsThreshold(
   return diff >= threshold;
 }
 
+export interface ChannelDeliveryResult {
+  email?: EmailResult | null;
+  webhook?: { success: boolean; error?: string };
+  slack?: { success: boolean; error?: string };
+}
+
+async function deliverToChannels(
+  monitor: Monitor,
+  change: MonitorChange,
+  emailOverride?: string
+): Promise<ChannelDeliveryResult> {
+  const result: ChannelDeliveryResult = {};
+  let channels: NotificationChannel[];
+  try {
+    channels = await storage.getMonitorChannels(monitor.id);
+  } catch {
+    channels = [];
+  }
+
+  // Backwards compatibility: no channel rows → use emailEnabled boolean
+  if (channels.length === 0) {
+    if (monitor.emailEnabled) {
+      result.email = await sendNotificationEmail(monitor, change.oldValue, change.newValue, emailOverride);
+      try {
+        await storage.addDeliveryLog({
+          monitorId: monitor.id,
+          changeId: change.id,
+          channel: "email",
+          status: result.email?.success ? "success" : "failed",
+          deliveredAt: result.email?.success ? new Date() : null,
+          response: result.email?.success ? null : { error: result.email?.error || "unknown" },
+        });
+      } catch { /* delivery log table may not exist yet */ }
+    }
+    return result;
+  }
+
+  const enabledChannels = channels.filter((c) => c.enabled);
+  const deliveries = enabledChannels.map(async (ch) => {
+    try {
+      switch (ch.channel) {
+        case "email": {
+          const emailResult = await sendNotificationEmail(monitor, change.oldValue, change.newValue, emailOverride);
+          result.email = emailResult;
+          await storage.addDeliveryLog({
+            monitorId: monitor.id,
+            changeId: change.id,
+            channel: "email",
+            status: emailResult.success ? "success" : "failed",
+            deliveredAt: emailResult.success ? new Date() : null,
+            response: emailResult.success ? null : { error: emailResult.error || "unknown" },
+          });
+          break;
+        }
+        case "webhook": {
+          const config = ch.config as unknown as WebhookConfig;
+          if (!config?.url || !config?.secret) break;
+          const webhookResult = await deliverWebhook(monitor, change, config);
+          result.webhook = webhookResult;
+          const urlDomain = new URL(config.url).hostname;
+          if (webhookResult.success) {
+            await storage.addDeliveryLog({
+              monitorId: monitor.id,
+              changeId: change.id,
+              channel: "webhook",
+              status: "success",
+              deliveredAt: new Date(),
+              response: { statusCode: webhookResult.statusCode },
+            });
+          } else {
+            // Schedule retry: create a pending entry at attempt 1
+            await storage.addDeliveryLog({
+              monitorId: monitor.id,
+              changeId: change.id,
+              channel: "webhook",
+              status: "pending",
+              attempt: 1,
+              response: { error: webhookResult.error, domain: urlDomain },
+            });
+            console.warn(`[Notification] Webhook delivery failed, scheduling retry (monitorId=${monitor.id}, attempt=1, error=${webhookResult.error})`);
+          }
+          break;
+        }
+        case "slack": {
+          const slackConfig = ch.config as { channelId?: string; channelName?: string };
+          if (!slackConfig?.channelId) break;
+          try {
+            const connection = await storage.getSlackConnection(monitor.userId);
+            if (!connection) {
+              console.warn(`[Notification] No Slack connection for user of monitor ${monitor.id}`);
+              break;
+            }
+            const botToken = decryptToken(connection.botToken);
+            const slackResult = await deliverSlack(monitor, change, slackConfig.channelId, botToken);
+            result.slack = slackResult;
+            await storage.addDeliveryLog({
+              monitorId: monitor.id,
+              changeId: change.id,
+              channel: "slack",
+              status: slackResult.success ? "success" : "failed",
+              deliveredAt: slackResult.success ? new Date() : null,
+              response: slackResult.success ? { ts: slackResult.slackTs } : { error: slackResult.error },
+            });
+            if (!slackResult.success) {
+              console.warn(`[Notification] Slack delivery failed (monitorId=${monitor.id}, error=${slackResult.error})`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[Notification] Slack token decryption failed (monitorId=${monitor.id})`);
+            await storage.addDeliveryLog({
+              monitorId: monitor.id,
+              changeId: change.id,
+              channel: "slack",
+              status: "failed",
+              response: { error: msg },
+            });
+          }
+          break;
+        }
+      }
+    } catch (err) {
+      await ErrorLogger.error("email", `Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err : null, { monitorId: monitor.id, channel: ch.channel });
+    }
+  });
+
+  await Promise.allSettled(deliveries);
+  return result;
+}
+
+async function deliverDigestToChannels(
+  monitor: Monitor,
+  changes: MonitorChange[],
+  emailOverride?: string
+): Promise<ChannelDeliveryResult> {
+  const result: ChannelDeliveryResult = {};
+  let channels: NotificationChannel[];
+  try {
+    channels = await storage.getMonitorChannels(monitor.id);
+  } catch {
+    channels = [];
+  }
+
+  // Backwards compat: no channel rows → email only via emailEnabled
+  if (channels.length === 0) {
+    if (monitor.emailEnabled) {
+      result.email = await sendDigestEmail(monitor, changes, emailOverride);
+    }
+    return result;
+  }
+
+  const enabledChannels = channels.filter((c) => c.enabled);
+  const deliveries = enabledChannels.map(async (ch) => {
+    try {
+      switch (ch.channel) {
+        case "email": {
+          result.email = await sendDigestEmail(monitor, changes, emailOverride);
+          break;
+        }
+        case "webhook": {
+          // For digest, send one webhook per change
+          const config = ch.config as unknown as WebhookConfig;
+          if (!config?.url || !config?.secret) break;
+          for (const change of changes) {
+            const webhookResult = await deliverWebhook(monitor, change, config);
+            if (!webhookResult.success) {
+              await storage.addDeliveryLog({
+                monitorId: monitor.id,
+                changeId: change.id,
+                channel: "webhook",
+                status: "pending",
+                attempt: 1,
+                response: { error: webhookResult.error },
+              });
+            } else {
+              await storage.addDeliveryLog({
+                monitorId: monitor.id,
+                changeId: change.id,
+                channel: "webhook",
+                status: "success",
+                deliveredAt: new Date(),
+                response: { statusCode: webhookResult.statusCode },
+              });
+            }
+          }
+          break;
+        }
+        case "slack": {
+          // For digest, send one Slack message per change
+          const slackConfig = ch.config as { channelId?: string };
+          if (!slackConfig?.channelId) break;
+          const connection = await storage.getSlackConnection(monitor.userId);
+          if (!connection) break;
+          try {
+            const botToken = decryptToken(connection.botToken);
+            for (const change of changes) {
+              const slackResult = await deliverSlack(monitor, change, slackConfig.channelId, botToken);
+              await storage.addDeliveryLog({
+                monitorId: monitor.id,
+                changeId: change.id,
+                channel: "slack",
+                status: slackResult.success ? "success" : "failed",
+                deliveredAt: slackResult.success ? new Date() : null,
+                response: slackResult.success ? { ts: slackResult.slackTs } : { error: slackResult.error },
+              });
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[Notification] Slack token decryption failed (monitorId=${monitor.id})`);
+            for (const change of changes) {
+              await storage.addDeliveryLog({
+                monitorId: monitor.id,
+                changeId: change.id,
+                channel: "slack",
+                status: "failed",
+                response: { error: msg },
+              });
+            }
+          }
+          break;
+        }
+      }
+    } catch (err) {
+      await ErrorLogger.error("email", `Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err : null, { monitorId: monitor.id, channel: ch.channel });
+    }
+  });
+
+  await Promise.allSettled(deliveries);
+  return result;
+}
+
+/**
+ * Checks if any notification channel is active for a monitor.
+ * Returns true if at least one channel is enabled, or if using legacy emailEnabled fallback.
+ */
+async function hasActiveChannels(monitor: Monitor): Promise<boolean> {
+  let channels: NotificationChannel[];
+  try {
+    channels = await storage.getMonitorChannels(monitor.id);
+  } catch {
+    channels = [];
+  }
+  if (channels.length === 0) {
+    return monitor.emailEnabled;
+  }
+  return channels.some((c) => c.enabled);
+}
+
 export async function processChangeNotification(
   monitor: Monitor,
   change: MonitorChange,
   isFirstChange: boolean
 ): Promise<EmailResult | null> {
-  if (!monitor.emailEnabled) {
+  // Check if any channel is active (backwards compat: falls back to emailEnabled)
+  if (!(await hasActiveChannels(monitor))) {
     return null;
   }
 
@@ -154,11 +405,12 @@ export async function processChangeNotification(
   try {
     prefs = await storage.getNotificationPreferences(monitor.id);
   } catch {
-    // Notification tables may not be migrated yet — fall through to send immediate email
+    // Notification tables may not be migrated yet — fall through to send immediate notification
   }
 
   if (!prefs) {
-    return await sendNotificationEmail(monitor, change.oldValue, change.newValue);
+    const result = await deliverToChannels(monitor, change);
+    return result.email ?? null;
   }
 
   if (!meetsThreshold(change.oldValue, change.newValue, prefs.sensitivityThreshold, isFirstChange)) {
@@ -183,7 +435,8 @@ export async function processChangeNotification(
   }
 
   const emailOverride = prefs.notificationEmail || undefined;
-  return await sendNotificationEmail(monitor, change.oldValue, change.newValue, emailOverride);
+  const result = await deliverToChannels(monitor, change, emailOverride);
+  return result.email ?? null;
 }
 
 export async function processDigestBatch(
@@ -210,13 +463,13 @@ export async function processDigestBatch(
   }
 
   const emailOverride = prefs.notificationEmail || undefined;
-  const result = await sendDigestEmail(monitor, changes, emailOverride);
+  const result = await deliverDigestToChannels(monitor, changes, emailOverride);
 
-  if (result.success) {
+  if (result.email?.success !== false) {
     await storage.markQueueEntriesDelivered(entries.map((e) => e.id));
   }
 
-  return result;
+  return result.email ?? null;
 }
 
 export async function processQueuedNotifications(): Promise<void> {
@@ -238,7 +491,7 @@ export async function processQueuedNotifications(): Promise<void> {
     const entries = monitorGroups.get(monitorId)!;
     try {
       const monitor = await storage.getMonitor(monitorId);
-      if (!monitor || !monitor.emailEnabled) {
+      if (!monitor || !(await hasActiveChannels(monitor))) {
         await storage.markQueueEntriesDelivered(entries.map((e) => e.id));
         continue;
       }
@@ -259,8 +512,8 @@ export async function processQueuedNotifications(): Promise<void> {
           continue;
         }
 
-        const result = await sendNotificationEmail(monitor, change.oldValue, change.newValue, emailOverride);
-        if (result.success) {
+        const result = await deliverToChannels(monitor, change, emailOverride);
+        if (result.email?.success !== false) {
           await storage.markQueueEntryDelivered(entry.id);
         }
       }
@@ -287,7 +540,7 @@ export async function processDigestCron(): Promise<void> {
   for (const prefs of digestPrefs) {
     try {
       const monitor = await storage.getMonitor(prefs.monitorId);
-      if (!monitor || !monitor.active || !monitor.emailEnabled) {
+      if (!monitor || !monitor.active || !(await hasActiveChannels(monitor))) {
         continue;
       }
 
