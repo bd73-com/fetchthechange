@@ -3,7 +3,11 @@ import { z } from "zod";
 import apiKeyAuth from "../middleware/apiKeyAuth";
 import { apiRateLimit } from "../middleware/apiRateLimit";
 import { storage } from "../storage";
-import { isPrivateUrl } from "../utils/ssrf";
+import {
+  checkMonitorLimit,
+  validateMonitorInput,
+  safeHostname,
+} from "../services/monitorValidation";
 import {
   apiV1PaginationSchema,
   apiV1ChangesPaginationSchema,
@@ -73,12 +77,19 @@ router.post("/monitors", async (req: any, res) => {
   try {
     const input = apiV1CreateMonitorSchema.parse(req.body);
 
-    // SSRF protection
-    const ssrfError = await isPrivateUrl(input.url);
-    if (ssrfError) {
-      const hostname = safeHostname(input.url);
-      console.warn(`[API] SSRF blocked: keyPrefix=${req.apiUser.keyPrefix} hostname=${hostname}`);
-      return res.status(422).json({ error: `URL blocked: ${ssrfError}`, code: "SSRF_BLOCKED" });
+    // Check tier-based monitor limit
+    const limitErr = await checkMonitorLimit(req.apiUser.id, req.apiUser.tier);
+    if (limitErr) {
+      return res.status(limitErr.status).json({ error: limitErr.error, code: limitErr.code });
+    }
+
+    // SSRF + CSS selector validation
+    const validationErr = await validateMonitorInput(input.url, input.selector);
+    if (validationErr) {
+      if (validationErr.code === "SSRF_BLOCKED") {
+        console.warn(`[API] SSRF blocked: keyPrefix=${req.apiUser.keyPrefix} hostname=${safeHostname(input.url)}`);
+      }
+      return res.status(validationErr.status).json({ error: validationErr.error, code: validationErr.code });
     }
 
     const monitor = await storage.createMonitor({
@@ -115,12 +126,17 @@ router.patch("/monitors/:id", async (req: any, res) => {
 
     const input = apiV1UpdateMonitorSchema.parse(req.body);
 
-    if (input.url) {
-      const ssrfError = await isPrivateUrl(input.url);
-      if (ssrfError) {
-        const hostname = safeHostname(input.url);
-        console.warn(`[API] SSRF blocked on update: keyPrefix=${req.apiUser.keyPrefix} hostname=${hostname}`);
-        return res.status(422).json({ error: `URL blocked: ${ssrfError}`, code: "SSRF_BLOCKED" });
+    // Validate only the fields being updated
+    if (input.url || input.selector) {
+      const validationErr = await validateMonitorInput(
+        input.url ?? existing.url,
+        input.selector,
+      );
+      if (validationErr) {
+        if (validationErr.code === "SSRF_BLOCKED" && input.url) {
+          console.warn(`[API] SSRF blocked on update: keyPrefix=${req.apiUser.keyPrefix} hostname=${safeHostname(input.url)}`);
+        }
+        return res.status(validationErr.status).json({ error: validationErr.error, code: validationErr.code });
       }
     }
 
@@ -213,14 +229,6 @@ function formatChange(c: any) {
     detectedAt: c.detectedAt,
     createdAt: c.detectedAt,
   };
-}
-
-function safeHostname(urlString: string): string {
-  try {
-    return new URL(urlString).hostname;
-  } catch {
-    return "unknown";
-  }
 }
 
 export default router;

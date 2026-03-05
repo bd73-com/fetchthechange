@@ -1,8 +1,44 @@
 import { describe, it, expect } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
+import { generateRawKey, hashApiKey, extractKeyPrefix } from "../utils/apiKey";
 
 describe("API key management logic", () => {
-  describe("Key generation", () => {
+  describe("Key generation (shared utility)", () => {
+    it("generateRawKey produces ftc_ prefix and correct length", () => {
+      const rawKey = generateRawKey();
+      expect(rawKey).toMatch(/^ftc_[a-f0-9]{64}$/);
+    });
+
+    it("hashApiKey returns a 64-char hex SHA-256 hash", () => {
+      const rawKey = generateRawKey();
+      const hash = hashApiKey(rawKey);
+      expect(hash).toHaveLength(64);
+      expect(hash).not.toContain("ftc_");
+      expect(hash).not.toBe(rawKey);
+    });
+
+    it("hashApiKey is deterministic", () => {
+      const rawKey = "ftc_abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+      expect(hashApiKey(rawKey)).toBe(hashApiKey(rawKey));
+    });
+
+    it("extractKeyPrefix returns first 12 characters", () => {
+      const rawKey = generateRawKey();
+      const prefix = extractKeyPrefix(rawKey);
+      expect(prefix).toHaveLength(12);
+      expect(prefix).toMatch(/^ftc_[a-f0-9]{8}$/);
+      expect(rawKey.startsWith(prefix)).toBe(true);
+    });
+
+    it("hashApiKey matches raw crypto equivalent", () => {
+      const rawKey = generateRawKey();
+      const utilHash = hashApiKey(rawKey);
+      const directHash = createHash("sha256").update(rawKey).digest("hex");
+      expect(utilHash).toBe(directHash);
+    });
+  });
+
+  describe("Key generation (raw crypto — legacy verification)", () => {
     it("generates keys with ftc_ prefix and correct length", () => {
       const rawKey = "ftc_" + randomBytes(32).toString("hex");
       expect(rawKey).toMatch(/^ftc_[a-f0-9]{64}$/);

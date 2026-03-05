@@ -12,11 +12,23 @@ export interface IStorage {
   createMonitor(monitor: InsertMonitor): Promise<Monitor>;
   updateMonitor(id: number, updates: any): Promise<Monitor>;
   deleteMonitor(id: number): Promise<void>;
-  
+
   getMonitorChanges(monitorId: number): Promise<MonitorChange[]>;
   addMonitorChange(monitorId: number, oldValue: string | null, newValue: string | null): Promise<MonitorChange>;
-  
+
   getAllActiveMonitors(): Promise<Monitor[]>;
+
+  // API keys
+  createApiKey(userId: string, name: string, keyHash: string, keyPrefix: string): Promise<ApiKey>;
+  getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
+  listApiKeys(userId: string): Promise<ApiKey[]>;
+  countActiveApiKeys(userId: string): Promise<number>;
+  revokeApiKey(id: number, userId: string): Promise<boolean>;
+  touchApiKey(id: number): Promise<void>;
+
+  // Paginated queries
+  getMonitorsPaginated(userId: string, page: number, limit: number): Promise<{ data: Monitor[]; total: number }>;
+  getMonitorChangesPaginated(monitorId: number, options: { page: number; limit: number; from?: Date; to?: Date }): Promise<{ data: MonitorChange[]; total: number }>;
 }
 
 export class DatabaseStorage implements IStorage {

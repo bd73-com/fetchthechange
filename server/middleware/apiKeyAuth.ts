@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
-import { createHash } from "node:crypto";
 import { storage } from "../storage";
 import { authStorage } from "../replit_integrations/auth/storage";
+import { hashApiKey } from "../utils/apiKey";
 import type { UserTier } from "@shared/models/auth";
 
 export interface ApiUser {
@@ -17,10 +17,6 @@ declare global {
       apiUser?: ApiUser;
     }
   }
-}
-
-function hashKey(rawKey: string): string {
-  return createHash("sha256").update(rawKey).digest("hex");
 }
 
 export default async function apiKeyAuth(
@@ -42,7 +38,7 @@ export default async function apiKeyAuth(
 
   let apiKey;
   try {
-    const hash = hashKey(rawKey);
+    const hash = hashApiKey(rawKey);
     apiKey = await storage.getApiKeyByHash(hash);
   } catch (err) {
     console.error("[API Auth] Key lookup failed unexpectedly:", err);

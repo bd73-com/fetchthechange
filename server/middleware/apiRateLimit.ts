@@ -6,8 +6,12 @@ export const apiRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req: any) => {
-    // Key on the API key ID (set by apiKeyAuth middleware)
-    return req.apiUser ? String(req.apiUser.keyId) : req.ip;
+    // Key on the API key ID (set by apiKeyAuth middleware).
+    // apiKeyAuth must run before this middleware — fail loudly if it didn't.
+    if (!req.apiUser) {
+      throw new Error("apiRateLimit: req.apiUser is not set — apiKeyAuth middleware must run first");
+    }
+    return String(req.apiUser.keyId);
   },
   handler: (_req: any, res) => {
     const keyPrefix = (_req as any).apiUser?.keyPrefix;
