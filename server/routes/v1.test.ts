@@ -66,9 +66,66 @@ describe("v1 route logic", () => {
       }
     });
 
+    it("apiV1CreateMonitorSchema rejects invalid URL", async () => {
+      const { apiV1CreateMonitorSchema } = await import("@shared/routes");
+      const result = apiV1CreateMonitorSchema.safeParse({
+        name: "Test",
+        url: "not-a-url",
+        selector: "h1",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("apiV1CreateMonitorSchema rejects empty selector", async () => {
+      const { apiV1CreateMonitorSchema } = await import("@shared/routes");
+      const result = apiV1CreateMonitorSchema.safeParse({
+        name: "Test",
+        url: "https://example.com",
+        selector: "",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("apiV1CreateMonitorSchema accepts hourly frequency", async () => {
+      const { apiV1CreateMonitorSchema } = await import("@shared/routes");
+      const result = apiV1CreateMonitorSchema.safeParse({
+        name: "Test",
+        url: "https://example.com",
+        selector: "h1",
+        frequency: "hourly",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.frequency).toBe("hourly");
+      }
+    });
+
+    it("apiV1CreateMonitorSchema rejects invalid frequency", async () => {
+      const { apiV1CreateMonitorSchema } = await import("@shared/routes");
+      const result = apiV1CreateMonitorSchema.safeParse({
+        name: "Test",
+        url: "https://example.com",
+        selector: "h1",
+        frequency: "weekly",
+      });
+      expect(result.success).toBe(false);
+    });
+
     it("apiV1UpdateMonitorSchema allows partial updates", async () => {
       const { apiV1UpdateMonitorSchema } = await import("@shared/routes");
       const result = apiV1UpdateMonitorSchema.safeParse({ active: false });
+      expect(result.success).toBe(true);
+    });
+
+    it("apiV1UpdateMonitorSchema accepts empty object", async () => {
+      const { apiV1UpdateMonitorSchema } = await import("@shared/routes");
+      const result = apiV1UpdateMonitorSchema.safeParse({});
+      expect(result.success).toBe(true);
+    });
+
+    it("apiV1UpdateMonitorSchema accepts emailEnabled field", async () => {
+      const { apiV1UpdateMonitorSchema } = await import("@shared/routes");
+      const result = apiV1UpdateMonitorSchema.safeParse({ emailEnabled: true });
       expect(result.success).toBe(true);
     });
 
@@ -86,6 +143,34 @@ describe("v1 route logic", () => {
         limit: "10",
       });
       expect(result.success).toBe(true);
+    });
+
+    it("apiV1PaginationSchema defaults page=1 and limit=20", async () => {
+      const { apiV1PaginationSchema } = await import("@shared/routes");
+      const result = apiV1PaginationSchema.safeParse({});
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.page).toBe(1);
+        expect(result.data.limit).toBe(20);
+      }
+    });
+
+    it("apiV1PaginationSchema rejects limit > 100", async () => {
+      const { apiV1PaginationSchema } = await import("@shared/routes");
+      const result = apiV1PaginationSchema.safeParse({ limit: "101" });
+      expect(result.success).toBe(false);
+    });
+
+    it("apiV1PaginationSchema rejects page < 1", async () => {
+      const { apiV1PaginationSchema } = await import("@shared/routes");
+      const result = apiV1PaginationSchema.safeParse({ page: "0" });
+      expect(result.success).toBe(false);
+    });
+
+    it("apiV1ChangesPaginationSchema rejects limit > 200", async () => {
+      const { apiV1ChangesPaginationSchema } = await import("@shared/routes");
+      const result = apiV1ChangesPaginationSchema.safeParse({ limit: "201" });
+      expect(result.success).toBe(false);
     });
   });
 
@@ -136,6 +221,54 @@ describe("v1 route logic", () => {
     it("openapi.json endpoint has no security requirement", async () => {
       const { openApiSpec } = await import("../openapi");
       expect(openApiSpec.paths["/openapi.json"].get.security).toEqual([]);
+    });
+
+    it("Monitor schema has required properties", async () => {
+      const { openApiSpec } = await import("../openapi");
+      const props = openApiSpec.components.schemas.Monitor.properties;
+      expect(props.id).toBeDefined();
+      expect(props.name).toBeDefined();
+      expect(props.url).toBeDefined();
+      expect(props.selector).toBeDefined();
+      expect(props.active).toBeDefined();
+      expect(props.checkInterval).toBeDefined();
+    });
+
+    it("Change schema has required properties", async () => {
+      const { openApiSpec } = await import("../openapi");
+      const props = openApiSpec.components.schemas.Change.properties;
+      expect(props.id).toBeDefined();
+      expect(props.monitorId).toBeDefined();
+      expect(props.oldValue).toBeDefined();
+      expect(props.newValue).toBeDefined();
+      expect(props.detectedAt).toBeDefined();
+    });
+
+    it("ErrorResponse schema requires error and code", async () => {
+      const { openApiSpec } = await import("../openapi");
+      const errSchema = openApiSpec.components.schemas.ErrorResponse;
+      expect(errSchema.required).toContain("error");
+      expect(errSchema.required).toContain("code");
+    });
+
+    it("all endpoints have defined HTTP methods", async () => {
+      const { openApiSpec } = await import("../openapi");
+      expect(openApiSpec.paths["/monitors"].get).toBeDefined();
+      expect(openApiSpec.paths["/monitors"].post).toBeDefined();
+      expect(openApiSpec.paths["/monitors/{id}"].get).toBeDefined();
+      expect(openApiSpec.paths["/monitors/{id}"].patch).toBeDefined();
+      expect(openApiSpec.paths["/monitors/{id}"].delete).toBeDefined();
+      expect(openApiSpec.paths["/monitors/{id}/changes"].get).toBeDefined();
+    });
+
+    it("uses OpenAPI 3.1.0", async () => {
+      const { openApiSpec } = await import("../openapi");
+      expect(openApiSpec.openapi).toBe("3.1.0");
+    });
+
+    it("has global security requiring BearerAuth", async () => {
+      const { openApiSpec } = await import("../openapi");
+      expect(openApiSpec.security).toEqual([{ BearerAuth: [] }]);
     });
   });
 

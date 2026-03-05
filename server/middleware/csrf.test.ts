@@ -241,6 +241,76 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
+    it("bypasses CSRF for POST /api/v1/monitors (prefix exemption)", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/v1/monitors",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("bypasses CSRF for DELETE /api/v1/monitors/5 (prefix exemption)", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "DELETE",
+        path: "/api/v1/monitors/5",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("bypasses CSRF for PATCH /api/v1/monitors/1 with bad origin", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "PATCH",
+        path: "/api/v1/monitors/1",
+        headers: { origin: "https://evil.com" },
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("bypasses CSRF for /api/v1/openapi.json (exact path exemption)", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/v1/openapi.json",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("bypasses CSRF for /api/v1/ping (exact path exemption)", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/v1/ping",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
     it("does NOT exempt /api/campaigns/ (non-unsubscribe paths)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
