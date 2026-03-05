@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertMonitorSchema, monitors, monitorChanges, notificationPreferences } from './schema';
+import { insertMonitorSchema, monitors, monitorChanges, notificationPreferences, notificationChannels, deliveryLog, slackConnections } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -51,6 +51,24 @@ export const notificationPreferencesInputSchema = z.object({
   },
   { message: "Timezone is required when quiet hours are set" }
 );
+
+export const channelTypeSchema = z.enum(["email", "webhook", "slack"]);
+
+export const webhookConfigInputSchema = z.object({
+  url: z.string().url("Must be a valid URL"),
+});
+
+export const slackConfigInputSchema = z.object({
+  channelId: z.string().min(1, "Channel ID is required"),
+  channelName: z.string(),
+});
+
+export const emailConfigInputSchema = z.object({});
+
+export const channelInputSchema = z.object({
+  enabled: z.boolean(),
+  config: z.union([webhookConfigInputSchema, slackConfigInputSchema, emailConfigInputSchema]),
+});
 
 export const api = {
   monitors: {
@@ -144,6 +162,57 @@ export const api = {
         401: errorSchemas.unauthorized,
       }
     },
+    channels: {
+      list: {
+        method: 'GET' as const,
+        path: '/api/monitors/:id/channels',
+        responses: {
+          200: z.array(z.custom<typeof notificationChannels.$inferSelect>()),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+        },
+      },
+      put: {
+        method: 'PUT' as const,
+        path: '/api/monitors/:id/channels/:channel',
+        input: channelInputSchema,
+        responses: {
+          200: z.custom<typeof notificationChannels.$inferSelect>(),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+          403: z.object({ message: z.string(), code: z.string().optional() }),
+          422: errorSchemas.validation,
+        },
+      },
+      delete: {
+        method: 'DELETE' as const,
+        path: '/api/monitors/:id/channels/:channel',
+        responses: {
+          204: z.void(),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+        },
+      },
+      revealSecret: {
+        method: 'POST' as const,
+        path: '/api/monitors/:id/channels/webhook/reveal-secret',
+        responses: {
+          200: z.object({ secret: z.string() }),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+          429: z.object({ message: z.string() }),
+        },
+      },
+      deliveries: {
+        method: 'GET' as const,
+        path: '/api/monitors/:id/deliveries',
+        responses: {
+          200: z.array(z.custom<typeof deliveryLog.$inferSelect>()),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+        },
+      },
+    },
     notificationPreferences: {
       get: {
         method: 'GET' as const,
@@ -172,6 +241,55 @@ export const api = {
           204: z.void(),
           404: errorSchemas.notFound,
           401: errorSchemas.unauthorized,
+        },
+      },
+    },
+  },
+  integrations: {
+    slack: {
+      install: {
+        method: 'GET' as const,
+        path: '/api/integrations/slack/install',
+        responses: {
+          302: z.void(),
+          401: errorSchemas.unauthorized,
+          403: z.object({ message: z.string(), code: z.string().optional() }),
+          501: z.object({ message: z.string() }),
+        },
+      },
+      callback: {
+        method: 'GET' as const,
+        path: '/api/integrations/slack/callback',
+        responses: {
+          302: z.void(),
+        },
+      },
+      status: {
+        method: 'GET' as const,
+        path: '/api/integrations/slack/status',
+        responses: {
+          200: z.object({
+            connected: z.boolean(),
+            teamName: z.string().optional(),
+          }),
+          401: errorSchemas.unauthorized,
+        },
+      },
+      disconnect: {
+        method: 'DELETE' as const,
+        path: '/api/integrations/slack',
+        responses: {
+          204: z.void(),
+          401: errorSchemas.unauthorized,
+        },
+      },
+      channels: {
+        method: 'GET' as const,
+        path: '/api/integrations/slack/channels',
+        responses: {
+          200: z.array(z.object({ id: z.string(), name: z.string() })),
+          401: errorSchemas.unauthorized,
+          404: z.object({ message: z.string() }),
         },
       },
     },

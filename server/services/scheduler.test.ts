@@ -15,7 +15,7 @@ const {
   mockGetAllActiveMonitors: vi.fn().mockResolvedValue([]),
   mockCleanupPollutedValues: vi.fn().mockResolvedValue(undefined),
   mockDbExecute: vi.fn().mockResolvedValue({ rowCount: 0 }),
-  cronCallbacks: {} as Record<string, () => Promise<void>>,
+  cronCallbacks: {} as Record<string, Array<() => Promise<void>>>,
   mockMonitorsNeedingRetry: new Set<number>(),
 }));
 
@@ -23,6 +23,12 @@ vi.mock("../storage", () => ({
   storage: {
     getAllActiveMonitors: mockGetAllActiveMonitors,
     cleanupPollutedValues: mockCleanupPollutedValues,
+    getPendingWebhookRetries: vi.fn().mockResolvedValue([]),
+    getMonitorChannels: vi.fn().mockResolvedValue([]),
+    getMonitor: vi.fn().mockResolvedValue(undefined),
+    getMonitorChanges: vi.fn().mockResolvedValue([]),
+    updateDeliveryLog: vi.fn().mockResolvedValue(undefined),
+    cleanupOldDeliveryLogs: vi.fn().mockResolvedValue(0),
   },
 }));
 
@@ -34,6 +40,10 @@ vi.mock("./scraper", () => ({
 vi.mock("./notification", () => ({
   processQueuedNotifications: vi.fn().mockResolvedValue(undefined),
   processDigestCron: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("./webhookDelivery", () => ({
+  deliver: vi.fn().mockResolvedValue({ success: true, statusCode: 200 }),
 }));
 
 vi.mock("./logger", () => ({
@@ -55,7 +65,8 @@ vi.mock("drizzle-orm", () => ({
 vi.mock("node-cron", () => ({
   default: {
     schedule: vi.fn((expression: string, callback: () => Promise<void>) => {
-      cronCallbacks[expression] = callback;
+      if (!cronCallbacks[expression]) cronCallbacks[expression] = [];
+      cronCallbacks[expression].push(callback);
     }),
   },
 }));
@@ -65,6 +76,19 @@ import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
 import { _resetCache } from "./notificationReady";
 import type { Monitor } from "@shared/schema";
+
+// Helper: call all callbacks registered for a cron expression
+async function runCron(expression: string) {
+  const callbacks = cronCallbacks[expression];
+  if (!callbacks) return;
+  for (const cb of callbacks) {
+    await cb();
+  }
+}
+
+function hasCron(expression: string): boolean {
+  return !!cronCallbacks[expression] && cronCallbacks[expression].length > 0;
+}
 
 function makeMonitor(overrides: Partial<Monitor> = {}): Monitor {
   return {
@@ -94,7 +118,7 @@ describe("startScheduler", () => {
     vi.clearAllMocks();
     _resetCache();
     // Clear captured cron callbacks
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => delete (cronCallbacks as any)[k]);
   });
 
   afterEach(() => {
@@ -108,9 +132,9 @@ describe("startScheduler", () => {
 
   it("registers all cron schedules (every-minute, notification queue, and daily cleanup)", async () => {
     await startScheduler();
-    expect(cronCallbacks["* * * * *"]).toBeDefined();
-    expect(cronCallbacks["*/1 * * * *"]).toBeDefined();
-    expect(cronCallbacks["0 3 * * *"]).toBeDefined();
+    expect(hasCron("* * * * *")).toBe(true);
+    expect(hasCron("*/1 * * * *")).toBe(true);
+    expect(hasCron("0 3 * * *")).toBe(true);
   });
 
   it("skips notification cron when notification tables do not exist", async () => {
@@ -119,8 +143,8 @@ describe("startScheduler", () => {
 
     await startScheduler();
 
-    expect(cronCallbacks["*/1 * * * *"]).toBeUndefined();
-    expect(cronCallbacks["* * * * *"]).toBeDefined();
+    expect(hasCron("*/1 * * * *")).toBe(false);
+    expect(hasCron("* * * * *")).toBe(true);
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining("Notification tables")
     );
@@ -134,7 +158,7 @@ describe("startScheduler", () => {
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
 
     // The check is dispatched via setTimeout with jitter (0-30s)
     await vi.advanceTimersByTimeAsync(31000);
@@ -148,7 +172,7 @@ describe("startScheduler", () => {
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);
@@ -160,7 +184,7 @@ describe("startScheduler", () => {
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     expect(mockCheckMonitor).not.toHaveBeenCalled();
@@ -172,7 +196,7 @@ describe("startScheduler", () => {
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);
@@ -184,7 +208,7 @@ describe("startScheduler", () => {
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     expect(mockCheckMonitor).not.toHaveBeenCalled();
@@ -196,7 +220,7 @@ describe("startScheduler", () => {
     mockCheckMonitor.mockRejectedValueOnce(new Error("Unexpected crash"));
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
@@ -211,7 +235,7 @@ describe("startScheduler", () => {
     mockGetAllActiveMonitors.mockRejectedValueOnce(new Error("DB down"));
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
@@ -229,7 +253,7 @@ describe("startScheduler", () => {
     mockGetAllActiveMonitors.mockRejectedValueOnce("connection reset");
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
@@ -253,7 +277,7 @@ describe("startScheduler", () => {
     );
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     // One check is now in-flight (activeChecks === 1)
@@ -261,7 +285,7 @@ describe("startScheduler", () => {
 
     // Second iteration: getAllActiveMonitors fails while check is still running
     mockGetAllActiveMonitors.mockRejectedValueOnce(new Error("DB pool exhausted"));
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
@@ -305,7 +329,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     );
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
 
     // Advance past all jitter timers (max 30s)
     await vi.advanceTimersByTimeAsync(31000);
@@ -330,7 +354,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     );
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     // All 10 should have started
@@ -349,7 +373,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
       () => new Promise<void>((resolve) => resolvers.push(resolve))
     );
 
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     // Should have started since active count is back to 0
@@ -367,7 +391,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     mockCheckMonitor.mockRejectedValueOnce(new Error("crash"));
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     expect(mockCheckMonitor).toHaveBeenCalledTimes(1);
@@ -376,7 +400,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     mockCheckMonitor.mockClear();
     mockCheckMonitor.mockResolvedValueOnce({ changed: false, status: "ok" });
 
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     expect(mockCheckMonitor).toHaveBeenCalledTimes(1);
@@ -406,7 +430,7 @@ describe("accelerated retry for Browserless infra failures", () => {
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     // Should be checked even though daily frequency hasn't elapsed
@@ -422,7 +446,7 @@ describe("accelerated retry for Browserless infra failures", () => {
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     // Should NOT be checked yet (daily hasn't elapsed, and retry interval not reached)
@@ -436,7 +460,7 @@ describe("accelerated retry for Browserless infra failures", () => {
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     // 6 minutes is not enough for daily schedule
@@ -452,7 +476,7 @@ describe("accelerated retry for Browserless infra failures", () => {
     mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
 
     await startScheduler();
-    await cronCallbacks["* * * * *"]();
+    await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
     // Check should trigger (accelerated retry condition matched first)
@@ -479,7 +503,7 @@ describe("daily metrics cleanup", () => {
 
     await startScheduler();
     mockDbExecute.mockResolvedValueOnce({ rowCount: 42 });
-    await cronCallbacks["0 3 * * *"]();
+    await runCron("0 3 * * *");
 
     expect(mockDbExecute).toHaveBeenCalled();
     expect(consoleSpy).toHaveBeenCalledWith(
@@ -493,7 +517,7 @@ describe("daily metrics cleanup", () => {
 
     await startScheduler();
     mockDbExecute.mockResolvedValueOnce({ rowCount: 0 });
-    await cronCallbacks["0 3 * * *"]();
+    await runCron("0 3 * * *");
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("Pruned")
@@ -504,7 +528,7 @@ describe("daily metrics cleanup", () => {
   it("logs error when cleanup query fails", async () => {
     await startScheduler();
     mockDbExecute.mockRejectedValueOnce(new Error("DB timeout"));
-    await cronCallbacks["0 3 * * *"]();
+    await runCron("0 3 * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
@@ -521,7 +545,7 @@ describe("daily metrics cleanup", () => {
   it("handles non-Error thrown in cleanup (uses String coercion)", async () => {
     await startScheduler();
     mockDbExecute.mockRejectedValueOnce("disk full");
-    await cronCallbacks["0 3 * * *"]();
+    await runCron("0 3 * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
@@ -553,14 +577,14 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
 
   it("calls processQueuedNotifications on each tick", async () => {
     await startScheduler();
-    await cronCallbacks["*/1 * * * *"]();
+    await runCron("*/1 * * * *");
 
     expect(mockProcessQueuedNotifications).toHaveBeenCalledOnce();
   });
 
   it("calls processDigestCron on each tick", async () => {
     await startScheduler();
-    await cronCallbacks["*/1 * * * *"]();
+    await runCron("*/1 * * * *");
 
     expect(mockProcessDigestCron).toHaveBeenCalledOnce();
   });
@@ -569,7 +593,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     mockProcessQueuedNotifications.mockRejectedValueOnce(new Error("Queue DB error"));
 
     await startScheduler();
-    await cronCallbacks["*/1 * * * *"]();
+    await runCron("*/1 * * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
@@ -586,7 +610,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     mockProcessDigestCron.mockRejectedValueOnce(new Error("Digest error"));
 
     await startScheduler();
-    await cronCallbacks["*/1 * * * *"]();
+    await runCron("*/1 * * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
@@ -602,7 +626,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     mockProcessQueuedNotifications.mockRejectedValueOnce(42);
 
     await startScheduler();
-    await cronCallbacks["*/1 * * * *"]();
+    await runCron("*/1 * * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
@@ -618,7 +642,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     mockProcessDigestCron.mockRejectedValueOnce({ code: "TIMEOUT" });
 
     await startScheduler();
-    await cronCallbacks["*/1 * * * *"]();
+    await runCron("*/1 * * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
@@ -635,7 +659,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     mockProcessDigestCron.mockRejectedValueOnce(new Error("Digest error"));
 
     await startScheduler();
-    await cronCallbacks["*/1 * * * *"]();
+    await runCron("*/1 * * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledTimes(2);
     expect(ErrorLogger.error).toHaveBeenCalledWith(

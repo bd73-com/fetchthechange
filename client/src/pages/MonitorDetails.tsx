@@ -18,6 +18,8 @@ import {
 import { ArrowLeft, RefreshCw, Trash2, ExternalLink, Calendar, Clock, Loader2, Edit2, X, Check, AlertTriangle } from "lucide-react";
 import { FixSelectorModal } from "@/components/FixSelectorModal";
 import { NotificationPreferencesForm } from "@/components/NotificationPreferencesForm";
+import { NotificationChannelsPanel } from "@/components/NotificationChannelsPanel";
+import { DeliveryLog } from "@/components/DeliveryLog";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -434,6 +436,13 @@ export default function MonitorDetails() {
 
         {!isEditing && monitor.emailEnabled && (
           <NotificationPreferencesForm monitorId={monitor.id} />
+        )}
+
+        {!isEditing && (
+          <>
+            <NotificationChannelsPanel monitorId={monitor.id} />
+            <DeliveryLog monitorId={monitor.id} />
+          </>
         )}
 
         <Card>
