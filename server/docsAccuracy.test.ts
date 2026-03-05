@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { createHmac } from "node:crypto";
 import { signPayload, buildWebhookPayload, type WebhookPayload } from "./services/webhookDelivery";
 import type { Monitor, MonitorChange } from "@shared/schema";
@@ -20,6 +20,14 @@ function readClientFile(relativePath: string): string {
     path.resolve(__dirname, "..", "client", "src", relativePath),
     "utf-8"
   );
+}
+
+function sliceSection(source: string, startToken: string, endToken: string): string {
+  const start = source.indexOf(startToken);
+  expect(start, `Missing start token: ${startToken}`).toBeGreaterThanOrEqual(0);
+  const end = source.indexOf(endToken, start + startToken.length);
+  expect(end, `Missing end token: ${endToken}`).toBeGreaterThan(start);
+  return source.slice(start, end);
 }
 
 function makeMonitor(): Monitor {
@@ -59,17 +67,15 @@ function makeChange(): MonitorChange {
 
 describe("DocsWebhooks payload example accuracy", () => {
   const docsSource = readClientFile("pages/DocsWebhooks.tsx");
+  let examplePayload: WebhookPayload;
 
-  // Extract the JSON example from the docs page source
-  const jsonMatch = docsSource.match(
-    /\{[^`]*"event"\s*:\s*"change\.detected"[^`]*\}/s
-  );
-
-  it("contains a JSON payload example", () => {
-    expect(jsonMatch).not.toBeNull();
+  beforeAll(() => {
+    const jsonMatch = docsSource.match(
+      /\{[^`]*"event"\s*:\s*"change\.detected"[^`]*\}/s
+    );
+    expect(jsonMatch, "JSON payload example not found in DocsWebhooks.tsx").not.toBeNull();
+    examplePayload = JSON.parse(jsonMatch![0]) as WebhookPayload;
   });
-
-  const examplePayload = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
 
   it("example payload has exactly the same keys as WebhookPayload", () => {
     const expectedKeys: (keyof WebhookPayload)[] = [
@@ -82,41 +88,41 @@ describe("DocsWebhooks payload example accuracy", () => {
       "detectedAt",
       "timestamp",
     ];
-    expect(Object.keys(examplePayload!).sort()).toEqual(
+    expect(Object.keys(examplePayload).sort()).toEqual(
       [...expectedKeys].sort()
     );
   });
 
   it("example event field is 'change.detected'", () => {
-    expect(examplePayload!.event).toBe("change.detected");
+    expect(examplePayload.event).toBe("change.detected");
   });
 
   it("example monitorId is a number", () => {
-    expect(typeof examplePayload!.monitorId).toBe("number");
+    expect(typeof examplePayload.monitorId).toBe("number");
   });
 
   it("example detectedAt is a valid ISO 8601 string", () => {
-    const d = new Date(examplePayload!.detectedAt);
-    expect(d.toISOString()).toBe(examplePayload!.detectedAt);
+    const d = new Date(examplePayload.detectedAt);
+    expect(d.toISOString()).toBe(examplePayload.detectedAt);
   });
 
   it("example timestamp is a valid ISO 8601 string", () => {
-    const d = new Date(examplePayload!.timestamp);
-    expect(d.toISOString()).toBe(examplePayload!.timestamp);
+    const d = new Date(examplePayload.timestamp);
+    expect(d.toISOString()).toBe(examplePayload.timestamp);
   });
 
   it("buildWebhookPayload output matches the documented field set", () => {
     const payload = buildWebhookPayload(makeMonitor(), makeChange());
     expect(Object.keys(payload).sort()).toEqual(
-      Object.keys(examplePayload!).sort()
+      Object.keys(examplePayload).sort()
     );
     // Values should match for the static fields
-    expect(payload.event).toBe(examplePayload!.event);
-    expect(payload.monitorId).toBe(examplePayload!.monitorId);
-    expect(payload.monitorName).toBe(examplePayload!.monitorName);
-    expect(payload.url).toBe(examplePayload!.url);
-    expect(payload.oldValue).toBe(examplePayload!.oldValue);
-    expect(payload.newValue).toBe(examplePayload!.newValue);
+    expect(payload.event).toBe(examplePayload.event);
+    expect(payload.monitorId).toBe(examplePayload.monitorId);
+    expect(payload.monitorName).toBe(examplePayload.monitorName);
+    expect(payload.url).toBe(examplePayload.url);
+    expect(payload.oldValue).toBe(examplePayload.oldValue);
+    expect(payload.newValue).toBe(examplePayload.newValue);
   });
 });
 
@@ -171,18 +177,13 @@ describe("Support FAQ documentation accuracy", () => {
   });
 
   it("Notification Preferences section has 5 FAQ items", () => {
-    // Extract the section between title "Notification Preferences" and the next section
-    const sectionStart = supportSource.indexOf('"Notification Preferences"');
-    const sectionEnd = supportSource.indexOf('"Webhooks & Slack"');
-    const section = supportSource.slice(sectionStart, sectionEnd);
+    const section = sliceSection(supportSource, '"Notification Preferences"', '"Webhooks & Slack"');
     const questionCount = (section.match(/question:/g) || []).length;
     expect(questionCount).toBe(5);
   });
 
   it("Webhooks & Slack section has 8 FAQ items", () => {
-    const sectionStart = supportSource.indexOf('"Webhooks & Slack"');
-    const sectionEnd = supportSource.indexOf('"Troubleshooting"');
-    const section = supportSource.slice(sectionStart, sectionEnd);
+    const section = sliceSection(supportSource, '"Webhooks & Slack"', '"Troubleshooting"');
     const questionCount = (section.match(/question:/g) || []).length;
     expect(questionCount).toBe(8);
   });
@@ -225,47 +226,34 @@ describe("Pricing page feature list accuracy", () => {
   const pricingSource = readClientFile("pages/Pricing.tsx");
 
   it("Free plan does not list webhook or Slack features", () => {
-    // Extract the Free plan block (from "Free" to the next plan "Pro")
-    const freeStart = pricingSource.indexOf('"Free"');
-    const proStart = pricingSource.indexOf('"Pro"');
-    const freeSection = pricingSource.slice(freeStart, proStart);
+    const freeSection = sliceSection(pricingSource, '"Free"', '"Pro"');
     expect(freeSection).not.toContain("Webhook");
     expect(freeSection).not.toContain("Slack");
     expect(freeSection).not.toContain("Quiet hours");
   });
 
   it("Pro plan lists webhook delivery", () => {
-    const proStart = pricingSource.indexOf('"Pro"');
-    const powerStart = pricingSource.indexOf('"Power"');
-    const proSection = pricingSource.slice(proStart, powerStart);
+    const proSection = sliceSection(pricingSource, '"Pro"', '"Power"');
     expect(proSection).toContain("Webhook delivery (HMAC-signed)");
   });
 
   it("Pro plan lists Slack integration", () => {
-    const proStart = pricingSource.indexOf('"Pro"');
-    const powerStart = pricingSource.indexOf('"Power"');
-    const proSection = pricingSource.slice(proStart, powerStart);
+    const proSection = sliceSection(pricingSource, '"Pro"', '"Power"');
     expect(proSection).toContain("Slack integration");
   });
 
   it("Pro plan lists quiet hours & daily digest mode", () => {
-    const proStart = pricingSource.indexOf('"Pro"');
-    const powerStart = pricingSource.indexOf('"Power"');
-    const proSection = pricingSource.slice(proStart, powerStart);
+    const proSection = sliceSection(pricingSource, '"Pro"', '"Power"');
     expect(proSection).toContain("Quiet hours & daily digest mode");
   });
 
   it("Pro plan lists per-monitor notification email override", () => {
-    const proStart = pricingSource.indexOf('"Pro"');
-    const powerStart = pricingSource.indexOf('"Power"');
-    const proSection = pricingSource.slice(proStart, powerStart);
+    const proSection = sliceSection(pricingSource, '"Pro"', '"Power"');
     expect(proSection).toContain("Per-monitor notification email override");
   });
 
   it("Pro plan does NOT list sensitivity threshold", () => {
-    const proStart = pricingSource.indexOf('"Pro"');
-    const powerStart = pricingSource.indexOf('"Power"');
-    const proSection = pricingSource.slice(proStart, powerStart);
+    const proSection = sliceSection(pricingSource, '"Pro"', '"Power"');
     expect(proSection).not.toContain("sensitivity threshold");
   });
 
@@ -293,30 +281,22 @@ describe("UpgradeDialog feature list consistency with Pricing", () => {
   const upgradeSource = readClientFile("components/UpgradeDialog.tsx");
 
   it("pro features include webhook & Slack", () => {
-    const proStart = upgradeSource.indexOf("pro: [");
-    const proEnd = upgradeSource.indexOf("],", proStart);
-    const proSection = upgradeSource.slice(proStart, proEnd);
+    const proSection = sliceSection(upgradeSource, "pro: [", "],");
     expect(proSection).toContain("webhook & Slack");
   });
 
   it("power features include webhook & Slack", () => {
-    const powerStart = upgradeSource.indexOf("power: [");
-    const powerEnd = upgradeSource.indexOf("],", powerStart);
-    const powerSection = upgradeSource.slice(powerStart, powerEnd);
+    const powerSection = sliceSection(upgradeSource, "power: [", "],");
     expect(powerSection).toContain("webhook & Slack");
   });
 
   it("power features include sensitivity threshold", () => {
-    const powerStart = upgradeSource.indexOf("power: [");
-    const powerEnd = upgradeSource.indexOf("],", powerStart);
-    const powerSection = upgradeSource.slice(powerStart, powerEnd);
+    const powerSection = sliceSection(upgradeSource, "power: [", "],");
     expect(powerSection).toContain("sensitivity threshold");
   });
 
   it("pro features do NOT include sensitivity threshold", () => {
-    const proStart = upgradeSource.indexOf("pro: [");
-    const proEnd = upgradeSource.indexOf("],", proStart);
-    const proSection = upgradeSource.slice(proStart, proEnd);
+    const proSection = sliceSection(upgradeSource, "pro: [", "],");
     expect(proSection).not.toContain("sensitivity threshold");
   });
 });

@@ -71,7 +71,9 @@ function SEOHead() {
     document.head.appendChild(canonicalLink);
 
     return () => {
-      existingMetas.forEach((meta) => meta.remove());
+      existingMetas.forEach((meta) => {
+        meta.remove();
+      });
       canonicalLink.remove();
     };
   }, []);
