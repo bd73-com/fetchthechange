@@ -5,12 +5,17 @@ import { processQueuedNotifications, processDigestCron } from "./notification";
 import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery";
 import { ErrorLogger } from "./logger";
 import { notificationTablesExist } from "./notificationReady";
+import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
 const MAX_CONCURRENT_CHECKS = 10;
-const ACCELERATED_RETRY_MS = 5 * 60 * 1000; // 5 minutes
+const BASE_RETRY_MS = 2 * 60 * 1000; // 2 minutes
+const MAX_RETRY_MS = 15 * 60 * 1000; // 15 minutes
 let activeChecks = 0;
+
+/** Per-monitor backoff tracker for accelerated retries. */
+export const retryBackoff = new Map<number, { attempts: number }>();
 
 async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]) {
   if (activeChecks >= MAX_CONCURRENT_CHECKS) {
@@ -38,6 +43,22 @@ export async function startScheduler() {
   // One-time cleanup of polluted values from legacy data
   await storage.cleanupPollutedValues();
 
+  // Wire circuit breaker recovery: immediately retry pending monitors when Browserless comes back
+  browserlessCircuitBreaker.onClose(() => {
+    storage.getAllActiveMonitors().then((allMonitors) => {
+      const pendingIds = Array.from(monitorsNeedingRetry);
+      const pendingMonitors = allMonitors.filter(m => pendingIds.includes(m.id));
+      for (const monitor of pendingMonitors) {
+        const jitterMs = Math.floor(Math.random() * 5000);
+        setTimeout(() => runCheckWithLimit(monitor), jitterMs);
+      }
+      // Reset backoff for all retried monitors
+      for (const id of pendingIds) {
+        retryBackoff.delete(id);
+      }
+    }).catch(() => {}); // best-effort
+  });
+
   // Run every minute to check if we need to process anything
   // This is a simple implementation. For production, maybe use a proper queue.
   // We'll filter monitors based on their 'frequency' and 'lastChecked'.
@@ -55,15 +76,27 @@ export async function startScheduler() {
         let shouldCheck = false;
 
         // Accelerated retry: monitors affected by Browserless infra failures
-        // get retried every 5 minutes instead of their normal frequency
-        if (monitorsNeedingRetry.has(monitor.id) && diffMs >= ACCELERATED_RETRY_MS) {
-          shouldCheck = true;
-        } else if (monitor.frequency === "hourly" && diffHours >= 1) {
-          shouldCheck = true;
-        } else if (monitor.frequency === "daily" && diffHours >= 24) {
-          shouldCheck = true;
-        } else if (!monitor.lastChecked) {
+        // get retried with exponential backoff (2 min → 4 min → 8 min → 15 min cap)
+        if (monitorsNeedingRetry.has(monitor.id)) {
+          const backoff = retryBackoff.get(monitor.id) ?? { attempts: 0 };
+          const interval = Math.min(BASE_RETRY_MS * Math.pow(2, backoff.attempts), MAX_RETRY_MS);
+          if (diffMs >= interval) {
             shouldCheck = true;
+            retryBackoff.set(monitor.id, { attempts: backoff.attempts + 1 });
+          }
+        } else {
+          // Clean up backoff entry if monitor is no longer in retry set
+          retryBackoff.delete(monitor.id);
+        }
+
+        if (!shouldCheck) {
+          if (monitor.frequency === "hourly" && diffHours >= 1) {
+            shouldCheck = true;
+          } else if (monitor.frequency === "daily" && diffHours >= 24) {
+            shouldCheck = true;
+          } else if (!monitor.lastChecked) {
+              shouldCheck = true;
+          }
         }
 
         if (shouldCheck) {

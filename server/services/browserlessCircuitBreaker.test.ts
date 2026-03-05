@@ -39,23 +39,25 @@ describe("BrowserlessCircuitBreaker", () => {
     expect(cb.isAvailable()).toBe(false);
   });
 
-  it("transitions to half_open after cooldown", () => {
+  it("transitions to half_open after cooldown (2 minutes base)", () => {
     for (let i = 0; i < 3; i++) cb.recordInfraFailure();
     expect(cb.getState()).toBe("open");
 
-    // Advance past cooldown (5 minutes)
-    vi.advanceTimersByTime(5 * 60 * 1000);
+    // Advance past base cooldown (2 minutes)
+    vi.advanceTimersByTime(2 * 60 * 1000);
     expect(cb.getState()).toBe("half_open");
     expect(cb.isAvailable()).toBe(true);
   });
 
-  it("allows only one probe while half_open", () => {
+  it("allows up to 3 probes while half_open", () => {
     for (let i = 0; i < 3; i++) cb.recordInfraFailure();
-    vi.advanceTimersByTime(5 * 60 * 1000);
+    vi.advanceTimersByTime(2 * 60 * 1000);
     expect(cb.getState()).toBe("half_open");
 
-    expect(cb.isAvailable()).toBe(true);   // first probe
-    expect(cb.isAvailable()).toBe(false);  // subsequent probes blocked
+    expect(cb.isAvailable()).toBe(true);   // probe 1
+    expect(cb.isAvailable()).toBe(true);   // probe 2
+    expect(cb.isAvailable()).toBe(true);   // probe 3
+    expect(cb.isAvailable()).toBe(false);  // no more probes
 
     cb.recordSuccess();
     expect(cb.getState()).toBe("closed");
@@ -64,7 +66,7 @@ describe("BrowserlessCircuitBreaker", () => {
 
   it("closes on success in half_open state", () => {
     for (let i = 0; i < 3; i++) cb.recordInfraFailure();
-    vi.advanceTimersByTime(5 * 60 * 1000);
+    vi.advanceTimersByTime(2 * 60 * 1000);
     expect(cb.getState()).toBe("half_open");
 
     cb.recordSuccess();
@@ -72,14 +74,49 @@ describe("BrowserlessCircuitBreaker", () => {
     expect(cb.isAvailable()).toBe(true);
   });
 
-  it("re-opens on failure in half_open state", () => {
+  it("re-opens only when all half_open probes fail", () => {
     for (let i = 0; i < 3; i++) cb.recordInfraFailure();
-    vi.advanceTimersByTime(5 * 60 * 1000);
+    vi.advanceTimersByTime(2 * 60 * 1000);
     expect(cb.getState()).toBe("half_open");
 
+    // Consume all 3 probes
+    cb.isAvailable();
+    cb.isAvailable();
+    cb.isAvailable();
+
+    // First two failures don't reopen (probes still in flight)
+    cb.recordInfraFailure();
+    expect(cb.getState()).toBe("half_open");
+    cb.recordInfraFailure();
+    expect(cb.getState()).toBe("half_open");
+
+    // Third failure: all probes resolved, none succeeded → reopen
     cb.recordInfraFailure();
     expect(cb.getState()).toBe("open");
     expect(cb.isAvailable()).toBe(false);
+  });
+
+  it("first success in half_open closes circuit even with concurrent failures", () => {
+    for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+    vi.advanceTimersByTime(2 * 60 * 1000);
+
+    // 3 probes consumed
+    cb.isAvailable();
+    cb.isAvailable();
+    cb.isAvailable();
+
+    // First probe fails
+    cb.recordInfraFailure();
+    expect(cb.getState()).toBe("half_open");
+
+    // Second probe succeeds → circuit closes
+    cb.recordSuccess();
+    expect(cb.getState()).toBe("closed");
+
+    // Third probe failure should not reopen (already closed)
+    cb.recordInfraFailure();
+    // Only 1 failure in window, not enough to open
+    expect(cb.getState()).toBe("closed");
   });
 
   it("success resets failure count in closed state", () => {
@@ -127,22 +164,29 @@ describe("BrowserlessCircuitBreaker", () => {
     expect(cb.getState()).toBe("open");
   });
 
-  it("handles multiple open-halfopen-open cycles", () => {
+  it("handles multiple open-halfopen-open cycles with backoff", () => {
     // Cycle 1: open the circuit
     for (let i = 0; i < 3; i++) cb.recordInfraFailure();
     expect(cb.getState()).toBe("open");
 
-    // Wait for cooldown → half_open
-    vi.advanceTimersByTime(5 * 60 * 1000);
+    // Wait for base cooldown (2 min) → half_open
+    vi.advanceTimersByTime(2 * 60 * 1000);
     expect(cb.getState()).toBe("half_open");
 
-    // Probe fails → open again
+    // All 3 probes fail → open again
+    cb.isAvailable();
+    cb.isAvailable();
+    cb.isAvailable();
+    cb.recordInfraFailure();
+    cb.recordInfraFailure();
     cb.recordInfraFailure();
     expect(cb.getState()).toBe("open");
     expect(cb.isAvailable()).toBe(false);
 
-    // Cycle 2: wait again
-    vi.advanceTimersByTime(5 * 60 * 1000);
+    // Cycle 2: cooldown should be 4 minutes (2 min * 2^1)
+    vi.advanceTimersByTime(2 * 60 * 1000); // only 2 min — not enough
+    expect(cb.getState()).toBe("open");
+    vi.advanceTimersByTime(2 * 60 * 1000); // now 4 min total
     expect(cb.getState()).toBe("half_open");
     expect(cb.isAvailable()).toBe(true);
 
@@ -152,11 +196,52 @@ describe("BrowserlessCircuitBreaker", () => {
     expect(cb.isAvailable()).toBe(true);
   });
 
+  it("backs off cooldown exponentially: 2 min → 4 min → 8 min → 10 min cap", () => {
+    expect(cb.getCurrentCooldownMs()).toBe(2 * 60 * 1000); // base
+
+    // Cycle 1
+    for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    cb.isAvailable(); cb.isAvailable(); cb.isAvailable();
+    cb.recordInfraFailure(); cb.recordInfraFailure(); cb.recordInfraFailure();
+    expect(cb.getCurrentCooldownMs()).toBe(4 * 60 * 1000); // 2^1
+
+    // Cycle 2
+    vi.advanceTimersByTime(4 * 60 * 1000);
+    cb.isAvailable(); cb.isAvailable(); cb.isAvailable();
+    cb.recordInfraFailure(); cb.recordInfraFailure(); cb.recordInfraFailure();
+    expect(cb.getCurrentCooldownMs()).toBe(8 * 60 * 1000); // 2^2
+
+    // Cycle 3
+    vi.advanceTimersByTime(8 * 60 * 1000);
+    cb.isAvailable(); cb.isAvailable(); cb.isAvailable();
+    cb.recordInfraFailure(); cb.recordInfraFailure(); cb.recordInfraFailure();
+    expect(cb.getCurrentCooldownMs()).toBe(10 * 60 * 1000); // capped at 10 min
+  });
+
+  it("resets consecutiveOpenCycles to 0 on successful close", () => {
+    // Build up consecutive cycles
+    for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    cb.isAvailable(); cb.isAvailable(); cb.isAvailable();
+    cb.recordInfraFailure(); cb.recordInfraFailure(); cb.recordInfraFailure();
+    expect(cb.getCurrentCooldownMs()).toBe(4 * 60 * 1000);
+
+    // Now succeed
+    vi.advanceTimersByTime(4 * 60 * 1000);
+    cb.isAvailable();
+    cb.recordSuccess();
+    expect(cb.getState()).toBe("closed");
+
+    // Cooldown should be back to base
+    expect(cb.getCurrentCooldownMs()).toBe(2 * 60 * 1000);
+  });
+
   it("isAvailable transitions open to half_open on call after cooldown", () => {
     for (let i = 0; i < 3; i++) cb.recordInfraFailure();
     expect(cb.isAvailable()).toBe(false);
 
-    vi.advanceTimersByTime(5 * 60 * 1000);
+    vi.advanceTimersByTime(2 * 60 * 1000);
 
     // isAvailable should itself trigger the transition
     expect(cb.isAvailable()).toBe(true);
@@ -167,5 +252,44 @@ describe("BrowserlessCircuitBreaker", () => {
     cb.recordSuccess();
     expect(cb.getState()).toBe("closed");
     expect(cb.isAvailable()).toBe(true);
+  });
+
+  it("fires onClose callback when circuit transitions to closed", () => {
+    const callback = vi.fn();
+    cb.onClose(callback);
+
+    for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    cb.isAvailable();
+    cb.recordSuccess();
+
+    expect(callback).toHaveBeenCalledOnce();
+  });
+
+  it("fires onClose callback on recordSuccess even from closed state", () => {
+    const callback = vi.fn();
+    cb.onClose(callback);
+
+    cb.recordSuccess();
+    expect(callback).toHaveBeenCalledOnce();
+  });
+
+  it("does not throw if onClose callback throws", () => {
+    cb.onClose(() => { throw new Error("callback error"); });
+
+    for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    cb.isAvailable();
+
+    expect(() => cb.recordSuccess()).not.toThrow();
+    expect(cb.getState()).toBe("closed");
+  });
+
+  it("reset clears onClose callback", () => {
+    const callback = vi.fn();
+    cb.onClose(callback);
+    cb.reset();
+    cb.recordSuccess();
+    expect(callback).not.toHaveBeenCalled();
   });
 });

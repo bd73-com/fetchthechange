@@ -89,6 +89,7 @@ import {
   monitorsNeedingRetry,
   classifyOuterError,
   classifyHttpStatus,
+  extractFromJsonLd,
 } from "./scraper";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
@@ -899,6 +900,85 @@ describe("extractValueFromHtml", () => {
   it("returns null when content attribute is also empty", () => {
     const html = `<html><body><meta class="meta-empty" content="" /></body></html>`;
     expect(extractValueFromHtml(html, ".meta-empty")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractFromJsonLd
+// ---------------------------------------------------------------------------
+describe("extractFromJsonLd", () => {
+  it("extracts price from standard Product JSON-LD", () => {
+    const html = `<html><head><script type="application/ld+json">
+      {"@type": "Product", "name": "Watch", "offers": {"@type": "Offer", "price": "299.99", "priceCurrency": "USD"}}
+    </script></head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBe("USD 299.99");
+  });
+
+  it("extracts price from Product with offers array", () => {
+    const html = `<html><head><script type="application/ld+json">
+      {"@type": "Product", "name": "Watch", "offers": [{"@type": "Offer", "price": "199.00", "priceCurrency": "EUR"}]}
+    </script></head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBe("EUR 199.00");
+  });
+
+  it("extracts lowPrice from AggregateOffer", () => {
+    const html = `<html><head><script type="application/ld+json">
+      {"@type": "Product", "name": "Watch", "offers": {"@type": "AggregateOffer", "lowPrice": "150.00", "highPrice": "300.00", "priceCurrency": "USD"}}
+    </script></head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBe("USD 150.00");
+  });
+
+  it("handles standalone Offer type", () => {
+    const html = `<html><head><script type="application/ld+json">
+      {"@type": "Offer", "price": "49.99", "priceCurrency": "GBP"}
+    </script></head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBe("GBP 49.99");
+  });
+
+  it("handles @graph wrapper", () => {
+    const html = `<html><head><script type="application/ld+json">
+      {"@graph": [{"@type": "WebPage"}, {"@type": "Product", "offers": {"price": "99.99"}}]}
+    </script></head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBe("99.99");
+  });
+
+  it("handles array of JSON-LD blocks", () => {
+    const html = `<html><head>
+      <script type="application/ld+json">[{"@type": "BreadcrumbList"}]</script>
+      <script type="application/ld+json">{"@type": "Product", "offers": {"price": "55.00"}}</script>
+    </head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBe("55.00");
+  });
+
+  it("returns null when no JSON-LD present", () => {
+    const html = `<html><head></head><body><p>No structured data</p></body></html>`;
+    expect(extractFromJsonLd(html)).toBeNull();
+  });
+
+  it("returns null for malformed JSON", () => {
+    const html = `<html><head><script type="application/ld+json">{invalid json}</script></head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBeNull();
+  });
+
+  it("returns null for non-Product/Offer schemas", () => {
+    const html = `<html><head><script type="application/ld+json">
+      {"@type": "Organization", "name": "Example Corp"}
+    </script></head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBeNull();
+  });
+
+  it("returns null when Product has no offers", () => {
+    const html = `<html><head><script type="application/ld+json">
+      {"@type": "Product", "name": "Watch"}
+    </script></head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBeNull();
+  });
+
+  it("handles numeric price values", () => {
+    const html = `<html><head><script type="application/ld+json">
+      {"@type": "Product", "offers": {"price": 42.5, "priceCurrency": "USD"}}
+    </script></head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBe("USD 42.5");
   });
 });
 
