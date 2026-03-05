@@ -342,7 +342,7 @@ export class DatabaseStorage implements IStorage {
     const result = await db.update(apiKeys)
       .set({ revokedAt: new Date() })
       .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, userId), isNull(apiKeys.revokedAt)));
-    return (result as any).rowCount > 0;
+    return ((result as any).rowCount ?? 0) > 0;
   }
 
   async touchApiKey(id: number): Promise<void> {

@@ -72,10 +72,14 @@ function ApiKeysTable() {
 
   const handleCreate = async () => {
     if (!newKeyName.trim()) return;
-    const result = await createKey.mutateAsync({ name: newKeyName.trim() });
-    setCreatedKey(result.key);
-    setNewKeyName("");
-    setShowCreateDialog(false);
+    try {
+      const result = await createKey.mutateAsync({ name: newKeyName.trim() });
+      setCreatedKey(result.key);
+      setNewKeyName("");
+      setShowCreateDialog(false);
+    } catch {
+      // Error toast is shown by the mutation's onError handler
+    }
   };
 
   const handleCopy = async () => {
