@@ -18,6 +18,7 @@ import BlogPriceMonitoring from "@/pages/BlogPriceMonitoring";
 import BlogSelectorBreakage from "@/pages/BlogSelectorBreakage";
 import Pricing from "@/pages/Pricing";
 import Support from "@/pages/Support";
+import DocsWebhooks from "@/pages/DocsWebhooks";
 import AdminErrors from "@/pages/AdminErrors";
 import AdminCampaigns from "@/pages/AdminCampaigns";
 import AdminCampaignDetail from "@/pages/AdminCampaignDetail";
@@ -64,6 +65,7 @@ function Router() {
       <Route path="/blog/css-selectors-keep-breaking-why-and-how-to-fix" component={BlogSelectorBreakage} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/support" component={Support} />
+      <Route path="/docs/webhooks" component={DocsWebhooks} />
       <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
       <Route path="/admin/campaigns" component={() => <ProtectedRoute component={AdminCampaigns} />} />
       <Route path="/admin/campaigns/:id" component={() => <ProtectedRoute component={AdminCampaignDetail} />} />
