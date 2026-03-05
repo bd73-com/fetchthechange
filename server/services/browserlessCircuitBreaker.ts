@@ -60,6 +60,7 @@ export class BrowserlessCircuitBreaker {
 
   /** Record a successful Browserless call. Resets the circuit to CLOSED. */
   recordSuccess(): void {
+    const wasOpen = this.state !== "closed";
     if (this.state === "half_open") {
       this.halfOpenSucceeded = true;
     }
@@ -70,7 +71,7 @@ export class BrowserlessCircuitBreaker {
     this.halfOpenProbesAllowed = 0;
     this.halfOpenProbesInFlight = 0;
     this.halfOpenSucceeded = false;
-    if (this.onCloseCallback) {
+    if (wasOpen && this.onCloseCallback) {
       try { this.onCloseCallback(); } catch {}
     }
   }

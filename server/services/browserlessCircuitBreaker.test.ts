@@ -266,12 +266,12 @@ describe("BrowserlessCircuitBreaker", () => {
     expect(callback).toHaveBeenCalledOnce();
   });
 
-  it("fires onClose callback on recordSuccess even from closed state", () => {
+  it("does not fire onClose callback when recordSuccess is called in closed state", () => {
     const callback = vi.fn();
     cb.onClose(callback);
 
     cb.recordSuccess();
-    expect(callback).toHaveBeenCalledOnce();
+    expect(callback).not.toHaveBeenCalled();
   });
 
   it("does not throw if onClose callback throws", () => {

@@ -980,6 +980,13 @@ describe("extractFromJsonLd", () => {
     </script></head><body></body></html>`;
     expect(extractFromJsonLd(html)).toBe("USD 42.5");
   });
+
+  it("handles @type as an array (e.g. ['Product', 'Thing'])", () => {
+    const html = `<html><head><script type="application/ld+json">
+      {"@type": ["Product", "Thing"], "offers": {"price": "19.99", "priceCurrency": "USD"}}
+    </script></head><body></body></html>`;
+    expect(extractFromJsonLd(html)).toBe("USD 19.99");
+  });
 });
 
 // ---------------------------------------------------------------------------

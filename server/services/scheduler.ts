@@ -17,14 +17,15 @@ let activeChecks = 0;
 /** Per-monitor backoff tracker for accelerated retries. */
 export const retryBackoff = new Map<number, { attempts: number }>();
 
-async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]) {
+async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]): Promise<boolean> {
   if (activeChecks >= MAX_CONCURRENT_CHECKS) {
     console.debug(`[Scheduler] Concurrency limit reached, deferring monitor ${monitor.id}`);
-    return;
+    return false;
   }
   activeChecks++;
   try {
     await checkMonitor(monitor);
+    return true;
   } catch (error) {
     await ErrorLogger.error("scheduler", `"${monitor.name}" — scheduled check failed. This is usually a temporary issue. If it persists, verify the URL is still valid and the selector matches the page.`, error instanceof Error ? error : null, {
       monitorId: monitor.id,
@@ -32,6 +33,7 @@ async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]) {
       url: monitor.url,
       selector: monitor.selector,
     });
+    return true;
   } finally {
     activeChecks--;
   }
@@ -82,7 +84,6 @@ export async function startScheduler() {
           const interval = Math.min(BASE_RETRY_MS * Math.pow(2, backoff.attempts), MAX_RETRY_MS);
           if (diffMs >= interval) {
             shouldCheck = true;
-            retryBackoff.set(monitor.id, { attempts: backoff.attempts + 1 });
           }
         } else {
           // Clean up backoff entry if monitor is no longer in retry set
@@ -95,14 +96,18 @@ export async function startScheduler() {
           } else if (monitor.frequency === "daily" && diffHours >= 24) {
             shouldCheck = true;
           } else if (!monitor.lastChecked) {
-              shouldCheck = true;
+            shouldCheck = true;
           }
         }
 
         if (shouldCheck) {
           const jitterMs = Math.floor(Math.random() * 30000);
           setTimeout(() => {
-            runCheckWithLimit(monitor);
+            void runCheckWithLimit(monitor).then((started) => {
+              if (!started || !monitorsNeedingRetry.has(monitor.id)) return;
+              const b = retryBackoff.get(monitor.id) ?? { attempts: 0 };
+              retryBackoff.set(monitor.id, { attempts: b.attempts + 1 });
+            });
           }, jitterMs);
         }
       }

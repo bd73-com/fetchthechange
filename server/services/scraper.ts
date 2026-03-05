@@ -376,9 +376,10 @@ export function extractFromJsonLd(html: string): string | null {
 function extractPriceFromSchema(obj: any): string | null {
   if (!obj || typeof obj !== "object") return null;
 
-  const type = obj["@type"];
+  const rawType = obj["@type"];
+  const types: string[] = Array.isArray(rawType) ? rawType : [rawType];
 
-  if (type === "Product" || type === "IndividualProduct") {
+  if (types.includes("Product") || types.includes("IndividualProduct")) {
     const offers = obj.offers;
     if (!offers) return null;
 
@@ -394,7 +395,7 @@ function extractPriceFromSchema(obj: any): string | null {
     return null;
   }
 
-  if (type === "Offer" || type === "AggregateOffer") {
+  if (types.includes("Offer") || types.includes("AggregateOffer")) {
     return extractPriceFromOffer(obj);
   }
 
