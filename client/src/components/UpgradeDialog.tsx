@@ -78,19 +78,26 @@ export function UpgradeDialog({ currentTier, children }: UpgradeDialogProps) {
   const getPlanFeatures = (tier: string) => {
     const features: Record<string, string[]> = {
       pro: [
-        "Monitor up to 100 pages",
-        "Email notifications",
-        "5-minute check intervals",
-        "Change history",
-        "Priority support",
+        "Up to 100 monitors",
+        "Hourly or daily checks",
+        "Email, webhook & Slack notifications",
+        "Quiet hours & daily digest mode",
+        "Per-monitor notification email override",
+        "JavaScript-rendered pages",
+        "Fix Selector tool",
+        "Full change history",
       ],
       power: [
-        "Unlimited page monitoring",
-        "Email notifications",
-        "1-minute check intervals",
+        "Unlimited monitors",
+        "Hourly or daily checks",
+        "Email, webhook & Slack notifications",
+        "Quiet hours & daily digest mode",
+        "Per-monitor notification email override",
+        "Change sensitivity threshold",
+        "JavaScript-rendered pages",
+        "Fix Selector tool",
         "Full change history",
-        "Priority support",
-        "API access",
+        "Admin event log",
       ],
     };
     return features[tier] || [];

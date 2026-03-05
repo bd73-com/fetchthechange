@@ -73,6 +73,83 @@ const faqSections: FAQSection[] = [
     ],
   },
   {
+    title: "Notification Preferences",
+    description: "Control when and how you receive change alerts.",
+    items: [
+      {
+        question: "What are quiet hours?",
+        answer:
+          "Quiet hours let you suppress notifications during a time window you define — for example, 11pm to 7am. Any change detected during quiet hours is queued and delivered when the window ends, so you never miss an alert.",
+      },
+      {
+        question: "What is daily digest mode?",
+        answer:
+          "Digest mode batches all change alerts for a monitor into a single daily email sent at 9am in your local timezone. Use it for monitors where you want a summary rather than an immediate ping for every change.",
+      },
+      {
+        question: "What is the sensitivity threshold?",
+        answer:
+          "The sensitivity threshold lets you ignore minor changes. It is measured in character difference between the old and new value. For example, a threshold of 20 means a change must involve at least 20 characters added or removed before a notification is sent. The first detected change for a monitor always triggers a notification regardless of the threshold.",
+      },
+      {
+        question: "Can I send a monitor's alerts to a different email address?",
+        answer:
+          "Yes. Each monitor has an optional notification email override. When set, alerts for that monitor are sent to that address instead of your account's default notification email. This is useful if you want some monitors to notify a colleague or a shared inbox.",
+      },
+      {
+        question: "Where do I configure notification preferences?",
+        answer:
+          "Open a monitor's detail page and look for the Notification Preferences section. You can set quiet hours, toggle digest mode, configure the sensitivity threshold, and override the notification email — all per monitor.",
+      },
+    ],
+  },
+  {
+    title: "Webhooks & Slack",
+    description: "Send change alerts to your own systems or Slack workspace.",
+    items: [
+      {
+        question: "Which plans include webhooks and Slack?",
+        answer:
+          "Webhooks and Slack notifications are available on the Pro and Power plans. Free plan users receive email notifications only.",
+      },
+      {
+        question: "How do I set up a webhook for a monitor?",
+        answer:
+          "On the monitor's detail page, open the Notification Channels section and enable the Webhook channel. Paste in your endpoint URL. FetchTheChange generates a secret automatically — save it somewhere safe as it is shown only once. Each change detection will POST a signed JSON payload to your endpoint.",
+      },
+      {
+        question: "How do I verify webhook signatures?",
+        answer:
+          "Every webhook request includes an X-FTC-Signature-256 header containing a sha256= prefix followed by an HMAC-SHA256 hex digest of the raw request body, computed using your webhook secret. To verify: compute HMAC-SHA256 of the raw body with your secret and compare it to the header value. Always use a constant-time comparison to prevent timing attacks. Reject requests that fail verification. See /docs/webhooks for code examples in Node.js, Python, and Go.",
+      },
+      {
+        question: "What does a webhook payload look like?",
+        answer:
+          "Payloads are JSON objects with the following fields: event (always \"change.detected\"), monitorId, monitorName, url, oldValue, newValue, detectedAt (ISO 8601, when the change was recorded), and timestamp (ISO 8601, when the request was sent). The content type is application/json. oldValue is null on the first detection for a monitor.",
+      },
+      {
+        question: "What happens if my webhook endpoint is down?",
+        answer:
+          "FetchTheChange retries failed deliveries automatically. You can view every delivery attempt — including the HTTP status code and error message — in the Delivery Log on the monitor's detail page.",
+      },
+      {
+        question: "How do I connect Slack?",
+        answer:
+          "Go to your dashboard settings and click \"Connect Slack\". This starts a standard OAuth flow — you'll authorise FetchTheChange to post to your workspace. Once connected, open a monitor's detail page, enable the Slack channel, and pick the channel you want alerts sent to.",
+      },
+      {
+        question: "Can I disconnect Slack?",
+        answer:
+          "Yes. Visit your integrations settings and click \"Disconnect Slack\". This removes FetchTheChange's access to your workspace and disables all Slack notification channels across your monitors.",
+      },
+      {
+        question: "My webhook stopped delivering. What should I check?",
+        answer:
+          "Check the Delivery Log on the monitor's detail page — it shows every delivery attempt, the HTTP status code returned, and any error message. Common causes are: the endpoint returning a non-2xx status, a TLS certificate error, or a firewall blocking incoming requests. Ensure your endpoint responds within 5 seconds — requests that time out are treated as failures.",
+      },
+    ],
+  },
+  {
     title: "Troubleshooting",
     description: "Help with common issues",
     items: [
