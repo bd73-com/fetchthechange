@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2 } from "lucide-react";
 import PublicNav from "@/components/PublicNav";
+import { Link } from "wouter";
 
 const plans = [
   {
@@ -62,6 +63,7 @@ const plans = [
       "Fix Selector tool",
       "Full change history",
       "Admin event log",
+      "REST API access (300 req/min)",
     ],
     cta: "Upgrade to Power",
     popular: false,
@@ -110,7 +112,11 @@ export default function Pricing() {
                   {plan.features.map((feature) => (
                     <li key={feature} className="flex items-start gap-2">
                       <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                      <span className="text-sm">{feature}</span>
+                      <span className="text-sm">
+                        {feature.includes("REST API") ? (
+                          <Link href="/developer" className="hover:underline">{feature}</Link>
+                        ) : feature}
+                      </span>
                     </li>
                   ))}
                 </ul>

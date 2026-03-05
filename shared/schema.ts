@@ -328,6 +328,30 @@ export const slackConnectionsRelations = relations(slackConnections, ({ one }) =
 
 export type SlackConnection = typeof slackConnections.$inferSelect;
 
+// API keys — per-user keys for the public REST API (Power tier only)
+export const apiKeys = pgTable("api_keys", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  name: text("name").notNull(),
+  keyHash: text("key_hash").notNull().unique(),
+  keyPrefix: text("key_prefix").notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  revokedAt: timestamp("revoked_at"),
+}, (table) => ({
+  userRevokedIdx: index("api_keys_user_revoked_idx").on(table.userId, table.revokedAt),
+}));
+
+export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
+  user: one(users, {
+    fields: [apiKeys.userId],
+    references: [users.id],
+  }),
+}));
+
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type InsertApiKey = typeof apiKeys.$inferInsert;
+
 export const insertMonitorSchema = createInsertSchema(monitors).omit({
   id: true,
   userId: true,

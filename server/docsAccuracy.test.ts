@@ -183,9 +183,15 @@ describe("Support FAQ documentation accuracy", () => {
   });
 
   it("Webhooks & Slack section has 8 FAQ items", () => {
-    const section = sliceSection(supportSource, '"Webhooks & Slack"', '"Troubleshooting"');
+    const section = sliceSection(supportSource, '"Webhooks & Slack"', '"API Access"');
     const questionCount = (section.match(/question:/g) || []).length;
     expect(questionCount).toBe(8);
+  });
+
+  it("API Access section has 5 FAQ items", () => {
+    const section = sliceSection(supportSource, '"API Access"', '"Troubleshooting"');
+    const questionCount = (section.match(/question:/g) || []).length;
+    expect(questionCount).toBe(5);
   });
 
   it("references the correct signature header in FAQ", () => {
