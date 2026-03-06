@@ -10,6 +10,7 @@ A web monitoring application that tracks changes to specific elements on any web
 - **Email notifications** — Get notified via Resend when monitored content changes
 - **Change history** — Browse a full timeline of detected changes for each monitor
 - **Selector assistance** — Built-in tool to help find and validate CSS selectors
+- **Monitor tags** — Organise monitors with coloured labels; filter your dashboard by tag
 - **Subscription tiers** — Free, Pro, and Power tiers with Stripe billing
 - **Admin dashboard** — Error logs, email campaigns, and usage tracking
 
@@ -117,6 +118,7 @@ npm run start
 | Monitors | 3 | 100 | Unlimited |
 | JS rendering | No | 200 checks/month | 500 checks/month |
 | Email notifications | 1 per day per monitor | Unlimited | Unlimited |
+| Monitor tags | — | 10 tags, 2 per monitor | Unlimited |
 
 ## Web Scraping
 

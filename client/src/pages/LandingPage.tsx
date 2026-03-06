@@ -464,6 +464,10 @@ export default function LandingPage() {
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Monitor tags (up to 10)</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
                     <span className="text-sm">Fix Selector tool</span>
                   </li>
                   <li className="flex items-start gap-2">
@@ -505,6 +509,10 @@ export default function LandingPage() {
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
                     <span className="text-sm">JavaScript-rendered pages</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                    <span className="text-sm">Unlimited monitor tags</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="h-5 w-5 text-primary shrink-0 mt-0.5" />
