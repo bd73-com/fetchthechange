@@ -704,6 +704,12 @@ describe("GET /api/integrations/slack/status", () => {
     expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "not_configured" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
+
+  it("propagates error when getSlackConnection throws (no try-catch)", async () => {
+    mockGetSlackConnection.mockRejectedValueOnce(new Error("db connection failed"));
+
+    await expect(callHandler("get", ENDPOINT, makeReq())).rejects.toThrow("db connection failed");
+  });
 });
 
 describe("DELETE /api/integrations/slack", () => {
