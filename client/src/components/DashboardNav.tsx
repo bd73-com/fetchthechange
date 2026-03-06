@@ -1,7 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
 import { NotificationEmailDialog } from "@/components/NotificationEmailDialog";
 import { Button } from "@/components/ui/button";
-import { LogOut, LayoutDashboard, FileWarning, HelpCircle, Send } from "lucide-react";
+import { LogOut, LayoutDashboard, FileWarning, HelpCircle, Send, BookOpen } from "lucide-react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 
@@ -69,6 +69,14 @@ export default function DashboardNav() {
               <span className="sr-only sm:not-sr-only">Support</span>
             </Link>
           </Button>
+          {(user?.tier === "power") && (
+            <Button variant="ghost" size="sm" asChild className="text-muted-foreground" data-testid="link-api-docs">
+              <Link href="/developer">
+                <BookOpen className="h-4 w-4 mr-2" />
+                <span className="sr-only sm:not-sr-only">API Docs</span>
+              </Link>
+            </Button>
+          )}
           <NotificationEmailDialog
             currentNotificationEmail={(user as any)?.notificationEmail}
             accountEmail={user?.email}
