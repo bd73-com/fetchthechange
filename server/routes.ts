@@ -826,19 +826,21 @@ export async function registerRoutes(
       Boolean(process.env.SLACK_CLIENT_ID?.trim()) &&
       Boolean(process.env.SLACK_CLIENT_SECRET?.trim());
 
-    if (!tablesReady) {
-      return res.json({ connected: false, available: false, unavailableReason: "setup_incomplete" as const });
-    }
-    if (!oauthReady) {
-      return res.json({ connected: false, available: false, unavailableReason: "not_configured" as const });
+    if (!tablesReady || !oauthReady) {
+      return res.json({ connected: false, available: false, unavailableReason: "unavailable" as const });
     }
 
-    const userId = req.user.claims.sub;
-    const connection = await storage.getSlackConnection(userId);
-    if (connection) {
-      res.json({ connected: true, available: true, teamName: connection.teamName });
-    } else {
-      res.json({ connected: false, available: true });
+    try {
+      const userId = req.user.claims.sub;
+      const connection = await storage.getSlackConnection(userId);
+      if (connection) {
+        res.json({ connected: true, available: true, teamName: connection.teamName });
+      } else {
+        res.json({ connected: false, available: true });
+      }
+    } catch (err) {
+      console.error("[Slack] Status check failed:", err instanceof Error ? err.message : err);
+      res.status(500).json({ message: "Internal server error" });
     }
   });
 

@@ -274,7 +274,7 @@ export const api = {
             connected: z.boolean(),
             available: z.boolean(),
             teamName: z.string().optional(),
-            unavailableReason: z.enum(["setup_incomplete", "not_configured"]).optional(),
+            unavailableReason: z.enum(["unavailable"]).optional(),
           }),
           401: errorSchemas.unauthorized,
         },
