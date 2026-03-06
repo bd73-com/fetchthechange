@@ -4312,3 +4312,303 @@ describe("checkMonitor HTTP status handling", () => {
     expect(result.error).toBe("Selector not found");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Stealth evasion: verifies anti-bot-detection measures in Browserless calls
+// ---------------------------------------------------------------------------
+describe("stealth evasion", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+    getMonitorChanges: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+
+  function mockDbUpdate(returnedFailureCount: number, returnedActive = true) {
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+    return { setFn, whereFn, returningFn };
+  }
+
+  function createPlaywrightMock(pageContentHtml: string, selectorCount: number, extractedText: string | null) {
+    const locatorMock = {
+      count: vi.fn().mockResolvedValue(selectorCount),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(extractedText || ""),
+      }),
+    };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(pageContentHtml),
+      locator: vi.fn().mockReturnValue(locatorMock),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      getByRole: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0) }),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    return { browserMock, contextMock, pageMock, locatorMock };
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "pro" });
+
+    // Reset hoisted mock default (cleared by vi.clearAllMocks)
+    mockConnectOverCDP.mockRejectedValue(new Error("not configured"));
+
+    // Ensure circuit breaker is available
+    const cbMock = browserlessCircuitBreaker as unknown as {
+      isAvailable: ReturnType<typeof vi.fn>;
+      recordSuccess: ReturnType<typeof vi.fn>;
+      recordInfraFailure: ReturnType<typeof vi.fn>;
+      getState: ReturnType<typeof vi.fn>;
+    };
+    cbMock.isAvailable.mockReturnValue(true);
+    cbMock.getState.mockReturnValue("closed");
+
+    // Reset BrowserlessUsageTracker default
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    return promise;
+  }
+
+  it("passes &stealth parameter in Browserless connection URL", async () => {
+    const emptyHtml = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { browserMock } = createPlaywrightMock("<html></html>", 0, null);
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const monitor = makeMonitor({ selector: ".price" });
+    await runWithTimers(monitor);
+
+    expect(mockConnectOverCDP).toHaveBeenCalledWith(
+      expect.stringContaining("&stealth"),
+      expect.any(Object)
+    );
+  });
+
+  it("creates browser context with viewport, screen, and Sec-CH-UA headers", async () => {
+    const emptyHtml = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const { browserMock } = createPlaywrightMock("<html></html>", 0, null);
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const monitor = makeMonitor({ selector: ".price" });
+    await runWithTimers(monitor);
+
+    expect(browserMock.newContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        viewport: { width: 1920, height: 1080 },
+        screen: { width: 1920, height: 1080 },
+        extraHTTPHeaders: expect.objectContaining({
+          'Sec-CH-UA': expect.stringContaining("Google Chrome"),
+          'Sec-CH-UA-Mobile': '?0',
+          'Sec-CH-UA-Platform': '"Windows"',
+        }),
+      })
+    );
+  });
+
+  it("calls addInitScript before page.goto in extractWithBrowserless", async () => {
+    const emptyHtml = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const callOrder: string[] = [];
+    const { browserMock, pageMock } = createPlaywrightMock("<html></html>", 0, null);
+    pageMock.addInitScript.mockImplementation(() => {
+      callOrder.push("addInitScript");
+      return Promise.resolve(undefined);
+    });
+    pageMock.goto.mockImplementation(() => {
+      callOrder.push("goto");
+      return Promise.resolve(undefined);
+    });
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const monitor = makeMonitor({ selector: ".price" });
+    await runWithTimers(monitor);
+
+    expect(pageMock.addInitScript).toHaveBeenCalledTimes(1);
+    expect(pageMock.addInitScript).toHaveBeenCalledWith(expect.any(Function));
+    // addInitScript must be called before goto for stealth to work
+    const initIdx = callOrder.indexOf("addInitScript");
+    const gotoIdx = callOrder.indexOf("goto");
+    expect(initIdx).toBeGreaterThanOrEqual(0);
+    expect(gotoIdx).toBeGreaterThan(initIdx);
+  });
+
+  it("includes Sec-CH-UA client hints in static fetch headers", async () => {
+    const html = `<html><body><span class="price">$10</span></body></html>`;
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    await runWithTimers(monitor);
+
+    const fetchCall = fetchSpy.mock.calls[0];
+    const headers = (fetchCall[1] as RequestInit)?.headers as Record<string, string>;
+    expect(headers['Sec-CH-UA']).toContain("Google Chrome");
+    expect(headers['Sec-CH-UA-Mobile']).toBe('?0');
+    expect(headers['Sec-CH-UA-Platform']).toBe('"Windows"');
+  });
+
+  it("calls addInitScript with stealth function in discoverSelectors", async () => {
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const makeLocator = (count: number, text: string) => ({
+      count: vi.fn().mockResolvedValue(count),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(text),
+      }),
+      innerText: vi.fn().mockResolvedValue(text),
+    });
+    const roleBtn = { count: vi.fn().mockResolvedValue(0) };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue("<html><body>$99</body></html>"),
+      locator: vi.fn().mockImplementation(() => makeLocator(0, "")),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      evaluate: vi.fn().mockResolvedValue([]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    await discoverSelectors("https://example.com", ".price", "$99");
+
+    // Verify stealth init script was called
+    expect(pageMock.addInitScript).toHaveBeenCalledTimes(1);
+    expect(pageMock.addInitScript).toHaveBeenCalledWith(expect.any(Function));
+
+    // Verify &stealth in connection URL
+    expect(mockConnectOverCDP).toHaveBeenCalledWith(
+      expect.stringContaining("&stealth"),
+      expect.any(Object)
+    );
+
+    // Verify viewport and headers in context
+    expect(browserMock.newContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        viewport: { width: 1920, height: 1080 },
+        screen: { width: 1920, height: 1080 },
+        extraHTTPHeaders: expect.objectContaining({
+          'Sec-CH-UA': expect.stringContaining("Google Chrome"),
+          'Sec-CH-UA-Mobile': '?0',
+          'Sec-CH-UA-Platform': '"Windows"',
+        }),
+      })
+    );
+  });
+
+  it("addInitScript is called before goto in discoverSelectors", async () => {
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const callOrder: string[] = [];
+    const makeLocator = (count: number, text: string) => ({
+      count: vi.fn().mockResolvedValue(count),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(text),
+      }),
+      innerText: vi.fn().mockResolvedValue(text),
+    });
+    const roleBtn = { count: vi.fn().mockResolvedValue(0) };
+    const pageMock = {
+      goto: vi.fn().mockImplementation(() => {
+        callOrder.push("goto");
+        return Promise.resolve(undefined);
+      }),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue("<html><body></body></html>"),
+      locator: vi.fn().mockImplementation(() => makeLocator(0, "")),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      evaluate: vi.fn().mockResolvedValue([]),
+      getByRole: vi.fn().mockReturnValue(roleBtn),
+      frames: vi.fn().mockReturnValue([]),
+      mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockImplementation(() => {
+        callOrder.push("addInitScript");
+        return Promise.resolve(undefined);
+      }),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    await discoverSelectors("https://example.com", ".price");
+
+    const initIdx = callOrder.indexOf("addInitScript");
+    const gotoIdx = callOrder.indexOf("goto");
+    expect(initIdx).toBeGreaterThanOrEqual(0);
+    expect(gotoIdx).toBeGreaterThan(initIdx);
+  });
+});
