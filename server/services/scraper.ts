@@ -28,6 +28,9 @@ const BROWSER_LIKE_HEADERS = {
   'Sec-Fetch-Mode': 'navigate',
   'Sec-Fetch-Site': 'none',
   'Sec-Fetch-User': '?1',
+  'Sec-CH-UA': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+  'Sec-CH-UA-Mobile': '?0',
+  'Sec-CH-UA-Platform': '"Windows"',
 } as const;
 
 interface SelectorSuggestion {
@@ -498,13 +501,21 @@ export async function extractWithBrowserless(url: string, selector: string, moni
     if (!chromium || typeof chromium.connectOverCDP !== 'function') {
       throw new Error("Playwright browser automation is not available");
     }
-    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`, {
+    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}&stealth`, {
       timeout: 30000
     });
-    
+
     const context = await browser.newContext({
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-      locale: "en-US"
+      locale: "en-US",
+      viewport: { width: 1920, height: 1080 },
+      screen: { width: 1920, height: 1080 },
+      extraHTTPHeaders: {
+        'Sec-CH-UA': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"Windows"',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
     });
     // Intercept all navigation requests (including redirects) to enforce SSRF validation
     await context.route('**/*', async (route) => {
@@ -517,6 +528,37 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       }
     });
     const page = await context.newPage();
+
+    // Stealth evasion: patch automation fingerprints before any page JS runs
+    await page.addInitScript(() => {
+      // Hide navigator.webdriver (the #1 bot detection signal)
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+      // Add chrome runtime object (present in real Chrome, absent in automation)
+      if (!(window as any).chrome) {
+        (window as any).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+      }
+
+      // Spoof navigator.plugins (real Chrome has PDF plugins)
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+          { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+        ],
+      });
+
+      // Consistent languages matching locale
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+
+      // Patch permissions query to avoid "notification denied" fingerprint
+      const originalQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
+      window.navigator.permissions.query = (params: any) =>
+        params.name === 'notifications'
+          ? Promise.resolve({ state: 'prompt', onchange: null } as PermissionStatus)
+          : originalQuery(params);
+    });
+
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
 
@@ -1090,13 +1132,21 @@ export async function discoverSelectors(
     if (!chromium || typeof chromium.connectOverCDP !== 'function') {
       throw new Error("Playwright browser automation is not available. Please try again later.");
     }
-    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`, {
+    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}&stealth`, {
       timeout: 30000
     });
 
     const context = await browser.newContext({
       userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-      locale: "en-US"
+      locale: "en-US",
+      viewport: { width: 1920, height: 1080 },
+      screen: { width: 1920, height: 1080 },
+      extraHTTPHeaders: {
+        'Sec-CH-UA': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"Windows"',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
     });
     // Intercept all navigation requests (including redirects) to enforce SSRF validation
     await context.route('**/*', async (route) => {
@@ -1109,6 +1159,28 @@ export async function discoverSelectors(
       }
     });
     const page = await context.newPage();
+
+    // Stealth evasion: patch automation fingerprints before any page JS runs
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      if (!(window as any).chrome) {
+        (window as any).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+      }
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+          { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+        ],
+      });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      const originalQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
+      window.navigator.permissions.query = (params: any) =>
+        params.name === 'notifications'
+          ? Promise.resolve({ state: 'prompt', onchange: null } as PermissionStatus)
+          : originalQuery(params);
+    });
+
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
 

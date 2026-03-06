@@ -2207,6 +2207,7 @@ describe("Browserless retry logic", () => {
       getByRole: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0) }),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -2598,6 +2599,7 @@ describe("auto-heal selector recovery", () => {
       getByRole: vi.fn().mockReturnValue(roleBtn),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -2663,6 +2665,7 @@ describe("auto-heal selector recovery", () => {
       getByRole: vi.fn().mockReturnValue(roleBtn),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -2746,6 +2749,7 @@ describe("auto-heal selector recovery", () => {
       getByRole: vi.fn().mockReturnValue(roleBtn),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -2814,6 +2818,7 @@ describe("auto-heal selector recovery", () => {
       getByRole: vi.fn().mockReturnValue(roleBtn),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -2878,6 +2883,7 @@ describe("auto-heal selector recovery", () => {
       getByRole: vi.fn().mockReturnValue(roleBtn),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -2949,6 +2955,7 @@ describe("auto-heal selector recovery", () => {
       getByRole: vi.fn().mockReturnValue(roleBtn),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -3039,6 +3046,7 @@ describe("discoverSelectors", () => {
       getByRole: vi.fn().mockReturnValue(roleBtn),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -3084,6 +3092,7 @@ describe("discoverSelectors", () => {
       getByRole: vi.fn().mockReturnValue(roleBtn),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -3139,6 +3148,7 @@ describe("discoverSelectors", () => {
       getByRole: vi.fn().mockReturnValue(roleBtn),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -3167,6 +3177,7 @@ describe("discoverSelectors", () => {
 
     const closeFn = vi.fn().mockResolvedValue(undefined);
     const pageMock = {
+      addInitScript: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn().mockRejectedValue(new Error("Page crashed")),
     };
     const contextMock = {
@@ -3214,6 +3225,7 @@ describe("discoverSelectors", () => {
       getByRole: vi.fn().mockReturnValue(roleBtn),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -3316,6 +3328,7 @@ describe("fetch timeout falls through to browserless fallback", () => {
       getByRole: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0) }),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
@@ -3583,6 +3596,7 @@ describe("self-healing recovery", () => {
       getByRole: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0) }),
       frames: vi.fn().mockReturnValue([]),
       mainFrame: vi.fn().mockReturnValue({}),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
     };
     const contextMock = {
       route: vi.fn().mockResolvedValue(undefined),
