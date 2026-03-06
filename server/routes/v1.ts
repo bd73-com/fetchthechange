@@ -38,20 +38,19 @@ router.get("/openapi.json", (_req, res) => {
 router.use(apiKeyAuth);
 
 // -------------------------------------------------------------------
-// Ping — validates key, no rate limit
+// Apply rate limiting to all authenticated routes
+// -------------------------------------------------------------------
+router.use(apiRateLimit);
+
+// -------------------------------------------------------------------
+// Ping — validates key and rate-limited
 // -------------------------------------------------------------------
 router.get("/ping", (req: any, res) => {
   res.json({
     ok: true,
-    userId: req.apiUser.id,
     keyPrefix: req.apiUser.keyPrefix,
   });
 });
-
-// -------------------------------------------------------------------
-// Apply rate limiting to all routes after this point
-// -------------------------------------------------------------------
-router.use(apiRateLimit);
 
 // -------------------------------------------------------------------
 // Monitors — CRUD

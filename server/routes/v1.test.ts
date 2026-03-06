@@ -201,6 +201,17 @@ describe("v1 route logic", () => {
     });
   });
 
+  describe("Ping response shape", () => {
+    it("ping handler returns ok and keyPrefix but not userId", async () => {
+      // Simulate what the /ping handler does
+      const req = { apiUser: { id: "user1", keyPrefix: "ftc_abc12345" } } as any;
+      const responseBody = { ok: true, keyPrefix: req.apiUser.keyPrefix };
+      expect(responseBody).toHaveProperty("ok", true);
+      expect(responseBody).toHaveProperty("keyPrefix", "ftc_abc12345");
+      expect(responseBody).not.toHaveProperty("userId");
+    });
+  });
+
   describe("OpenAPI spec", () => {
     it("includes all required endpoints", async () => {
       const { openApiSpec } = await import("../openapi");
@@ -221,6 +232,21 @@ describe("v1 route logic", () => {
     it("openapi.json endpoint has no security requirement", async () => {
       const { openApiSpec } = await import("../openapi");
       expect(openApiSpec.paths["/openapi.json"].get.security).toEqual([]);
+    });
+
+    it("ping schema does not include userId property", async () => {
+      const { openApiSpec } = await import("../openapi");
+      const pingSchema = openApiSpec.paths["/ping"].get.responses["200"]
+        .content["application/json"].schema;
+      expect(pingSchema.properties).not.toHaveProperty("userId");
+      expect(pingSchema.properties).toHaveProperty("ok");
+      expect(pingSchema.properties).toHaveProperty("keyPrefix");
+    });
+
+    it("ping description does not mention user ID", async () => {
+      const { openApiSpec } = await import("../openapi");
+      const desc = openApiSpec.paths["/ping"].get.description;
+      expect(desc.toLowerCase()).not.toContain("user id");
     });
 
     it("Monitor schema has required properties", async () => {

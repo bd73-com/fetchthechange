@@ -67,7 +67,7 @@ export const openApiSpec = {
     "/ping": {
       get: {
         summary: "Test API key validity",
-        description: "Returns the authenticated user ID and key prefix. Does not count against rate limits.",
+        description: "Returns the key prefix for the authenticated API key.",
         responses: {
           "200": {
             description: "Key is valid",
@@ -77,7 +77,6 @@ export const openApiSpec = {
                   type: "object",
                   properties: {
                     ok: { type: "boolean" },
-                    userId: { type: "string" },
                     keyPrefix: { type: "string" },
                   },
                 },
