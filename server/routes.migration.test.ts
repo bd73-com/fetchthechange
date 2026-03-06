@@ -171,6 +171,15 @@ describe("error_logs dedup column migration at startup", () => {
     // 3 for the ALTER TABLE error_logs statements (first_occurrence, occurrence_count, deleted_at)
     // 2 for the api_keys table creation (CREATE TABLE + CREATE INDEX)
     expect(mockDbExecute).toHaveBeenCalledTimes(5);
+
+    // Verify specific DDL statements were issued (drizzle sql`` produces SQL objects)
+    const callStrings = mockDbExecute.mock.calls.map((c: any[]) => {
+      const arg = c[0];
+      // Try JSON stringify to capture all nested content
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(callStrings.some((s: string) => s.includes("api_keys"))).toBe(true);
+    expect(callStrings.some((s: string) => s.includes("api_keys_user_revoked_idx"))).toBe(true);
   });
 
   it("still registers all route groups when migration succeeds", async () => {
