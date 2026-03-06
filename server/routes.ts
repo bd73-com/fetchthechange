@@ -2,11 +2,11 @@ import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPage
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { api, channelTypeSchema, webhookConfigInputSchema, slackConfigInputSchema } from "@shared/routes";
+import { api, channelTypeSchema, webhookConfigInputSchema, slackConfigInputSchema, createTagSchema, updateTagSchema, setMonitorTagsSchema } from "@shared/routes";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { authStorage } from "./replit_integrations/auth/storage";
-import { TIER_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS, PAUSE_THRESHOLDS, type UserTier } from "@shared/models/auth";
+import { TIER_LIMITS, TAG_LIMITS, TAG_ASSIGNMENT_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS, PAUSE_THRESHOLDS, type UserTier } from "@shared/models/auth";
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
@@ -306,12 +306,12 @@ export async function registerRoutes(
 
   app.get(api.monitors.list.path, isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
-    const monitors = await storage.getMonitors(userId);
+    const monitors = await storage.getMonitorsWithTags(userId);
     res.json(monitors);
   });
 
   app.get(api.monitors.get.path, isAuthenticated, async (req: any, res) => {
-    const monitor = await storage.getMonitor(Number(req.params.id));
+    const monitor = await storage.getMonitorWithTags(Number(req.params.id));
     if (!monitor) return res.status(404).json({ message: "Not found" });
     if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
     res.json(monitor);
@@ -2154,6 +2154,169 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error processing resubscribe:", error);
       res.status(500).send("An error occurred. Please try again.");
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // TAGS CRUD ROUTES
+  // ---------------------------------------------------------------
+
+  app.get(api.tags.list.path, isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const userTags = await storage.listUserTags(userId);
+    res.json(userTags);
+  });
+
+  app.post(api.tags.create.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+
+      // Tier check
+      const user = await authStorage.getUser(userId);
+      const tier = (user?.tier || "free") as UserTier;
+      const limit = TAG_LIMITS[tier] ?? TAG_LIMITS.free;
+      const currentCount = await storage.countUserTags(userId);
+
+      if (currentCount >= limit) {
+        console.log(`[Tags] Tag limit reached for ${tier} user ${userId} (${currentCount}/${limit})`);
+        if (tier === "free") {
+          return res.status(400).json({
+            message: "Free plan cannot create tags. Upgrade to Pro to organise your monitors with tags.",
+            code: "TAG_LIMIT_REACHED",
+          });
+        }
+        return res.status(400).json({
+          message: `You've reached your ${tier} plan limit of ${limit} tags. Upgrade to create more.`,
+          code: "TAG_LIMIT_REACHED",
+        });
+      }
+
+      const input = createTagSchema.parse(req.body);
+      const nameLower = input.name.toLowerCase();
+
+      // Uniqueness check
+      const existing = await storage.listUserTags(userId);
+      if (existing.some(t => t.nameLower === nameLower)) {
+        return res.status(409).json({
+          message: "A tag with this name already exists.",
+          code: "TAG_NAME_CONFLICT",
+        });
+      }
+
+      const tag = await storage.createTag(userId, input.name, nameLower, input.colour);
+      console.log(`[Tags] Tag created: userId=${userId}, tagId=${tag.id}, tagName=${tag.name}`);
+      res.status(201).json(tag);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      throw err;
+    }
+  });
+
+  app.patch(api.tags.update.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const tagId = Number(req.params.id);
+
+      const existing = await storage.getTag(tagId, userId);
+      if (!existing) return res.status(404).json({ message: "Not found" });
+
+      const input = updateTagSchema.parse(req.body);
+      const fields: { name?: string; nameLower?: string; colour?: string } = {};
+
+      if (input.name !== undefined) {
+        fields.name = input.name;
+        fields.nameLower = input.name.toLowerCase();
+
+        // Check uniqueness if name changed
+        if (fields.nameLower !== existing.nameLower) {
+          const userTags = await storage.listUserTags(userId);
+          if (userTags.some(t => t.nameLower === fields.nameLower && t.id !== tagId)) {
+            return res.status(409).json({
+              message: "A tag with this name already exists.",
+              code: "TAG_NAME_CONFLICT",
+            });
+          }
+        }
+      }
+
+      if (input.colour !== undefined) {
+        fields.colour = input.colour;
+      }
+
+      const updated = await storage.updateTag(tagId, userId, fields);
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      throw err;
+    }
+  });
+
+  app.delete(api.tags.delete.path, isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub;
+    const tagId = Number(req.params.id);
+
+    const existing = await storage.getTag(tagId, userId);
+    if (!existing) return res.status(404).json({ message: "Not found" });
+
+    await storage.deleteTag(tagId, userId);
+    console.log(`[Tags] Tag deleted: userId=${userId}, tagId=${tagId}, tagName=${existing.name}`);
+    res.status(204).send();
+  });
+
+  // ---------------------------------------------------------------
+  // MONITOR-TAG ASSIGNMENT ROUTE
+  // ---------------------------------------------------------------
+
+  app.put(api.monitors.setTags.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const monitorId = Number(req.params.id);
+
+      // Verify monitor ownership
+      const monitor = await storage.getMonitor(monitorId);
+      if (!monitor) return res.status(404).json({ message: "Not found" });
+      if (String(monitor.userId) !== String(userId)) return res.status(403).json({ message: "Forbidden" });
+
+      const input = setMonitorTagsSchema.parse(req.body);
+
+      // Validate all tagIds belong to the user
+      if (input.tagIds.length > 0) {
+        const userTags = await storage.listUserTags(userId);
+        const userTagIds = new Set(userTags.map(t => t.id));
+        for (const tagId of input.tagIds) {
+          if (!userTagIds.has(tagId)) {
+            console.warn(`[Tags] Foreign tag assignment attempt: userId=${userId}, tagId=${tagId}, monitorId=${monitorId}`);
+            return res.status(422).json({
+              message: "One or more tags do not belong to your account.",
+              code: "INVALID_TAG",
+            });
+          }
+        }
+
+        // Enforce assignment limit
+        const user = await authStorage.getUser(userId);
+        const tier = (user?.tier || "free") as UserTier;
+        const assignLimit = TAG_ASSIGNMENT_LIMITS[tier] ?? TAG_ASSIGNMENT_LIMITS.free;
+        if (input.tagIds.length > assignLimit) {
+          return res.status(400).json({
+            message: `Your ${tier} plan allows up to ${assignLimit} tags per monitor.`,
+            code: "TAG_ASSIGNMENT_LIMIT_REACHED",
+          });
+        }
+      }
+
+      await storage.setMonitorTags(monitorId, input.tagIds);
+      const updated = await storage.getMonitorWithTags(monitorId);
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(422).json({ message: err.errors[0].message });
+      }
+      throw err;
     }
   });
 

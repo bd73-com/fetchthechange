@@ -27,6 +27,10 @@ import { insertMonitorSchema } from "@shared/schema";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { TagBadge } from "@/components/TagBadge";
+import { TagPicker } from "@/components/TagPicker";
+import { useSetMonitorTags } from "@/hooks/use-tags";
+import { TAG_ASSIGNMENT_LIMITS, type UserTier } from "@shared/models/auth";
 
 export default function MonitorDetails() {
   const [match, params] = useRoute("/monitors/:id");
@@ -39,9 +43,12 @@ export default function MonitorDetails() {
   const { mutate: checkNow, isPending: isChecking } = useCheckMonitor();
   const { mutate: deleteMonitor, isPending: isDeleting } = useDeleteMonitor();
   const { mutate: updateMonitor } = useUpdateMonitor();
+  const { mutate: setMonitorTags } = useSetMonitorTags();
   const { toast } = useToast();
 
-  const isFreeTier = (user as any)?.tier === "free" || !(user as any)?.tier;
+  const userTier = ((user as any)?.tier || "free") as UserTier;
+  const isFreeTier = userTier === "free";
+  const tagAssignLimit = TAG_ASSIGNMENT_LIMITS[userTier] ?? TAG_ASSIGNMENT_LIMITS.free;
   const checkedRecently = monitor?.lastChecked && 
     (Date.now() - new Date(monitor.lastChecked).getTime()) < 24 * 60 * 60 * 1000;
   const canCheckNow = !isFreeTier || !checkedRecently;
@@ -340,6 +347,28 @@ export default function MonitorDetails() {
                     <p className="font-medium">
                       {monitor.emailEnabled ? "Email alerts enabled" : "No alerts"}
                     </p>
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <span className="text-sm text-muted-foreground">Tags</span>
+                    <div className="flex flex-wrap gap-1 items-center">
+                      {(monitor as any).tags?.map((tag: { id: number; name: string; colour: string }) => (
+                        <TagBadge
+                          key={tag.id}
+                          tag={tag}
+                          onRemove={() => {
+                            const currentIds = ((monitor as any).tags || []).map((t: any) => t.id);
+                            setMonitorTags({ monitorId: monitor.id, tagIds: currentIds.filter((tid: number) => tid !== tag.id) });
+                          }}
+                        />
+                      ))}
+                    </div>
+                    {!isFreeTier && (
+                      <TagPicker
+                        selectedTagIds={((monitor as any).tags || []).map((t: any) => t.id)}
+                        onChange={(ids) => setMonitorTags({ monitorId: monitor.id, tagIds: ids })}
+                        maxTags={tagAssignLimit === Infinity ? undefined : tagAssignLimit}
+                      />
+                    )}
                   </div>
                 </div>
               </CardContent>

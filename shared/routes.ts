@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertMonitorSchema, monitors, monitorChanges, notificationPreferences, notificationChannels, deliveryLog, slackConnections, apiKeys } from './schema';
+import { insertMonitorSchema, monitors, monitorChanges, notificationPreferences, notificationChannels, deliveryLog, slackConnections, apiKeys, tags } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -68,6 +68,31 @@ export const emailConfigInputSchema = z.object({});
 export const channelInputSchema = z.object({
   enabled: z.boolean(),
   config: z.union([webhookConfigInputSchema, slackConfigInputSchema, emailConfigInputSchema]),
+});
+
+export const PRESET_COLOURS = [
+  "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4",
+  "#3b82f6", "#8b5cf6", "#ec4899", "#6b7280", "#0f172a",
+] as const;
+
+export const createTagSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(32, "Name must be 32 characters or fewer"),
+  colour: z.enum(PRESET_COLOURS, { errorMap: () => ({ message: "Invalid colour" }) }),
+});
+
+export const updateTagSchema = createTagSchema.partial().refine(
+  (data) => data.name !== undefined || data.colour !== undefined,
+  { message: "At least one field (name or colour) is required" }
+);
+
+export const setMonitorTagsSchema = z.object({
+  tagIds: z.array(z.number().int().nonnegative()),
+});
+
+export const tagResponseSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  colour: z.string(),
 });
 
 export const api = {
@@ -162,6 +187,17 @@ export const api = {
         401: errorSchemas.unauthorized,
       }
     },
+    setTags: {
+      method: 'PUT' as const,
+      path: '/api/monitors/:id/tags',
+      input: setMonitorTagsSchema,
+      responses: {
+        200: z.custom<typeof monitors.$inferSelect & { tags: { id: number; name: string; colour: string }[] }>(),
+        404: errorSchemas.notFound,
+        401: errorSchemas.unauthorized,
+        422: errorSchemas.validation,
+      },
+    },
     channels: {
       list: {
         method: 'GET' as const,
@@ -242,6 +278,47 @@ export const api = {
           404: errorSchemas.notFound,
           401: errorSchemas.unauthorized,
         },
+      },
+    },
+  },
+  tags: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/tags',
+      responses: {
+        200: z.array(z.custom<typeof tags.$inferSelect>()),
+        401: errorSchemas.unauthorized,
+      },
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/tags',
+      input: createTagSchema,
+      responses: {
+        201: z.custom<typeof tags.$inferSelect>(),
+        400: z.object({ message: z.string(), code: z.string().optional() }),
+        401: errorSchemas.unauthorized,
+        409: z.object({ message: z.string(), code: z.string() }),
+      },
+    },
+    update: {
+      method: 'PATCH' as const,
+      path: '/api/tags/:id',
+      input: updateTagSchema,
+      responses: {
+        200: z.custom<typeof tags.$inferSelect>(),
+        404: errorSchemas.notFound,
+        401: errorSchemas.unauthorized,
+        409: z.object({ message: z.string(), code: z.string() }),
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/tags/:id',
+      responses: {
+        204: z.void(),
+        404: errorSchemas.notFound,
+        401: errorSchemas.unauthorized,
       },
     },
   },

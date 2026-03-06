@@ -31,10 +31,22 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { TagPicker } from "@/components/TagPicker";
+import { useSetMonitorTags, useTags } from "@/hooks/use-tags";
+import { useAuth } from "@/hooks/use-auth";
+import { TAG_ASSIGNMENT_LIMITS, type UserTier } from "@shared/models/auth";
+import { useToast } from "@/hooks/use-toast";
 
 export function CreateMonitorDialog() {
   const [open, setOpen] = useState(false);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const { mutate, isPending } = useCreateMonitor();
+  const { mutate: setMonitorTags } = useSetMonitorTags();
+  const { data: allTags = [] } = useTags();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const userTier = ((user as any)?.tier || "free") as UserTier;
+  const tagAssignLimit = TAG_ASSIGNMENT_LIMITS[userTier] ?? TAG_ASSIGNMENT_LIMITS.free;
 
   const form = useForm<InsertMonitor>({
     resolver: zodResolver(insertMonitorSchema),
@@ -50,9 +62,17 @@ export function CreateMonitorDialog() {
 
   const onSubmit = (data: InsertMonitor) => {
     mutate(data, {
-      onSuccess: () => {
+      onSuccess: ({ monitor }) => {
+        if (selectedTagIds.length > 0 && monitor?.id) {
+          setMonitorTags({ monitorId: monitor.id, tagIds: selectedTagIds }, {
+            onError: () => {
+              toast({ title: "Warning", description: "Monitor created but tags could not be assigned.", variant: "destructive" });
+            },
+          });
+        }
         setOpen(false);
         form.reset();
+        setSelectedTagIds([]);
       },
     });
   };
@@ -178,6 +198,16 @@ export function CreateMonitorDialog() {
                 )}
               />
             </div>
+            {allTags.length > 0 && userTier !== "free" && (
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Tags (optional)</label>
+                <TagPicker
+                  selectedTagIds={selectedTagIds}
+                  onChange={setSelectedTagIds}
+                  maxTags={tagAssignLimit === Infinity ? undefined : tagAssignLimit}
+                />
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
               After creating your monitor, you can configure quiet hours, daily digests, and sensitivity thresholds from the monitor details page.
             </p>

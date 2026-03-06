@@ -13,6 +13,9 @@ import { useToast } from "@/hooks/use-toast";
 import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
 import { useState, useEffect } from "react";
 import { useSearch } from "wouter";
+import { useTags } from "@/hooks/use-tags";
+import { TagManager } from "@/components/TagManager";
+import { Tags } from "lucide-react";
 
 // TODO: Remove banner code after 2026-02-27 (cutoff date)
 const BANNER_CUTOFF = new Date("2026-02-27T00:00:00Z");
@@ -24,6 +27,9 @@ export default function Dashboard() {
   const { mutate: checkMonitor, isPending: isChecking } = useCheckMonitor();
   const { toast } = useToast();
   const searchString = useSearch();
+
+  const { data: userTags = [] } = useTags();
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
 
   const [bannerDismissed, setBannerDismissed] = useState(() => {
     try { return localStorage.getItem(BANNER_KEY) === "1"; } catch { return false; }
@@ -196,24 +202,81 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {monitors?.length === 0 ? (
-          <div className="border-2 border-dashed border-border rounded-xl p-12 text-center bg-card/30">
-            <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
-              <LayoutDashboard className="h-8 w-8 text-primary" />
+        {/* Tag filter bar */}
+        {userTags.length > 0 && monitors && monitors.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap mb-6">
+            <button
+              onClick={() => setSelectedTagIds([])}
+              className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+                selectedTagIds.length === 0
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-secondary/50 text-muted-foreground border-border/50 hover:bg-secondary"
+              }`}
+            >
+              All
+            </button>
+            {userTags.map((tag) => {
+              const isActive = selectedTagIds.includes(tag.id);
+              return (
+                <button
+                  key={tag.id}
+                  onClick={() => {
+                    setSelectedTagIds(prev =>
+                      isActive ? prev.filter(id => id !== tag.id) : [...prev, tag.id]
+                    );
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+                    isActive
+                      ? "bg-primary/10 text-foreground border-primary/30"
+                      : "bg-secondary/50 text-muted-foreground border-border/50 hover:bg-secondary"
+                  }`}
+                >
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.colour }} />
+                  {tag.name}
+                </button>
+              );
+            })}
+            <div className="ml-auto">
+              <TagManager />
             </div>
-            <h3 className="text-xl font-semibold mb-2">No monitors yet</h3>
-            <p className="text-muted-foreground max-w-sm mx-auto mb-6">
-              Start tracking web pages for changes by creating your first monitor. We'll notify you when content updates.
-            </p>
-            <CreateMonitorDialog />
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {monitors?.map((monitor) => (
-              <MonitorCard key={monitor.id} monitor={monitor} />
-            ))}
           </div>
         )}
+
+        {(() => {
+          const filteredMonitors = selectedTagIds.length === 0
+            ? monitors
+            : monitors?.filter(m => (m as any).tags?.some((t: any) => selectedTagIds.includes(t.id)));
+
+          if (!monitors || monitors.length === 0) {
+            return (
+              <div className="border-2 border-dashed border-border rounded-xl p-12 text-center bg-card/30">
+                <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+                  <LayoutDashboard className="h-8 w-8 text-primary" />
+                </div>
+                <h3 className="text-xl font-semibold mb-2">No monitors yet</h3>
+                <p className="text-muted-foreground max-w-sm mx-auto mb-6">
+                  Start tracking web pages for changes by creating your first monitor. We'll notify you when content updates.
+                </p>
+                <CreateMonitorDialog />
+              </div>
+            );
+          }
+
+          return (
+            <>
+              {selectedTagIds.length > 0 && (
+                <p className="text-sm text-muted-foreground mb-3">
+                  Showing {filteredMonitors?.length ?? 0} of {monitors.length} monitors
+                </p>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredMonitors?.map((monitor) => (
+                  <MonitorCard key={monitor.id} monitor={monitor} />
+                ))}
+              </div>
+            </>
+          );
+        })()}
 
         {/* API Keys section */}
         <div className="mt-10">
