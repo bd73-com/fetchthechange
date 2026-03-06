@@ -812,3 +812,95 @@ describe("GET /api/integrations/slack/callback", () => {
     delete process.env.SLACK_CLIENT_SECRET;
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: channelTablesExist guards — early-return when tables are missing
+// ---------------------------------------------------------------------------
+describe("channelTablesExist guards", () => {
+  beforeEach(async () => {
+    await ensureRoutes();
+    resetMocks();
+    mockChannelTablesExist.mockResolvedValue(false);
+  });
+
+  it("GET /api/monitors/:id/channels returns [] when channel tables missing", async () => {
+    const res = await callHandler("get", "/api/monitors/:id/channels", makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual([]);
+    expect(mockGetMonitor).not.toHaveBeenCalled();
+  });
+
+  it("PUT /api/monitors/:id/channels/:channel returns 503 when channel tables missing", async () => {
+    const req = makeReq("user1", {
+      params: { id: "1", channel: "email" },
+      body: { enabled: true, config: {} },
+    });
+    const res = await callHandler("put", "/api/monitors/:id/channels/:channel", req);
+    expect(res._status).toBe(503);
+    expect(res._json.message).toContain("not available yet");
+    expect(mockGetMonitor).not.toHaveBeenCalled();
+  });
+
+  it("DELETE /api/monitors/:id/channels/:channel returns 204 when channel tables missing", async () => {
+    const req = makeReq("user1", { params: { id: "1", channel: "email" } });
+    const res = await callHandler("delete", "/api/monitors/:id/channels/:channel", req);
+    expect(res._status).toBe(204);
+    expect(mockDeleteMonitorChannel).not.toHaveBeenCalled();
+  });
+
+  it("POST reveal-secret returns 404 when channel tables missing", async () => {
+    const res = await callHandler("post", "/api/monitors/:id/channels/webhook/reveal-secret", makeReq());
+    expect(res._status).toBe(404);
+    expect(res._json.code).toBe("NOT_FOUND");
+    expect(mockGetMonitor).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/monitors/:id/deliveries returns [] when channel tables missing", async () => {
+    const res = await callHandler("get", "/api/monitors/:id/deliveries", makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual([]);
+    expect(mockGetMonitor).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/integrations/slack/status returns disconnected when channel tables missing", async () => {
+    const res = await callHandler("get", "/api/integrations/slack/status", makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false });
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
+
+  it("DELETE /api/integrations/slack returns 204 when channel tables missing", async () => {
+    const res = await callHandler("delete", "/api/integrations/slack", makeReq());
+    expect(res._status).toBe(204);
+    expect(mockDeleteSlackConnection).not.toHaveBeenCalled();
+    expect(mockDeleteSlackChannelsForUser).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/integrations/slack/channels returns 404 when channel tables missing", async () => {
+    const userId = `user-guard-${Date.now()}`;
+    const res = await callHandler("get", "/api/integrations/slack/channels", makeReq(userId));
+    expect(res._status).toBe(404);
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/integrations/slack/install returns 503 when channel tables missing", async () => {
+    const req = makeReq("user1", {
+      protocol: "https",
+      get: () => "example.com",
+    });
+    const res = await callHandler("get", "/api/integrations/slack/install", req);
+    expect(res._status).toBe(503);
+    expect(res._json.code).toBe("NOT_CONFIGURED");
+    expect(mockGetUser).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/integrations/slack/callback redirects with not_configured when channel tables missing", async () => {
+    const req = makeReq("user1", {
+      query: { code: "abc", state: "user1:sig" },
+      protocol: "https",
+      get: () => "example.com",
+    });
+    const res = await callHandler("get", "/api/integrations/slack/callback", req);
+    expect(res._redirectUrl).toContain("not_configured");
+  });
+});
