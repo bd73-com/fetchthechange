@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatDate as formatDateStd } from "@/lib/date-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -72,11 +73,7 @@ const statusConfig: Record<string, { variant: "default" | "secondary" | "outline
 
 function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "-";
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatDateStd(dateStr);
 }
 
 function formatRate(count: number, total: number): string {

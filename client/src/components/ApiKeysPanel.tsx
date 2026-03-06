@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatDate } from "@/lib/date-format";
 import { useAuth } from "@/hooks/use-auth";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/hooks/use-api-keys";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -137,7 +138,7 @@ function ApiKeysTable() {
                     <code>{key.keyPrefix}...</code>
                     {key.lastUsedAt && (
                       <> &middot; Last used{" "}
-                        {new Date(key.lastUsedAt).toLocaleDateString()}
+                        {formatDate(key.lastUsedAt)}
                       </>
                     )}
                     {!key.lastUsedAt && <> &middot; Never used</>}

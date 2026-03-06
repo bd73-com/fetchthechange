@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRoute, Link } from "wouter";
-import { format } from "date-fns";
+import { formatDateTime } from "@/lib/date-format";
 import { useAuth } from "@/hooks/use-auth";
 import { useMonitor, useMonitorHistory, useCheckMonitor, useDeleteMonitor, useUpdateMonitor } from "@/hooks/use-monitors";
 import { Button } from "@/components/ui/button";
@@ -358,7 +358,7 @@ export default function MonitorDetails() {
                     <p className="text-sm text-muted-foreground">Last Checked</p>
                     <p className="font-medium">
                       {monitor.lastChecked
-                        ? format(new Date(monitor.lastChecked), "PPp")
+                        ? formatDateTime(monitor.lastChecked)
                         : "Never checked"}
                     </p>
                   </div>
@@ -371,7 +371,7 @@ export default function MonitorDetails() {
                     <p className="text-sm text-muted-foreground">Last Change Detected</p>
                     <p className="font-medium">
                       {monitor.lastChanged
-                        ? format(new Date(monitor.lastChanged), "PPp")
+                        ? formatDateTime(monitor.lastChanged)
                         : "No changes detected"}
                     </p>
                   </div>
@@ -473,7 +473,7 @@ export default function MonitorDetails() {
                     {history.map((change) => (
                       <TableRow key={change.id}>
                         <TableCell className="font-medium whitespace-nowrap">
-                          {format(new Date(change.detectedAt), "MMM d, yyyy HH:mm")}
+                          {formatDateTime(change.detectedAt)}
                         </TableCell>
                         <TableCell className="font-mono text-xs text-muted-foreground max-w-[300px] truncate" title={change.oldValue || ""}>
                           {change.oldValue || <span className="italic">null</span>}
