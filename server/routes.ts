@@ -103,7 +103,7 @@ export async function registerRoutes(
         monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
         channel TEXT NOT NULL,
         enabled BOOLEAN NOT NULL DEFAULT true,
-        config JSONB NOT NULL,
+        config JSONB NOT NULL, -- may contain webhook secrets; never log raw values
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       )
@@ -132,7 +132,7 @@ export async function registerRoutes(
         user_id TEXT NOT NULL UNIQUE REFERENCES users(id),
         team_id TEXT NOT NULL,
         team_name TEXT NOT NULL,
-        bot_token TEXT NOT NULL,
+        bot_token TEXT NOT NULL CHECK (bot_token ~ '^[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$'),
         scope TEXT NOT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
