@@ -96,3 +96,36 @@ export async function ensureChannelTables(): Promise<void> {
     console.error("Could not ensure notification channel tables:", e);
   }
 }
+
+/**
+ * Ensures tags and monitor_tags tables exist (added in PR #86).
+ * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
+ */
+export async function ensureTagTables(): Promise<void> {
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS tags (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        name TEXT NOT NULL,
+        name_lower TEXT NOT NULL,
+        colour TEXT NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS tags_user_idx ON tags(user_id)`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS tags_user_name_lower_uniq ON tags(user_id, name_lower)`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS monitor_tags (
+        id SERIAL PRIMARY KEY,
+        monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+        tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS monitor_tags_monitor_tag_uniq ON monitor_tags(monitor_id, tag_id)`);
+  } catch (e) {
+    console.error("Could not ensure tag tables:", e);
+  }
+}
