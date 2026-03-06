@@ -15,6 +15,7 @@ const {
   mockDeleteSlackConnection,
   mockDeleteSlackChannelsForUser,
   mockNotificationTablesExist,
+  mockChannelTablesExist,
   mockGetUser,
   mockIsPrivateUrl,
   mockGenerateWebhookSecret,
@@ -34,6 +35,7 @@ const {
   mockDeleteSlackConnection: vi.fn(),
   mockDeleteSlackChannelsForUser: vi.fn(),
   mockNotificationTablesExist: vi.fn().mockResolvedValue(true),
+  mockChannelTablesExist: vi.fn().mockResolvedValue(true),
   mockGetUser: vi.fn(),
   mockIsPrivateUrl: vi.fn().mockResolvedValue(null),
   mockGenerateWebhookSecret: vi.fn().mockReturnValue("whsec_generated123"),
@@ -141,6 +143,7 @@ vi.mock("./services/scheduler", () => ({
 
 vi.mock("./services/notificationReady", () => ({
   notificationTablesExist: (...args: any[]) => mockNotificationTablesExist(...args),
+  channelTablesExist: (...args: any[]) => mockChannelTablesExist(...args),
 }));
 
 vi.mock("./utils/ssrf", () => ({
@@ -234,6 +237,7 @@ function resetMocks() {
   mockDeleteSlackConnection.mockReset();
   mockDeleteSlackChannelsForUser.mockReset();
   mockNotificationTablesExist.mockReset().mockResolvedValue(true);
+  mockChannelTablesExist.mockReset().mockResolvedValue(true);
   mockGetUser.mockReset();
   mockIsPrivateUrl.mockReset().mockResolvedValue(null);
   mockGenerateWebhookSecret.mockReset().mockReturnValue("whsec_generated123");

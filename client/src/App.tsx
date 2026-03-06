@@ -53,6 +53,28 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
   return <Component {...rest} />;
 }
 
+function PowerProtectedRoute({ component: Component, ...rest }: any) {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LandingPage />;
+  }
+
+  if (user.tier !== "power") {
+    return <LandingPage />;
+  }
+
+  return <Component {...rest} />;
+}
+
 function Router() {
   return (
     <Switch>
@@ -67,7 +89,7 @@ function Router() {
       <Route path="/pricing" component={Pricing} />
       <Route path="/support" component={Support} />
       <Route path="/docs/webhooks" component={DocsWebhooks} />
-      <Route path="/developer" component={Developer} />
+      <Route path="/developer" component={() => <PowerProtectedRoute component={Developer} />} />
       <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
       <Route path="/admin/campaigns" component={() => <ProtectedRoute component={AdminCampaigns} />} />
       <Route path="/admin/campaigns/:id" component={() => <ProtectedRoute component={AdminCampaignDetail} />} />
