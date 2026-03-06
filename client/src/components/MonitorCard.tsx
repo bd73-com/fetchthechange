@@ -14,9 +14,10 @@ import { Input } from "@/components/ui/input";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
+import { TagBadge } from "@/components/TagBadge";
 
 interface MonitorCardProps {
-  monitor: Monitor;
+  monitor: Monitor & { tags?: { id: number; name: string; colour: string }[] };
 }
 
 export function MonitorCard({ monitor }: MonitorCardProps) {
@@ -168,6 +169,18 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
             {new URL(monitor.url).hostname}
             <ExternalLink className="h-3 w-3" />
           </a>
+          {monitor.tags && monitor.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-1">
+              {monitor.tags.slice(0, 2).map((tag) => (
+                <TagBadge key={tag.id} tag={tag} />
+              ))}
+              {monitor.tags.length > 2 && (
+                <span className="inline-flex items-center rounded-full bg-secondary/50 px-2 py-0.5 text-xs text-muted-foreground">
+                  +{monitor.tags.length - 2} more
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
            {monitor.emailEnabled && (

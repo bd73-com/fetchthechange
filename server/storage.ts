@@ -1,7 +1,7 @@
-import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, apiKeys, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection, type ApiKey } from "@shared/schema";
+import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, apiKeys, tags, monitorTags, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection, type ApiKey, type Tag } from "@shared/schema";
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
-import { eq, desc, and, or, isNull, lte, lt, gte, sql } from "drizzle-orm";
+import { eq, desc, and, or, isNull, lte, lt, gte, sql, inArray } from "drizzle-orm";
 import { notificationTablesExist } from "./services/notificationReady";
 
 export interface IStorage {
@@ -30,6 +30,18 @@ export interface IStorage {
   // Paginated queries
   getMonitorsPaginated(userId: string, page: number, limit: number): Promise<{ data: Monitor[]; total: number }>;
   getMonitorChangesPaginated(monitorId: number, options: { page: number; limit: number; from?: Date; to?: Date }): Promise<{ data: MonitorChange[]; total: number }>;
+
+  // Tags
+  listUserTags(userId: string): Promise<Tag[]>;
+  countUserTags(userId: string): Promise<number>;
+  createTag(userId: string, name: string, nameLower: string, colour: string): Promise<Tag>;
+  getTag(id: number, userId: string): Promise<Tag | undefined>;
+  updateTag(id: number, userId: string, fields: { name?: string; nameLower?: string; colour?: string }): Promise<Tag>;
+  deleteTag(id: number, userId: string): Promise<void>;
+  getMonitorTags(monitorId: number): Promise<{ id: number; name: string; colour: string }[]>;
+  setMonitorTags(monitorId: number, tagIds: number[]): Promise<void>;
+  getMonitorsWithTags(userId: string): Promise<(Monitor & { tags: { id: number; name: string; colour: string }[] })[]>;
+  getMonitorWithTags(id: number): Promise<(Monitor & { tags: { id: number; name: string; colour: string }[] }) | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -417,6 +429,88 @@ export class DatabaseStorage implements IStorage {
       .offset((page - 1) * limit);
 
     return { data, total };
+  }
+
+  // Tags
+  async listUserTags(userId: string): Promise<Tag[]> {
+    return await db.select().from(tags).where(eq(tags.userId, userId)).orderBy(tags.name);
+  }
+
+  async countUserTags(userId: string): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` })
+      .from(tags)
+      .where(eq(tags.userId, userId));
+    return Number(result[0]?.count ?? 0);
+  }
+
+  async createTag(userId: string, name: string, nameLower: string, colour: string): Promise<Tag> {
+    const [tag] = await db.insert(tags).values({ userId, name, nameLower, colour }).returning();
+    return tag;
+  }
+
+  async getTag(id: number, userId: string): Promise<Tag | undefined> {
+    const [tag] = await db.select().from(tags).where(and(eq(tags.id, id), eq(tags.userId, userId)));
+    return tag;
+  }
+
+  async updateTag(id: number, userId: string, fields: { name?: string; nameLower?: string; colour?: string }): Promise<Tag> {
+    const [updated] = await db.update(tags).set(fields).where(and(eq(tags.id, id), eq(tags.userId, userId))).returning();
+    return updated;
+  }
+
+  async deleteTag(id: number, userId: string): Promise<void> {
+    await db.delete(tags).where(and(eq(tags.id, id), eq(tags.userId, userId)));
+  }
+
+  async getMonitorTags(monitorId: number): Promise<{ id: number; name: string; colour: string }[]> {
+    const rows = await db.select({
+      id: tags.id,
+      name: tags.name,
+      colour: tags.colour,
+    }).from(monitorTags)
+      .innerJoin(tags, eq(monitorTags.tagId, tags.id))
+      .where(eq(monitorTags.monitorId, monitorId));
+    return rows;
+  }
+
+  async setMonitorTags(monitorId: number, tagIds: number[]): Promise<void> {
+    await db.transaction(async (tx) => {
+      await tx.delete(monitorTags).where(eq(monitorTags.monitorId, monitorId));
+      if (tagIds.length > 0) {
+        await tx.insert(monitorTags).values(tagIds.map(tagId => ({ monitorId, tagId })));
+      }
+    });
+  }
+
+  async getMonitorsWithTags(userId: string): Promise<(Monitor & { tags: { id: number; name: string; colour: string }[] })[]> {
+    const userMonitors = await db.select().from(monitors).where(eq(monitors.userId, userId)).orderBy(desc(monitors.createdAt));
+    if (userMonitors.length === 0) return [];
+
+    const monitorIds = userMonitors.map(m => m.id);
+    const tagRows = await db.select({
+      monitorId: monitorTags.monitorId,
+      tagId: tags.id,
+      tagName: tags.name,
+      tagColour: tags.colour,
+    }).from(monitorTags)
+      .innerJoin(tags, eq(monitorTags.tagId, tags.id))
+      .where(inArray(monitorTags.monitorId, monitorIds));
+
+    const tagsByMonitor = new Map<number, { id: number; name: string; colour: string }[]>();
+    for (const row of tagRows) {
+      const arr = tagsByMonitor.get(row.monitorId) || [];
+      arr.push({ id: row.tagId, name: row.tagName, colour: row.tagColour });
+      tagsByMonitor.set(row.monitorId, arr);
+    }
+
+    return userMonitors.map(m => ({ ...m, tags: tagsByMonitor.get(m.id) || [] }));
+  }
+
+  async getMonitorWithTags(id: number): Promise<(Monitor & { tags: { id: number; name: string; colour: string }[] }) | undefined> {
+    const [monitor] = await db.select().from(monitors).where(eq(monitors.id, id));
+    if (!monitor) return undefined;
+    const monitorTagsList = await this.getMonitorTags(id);
+    return { ...monitor, tags: monitorTagsList };
   }
 }
 

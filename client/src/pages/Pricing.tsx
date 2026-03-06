@@ -37,6 +37,7 @@ const plans = [
       "Slack integration",
       "Quiet hours & daily digest mode",
       "Per-monitor notification email override",
+      "Monitor tags (up to 10, 2 per monitor)",
       "JavaScript-rendered pages",
       "Fix Selector tool",
       "Full change history",
@@ -58,6 +59,7 @@ const plans = [
       "Slack integration",
       "Quiet hours & daily digest mode",
       "Per-monitor notification email override",
+      "Unlimited monitor tags",
       "Change sensitivity threshold",
       "JavaScript-rendered pages",
       "Fix Selector tool",
@@ -148,6 +150,14 @@ export default function Pricing() {
                 You won't be able to create new monitors until you upgrade or delete existing ones. Your current monitors will continue working.
               </p>
            </div>
+            <div>
+              <h3 className="font-semibold mb-2">What are monitor tags?</h3>
+              <p className="text-muted-foreground text-sm">
+                Tags let you organise monitors with coloured labels — for example "Work", "Competitors", or "Prices".
+                Pro users can create up to 10 tags and assign up to 2 per monitor. Power users get unlimited tags and assignments.
+                Tags are not available on the free plan.
+              </p>
+            </div>
           </div>
         </div>
       </div>

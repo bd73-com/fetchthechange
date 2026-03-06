@@ -104,6 +104,37 @@ const faqSections: FAQSection[] = [
     ],
   },
   {
+    title: "Tags",
+    description: "Organise your monitors with coloured labels.",
+    items: [
+      {
+        question: "What are monitor tags?",
+        answer:
+          "Tags are coloured labels you can assign to monitors to organise them — for example \"Work\", \"Competitors\", or \"Prices\". You can filter your dashboard by tag to quickly find the monitors you care about.",
+      },
+      {
+        question: "Which plans include tags?",
+        answer:
+          "Tags are available on Pro and Power plans. Pro users can create up to 10 tags and assign up to 2 tags per monitor. Power users get unlimited tags and unlimited assignments per monitor. Free plan users cannot create or assign tags.",
+      },
+      {
+        question: "How do I create and manage tags?",
+        answer:
+          "Click the \"Manage tags\" button on your dashboard to open the tag manager. From there you can create new tags, rename them, change their colour, or delete them. You can also manage tags from the tag picker on any monitor.",
+      },
+      {
+        question: "How do I assign tags to a monitor?",
+        answer:
+          "On your dashboard or on the monitor detail page, click the tag picker button on a monitor card. Check or uncheck tags to assign or remove them. Changes are saved immediately.",
+      },
+      {
+        question: "What happens to tags if I downgrade my plan?",
+        answer:
+          "Your existing tags and assignments remain in place, but you won't be able to create new tags or assign additional tags until you upgrade again or remove existing ones to stay within the new plan's limits.",
+      },
+    ],
+  },
+  {
     title: "Webhooks & Slack",
     description: "Send change alerts to your own systems or Slack workspace.",
     items: [
