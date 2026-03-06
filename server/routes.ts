@@ -33,7 +33,7 @@ import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encry
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit from "express-rate-limit";
-import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables } from "./services/ensureTables";
+import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables } from "./services/ensureTables";
 
 
 // ------------------------------------------------------------------
@@ -62,6 +62,7 @@ export async function registerRoutes(
   await ensureErrorLogColumns();
   const apiKeysReady = await ensureApiKeysTable();
   await ensureChannelTables();
+  await ensureTagTables();
 
   // Setup Auth (must be before rate limiter so req.user is populated)
   await setupAuth(app);
