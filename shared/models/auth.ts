@@ -40,6 +40,18 @@ export const RESEND_CAPS = {
   monthly: 3000,
 } as const;
 
+export const TAG_LIMITS = {
+  free: 0,
+  pro: 10,
+  power: Infinity,
+} as const;
+
+export const TAG_ASSIGNMENT_LIMITS = {
+  free: 0,
+  pro: 2,
+  power: Infinity,
+} as const;
+
 export const API_RATE_LIMITS = {
   /** Maximum API requests per key per minute. */
   perMinute: 300,

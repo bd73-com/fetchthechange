@@ -177,7 +177,17 @@ describe("Support FAQ documentation accuracy", () => {
   });
 
   it("Notification Preferences section has 5 FAQ items", () => {
-    const section = sliceSection(supportSource, '"Notification Preferences"', '"Webhooks & Slack"');
+    const section = sliceSection(supportSource, '"Notification Preferences"', '"Tags"');
+    const questionCount = (section.match(/question:/g) || []).length;
+    expect(questionCount).toBe(5);
+  });
+
+  it("has a Tags FAQ section", () => {
+    expect(supportSource).toContain('"Tags"');
+  });
+
+  it("Tags section has 5 FAQ items", () => {
+    const section = sliceSection(supportSource, '"Tags"', '"Webhooks & Slack"');
     const questionCount = (section.match(/question:/g) || []).length;
     expect(questionCount).toBe(5);
   });

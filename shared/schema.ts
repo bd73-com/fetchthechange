@@ -45,6 +45,7 @@ export const monitorsRelations = relations(monitors, ({ one, many }) => ({
   notificationQueue: many(notificationQueue),
   notificationChannels: many(notificationChannels),
   deliveryLogs: many(deliveryLog),
+  monitorTags: many(monitorTags),
 }));
 
 export const monitorChangesRelations = relations(monitorChanges, ({ one }) => ({
@@ -351,6 +352,53 @@ export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
 
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type InsertApiKey = typeof apiKeys.$inferInsert;
+
+// Tags — per-user labels for organising monitors
+export const tags = pgTable("tags", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  name: text("name").notNull(),
+  nameLower: text("name_lower").notNull(),
+  colour: text("colour").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  userIdx: index("tags_user_idx").on(table.userId),
+  userNameUniq: uniqueIndex("tags_user_name_lower_uniq").on(table.userId, table.nameLower),
+}));
+
+export const tagsRelations = relations(tags, ({ one, many }) => ({
+  user: one(users, {
+    fields: [tags.userId],
+    references: [users.id],
+  }),
+  monitorTags: many(monitorTags),
+}));
+
+export type Tag = typeof tags.$inferSelect;
+export type InsertTag = typeof tags.$inferInsert;
+
+// Monitor-Tag join table — many-to-many
+export const monitorTags = pgTable("monitor_tags", {
+  id: serial("id").primaryKey(),
+  monitorId: integer("monitor_id").notNull().references(() => monitors.id, { onDelete: "cascade" }),
+  tagId: integer("tag_id").notNull().references(() => tags.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  monitorTagUniq: uniqueIndex("monitor_tags_monitor_tag_uniq").on(table.monitorId, table.tagId),
+}));
+
+export const monitorTagsRelations = relations(monitorTags, ({ one }) => ({
+  monitor: one(monitors, {
+    fields: [monitorTags.monitorId],
+    references: [monitors.id],
+  }),
+  tag: one(tags, {
+    fields: [monitorTags.tagId],
+    references: [tags.id],
+  }),
+}));
+
+export type MonitorTag = typeof monitorTags.$inferSelect;
 
 export const insertMonitorSchema = createInsertSchema(monitors).omit({
   id: true,
