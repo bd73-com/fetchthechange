@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { getTableColumns } from "drizzle-orm";
+import { notificationChannels, deliveryLog, slackConnections } from "@shared/schema";
 
 const mockExecute = vi.fn();
 
@@ -89,5 +91,36 @@ describe("ensureChannelTables", () => {
       expect.any(Error),
     );
     errorSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Schema sync guard — ensures ensureTables.ts DDL stays in sync with Drizzle.
+// If a column is added/removed in shared/schema.ts, this test fails and
+// reminds you to update the DDL in ensureTables.ts (and vice-versa).
+// ---------------------------------------------------------------------------
+describe("schema sync between ensureTables DDL and Drizzle schema", () => {
+  // Column names as defined in the CREATE TABLE statements in ensureTables.ts.
+  // These MUST match the Drizzle definitions in shared/schema.ts exactly.
+  const DDL_COLUMNS = {
+    notification_channels: ["id", "monitor_id", "channel", "enabled", "config", "created_at", "updated_at"],
+    delivery_log: ["id", "monitor_id", "change_id", "channel", "status", "attempt", "response", "delivered_at", "created_at"],
+    slack_connections: ["id", "user_id", "team_id", "team_name", "bot_token", "scope", "created_at", "updated_at"],
+  };
+
+  function drizzleColumnNames(table: Parameters<typeof getTableColumns>[0]): string[] {
+    return Object.values(getTableColumns(table)).map((col) => col.name).sort();
+  }
+
+  it("notification_channels columns match Drizzle schema", () => {
+    expect(DDL_COLUMNS.notification_channels.sort()).toEqual(drizzleColumnNames(notificationChannels));
+  });
+
+  it("delivery_log columns match Drizzle schema", () => {
+    expect(DDL_COLUMNS.delivery_log.sort()).toEqual(drizzleColumnNames(deliveryLog));
+  });
+
+  it("slack_connections columns match Drizzle schema", () => {
+    expect(DDL_COLUMNS.slack_connections.sort()).toEqual(drizzleColumnNames(slackConnections));
   });
 });
