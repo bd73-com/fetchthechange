@@ -785,6 +785,37 @@ describe("GET /api/integrations/slack/install", () => {
     expect(res._redirectUrl).toContain("client_id=test-client-id");
     expect(res._redirectUrl).toContain("chat:write");
   });
+
+  it("uses request host for redirect_uri, not REPLIT_DOMAINS", async () => {
+    process.env.SLACK_CLIENT_ID = "test-client-id";
+    process.env.SLACK_CLIENT_SECRET = "test-client-secret";
+    process.env.REPLIT_DOMAINS = "replit-domain.repl.co";
+    mockGetUser.mockResolvedValueOnce({ tier: "pro" });
+
+    const req = makeReq("user1", {
+      protocol: "https",
+      get: () => "custom-domain.example.com",
+    });
+    const res = await callHandler("get", ENDPOINT, req);
+    const redirectUri = decodeURIComponent(res._redirectUrl);
+    expect(redirectUri).toContain("redirect_uri=https://custom-domain.example.com/api/integrations/slack/callback");
+    expect(redirectUri).not.toContain("replit-domain.repl.co");
+
+    delete process.env.REPLIT_DOMAINS;
+  });
+
+  it("works for power tier users", async () => {
+    process.env.SLACK_CLIENT_ID = "test-client-id";
+    process.env.SLACK_CLIENT_SECRET = "test-client-secret";
+    mockGetUser.mockResolvedValueOnce({ tier: "power" });
+
+    const req = makeReq("user1", {
+      protocol: "https",
+      get: () => "example.com",
+    });
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._redirectUrl).toContain("slack.com/oauth/v2/authorize");
+  });
 });
 
 describe("GET /api/integrations/slack/callback", () => {
