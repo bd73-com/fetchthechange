@@ -1,3 +1,4 @@
+import { formatDateTime as formatDateTimeStd } from "@/lib/date-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,12 +61,7 @@ const recipientStatusConfig: Record<string, { variant: "default" | "secondary" |
 
 function formatDateTime(dateStr: string | null | undefined): string {
   if (!dateStr) return "-";
-  return new Date(dateStr).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatDateTimeStd(dateStr);
 }
 
 function formatRate(count: number, total: number): string {

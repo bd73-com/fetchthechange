@@ -1,3 +1,4 @@
+import { format } from "date-fns";
 import { db } from "../db";
 import { browserlessUsage, errorLogs } from "@shared/schema";
 import { BROWSERLESS_CAPS, users, type UserTier } from "@shared/models/auth";
@@ -15,7 +16,7 @@ function getMonthEnd(): Date {
 
 export function getMonthResetDate(): string {
   const end = getMonthEnd();
-  return end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return format(end, "MMM d, yyyy");
 }
 
 export class BrowserlessUsageTracker {

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { formatDate } from "@/lib/date-format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight, Check, X, Minus } from "lucide-react";
@@ -115,7 +116,7 @@ export default function BlogComparison() {
             FetchTheChange vs Distill, Visualping, Hexowatch (and others): Which Website Change Monitor Should You Use?
           </h1>
           <p className="text-muted-foreground">
-            By {AUTHOR} · Published {new Date(PUBLISH_DATE).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+            By {AUTHOR} · Published {formatDate(PUBLISH_DATE)}
           </p>
         </header>
 

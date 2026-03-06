@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatDateTime } from "@/lib/date-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,7 +76,7 @@ export function DeliveryLog({ monitorId }: DeliveryLogProps) {
               return (
                 <TableRow key={entry.id}>
                   <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                    {new Date(entry.createdAt).toLocaleString()}
+                    {formatDateTime(entry.createdAt)}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">

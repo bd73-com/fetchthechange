@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { formatDate } from "@/lib/date-format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
@@ -94,7 +95,7 @@ export default function BlogWhyMonitorsFail() {
             Why Website Change Monitors Fail Silently on JavaScript-Heavy Sites
           </h1>
           <p className="text-muted-foreground">
-            By {AUTHOR} · Published {new Date(PUBLISH_DATE).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+            By {AUTHOR} · Published {formatDate(PUBLISH_DATE)}
           </p>
         </header>
 
