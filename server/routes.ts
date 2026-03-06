@@ -68,6 +68,31 @@ export async function registerRoutes(
     console.warn("Could not ensure error_logs columns:", e);
   }
 
+  // Ensure api_keys table exists (added in PR #77).
+  // Without this, API key management routes fail with "relation does not exist"
+  // if schema:push has not been run after the table was added to the schema.
+  let apiKeysReady = false;
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        name TEXT NOT NULL,
+        key_hash TEXT NOT NULL UNIQUE,
+        key_prefix TEXT NOT NULL,
+        last_used_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        revoked_at TIMESTAMP
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS api_keys_user_revoked_idx ON api_keys(user_id, revoked_at)
+    `);
+    apiKeysReady = true;
+  } catch (e) {
+    console.error("Could not ensure api_keys table — API key routes will be disabled:", e);
+  }
+
   // Setup Auth (must be before rate limiter so req.user is populated)
   await setupAuth(app);
 
@@ -2131,11 +2156,15 @@ export async function registerRoutes(
   // ---------------------------------------------------------------
   // API KEY MANAGEMENT & PUBLIC REST API v1 ROUTES
   // ---------------------------------------------------------------
-  const { default: apiKeyManagementRouter } = await import("./routes/apiKeyManagement");
-  app.use("/api/keys", apiKeyManagementRouter);
+  if (apiKeysReady) {
+    const { default: apiKeyManagementRouter } = await import("./routes/apiKeyManagement");
+    app.use("/api/keys", apiKeyManagementRouter);
 
-  const { default: v1Router } = await import("./routes/v1");
-  app.use("/api/v1", v1Router);
+    const { default: v1Router } = await import("./routes/v1");
+    app.use("/api/v1", v1Router);
+  } else {
+    console.warn("[Startup] API key routes disabled — api_keys table bootstrap failed");
+  }
 
   // Catch-all error handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

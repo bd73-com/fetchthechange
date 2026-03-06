@@ -20,6 +20,7 @@ export interface IStorage {
 
   // API keys
   createApiKey(userId: string, name: string, keyHash: string, keyPrefix: string): Promise<ApiKey>;
+  createApiKeyIfUnderLimit(userId: string, name: string, keyHash: string, keyPrefix: string, maxKeys: number): Promise<ApiKey | null>;
   getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
   listApiKeys(userId: string): Promise<ApiKey[]>;
   countActiveApiKeys(userId: string): Promise<number>;
@@ -317,6 +318,17 @@ export class DatabaseStorage implements IStorage {
   async createApiKey(userId: string, name: string, keyHash: string, keyPrefix: string): Promise<ApiKey> {
     const [key] = await db.insert(apiKeys).values({ userId, name, keyHash, keyPrefix }).returning();
     return key;
+  }
+
+  async createApiKeyIfUnderLimit(userId: string, name: string, keyHash: string, keyPrefix: string, maxKeys: number): Promise<ApiKey | null> {
+    return await db.transaction(async (tx) => {
+      const result = await tx.select({ count: sql<number>`count(*)` })
+        .from(apiKeys)
+        .where(and(eq(apiKeys.userId, userId), isNull(apiKeys.revokedAt)));
+      if (Number(result[0]?.count ?? 0) >= maxKeys) return null;
+      const [key] = await tx.insert(apiKeys).values({ userId, name, keyHash, keyPrefix }).returning();
+      return key;
+    });
   }
 
   async getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined> {

@@ -43,16 +43,14 @@ router.post("/", isAuthenticated, async (req: any, res) => {
 
     const input = apiV1CreateKeySchema.parse(req.body);
 
-    const activeCount = await storage.countActiveApiKeys(userId);
-    if (activeCount >= API_RATE_LIMITS.maxKeysPerUser) {
-      return res.status(400).json({ message: `You can have at most ${API_RATE_LIMITS.maxKeysPerUser} active API keys. Revoke an existing key before creating a new one.`, code: "KEY_LIMIT_REACHED" });
-    }
-
     const rawKey = generateRawKey();
     const keyHash = hashApiKey(rawKey);
     const keyPrefix = extractKeyPrefix(rawKey);
 
-    const apiKey = await storage.createApiKey(userId, input.name, keyHash, keyPrefix);
+    const apiKey = await storage.createApiKeyIfUnderLimit(userId, input.name, keyHash, keyPrefix, API_RATE_LIMITS.maxKeysPerUser);
+    if (!apiKey) {
+      return res.status(400).json({ message: `You can have at most ${API_RATE_LIMITS.maxKeysPerUser} active API keys. Revoke an existing key before creating a new one.`, code: "KEY_LIMIT_REACHED" });
+    }
 
     console.log(`[API Keys] Created: userId=${userId} keyPrefix=${keyPrefix} name="${input.name}"`);
 
