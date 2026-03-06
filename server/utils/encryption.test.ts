@@ -56,4 +56,17 @@ describe("encryption", () => {
     const { decryptToken } = await import("./encryption");
     expect(() => decryptToken("not-valid-format")).toThrow("Invalid encrypted token format");
   });
+
+  it("isValidEncryptedToken accepts valid encrypted output", async () => {
+    const { encryptToken, isValidEncryptedToken } = await import("./encryption");
+    const encrypted = encryptToken("xoxb-test-token");
+    expect(isValidEncryptedToken(encrypted)).toBe(true);
+  });
+
+  it("isValidEncryptedToken rejects plaintext tokens", async () => {
+    const { isValidEncryptedToken } = await import("./encryption");
+    expect(isValidEncryptedToken("xoxb-plain-token")).toBe(false);
+    expect(isValidEncryptedToken("")).toBe(false);
+    expect(isValidEncryptedToken("only:two")).toBe(false);
+  });
 });

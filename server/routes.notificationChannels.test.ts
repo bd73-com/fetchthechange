@@ -23,6 +23,7 @@ const {
   mockListSlackChannels,
   mockEncryptToken,
   mockDecryptToken,
+  mockIsValidEncryptedToken,
 } = vi.hoisted(() => ({
   mockGetMonitor: vi.fn(),
   mockGetMonitorChannels: vi.fn(),
@@ -43,6 +44,7 @@ const {
   mockListSlackChannels: vi.fn(),
   mockEncryptToken: vi.fn().mockReturnValue("encrypted-token"),
   mockDecryptToken: vi.fn().mockReturnValue("xoxb-decrypted"),
+  mockIsValidEncryptedToken: vi.fn().mockReturnValue(true),
 }));
 
 // ---------------------------------------------------------------------------
@@ -163,6 +165,7 @@ vi.mock("./services/slackDelivery", () => ({
 vi.mock("./utils/encryption", () => ({
   encryptToken: (...args: any[]) => mockEncryptToken(...args),
   decryptToken: (...args: any[]) => mockDecryptToken(...args),
+  isValidEncryptedToken: (...args: any[]) => mockIsValidEncryptedToken(...args),
 }));
 
 vi.mock("express-rate-limit", () => ({
@@ -245,6 +248,7 @@ function resetMocks() {
   mockListSlackChannels.mockReset();
   mockEncryptToken.mockReset().mockReturnValue("encrypted-token");
   mockDecryptToken.mockReset().mockReturnValue("xoxb-decrypted");
+  mockIsValidEncryptedToken.mockReset().mockReturnValue(true);
 }
 
 function makeReq(userId = "user1", overrides: Record<string, any> = {}) {
@@ -614,11 +618,13 @@ describe("GET /api/monitors/:id/deliveries", () => {
 describe("GET /api/integrations/slack/status", () => {
   const ENDPOINT = "/api/integrations/slack/status";
   const savedClientId = process.env.SLACK_CLIENT_ID;
+  const savedClientSecret = process.env.SLACK_CLIENT_SECRET;
 
   beforeEach(async () => {
     await ensureRoutes();
     resetMocks();
     process.env.SLACK_CLIENT_ID = "test-client-id";
+    process.env.SLACK_CLIENT_SECRET = "test-client-secret";
   });
 
   afterEach(() => {
@@ -626,6 +632,11 @@ describe("GET /api/integrations/slack/status", () => {
       process.env.SLACK_CLIENT_ID = savedClientId;
     } else {
       delete process.env.SLACK_CLIENT_ID;
+    }
+    if (savedClientSecret !== undefined) {
+      process.env.SLACK_CLIENT_SECRET = savedClientSecret;
+    } else {
+      delete process.env.SLACK_CLIENT_SECRET;
     }
   });
 
@@ -648,12 +659,49 @@ describe("GET /api/integrations/slack/status", () => {
     expect(res._json).toEqual({ connected: false, available: true });
   });
 
-  it("returns available false when SLACK_CLIENT_ID is not set", async () => {
+  it("returns available false with not_configured reason when SLACK_CLIENT_ID is not set", async () => {
     delete process.env.SLACK_CLIENT_ID;
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "not_configured" });
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
+
+  it("returns setup_incomplete reason when both tables and SLACK_CLIENT_ID are missing", async () => {
+    delete process.env.SLACK_CLIENT_ID;
+    mockChannelTablesExist.mockResolvedValueOnce(false);
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "setup_incomplete" });
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
+
+  it("does not include unavailableReason when Slack is available", async () => {
+    mockGetSlackConnection.mockResolvedValueOnce(undefined);
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: true });
+    expect(res._json.unavailableReason).toBeUndefined();
+  });
+
+  it("returns not_configured when SLACK_CLIENT_ID is empty string", async () => {
+    process.env.SLACK_CLIENT_ID = "";
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "not_configured" });
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
+
+  it("returns not_configured when SLACK_CLIENT_SECRET is missing", async () => {
+    delete process.env.SLACK_CLIENT_SECRET;
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "not_configured" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 });
@@ -936,10 +984,10 @@ describe("channelTablesExist guards", () => {
     expect(mockGetMonitor).not.toHaveBeenCalled();
   });
 
-  it("GET /api/integrations/slack/status returns unavailable when channel tables missing", async () => {
+  it("GET /api/integrations/slack/status returns unavailable with setup_incomplete reason when channel tables missing", async () => {
     const res = await callHandler("get", "/api/integrations/slack/status", makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "setup_incomplete" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 

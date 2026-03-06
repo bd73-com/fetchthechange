@@ -29,7 +29,7 @@ import {
 } from "./middleware/rateLimiter";
 import { generateWebhookSecret, redactSecret } from "./services/webhookDelivery";
 import { listChannels as listSlackChannels } from "./services/slackDelivery";
-import { encryptToken, decryptToken } from "./utils/encryption";
+import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encryption";
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit from "express-rate-limit";
@@ -799,6 +799,10 @@ export async function registerRoutes(
 
       // Encrypt bot token before storage
       const encryptedToken = encryptToken(tokenData.access_token);
+      if (!isValidEncryptedToken(encryptedToken)) {
+        console.error("[Slack OAuth] Encrypted token failed format validation");
+        return res.redirect("/?slack=error&reason=internal");
+      }
 
       await storage.upsertSlackConnection({
         userId,
@@ -817,9 +821,17 @@ export async function registerRoutes(
 
   // GET /api/integrations/slack/status
   app.get(api.integrations.slack.status.path, isAuthenticated, async (req: any, res) => {
-    const slackAvailable = !!(await channelTablesExist()) && !!process.env.SLACK_CLIENT_ID;
+    const tablesReady = await channelTablesExist();
+    const oauthReady =
+      Boolean(process.env.SLACK_CLIENT_ID?.trim()) &&
+      Boolean(process.env.SLACK_CLIENT_SECRET?.trim());
 
-    if (!slackAvailable) return res.json({ connected: false, available: false });
+    if (!tablesReady) {
+      return res.json({ connected: false, available: false, unavailableReason: "setup_incomplete" as const });
+    }
+    if (!oauthReady) {
+      return res.json({ connected: false, available: false, unavailableReason: "not_configured" as const });
+    }
 
     const userId = req.user.claims.sub;
     const connection = await storage.getSlackConnection(userId);
