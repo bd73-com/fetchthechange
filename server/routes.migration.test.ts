@@ -185,7 +185,7 @@ describe("error_logs dedup column migration at startup", () => {
     expect(callStrings.some((s: string) => s.includes("notification_channels"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("delivery_log"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("slack_connections"))).toBe(true);
-    expect(callStrings.some((s: string) => s.includes("tags"))).toBe(true);
+    expect(callStrings.some((s: string) => s.includes("CREATE TABLE IF NOT EXISTS tags"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("monitor_tags"))).toBe(true);
   });
 
@@ -347,6 +347,45 @@ describe("error_logs dedup column migration at startup", () => {
     // bot_token must NOT have a CHECK constraint — validation belongs in app layer,
     // and the constraint mismatch with the Drizzle schema can silently break table creation
     expect(scCreate).not.toContain("CHECK");
+  });
+
+  it("issues DDL for tags and monitor_tags with correct columns and indexes", async () => {
+    vi.clearAllMocks();
+    mockDbExecute.mockResolvedValue({ rows: [] });
+    process.env.APP_OWNER_ID = "owner-123";
+
+    const { registerRoutes } = await import("./routes");
+    const app = makeMockApp();
+    await registerRoutes(app as any, app as any);
+
+    const callStrings = mockDbExecute.mock.calls.map((c: any[]) => {
+      try { return JSON.stringify(c[0]); } catch { return String(c[0]); }
+    });
+
+    // tags CREATE TABLE includes required columns
+    const tagsCreate = callStrings.find((s: string) =>
+      s.includes("CREATE TABLE IF NOT EXISTS tags")
+    );
+    expect(tagsCreate).toBeDefined();
+    expect(tagsCreate).toContain("user_id");
+    expect(tagsCreate).toContain("name_lower");
+    expect(tagsCreate).toContain("colour");
+
+    // tags indexes
+    expect(callStrings.some((s: string) => s.includes("tags_user_idx"))).toBe(true);
+    expect(callStrings.some((s: string) => s.includes("tags_user_name_lower_uniq"))).toBe(true);
+
+    // monitor_tags CREATE TABLE includes required columns and constraints
+    const mtCreate = callStrings.find((s: string) =>
+      s.includes("CREATE TABLE IF NOT EXISTS monitor_tags")
+    );
+    expect(mtCreate).toBeDefined();
+    expect(mtCreate).toContain("monitor_id");
+    expect(mtCreate).toContain("tag_id");
+    expect(mtCreate).toContain("ON DELETE CASCADE");
+
+    // monitor_tags unique index
+    expect(callStrings.some((s: string) => s.includes("monitor_tags_monitor_tag_uniq"))).toBe(true);
   });
 
   it("logs error and continues when notification channel table creation fails", async () => {
