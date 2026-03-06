@@ -274,6 +274,7 @@ export const api = {
             connected: z.boolean(),
             available: z.boolean(),
             teamName: z.string().optional(),
+            unavailableReason: z.enum(["tables_missing", "not_configured"]).optional(),
           }),
           401: errorSchemas.unauthorized,
         },

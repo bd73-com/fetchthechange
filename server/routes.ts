@@ -817,9 +817,15 @@ export async function registerRoutes(
 
   // GET /api/integrations/slack/status
   app.get(api.integrations.slack.status.path, isAuthenticated, async (req: any, res) => {
-    const slackAvailable = !!(await channelTablesExist()) && !!process.env.SLACK_CLIENT_ID;
+    const tablesReady = await channelTablesExist();
+    const clientIdSet = !!process.env.SLACK_CLIENT_ID;
 
-    if (!slackAvailable) return res.json({ connected: false, available: false });
+    if (!tablesReady) {
+      return res.json({ connected: false, available: false, unavailableReason: "tables_missing" as const });
+    }
+    if (!clientIdSet) {
+      return res.json({ connected: false, available: false, unavailableReason: "not_configured" as const });
+    }
 
     const userId = req.user.claims.sub;
     const connection = await storage.getSlackConnection(userId);

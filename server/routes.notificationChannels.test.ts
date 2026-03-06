@@ -648,13 +648,32 @@ describe("GET /api/integrations/slack/status", () => {
     expect(res._json).toEqual({ connected: false, available: true });
   });
 
-  it("returns available false when SLACK_CLIENT_ID is not set", async () => {
+  it("returns available false with not_configured reason when SLACK_CLIENT_ID is not set", async () => {
     delete process.env.SLACK_CLIENT_ID;
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "not_configured" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
+
+  it("returns tables_missing reason when both tables and SLACK_CLIENT_ID are missing", async () => {
+    delete process.env.SLACK_CLIENT_ID;
+    mockChannelTablesExist.mockResolvedValueOnce(false);
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "tables_missing" });
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
+
+  it("does not include unavailableReason when Slack is available", async () => {
+    mockGetSlackConnection.mockResolvedValueOnce(undefined);
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: true });
+    expect(res._json.unavailableReason).toBeUndefined();
   });
 });
 
@@ -936,10 +955,10 @@ describe("channelTablesExist guards", () => {
     expect(mockGetMonitor).not.toHaveBeenCalled();
   });
 
-  it("GET /api/integrations/slack/status returns unavailable when channel tables missing", async () => {
+  it("GET /api/integrations/slack/status returns unavailable with tables_missing reason when channel tables missing", async () => {
     const res = await callHandler("get", "/api/integrations/slack/status", makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "tables_missing" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 
