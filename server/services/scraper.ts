@@ -51,13 +51,12 @@ const STEALTH_CONTEXT_OPTIONS = {
 function stealthInitScript() {
   Object.defineProperty(navigator, 'webdriver', { get: () => false });
   if (!(window as any).chrome) {
-    (window as any).chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+    (window as any).chrome = { runtime: {}, csi: () => ({}) };
   }
   Object.defineProperty(navigator, 'plugins', {
     get: () => [
       { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
       { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-      { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
     ],
   });
   Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
@@ -536,7 +535,7 @@ export async function extractWithBrowserless(url: string, selector: string, moni
     if (!chromium || typeof chromium.connectOverCDP !== 'function') {
       throw new Error("Playwright browser automation is not available");
     }
-    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}&stealth`, {
+    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`, {
       timeout: 30000
     });
 
@@ -1129,7 +1128,7 @@ export async function discoverSelectors(
     if (!chromium || typeof chromium.connectOverCDP !== 'function') {
       throw new Error("Playwright browser automation is not available. Please try again later.");
     }
-    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}&stealth`, {
+    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`, {
       timeout: 30000
     });
 

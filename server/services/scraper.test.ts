@@ -4424,7 +4424,7 @@ describe("stealth evasion", () => {
     await runWithTimers(monitor);
 
     expect(mockConnectOverCDP).toHaveBeenCalledWith(
-      expect.stringContaining("&stealth"),
+      expect.stringContaining("/stealth?token="),
       expect.any(Object)
     );
   });
@@ -4543,7 +4543,7 @@ describe("stealth evasion", () => {
 
     // Verify &stealth in connection URL
     expect(mockConnectOverCDP).toHaveBeenCalledWith(
-      expect.stringContaining("&stealth"),
+      expect.stringContaining("/stealth?token="),
       expect.any(Object)
     );
 
