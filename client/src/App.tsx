@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -19,10 +19,12 @@ import BlogSelectorBreakage from "@/pages/BlogSelectorBreakage";
 import Pricing from "@/pages/Pricing";
 import Support from "@/pages/Support";
 import DocsWebhooks from "@/pages/DocsWebhooks";
-import Developer from "@/pages/Developer";
 import AdminErrors from "@/pages/AdminErrors";
 import AdminCampaigns from "@/pages/AdminCampaigns";
 import AdminCampaignDetail from "@/pages/AdminCampaignDetail";
+
+// Lazy-loaded: only downloaded for authenticated Power-plan users
+const Developer = lazy(() => import("@/pages/Developer"));
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme] = useState<"dark" | "light">("dark");
@@ -72,7 +74,15 @@ function PowerProtectedRoute({ component: Component, ...rest }: any) {
     return <LandingPage />;
   }
 
-  return <Component {...rest} />;
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    }>
+      <Component {...rest} />
+    </Suspense>
+  );
 }
 
 function Router() {
