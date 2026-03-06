@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { formatDate, formatDateTime } from "@/lib/date-format";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -327,8 +328,7 @@ export default function AdminErrors() {
     : selectedIds.size > 0 && !allVisibleSelected;
 
   const formatTimestamp = (ts: string) => {
-    const d = new Date(ts);
-    return d.toLocaleString();
+    return formatDateTime(ts);
   };
 
   const getTierBadgeClass = (tier: string) => {
@@ -351,7 +351,7 @@ export default function AdminErrors() {
     if (diffHours < 24) return `${diffHours}h ago`;
     const diffDays = Math.floor(diffHours / 24);
     if (diffDays < 30) return `${diffDays}d ago`;
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return formatDate(date);
   };
 
   return (
@@ -476,11 +476,7 @@ export default function AdminErrors() {
                         </TableCell>
                         <TableCell className="text-right text-xs text-muted-foreground">
                           {u.created_at
-                            ? new Date(u.created_at).toLocaleDateString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                year: "numeric",
-                              })
+                            ? formatDate(u.created_at)
                             : "\u2014"}
                         </TableCell>
                       </TableRow>

@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { format } from "date-fns";
 import { type Monitor, type MonitorChange } from "@shared/schema";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { type UserTier } from "@shared/models/auth";
@@ -258,12 +259,12 @@ export async function sendDigestEmail(monitor: Monitor, changes: MonitorChange[]
     const recipientEmail = emailOverride || user.notificationEmail || user.email;
 
     const changesTextList = changes.map((c, i) => {
-      const dateStr = new Date(c.detectedAt).toLocaleString("en-US");
+      const dateStr = format(new Date(c.detectedAt), "MMM d, yyyy HHmm");
       return `  ${i + 1}. [${dateStr}]\n     Old: ${sanitizePlainText(c.oldValue)}\n     New: ${sanitizePlainText(c.newValue)}`;
     }).join("\n\n");
 
     const changesHtmlList = changes.map((c) => {
-      const dateStr = new Date(c.detectedAt).toLocaleString("en-US");
+      const dateStr = format(new Date(c.detectedAt), "MMM d, yyyy HHmm");
       return `
         <tr>
           <td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(dateStr)}</td>

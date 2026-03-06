@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { formatDate } from "@/lib/date-format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight } from "lucide-react";
@@ -58,11 +59,7 @@ export default function Blog() {
                   <div className="flex items-center gap-2 mb-2">
                     <Badge variant="secondary">{post.category}</Badge>
                     <span className="text-sm text-muted-foreground">
-                      {new Date(post.date).toLocaleDateString("en-US", { 
-                        year: "numeric", 
-                        month: "long", 
-                        day: "numeric" 
-                      })}
+                      {formatDate(post.date)}
                     </span>
                   </div>
                   <CardTitle className="text-xl md:text-2xl">{post.title}</CardTitle>

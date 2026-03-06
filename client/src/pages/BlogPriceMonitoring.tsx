@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { formatDate } from "@/lib/date-format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight } from "lucide-react";
@@ -102,7 +103,7 @@ export default function BlogPriceMonitoring() {
             How to Monitor Competitor Prices Without Getting Blocked (2026 Guide)
           </h1>
           <p className="text-muted-foreground">
-            By {AUTHOR} · Published {new Date(PUBLISH_DATE).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+            By {AUTHOR} · Published {formatDate(PUBLISH_DATE)}
           </p>
         </header>
 

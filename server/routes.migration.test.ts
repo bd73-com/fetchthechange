@@ -339,12 +339,11 @@ describe("error_logs dedup column migration at startup", () => {
     expect(scCreate).toContain("team_id");
     expect(scCreate).toContain("team_name");
     expect(scCreate).toContain("bot_token");
-    // CHECK constraint enforces encrypted ciphertext format with minimum lengths
-    expect(scCreate).toContain("CHECK");
-    expect(scCreate).toContain("bot_token ~");
-    expect(scCreate).toMatch(/\[A-Za-z0-9\+\/=\]\{16,\}/);
     expect(scCreate).toContain("scope");
     expect(scCreate).toContain("UNIQUE");
+    // bot_token must NOT have a CHECK constraint — validation belongs in app layer,
+    // and the constraint mismatch with the Drizzle schema can silently break table creation
+    expect(scCreate).not.toContain("CHECK");
   });
 
   it("logs error and continues when notification channel table creation fails", async () => {
