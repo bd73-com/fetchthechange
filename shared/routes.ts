@@ -270,6 +270,7 @@ export const api = {
         responses: {
           200: z.object({
             connected: z.boolean(),
+            available: z.boolean(),
             teamName: z.string().optional(),
           }),
           401: errorSchemas.unauthorized,

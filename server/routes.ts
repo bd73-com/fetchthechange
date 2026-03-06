@@ -807,9 +807,7 @@ export async function registerRoutes(
 
     const state = `${userId}:${signSlackState(userId)}`;
     const scopes = "chat:write,channels:read,groups:read";
-    const appUrl = process.env.REPLIT_DOMAINS
-      ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
-      : `${req.protocol}://${req.get("host")}`;
+    const appUrl = `https://${req.get("host")}`;
     const redirectUri = `${appUrl}/api/integrations/slack/callback`;
 
     const url = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
@@ -843,9 +841,7 @@ export async function registerRoutes(
         return res.redirect("/?slack=error&reason=not_configured");
       }
 
-      const appUrl = process.env.REPLIT_DOMAINS
-        ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
-        : `${req.protocol}://${req.get("host")}`;
+      const appUrl = `https://${req.get("host")}`;
       const redirectUri = `${appUrl}/api/integrations/slack/callback`;
 
       const tokenResp = await fetch("https://slack.com/api/oauth.v2.access", {
@@ -891,14 +887,16 @@ export async function registerRoutes(
 
   // GET /api/integrations/slack/status
   app.get(api.integrations.slack.status.path, isAuthenticated, async (req: any, res) => {
-    if (!(await channelTablesExist())) return res.json({ connected: false });
+    const slackAvailable = !!(await channelTablesExist()) && !!process.env.SLACK_CLIENT_ID;
+
+    if (!slackAvailable) return res.json({ connected: false, available: false });
 
     const userId = req.user.claims.sub;
     const connection = await storage.getSlackConnection(userId);
     if (connection) {
-      res.json({ connected: true, teamName: connection.teamName });
+      res.json({ connected: true, available: true, teamName: connection.teamName });
     } else {
-      res.json({ connected: false });
+      res.json({ connected: false, available: true });
     }
   });
 

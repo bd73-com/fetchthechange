@@ -210,6 +210,10 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             <p className="text-sm text-muted-foreground">
               Upgrade to Pro or Power to use Slack notifications.
             </p>
+          ) : !slackStatus?.available ? (
+            <p className="text-sm text-muted-foreground">
+              Slack integration is not configured on this server.
+            </p>
           ) : !slackStatus?.connected ? (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Connect your Slack workspace to enable notifications.</p>

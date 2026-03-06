@@ -613,10 +613,20 @@ describe("GET /api/monitors/:id/deliveries", () => {
 // ---------------------------------------------------------------------------
 describe("GET /api/integrations/slack/status", () => {
   const ENDPOINT = "/api/integrations/slack/status";
+  const savedClientId = process.env.SLACK_CLIENT_ID;
 
   beforeEach(async () => {
     await ensureRoutes();
     resetMocks();
+    process.env.SLACK_CLIENT_ID = "test-client-id";
+  });
+
+  afterEach(() => {
+    if (savedClientId !== undefined) {
+      process.env.SLACK_CLIENT_ID = savedClientId;
+    } else {
+      delete process.env.SLACK_CLIENT_ID;
+    }
   });
 
   it("returns connected with teamName when connection exists", async () => {
@@ -627,7 +637,7 @@ describe("GET /api/integrations/slack/status", () => {
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: true, teamName: "TestTeam" });
+    expect(res._json).toEqual({ connected: true, available: true, teamName: "TestTeam" });
   });
 
   it("returns not connected when no connection exists", async () => {
@@ -635,7 +645,16 @@ describe("GET /api/integrations/slack/status", () => {
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false });
+    expect(res._json).toEqual({ connected: false, available: true });
+  });
+
+  it("returns available false when SLACK_CLIENT_ID is not set", async () => {
+    delete process.env.SLACK_CLIENT_ID;
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: false });
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 });
 
@@ -863,10 +882,10 @@ describe("channelTablesExist guards", () => {
     expect(mockGetMonitor).not.toHaveBeenCalled();
   });
 
-  it("GET /api/integrations/slack/status returns disconnected when channel tables missing", async () => {
+  it("GET /api/integrations/slack/status returns unavailable when channel tables missing", async () => {
     const res = await callHandler("get", "/api/integrations/slack/status", makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false });
+    expect(res._json).toEqual({ connected: false, available: false });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 
