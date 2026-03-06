@@ -28,7 +28,44 @@ const BROWSER_LIKE_HEADERS = {
   'Sec-Fetch-Mode': 'navigate',
   'Sec-Fetch-Site': 'none',
   'Sec-Fetch-User': '?1',
+  'Sec-CH-UA': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+  'Sec-CH-UA-Mobile': '?0',
+  'Sec-CH-UA-Platform': '"Windows"',
 } as const;
+
+/** Shared browser context options for Browserless stealth sessions. */
+const STEALTH_CONTEXT_OPTIONS = {
+  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  locale: "en-US",
+  viewport: { width: 1920, height: 1080 },
+  screen: { width: 1920, height: 1080 },
+  extraHTTPHeaders: {
+    'Sec-CH-UA': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+    'Sec-CH-UA-Mobile': '?0',
+    'Sec-CH-UA-Platform': '"Windows"',
+    'Accept-Language': 'en-US,en;q=0.9',
+  },
+} as const;
+
+/** Stealth init script injected into browser pages before navigation to evade bot detection. */
+function stealthInitScript() {
+  Object.defineProperty(navigator, 'webdriver', { get: () => false });
+  if (!(window as any).chrome) {
+    (window as any).chrome = { runtime: {}, csi: () => ({}) };
+  }
+  Object.defineProperty(navigator, 'plugins', {
+    get: () => [
+      { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+      { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+    ],
+  });
+  Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+  const originalQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
+  window.navigator.permissions.query = (params: any) =>
+    params.name === 'notifications'
+      ? Promise.resolve({ state: 'prompt', onchange: null } as PermissionStatus)
+      : originalQuery(params);
+}
 
 interface SelectorSuggestion {
   selector: string;
@@ -498,14 +535,11 @@ export async function extractWithBrowserless(url: string, selector: string, moni
     if (!chromium || typeof chromium.connectOverCDP !== 'function') {
       throw new Error("Playwright browser automation is not available");
     }
-    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`, {
+    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`, {
       timeout: 30000
     });
-    
-    const context = await browser.newContext({
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-      locale: "en-US"
-    });
+
+    const context = await browser.newContext(STEALTH_CONTEXT_OPTIONS);
     // Intercept all navigation requests (including redirects) to enforce SSRF validation
     await context.route('**/*', async (route) => {
       if (!route.request().isNavigationRequest()) return route.continue();
@@ -517,6 +551,10 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       }
     });
     const page = await context.newPage();
+
+    // Stealth evasion: patch automation fingerprints before any page JS runs
+    await page.addInitScript(stealthInitScript);
+
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
 
@@ -1090,14 +1128,11 @@ export async function discoverSelectors(
     if (!chromium || typeof chromium.connectOverCDP !== 'function') {
       throw new Error("Playwright browser automation is not available. Please try again later.");
     }
-    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io?token=${token}`, {
+    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`, {
       timeout: 30000
     });
 
-    const context = await browser.newContext({
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-      locale: "en-US"
-    });
+    const context = await browser.newContext(STEALTH_CONTEXT_OPTIONS);
     // Intercept all navigation requests (including redirects) to enforce SSRF validation
     await context.route('**/*', async (route) => {
       if (!route.request().isNavigationRequest()) return route.continue();
@@ -1109,6 +1144,10 @@ export async function discoverSelectors(
       }
     });
     const page = await context.newPage();
+
+    // Stealth evasion: patch automation fingerprints before any page JS runs
+    await page.addInitScript(stealthInitScript);
+
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
 
