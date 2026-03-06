@@ -7,6 +7,7 @@ const SLACK_CHANNELS_KEY = "slack-channels";
 
 interface SlackStatus {
   connected: boolean;
+  available: boolean;
   teamName?: string;
 }
 

@@ -613,10 +613,20 @@ describe("GET /api/monitors/:id/deliveries", () => {
 // ---------------------------------------------------------------------------
 describe("GET /api/integrations/slack/status", () => {
   const ENDPOINT = "/api/integrations/slack/status";
+  const savedClientId = process.env.SLACK_CLIENT_ID;
 
   beforeEach(async () => {
     await ensureRoutes();
     resetMocks();
+    process.env.SLACK_CLIENT_ID = "test-client-id";
+  });
+
+  afterEach(() => {
+    if (savedClientId !== undefined) {
+      process.env.SLACK_CLIENT_ID = savedClientId;
+    } else {
+      delete process.env.SLACK_CLIENT_ID;
+    }
   });
 
   it("returns connected with teamName when connection exists", async () => {
@@ -627,7 +637,7 @@ describe("GET /api/integrations/slack/status", () => {
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: true, teamName: "TestTeam" });
+    expect(res._json).toEqual({ connected: true, available: true, teamName: "TestTeam" });
   });
 
   it("returns not connected when no connection exists", async () => {
@@ -635,7 +645,16 @@ describe("GET /api/integrations/slack/status", () => {
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false });
+    expect(res._json).toEqual({ connected: false, available: true });
+  });
+
+  it("returns available false when SLACK_CLIENT_ID is not set", async () => {
+    delete process.env.SLACK_CLIENT_ID;
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: false });
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 });
 
@@ -748,14 +767,15 @@ describe("GET /api/integrations/slack/install", () => {
     });
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(501);
-    expect(res._json.message).toContain("not configured");
+    expect(res._json.message).toContain("not available");
   });
 
   it("redirects to Slack OAuth URL for pro tier with client ID set", async () => {
     process.env.SLACK_CLIENT_ID = "test-client-id";
     process.env.SLACK_CLIENT_SECRET = "test-client-secret";
+    process.env.REPLIT_DOMAINS = "example.com";
+
     mockGetUser.mockResolvedValueOnce({ tier: "pro" });
-    delete process.env.REPLIT_DOMAINS;
 
     const req = makeReq("user1", {
       protocol: "https",
@@ -765,6 +785,59 @@ describe("GET /api/integrations/slack/install", () => {
     expect(res._redirectUrl).toContain("slack.com/oauth/v2/authorize");
     expect(res._redirectUrl).toContain("client_id=test-client-id");
     expect(res._redirectUrl).toContain("chat:write");
+
+    delete process.env.REPLIT_DOMAINS;
+  });
+
+  it("uses request host for redirect_uri when host is in REPLIT_DOMAINS", async () => {
+    process.env.SLACK_CLIENT_ID = "test-client-id";
+    process.env.SLACK_CLIENT_SECRET = "test-client-secret";
+    process.env.REPLIT_DOMAINS = "replit-domain.repl.co,custom-domain.example.com";
+    mockGetUser.mockResolvedValueOnce({ tier: "pro" });
+
+    const req = makeReq("user1", {
+      protocol: "https",
+      get: () => "custom-domain.example.com",
+    });
+    const res = await callHandler("get", ENDPOINT, req);
+    const redirectUri = decodeURIComponent(res._redirectUrl);
+    expect(redirectUri).toContain("redirect_uri=https://custom-domain.example.com/api/integrations/slack/callback");
+    expect(redirectUri).not.toContain("replit-domain.repl.co");
+
+    delete process.env.REPLIT_DOMAINS;
+  });
+
+  it("returns 400 when Host header is not in REPLIT_DOMAINS", async () => {
+    process.env.SLACK_CLIENT_ID = "test-client-id";
+    process.env.SLACK_CLIENT_SECRET = "test-client-secret";
+    process.env.REPLIT_DOMAINS = "legit-domain.example.com";
+    mockGetUser.mockResolvedValueOnce({ tier: "pro" });
+
+    const req = makeReq("user1", {
+      protocol: "https",
+      get: () => "evil-domain.attacker.com",
+    });
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json.code).toBe("BAD_REQUEST");
+
+    delete process.env.REPLIT_DOMAINS;
+  });
+
+  it("works for power tier users", async () => {
+    process.env.SLACK_CLIENT_ID = "test-client-id";
+    process.env.SLACK_CLIENT_SECRET = "test-client-secret";
+    process.env.REPLIT_DOMAINS = "example.com";
+    mockGetUser.mockResolvedValueOnce({ tier: "power" });
+
+    const req = makeReq("user1", {
+      protocol: "https",
+      get: () => "example.com",
+    });
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._redirectUrl).toContain("slack.com/oauth/v2/authorize");
+
+    delete process.env.REPLIT_DOMAINS;
   });
 });
 
@@ -863,10 +936,10 @@ describe("channelTablesExist guards", () => {
     expect(mockGetMonitor).not.toHaveBeenCalled();
   });
 
-  it("GET /api/integrations/slack/status returns disconnected when channel tables missing", async () => {
+  it("GET /api/integrations/slack/status returns unavailable when channel tables missing", async () => {
     const res = await callHandler("get", "/api/integrations/slack/status", makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false });
+    expect(res._json).toEqual({ connected: false, available: false });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 
