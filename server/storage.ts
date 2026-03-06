@@ -2,7 +2,7 @@ import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
 import { eq, desc, and, or, isNull, lte, lt, gte, sql } from "drizzle-orm";
-import { notificationTablesExist, channelTablesExist } from "./services/notificationReady";
+import { notificationTablesExist } from "./services/notificationReady";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -69,9 +69,15 @@ export class DatabaseStorage implements IStorage {
       await db.delete(notificationQueue).where(eq(notificationQueue.monitorId, id));
       await db.delete(notificationPreferences).where(eq(notificationPreferences.monitorId, id));
     }
-    if (await channelTablesExist()) {
-      await db.delete(deliveryLog).where(eq(deliveryLog.monitorId, id));
-      await db.delete(notificationChannels).where(eq(notificationChannels.monitorId, id));
+    // Delete channel-related rows independently — in partially-migrated DBs
+    // one table may exist without the others, and delivery_log.changeId has a FK
+    // to monitorChanges without CASCADE, so we must clean it up if the table exists.
+    for (const [table, col] of [[deliveryLog, deliveryLog.monitorId], [notificationChannels, notificationChannels.monitorId]] as const) {
+      try {
+        await db.delete(table).where(eq(col, id));
+      } catch (err: any) {
+        if (!err?.message?.includes("relation")) throw err;
+      }
     }
     await db.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
     await db.delete(monitorMetrics).where(eq(monitorMetrics.monitorId, id));

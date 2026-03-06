@@ -838,6 +838,7 @@ describe("channelTablesExist guards", () => {
     const res = await callHandler("put", "/api/monitors/:id/channels/:channel", req);
     expect(res._status).toBe(503);
     expect(res._json.message).toContain("not available yet");
+    expect(res._json.code).toBe("NOT_CONFIGURED");
     expect(mockGetMonitor).not.toHaveBeenCalled();
   });
 

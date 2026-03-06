@@ -600,7 +600,7 @@ export async function registerRoutes(
   // PUT /api/monitors/:id/channels/:channel
   app.put(api.monitors.channels.put.path, isAuthenticated, async (req: any, res) => {
     if (!(await channelTablesExist())) {
-      return res.status(503).json({ message: "Notification channels are not available yet" });
+      return res.status(503).json({ message: "Notification channels are not available yet", code: "NOT_CONFIGURED" });
     }
     try {
       const id = Number(req.params.id);
