@@ -20,14 +20,22 @@ describe("validateHost", () => {
     expect(validateHost("")).toBeNull();
   });
 
-  it("accepts any host when REPLIT_DOMAINS is not set", () => {
+  it("accepts localhost when REPLIT_DOMAINS is not set", () => {
     delete process.env.REPLIT_DOMAINS;
-    expect(validateHost("anything.example.com")).toBe("anything.example.com");
+    expect(validateHost("localhost")).toBe("localhost");
+    expect(validateHost("localhost:3000")).toBe("localhost:3000");
+    expect(validateHost("127.0.0.1")).toBe("127.0.0.1");
+    expect(validateHost("127.0.0.1:5173")).toBe("127.0.0.1:5173");
   });
 
-  it("accepts any host when REPLIT_DOMAINS is empty", () => {
+  it("rejects non-localhost when REPLIT_DOMAINS is not set", () => {
+    delete process.env.REPLIT_DOMAINS;
+    expect(validateHost("anything.example.com")).toBeNull();
+  });
+
+  it("rejects non-localhost when REPLIT_DOMAINS is empty", () => {
     process.env.REPLIT_DOMAINS = "";
-    expect(validateHost("anything.example.com")).toBe("anything.example.com");
+    expect(validateHost("anything.example.com")).toBeNull();
   });
 
   it("accepts host that is in REPLIT_DOMAINS", () => {

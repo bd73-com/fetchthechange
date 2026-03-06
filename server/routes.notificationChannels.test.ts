@@ -773,7 +773,7 @@ describe("GET /api/integrations/slack/install", () => {
   it("redirects to Slack OAuth URL for pro tier with client ID set", async () => {
     process.env.SLACK_CLIENT_ID = "test-client-id";
     process.env.SLACK_CLIENT_SECRET = "test-client-secret";
-    delete process.env.REPLIT_DOMAINS;
+    process.env.REPLIT_DOMAINS = "example.com";
 
     mockGetUser.mockResolvedValueOnce({ tier: "pro" });
 
@@ -785,6 +785,8 @@ describe("GET /api/integrations/slack/install", () => {
     expect(res._redirectUrl).toContain("slack.com/oauth/v2/authorize");
     expect(res._redirectUrl).toContain("client_id=test-client-id");
     expect(res._redirectUrl).toContain("chat:write");
+
+    delete process.env.REPLIT_DOMAINS;
   });
 
   it("uses request host for redirect_uri when host is in REPLIT_DOMAINS", async () => {
@@ -825,7 +827,7 @@ describe("GET /api/integrations/slack/install", () => {
   it("works for power tier users", async () => {
     process.env.SLACK_CLIENT_ID = "test-client-id";
     process.env.SLACK_CLIENT_SECRET = "test-client-secret";
-    delete process.env.REPLIT_DOMAINS;
+    process.env.REPLIT_DOMAINS = "example.com";
     mockGetUser.mockResolvedValueOnce({ tier: "power" });
 
     const req = makeReq("user1", {
@@ -834,6 +836,8 @@ describe("GET /api/integrations/slack/install", () => {
     });
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._redirectUrl).toContain("slack.com/oauth/v2/authorize");
+
+    delete process.env.REPLIT_DOMAINS;
   });
 });
 

@@ -252,9 +252,11 @@ export const api = {
         path: '/api/integrations/slack/install',
         responses: {
           302: z.void(),
+          400: z.object({ message: z.string(), code: z.string() }),
           401: errorSchemas.unauthorized,
           403: z.object({ message: z.string(), code: z.string().optional() }),
           501: z.object({ message: z.string() }),
+          503: z.object({ message: z.string(), code: z.string().optional() }),
         },
       },
       callback: {

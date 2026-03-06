@@ -40,7 +40,7 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
   const revealSecret = useRevealWebhookSecret(monitorId);
 
   // Slack state
-  const { data: slackStatus } = useSlackStatus();
+  const { data: slackStatus, isLoading: isSlackStatusLoading } = useSlackStatus();
   const { data: slackChannelsList = [] } = useSlackChannels();
   const disconnectSlack = useDisconnectSlack();
   const [selectedSlackChannel, setSelectedSlackChannel] = useState("");
@@ -210,7 +210,7 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             <p className="text-sm text-muted-foreground">
               Upgrade to Pro or Power to use Slack notifications.
             </p>
-          ) : !slackStatus?.available ? (
+          ) : isSlackStatusLoading ? null : slackStatus?.available === false ? (
             <p className="text-sm text-muted-foreground">
               Slack integration is not available.
             </p>
