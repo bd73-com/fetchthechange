@@ -259,4 +259,156 @@ describe("error_logs dedup column migration at startup", () => {
     expect(getRoutes.length).toBeGreaterThan(0);
     warnSpy.mockRestore();
   });
+
+  it("issues DDL for notification_channels with correct columns and constraints", async () => {
+    vi.clearAllMocks();
+    mockDbExecute.mockResolvedValue({ rows: [] });
+    process.env.APP_OWNER_ID = "owner-123";
+
+    const { registerRoutes } = await import("./routes");
+    const app = makeMockApp();
+    await registerRoutes(app as any, app as any);
+
+    const callStrings = mockDbExecute.mock.calls.map((c: any[]) => {
+      try { return JSON.stringify(c[0]); } catch { return String(c[0]); }
+    });
+
+    // notification_channels CREATE TABLE includes required columns
+    const ncCreate = callStrings.find((s: string) =>
+      s.includes("CREATE TABLE IF NOT EXISTS notification_channels")
+    );
+    expect(ncCreate).toBeDefined();
+    expect(ncCreate).toContain("monitor_id");
+    expect(ncCreate).toContain("channel");
+    expect(ncCreate).toContain("enabled");
+    expect(ncCreate).toContain("config");
+    expect(ncCreate).toContain("JSONB");
+    expect(ncCreate).toContain("ON DELETE CASCADE");
+
+    // notification_channels indexes
+    expect(callStrings.some((s: string) => s.includes("notification_channels_monitor_idx"))).toBe(true);
+    expect(callStrings.some((s: string) => s.includes("notification_channels_monitor_channel_uniq"))).toBe(true);
+  });
+
+  it("issues DDL for delivery_log with correct columns and foreign keys", async () => {
+    vi.clearAllMocks();
+    mockDbExecute.mockResolvedValue({ rows: [] });
+    process.env.APP_OWNER_ID = "owner-123";
+
+    const { registerRoutes } = await import("./routes");
+    const app = makeMockApp();
+    await registerRoutes(app as any, app as any);
+
+    const callStrings = mockDbExecute.mock.calls.map((c: any[]) => {
+      try { return JSON.stringify(c[0]); } catch { return String(c[0]); }
+    });
+
+    const dlCreate = callStrings.find((s: string) =>
+      s.includes("CREATE TABLE IF NOT EXISTS delivery_log")
+    );
+    expect(dlCreate).toBeDefined();
+    expect(dlCreate).toContain("monitor_id");
+    expect(dlCreate).toContain("change_id");
+    expect(dlCreate).toContain("monitor_changes");
+    expect(dlCreate).toContain("status");
+    expect(dlCreate).toContain("attempt");
+    expect(dlCreate).toContain("ON DELETE CASCADE");
+
+    // delivery_log index
+    expect(callStrings.some((s: string) => s.includes("delivery_log_monitor_created_idx"))).toBe(true);
+  });
+
+  it("issues DDL for slack_connections with correct columns", async () => {
+    vi.clearAllMocks();
+    mockDbExecute.mockResolvedValue({ rows: [] });
+    process.env.APP_OWNER_ID = "owner-123";
+
+    const { registerRoutes } = await import("./routes");
+    const app = makeMockApp();
+    await registerRoutes(app as any, app as any);
+
+    const callStrings = mockDbExecute.mock.calls.map((c: any[]) => {
+      try { return JSON.stringify(c[0]); } catch { return String(c[0]); }
+    });
+
+    const scCreate = callStrings.find((s: string) =>
+      s.includes("CREATE TABLE IF NOT EXISTS slack_connections")
+    );
+    expect(scCreate).toBeDefined();
+    expect(scCreate).toContain("user_id");
+    expect(scCreate).toContain("team_id");
+    expect(scCreate).toContain("team_name");
+    expect(scCreate).toContain("bot_token");
+    expect(scCreate).toContain("scope");
+    expect(scCreate).toContain("UNIQUE");
+  });
+
+  it("logs error and continues when notification channel table creation fails", async () => {
+    vi.clearAllMocks();
+    const channelError = new Error("permission denied for schema public");
+    // error_logs ALTERs succeed (3), api_keys succeed (2), then channel tables fail
+    mockDbExecute
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 1
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 2
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 3
+      .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
+      .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
+      .mockRejectedValueOnce(channelError); // notification_channels fails
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.APP_OWNER_ID = "owner-123";
+
+    const { registerRoutes } = await import("./routes");
+    const app = makeMockApp();
+
+    // Should not throw
+    await registerRoutes(app as any, app as any);
+
+    // Should log the specific notification channel error
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Could not ensure notification channel tables:",
+      channelError,
+    );
+
+    // Routes should still be registered
+    const getRoutes = Object.keys(registeredRoutes["get"] ?? {});
+    expect(getRoutes.length).toBeGreaterThan(0);
+    expect(getRoutes).toContain("/api/admin/error-logs");
+
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  it("registers channel routes even when notification channel tables fail to create", async () => {
+    vi.clearAllMocks();
+    const channelError = new Error("connection timeout");
+    // error_logs and api_keys succeed, channel tables fail
+    mockDbExecute
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 1
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 2
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 3
+      .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
+      .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
+      .mockRejectedValueOnce(channelError); // notification_channels fails
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.APP_OWNER_ID = "owner-123";
+
+    const { registerRoutes } = await import("./routes");
+    const app = makeMockApp();
+    await registerRoutes(app as any, app as any);
+
+    // Channel routes should still be registered (they use runtime channelTablesExist checks)
+    const getRoutes = Object.keys(registeredRoutes["get"] ?? {});
+    const putRoutes = Object.keys(registeredRoutes["put"] ?? {});
+    const deleteRoutes = Object.keys(registeredRoutes["delete"] ?? {});
+    expect(getRoutes).toContain("/api/monitors/:id/channels");
+    expect(putRoutes).toContain("/api/monitors/:id/channels/:channel");
+    expect(deleteRoutes).toContain("/api/monitors/:id/channels/:channel");
+
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
 });
