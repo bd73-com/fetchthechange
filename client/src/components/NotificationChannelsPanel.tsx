@@ -217,8 +217,8 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
               <AlertTitle>Slack integration is not available</AlertTitle>
               <AlertDescription>
                 {slackStatus.unavailableReason === "not_configured"
-                  ? "The Slack app credentials have not been configured. Set the SLACK_CLIENT_ID and SLACK_CLIENT_SECRET environment variables."
-                  : "Slack database tables could not be initialized. This usually resolves after a server restart."}
+                  ? "The Slack app credentials have not been configured. Please contact your administrator."
+                  : "Slack setup is incomplete. This usually resolves after a server restart."}
               </AlertDescription>
             </Alert>
           ) : !slackStatus?.connected ? (

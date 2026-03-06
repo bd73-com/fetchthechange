@@ -16,6 +16,12 @@ function getEncryptionKey(): Buffer {
   return key;
 }
 
+const ENCRYPTED_TOKEN_RE = /^[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/;
+
+export function isValidEncryptedToken(value: string): boolean {
+  return ENCRYPTED_TOKEN_RE.test(value);
+}
+
 export function encryptToken(plaintext: string): string {
   const key = getEncryptionKey();
   const iv = randomBytes(IV_LENGTH);

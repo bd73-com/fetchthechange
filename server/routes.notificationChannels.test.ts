@@ -23,6 +23,7 @@ const {
   mockListSlackChannels,
   mockEncryptToken,
   mockDecryptToken,
+  mockIsValidEncryptedToken,
 } = vi.hoisted(() => ({
   mockGetMonitor: vi.fn(),
   mockGetMonitorChannels: vi.fn(),
@@ -43,6 +44,7 @@ const {
   mockListSlackChannels: vi.fn(),
   mockEncryptToken: vi.fn().mockReturnValue("encrypted-token"),
   mockDecryptToken: vi.fn().mockReturnValue("xoxb-decrypted"),
+  mockIsValidEncryptedToken: vi.fn().mockReturnValue(true),
 }));
 
 // ---------------------------------------------------------------------------
@@ -163,6 +165,7 @@ vi.mock("./services/slackDelivery", () => ({
 vi.mock("./utils/encryption", () => ({
   encryptToken: (...args: any[]) => mockEncryptToken(...args),
   decryptToken: (...args: any[]) => mockDecryptToken(...args),
+  isValidEncryptedToken: (...args: any[]) => mockIsValidEncryptedToken(...args),
 }));
 
 vi.mock("express-rate-limit", () => ({
@@ -245,6 +248,7 @@ function resetMocks() {
   mockListSlackChannels.mockReset();
   mockEncryptToken.mockReset().mockReturnValue("encrypted-token");
   mockDecryptToken.mockReset().mockReturnValue("xoxb-decrypted");
+  mockIsValidEncryptedToken.mockReset().mockReturnValue(true);
 }
 
 function makeReq(userId = "user1", overrides: Record<string, any> = {}) {
@@ -657,13 +661,13 @@ describe("GET /api/integrations/slack/status", () => {
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 
-  it("returns tables_missing reason when both tables and SLACK_CLIENT_ID are missing", async () => {
+  it("returns setup_incomplete reason when both tables and SLACK_CLIENT_ID are missing", async () => {
     delete process.env.SLACK_CLIENT_ID;
     mockChannelTablesExist.mockResolvedValueOnce(false);
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "tables_missing" });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "setup_incomplete" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 
@@ -964,10 +968,10 @@ describe("channelTablesExist guards", () => {
     expect(mockGetMonitor).not.toHaveBeenCalled();
   });
 
-  it("GET /api/integrations/slack/status returns unavailable with tables_missing reason when channel tables missing", async () => {
+  it("GET /api/integrations/slack/status returns unavailable with setup_incomplete reason when channel tables missing", async () => {
     const res = await callHandler("get", "/api/integrations/slack/status", makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "tables_missing" });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "setup_incomplete" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 
