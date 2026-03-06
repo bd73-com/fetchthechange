@@ -60,11 +60,13 @@ function stealthInitScript() {
     ],
   });
   Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-  const originalQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
-  window.navigator.permissions.query = (params: any) =>
-    params.name === 'notifications'
-      ? Promise.resolve({ state: 'prompt', onchange: null } as PermissionStatus)
-      : originalQuery(params);
+  try {
+    const originalQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
+    window.navigator.permissions.query = (params: any) =>
+      params.name === 'notifications'
+        ? Promise.resolve({ state: 'prompt', onchange: null } as PermissionStatus)
+        : originalQuery(params);
+  } catch (_) { /* permissions API may be unavailable */ }
 }
 
 interface SelectorSuggestion {

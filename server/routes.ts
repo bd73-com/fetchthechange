@@ -14,7 +14,7 @@ import { sql, desc, eq, and, isNull, isNotNull, inArray, notInArray } from "driz
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
-import { notificationTablesExist } from "./services/notificationReady";
+import { notificationTablesExist, channelTablesExist } from "./services/notificationReady";
 import { BrowserlessUsageTracker, getMonthResetDate } from "./services/browserlessTracker";
 import { ResendUsageTracker, getResendResetDate } from "./services/resendTracker";
 import { errorLogs, monitorMetrics } from "@shared/schema";
@@ -579,6 +579,8 @@ export async function registerRoutes(
 
   // GET /api/monitors/:id/channels
   app.get(api.monitors.channels.list.path, isAuthenticated, async (req: any, res) => {
+    if (!(await channelTablesExist())) return res.json([]);
+
     const id = Number(req.params.id);
     const monitor = await storage.getMonitor(id);
     if (!monitor) return res.status(404).json({ message: "Not found" });
@@ -597,6 +599,9 @@ export async function registerRoutes(
 
   // PUT /api/monitors/:id/channels/:channel
   app.put(api.monitors.channels.put.path, isAuthenticated, async (req: any, res) => {
+    if (!(await channelTablesExist())) {
+      return res.status(503).json({ message: "Notification channels are not available yet", code: "NOT_CONFIGURED" });
+    }
     try {
       const id = Number(req.params.id);
       const channelParam = req.params.channel;
@@ -663,6 +668,8 @@ export async function registerRoutes(
 
   // DELETE /api/monitors/:id/channels/:channel
   app.delete(api.monitors.channels.delete.path, isAuthenticated, async (req: any, res) => {
+    if (!(await channelTablesExist())) return res.status(204).send();
+
     const id = Number(req.params.id);
     const parsed = channelTypeSchema.safeParse(req.params.channel);
     if (!parsed.success) {
@@ -684,6 +691,9 @@ export async function registerRoutes(
     message: { message: "Too many secret reveal requests. Try again later." },
   });
   app.post(api.monitors.channels.revealSecret.path, isAuthenticated, revealSecretRateLimiter, async (req: any, res) => {
+    if (!(await channelTablesExist())) {
+      return res.status(404).json({ message: "No webhook channel configured", code: "NOT_FOUND" });
+    }
     const id = Number(req.params.id);
     const monitor = await storage.getMonitor(id);
     if (!monitor) return res.status(404).json({ message: "Not found" });
@@ -701,6 +711,8 @@ export async function registerRoutes(
 
   // GET /api/monitors/:id/deliveries
   app.get(api.monitors.channels.deliveries.path, isAuthenticated, async (req: any, res) => {
+    if (!(await channelTablesExist())) return res.json([]);
+
     const id = Number(req.params.id);
     const monitor = await storage.getMonitor(id);
     if (!monitor) return res.status(404).json({ message: "Not found" });
@@ -726,6 +738,10 @@ export async function registerRoutes(
 
   // GET /api/integrations/slack/install
   app.get(api.integrations.slack.install.path, isAuthenticated, async (req: any, res) => {
+    if (!(await channelTablesExist())) {
+      return res.status(503).json({ message: "Slack integration is not available yet.", code: "NOT_CONFIGURED" });
+    }
+
     const userId = req.user.claims.sub;
 
     // Tier check
@@ -753,6 +769,9 @@ export async function registerRoutes(
 
   // GET /api/integrations/slack/callback
   app.get(api.integrations.slack.callback.path, async (req: any, res) => {
+    if (!(await channelTablesExist())) {
+      return res.redirect("/?slack=error&reason=not_configured");
+    }
     try {
       const { code, state, error } = req.query;
 
@@ -823,6 +842,8 @@ export async function registerRoutes(
 
   // GET /api/integrations/slack/status
   app.get(api.integrations.slack.status.path, isAuthenticated, async (req: any, res) => {
+    if (!(await channelTablesExist())) return res.json({ connected: false });
+
     const userId = req.user.claims.sub;
     const connection = await storage.getSlackConnection(userId);
     if (connection) {
@@ -837,6 +858,8 @@ export async function registerRoutes(
 
   // DELETE /api/integrations/slack
   app.delete(api.integrations.slack.disconnect.path, isAuthenticated, async (req: any, res) => {
+    if (!(await channelTablesExist())) return res.status(204).send();
+
     const userId = req.user.claims.sub;
     slackChannelsCache.delete(userId);
     await storage.deleteSlackChannelsForUser(userId);
@@ -844,6 +867,10 @@ export async function registerRoutes(
     res.status(204).send();
   });
   app.get(api.integrations.slack.channels.path, isAuthenticated, async (req: any, res) => {
+    if (!(await channelTablesExist())) {
+      return res.status(404).json({ message: "No Slack connection found. Connect Slack first.", code: "NOT_FOUND" });
+    }
+
     const userId = req.user.claims.sub;
     const connection = await storage.getSlackConnection(userId);
     if (!connection) {
