@@ -675,6 +675,15 @@ describe("GET /api/integrations/slack/status", () => {
     expect(res._json).toEqual({ connected: false, available: true });
     expect(res._json.unavailableReason).toBeUndefined();
   });
+
+  it("returns not_configured when SLACK_CLIENT_ID is empty string", async () => {
+    process.env.SLACK_CLIENT_ID = "";
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "not_configured" });
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE /api/integrations/slack", () => {

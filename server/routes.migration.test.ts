@@ -341,6 +341,9 @@ describe("error_logs dedup column migration at startup", () => {
     expect(scCreate).toContain("bot_token");
     expect(scCreate).toContain("scope");
     expect(scCreate).toContain("UNIQUE");
+    // bot_token must NOT have a CHECK constraint — validation belongs in app layer,
+    // and the constraint mismatch with the Drizzle schema can silently break table creation
+    expect(scCreate).not.toContain("CHECK");
   });
 
   it("logs error and continues when notification channel table creation fails", async () => {
