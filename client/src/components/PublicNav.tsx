@@ -10,7 +10,6 @@ const navLinks = [
   { label: "Use cases", href: "/#use-cases" },
   { label: "Blog", href: "/blog" },
   { label: "Pricing", href: "/pricing" },
-  { label: "API Docs", href: "/developer" },
   { label: "Support", href: "/support" },
 ];
 
