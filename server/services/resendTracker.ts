@@ -1,4 +1,4 @@
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { db } from "../db";
 import { resendUsage, errorLogs } from "@shared/schema";
 import { RESEND_CAPS } from "@shared/models/auth";
@@ -166,7 +166,7 @@ export class ResendUsageTracker {
     `);
 
     return (result.rows as any[]).map(r => ({
-      date: format(new Date(r.date), "MMM d, yyyy"),
+      date: format(parseISO(r.date), "MMM d, yyyy"),
       count: Number(r.count),
     }));
   }
