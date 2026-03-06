@@ -40,6 +40,12 @@ import { useToast } from "@/hooks/use-toast";
 export function CreateMonitorDialog() {
   const [open, setOpen] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+
+  // Reset tag selection when dialog closes (cancel or dismiss)
+  const handleOpenChange = (isOpen: boolean) => {
+    setOpen(isOpen);
+    if (!isOpen) setSelectedTagIds([]);
+  };
   const { mutate, isPending } = useCreateMonitor();
   const { mutate: setMonitorTags } = useSetMonitorTags();
   const { data: allTags = [] } = useTags();
@@ -78,7 +84,7 @@ export function CreateMonitorDialog() {
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button className="gap-2 shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all">
           <Plus className="h-4 w-4" />
@@ -200,7 +206,7 @@ export function CreateMonitorDialog() {
             </div>
             {allTags.length > 0 && userTier !== "free" && (
               <div className="space-y-1">
-                <label className="text-sm font-medium">Tags (optional)</label>
+                <span className="text-sm font-medium">Tags (optional)</span>
                 <TagPicker
                   selectedTagIds={selectedTagIds}
                   onChange={setSelectedTagIds}

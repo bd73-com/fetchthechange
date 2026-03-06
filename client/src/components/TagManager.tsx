@@ -122,10 +122,10 @@ export function TagManager({ trigger }: TagManagerProps) {
                 <>
                   <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: tag.colour }} />
                   <span className="text-sm flex-1 truncate">{tag.name}</span>
-                  <Button size="sm" variant="ghost" onClick={() => startEdit(tag)} className="h-7 w-7 p-0">
+                  <Button size="sm" variant="ghost" onClick={() => startEdit(tag)} className="h-7 w-7 p-0" aria-label={`Edit tag ${tag.name}`}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(tag.id)} className="h-7 w-7 p-0 text-destructive hover:text-destructive">
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmDeleteId(tag.id)} className="h-7 w-7 p-0 text-destructive hover:text-destructive" aria-label={`Delete tag ${tag.name}`}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </>

@@ -206,6 +206,7 @@ export default function Dashboard() {
         {userTags.length > 0 && monitors && monitors.length > 0 && (
           <div className="flex items-center gap-2 flex-wrap mb-6">
             <button
+              type="button"
               onClick={() => setSelectedTagIds([])}
               className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
                 selectedTagIds.length === 0
@@ -219,6 +220,7 @@ export default function Dashboard() {
               const isActive = selectedTagIds.includes(tag.id);
               return (
                 <button
+                  type="button"
                   key={tag.id}
                   onClick={() => {
                     setSelectedTagIds(prev =>

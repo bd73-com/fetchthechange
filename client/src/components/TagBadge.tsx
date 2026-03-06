@@ -22,6 +22,7 @@ export function TagBadge({ tag, onRemove }: TagBadgeProps) {
       {onRemove && (
         <button
           type="button"
+          aria-label={`Remove tag ${tag.name}`}
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();

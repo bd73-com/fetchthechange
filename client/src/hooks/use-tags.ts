@@ -67,6 +67,7 @@ export function useUpdateTag() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.tags.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
       toast({ title: "Tag updated" });
     },
     onError: (err) => {

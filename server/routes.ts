@@ -2208,7 +2208,7 @@ export async function registerRoutes(
       res.status(201).json(tag);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
+        return res.status(400).json({ message: err.errors[0].message, code: "INVALID_INPUT" });
       }
       // Handle unique constraint violation (TOCTOU race on duplicate name)
       if ((err as any)?.code === "23505") {
@@ -2225,9 +2225,12 @@ export async function registerRoutes(
     try {
       const userId = req.user.claims.sub;
       const tagId = Number(req.params.id);
+      if (!Number.isFinite(tagId) || tagId < 1) {
+        return res.status(400).json({ message: "Invalid tag ID", code: "INVALID_INPUT" });
+      }
 
       const existing = await storage.getTag(tagId, userId);
-      if (!existing) return res.status(404).json({ message: "Not found" });
+      if (!existing) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
 
       const input = updateTagSchema.parse(req.body);
       const fields: { name?: string; nameLower?: string; colour?: string } = {};
@@ -2256,7 +2259,7 @@ export async function registerRoutes(
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
+        return res.status(400).json({ message: err.errors[0].message, code: "INVALID_INPUT" });
       }
       // Handle unique constraint violation (TOCTOU race on duplicate name)
       if ((err as any)?.code === "23505") {
@@ -2272,9 +2275,12 @@ export async function registerRoutes(
   app.delete(api.tags.delete.path, isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub;
     const tagId = Number(req.params.id);
+    if (!Number.isFinite(tagId) || tagId < 1) {
+      return res.status(400).json({ message: "Invalid tag ID", code: "INVALID_INPUT" });
+    }
 
     const existing = await storage.getTag(tagId, userId);
-    if (!existing) return res.status(404).json({ message: "Not found" });
+    if (!existing) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
 
     await storage.deleteTag(tagId, userId);
     console.log(`[Tags] Tag deleted: userId=${userId}, tagId=${tagId}, tagName=${existing.name}`);
@@ -2289,11 +2295,14 @@ export async function registerRoutes(
     try {
       const userId = req.user.claims.sub;
       const monitorId = Number(req.params.id);
+      if (!Number.isFinite(monitorId) || monitorId < 1) {
+        return res.status(400).json({ message: "Invalid monitor ID", code: "INVALID_INPUT" });
+      }
 
       // Verify monitor ownership
       const monitor = await storage.getMonitor(monitorId);
-      if (!monitor) return res.status(404).json({ message: "Not found" });
-      if (String(monitor.userId) !== String(userId)) return res.status(403).json({ message: "Forbidden" });
+      if (!monitor) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
+      if (String(monitor.userId) !== String(userId)) return res.status(403).json({ message: "Forbidden", code: "FORBIDDEN" });
 
       const input = setMonitorTagsSchema.parse(req.body);
 
@@ -2328,7 +2337,7 @@ export async function registerRoutes(
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(422).json({ message: err.errors[0].message });
+        return res.status(422).json({ message: err.errors[0].message, code: "INVALID_INPUT" });
       }
       throw err;
     }

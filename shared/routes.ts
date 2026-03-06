@@ -86,7 +86,10 @@ export const updateTagSchema = createTagSchema.partial().refine(
 );
 
 export const setMonitorTagsSchema = z.object({
-  tagIds: z.array(z.number().int().nonnegative()),
+  tagIds: z.array(z.number().int().positive()).refine(
+    (ids) => new Set(ids).size === ids.length,
+    { message: "Duplicate tag IDs are not allowed" }
+  ),
 });
 
 export const tagResponseSchema = z.object({

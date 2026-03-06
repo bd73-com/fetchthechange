@@ -166,9 +166,9 @@ describe("Tag feature schemas and constants", () => {
       expect(result.success).toBe(true);
     });
 
-    it("accepts zero as a tagId", () => {
+    it("rejects zero as a tagId", () => {
       const result = setMonitorTagsSchema.safeParse({ tagIds: [0] });
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
     });
 
     it("rejects negative tagIds", () => {
@@ -188,6 +188,11 @@ describe("Tag feature schemas and constants", () => {
 
     it("rejects non-array tagIds", () => {
       const result = setMonitorTagsSchema.safeParse({ tagIds: "1,2,3" });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects duplicate tagIds", () => {
+      const result = setMonitorTagsSchema.safeParse({ tagIds: [1, 2, 1] });
       expect(result.success).toBe(false);
     });
   });
