@@ -167,9 +167,10 @@ describe("error_logs dedup column migration at startup", () => {
     const app = makeMockApp();
     await registerRoutes(app as any, app as any);
 
-    // db.execute should have been called 3 times for the ALTER TABLE statements
-    // (first_occurrence, occurrence_count, deleted_at)
-    expect(mockDbExecute).toHaveBeenCalledTimes(3);
+    // db.execute should have been called 5 times:
+    // 3 for the ALTER TABLE error_logs statements (first_occurrence, occurrence_count, deleted_at)
+    // 2 for the api_keys table creation (CREATE TABLE + CREATE INDEX)
+    expect(mockDbExecute).toHaveBeenCalledTimes(5);
   });
 
   it("still registers all route groups when migration succeeds", async () => {

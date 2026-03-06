@@ -68,6 +68,29 @@ export async function registerRoutes(
     console.warn("Could not ensure error_logs columns:", e);
   }
 
+  // Ensure api_keys table exists (added in PR #77).
+  // Without this, API key management routes fail with "relation does not exist"
+  // if schema:push has not been run after the table was added to the schema.
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        name TEXT NOT NULL,
+        key_hash TEXT NOT NULL UNIQUE,
+        key_prefix TEXT NOT NULL,
+        last_used_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        revoked_at TIMESTAMP
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS api_keys_user_revoked_idx ON api_keys(user_id, revoked_at)
+    `);
+  } catch (e) {
+    console.warn("Could not ensure api_keys table:", e);
+  }
+
   // Setup Auth (must be before rate limiter so req.user is populated)
   await setupAuth(app);
 
