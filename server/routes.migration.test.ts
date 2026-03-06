@@ -339,8 +339,10 @@ describe("error_logs dedup column migration at startup", () => {
     expect(scCreate).toContain("team_id");
     expect(scCreate).toContain("team_name");
     expect(scCreate).toContain("bot_token");
-    // CHECK constraint enforces encrypted ciphertext format (base64:base64:base64)
+    // CHECK constraint enforces encrypted ciphertext format with minimum lengths
     expect(scCreate).toContain("CHECK");
+    expect(scCreate).toContain("bot_token ~");
+    expect(scCreate).toMatch(/\[A-Za-z0-9\+\/=\]\{16,\}/);
     expect(scCreate).toContain("scope");
     expect(scCreate).toContain("UNIQUE");
   });

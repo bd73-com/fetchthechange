@@ -132,7 +132,7 @@ export async function registerRoutes(
         user_id TEXT NOT NULL UNIQUE REFERENCES users(id),
         team_id TEXT NOT NULL,
         team_name TEXT NOT NULL,
-        bot_token TEXT NOT NULL CHECK (bot_token ~ '^[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$'),
+        bot_token TEXT NOT NULL CHECK (bot_token ~ '^[A-Za-z0-9+/=]{16,}:[A-Za-z0-9+/=]{20,}:[A-Za-z0-9+/=]{22,}$'),
         scope TEXT NOT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
