@@ -37,54 +37,32 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function ProtectedRoute({ component: Component, ...rest }: any) {
-  const { user, isLoading } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <LandingPage />;
-  }
-
-  return <Component {...rest} />;
+function LoadingSpinner() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background" role="status">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
+      <span className="sr-only">Loading…</span>
+    </div>
+  );
 }
 
-function PowerProtectedRoute({ component: Component, ...rest }: any) {
+function ProtectedRoute({ component: Component, requiredTier, ...rest }: any) {
   const { user, isLoading } = useAuth();
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background" role="status">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
-        <span className="sr-only">Loading…</span>
-      </div>
-    );
+    return <LoadingSpinner />;
   }
 
   if (!user) {
     return <LandingPage />;
   }
 
-  if (user.tier !== "power") {
+  if (requiredTier && user.tier !== requiredTier) {
     return <LandingPage />;
   }
 
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-background" role="status">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
-        <span className="sr-only">Loading…</span>
-      </div>
-    }>
-      <Component {...rest} />
-    </Suspense>
-  );
+  const content = <Component {...rest} />;
+  return requiredTier ? <Suspense fallback={<LoadingSpinner />}>{content}</Suspense> : content;
 }
 
 function Router() {
@@ -101,7 +79,7 @@ function Router() {
       <Route path="/pricing" component={Pricing} />
       <Route path="/support" component={Support} />
       <Route path="/docs/webhooks" component={DocsWebhooks} />
-      <Route path="/developer" component={() => <PowerProtectedRoute component={Developer} />} />
+      <Route path="/developer" component={() => <ProtectedRoute component={Developer} requiredTier="power" />} />
       <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
       <Route path="/admin/campaigns" component={() => <ProtectedRoute component={AdminCampaigns} />} />
       <Route path="/admin/campaigns/:id" component={() => <ProtectedRoute component={AdminCampaignDetail} />} />

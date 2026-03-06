@@ -30,8 +30,10 @@ import {
 import { generateWebhookSecret, redactSecret } from "./services/webhookDelivery";
 import { listChannels as listSlackChannels } from "./services/slackDelivery";
 import { encryptToken, decryptToken } from "./utils/encryption";
+import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit from "express-rate-limit";
+import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables } from "./services/ensureTables";
 
 
 // ------------------------------------------------------------------
@@ -57,90 +59,9 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
-  // Ensure error_logs deduplication columns exist (added in PR #56).
-  // Without this, db.select().from(errorLogs) fails when the schema
-  // references columns the database doesn't have yet.
-  try {
-    await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS first_occurrence TIMESTAMP NOT NULL DEFAULT NOW()`);
-    await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS occurrence_count INTEGER NOT NULL DEFAULT 1`);
-    await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP`);
-  } catch (e) {
-    console.warn("Could not ensure error_logs columns:", e);
-  }
-
-  // Ensure api_keys table exists (added in PR #77).
-  // Without this, API key management routes fail with "relation does not exist"
-  // if schema:push has not been run after the table was added to the schema.
-  let apiKeysReady = false;
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS api_keys (
-        id SERIAL PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES users(id),
-        name TEXT NOT NULL,
-        key_hash TEXT NOT NULL UNIQUE,
-        key_prefix TEXT NOT NULL,
-        last_used_at TIMESTAMP,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        revoked_at TIMESTAMP
-      )
-    `);
-    await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS api_keys_user_revoked_idx ON api_keys(user_id, revoked_at)
-    `);
-    apiKeysReady = true;
-  } catch (e) {
-    console.error("Could not ensure api_keys table — API key routes will be disabled:", e);
-  }
-
-  // Ensure notification channel tables exist (notification_channels, delivery_log, slack_connections).
-  // Without this, channel management routes return 503 "not available yet"
-  // if schema:push has not been run after these tables were added to the schema.
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS notification_channels (
-        id SERIAL PRIMARY KEY,
-        monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
-        channel TEXT NOT NULL,
-        enabled BOOLEAN NOT NULL DEFAULT true,
-        config JSONB NOT NULL, -- may contain webhook secrets; never log raw values
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS notification_channels_monitor_idx ON notification_channels(monitor_id)`);
-    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS notification_channels_monitor_channel_uniq ON notification_channels(monitor_id, channel)`);
-
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS delivery_log (
-        id SERIAL PRIMARY KEY,
-        monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
-        change_id INTEGER NOT NULL REFERENCES monitor_changes(id),
-        channel TEXT NOT NULL,
-        status TEXT NOT NULL,
-        attempt INTEGER NOT NULL DEFAULT 1,
-        response JSONB,
-        delivered_at TIMESTAMP,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS delivery_log_monitor_created_idx ON delivery_log(monitor_id, created_at)`);
-
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS slack_connections (
-        id SERIAL PRIMARY KEY,
-        user_id TEXT NOT NULL UNIQUE REFERENCES users(id),
-        team_id TEXT NOT NULL,
-        team_name TEXT NOT NULL,
-        bot_token TEXT NOT NULL CHECK (bot_token ~ '^[A-Za-z0-9+/=]{16,}:[A-Za-z0-9+/=]{20,}:[A-Za-z0-9+/=]{22,}$'),
-        scope TEXT NOT NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-  } catch (e) {
-    console.error("Could not ensure notification channel tables:", e);
-  }
+  await ensureErrorLogColumns();
+  const apiKeysReady = await ensureApiKeysTable();
+  await ensureChannelTables();
 
   // Setup Auth (must be before rate limiter so req.user is populated)
   await setupAuth(app);
@@ -788,7 +709,7 @@ export async function registerRoutes(
   // GET /api/integrations/slack/install
   app.get(api.integrations.slack.install.path, isAuthenticated, async (req: any, res) => {
     if (!(await channelTablesExist())) {
-      return res.status(503).json({ message: "Slack integration is not available yet.", code: "NOT_CONFIGURED" });
+      return res.status(503).json({ message: "Slack integration is not available.", code: "NOT_CONFIGURED" });
     }
 
     const userId = req.user.claims.sub;
@@ -802,14 +723,17 @@ export async function registerRoutes(
 
     const clientId = process.env.SLACK_CLIENT_ID;
     if (!clientId) {
-      return res.status(501).json({ message: "Slack integration is not configured on this server.", code: "NOT_CONFIGURED" });
+      return res.status(501).json({ message: "Slack integration is not available.", code: "NOT_CONFIGURED" });
     }
+
+    const host = validateHost(req.get("host"));
+    if (!host) {
+      return res.status(400).json({ message: "Invalid request host.", code: "BAD_REQUEST" });
+    }
+    const appUrl = `https://${host}`;
 
     const state = `${userId}:${signSlackState(userId)}`;
     const scopes = "chat:write,channels:read,groups:read";
-    const appUrl = process.env.REPLIT_DOMAINS
-      ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
-      : `${req.protocol}://${req.get("host")}`;
     const redirectUri = `${appUrl}/api/integrations/slack/callback`;
 
     const url = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
@@ -843,9 +767,11 @@ export async function registerRoutes(
         return res.redirect("/?slack=error&reason=not_configured");
       }
 
-      const appUrl = process.env.REPLIT_DOMAINS
-        ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
-        : `${req.protocol}://${req.get("host")}`;
+      const host = validateHost(req.get("host"));
+      if (!host) {
+        return res.redirect("/?slack=error&reason=invalid_host");
+      }
+      const appUrl = `https://${host}`;
       const redirectUri = `${appUrl}/api/integrations/slack/callback`;
 
       const tokenResp = await fetch("https://slack.com/api/oauth.v2.access", {
@@ -891,14 +817,16 @@ export async function registerRoutes(
 
   // GET /api/integrations/slack/status
   app.get(api.integrations.slack.status.path, isAuthenticated, async (req: any, res) => {
-    if (!(await channelTablesExist())) return res.json({ connected: false });
+    const slackAvailable = !!(await channelTablesExist()) && !!process.env.SLACK_CLIENT_ID;
+
+    if (!slackAvailable) return res.json({ connected: false, available: false });
 
     const userId = req.user.claims.sub;
     const connection = await storage.getSlackConnection(userId);
     if (connection) {
-      res.json({ connected: true, teamName: connection.teamName });
+      res.json({ connected: true, available: true, teamName: connection.teamName });
     } else {
-      res.json({ connected: false });
+      res.json({ connected: false, available: true });
     }
   });
 
