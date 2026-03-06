@@ -365,6 +365,22 @@ describe("POST /api/tags", () => {
     expect(res._status).toBe(400);
   });
 
+  it("returns 409 on DB unique constraint race (23505)", async () => {
+    mockGetUser.mockResolvedValueOnce({ tier: "pro" });
+    mockCountUserTags.mockResolvedValueOnce(1);
+    mockListUserTags.mockResolvedValueOnce([]); // app-level check passes
+    const dbError: any = new Error("duplicate key value violates unique constraint");
+    dbError.code = "23505";
+    mockCreateTag.mockRejectedValueOnce(dbError);
+
+    const req = makeReq("user1", {
+      body: { name: "Work", colour: "#ef4444" },
+    });
+    const res = await callHandler("post", "/api/tags", req);
+    expect(res._status).toBe(409);
+    expect(res._json.code).toBe("TAG_NAME_CONFLICT");
+  });
+
   it("allows power tier with many existing tags", async () => {
     mockGetUser.mockResolvedValueOnce({ tier: "power" });
     mockCountUserTags.mockResolvedValueOnce(999);
@@ -453,6 +469,22 @@ describe("PATCH /api/tags/:id", () => {
     const res = await callHandler("patch", "/api/tags/:id", req);
     // Same nameLower, so no conflict check needed — skips the uniqueness path
     expect(res._status).toBe(200);
+  });
+
+  it("returns 409 on DB unique constraint race during update (23505)", async () => {
+    mockGetTag.mockResolvedValueOnce({ id: 1, userId: "user1", name: "Old", nameLower: "old", colour: "#ef4444" });
+    mockListUserTags.mockResolvedValueOnce([]); // app-level check passes
+    const dbError: any = new Error("duplicate key value violates unique constraint");
+    dbError.code = "23505";
+    mockUpdateTag.mockRejectedValueOnce(dbError);
+
+    const req = makeReq("user1", {
+      params: { id: "1" },
+      body: { name: "Conflict" },
+    });
+    const res = await callHandler("patch", "/api/tags/:id", req);
+    expect(res._status).toBe(409);
+    expect(res._json.code).toBe("TAG_NAME_CONFLICT");
   });
 
   it("returns 400 for invalid update body (empty object)", async () => {

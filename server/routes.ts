@@ -2210,6 +2210,13 @@ export async function registerRoutes(
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
       }
+      // Handle unique constraint violation (TOCTOU race on duplicate name)
+      if ((err as any)?.code === "23505") {
+        return res.status(409).json({
+          message: "A tag with this name already exists.",
+          code: "TAG_NAME_CONFLICT",
+        });
+      }
       throw err;
     }
   });
@@ -2250,6 +2257,13 @@ export async function registerRoutes(
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
+      }
+      // Handle unique constraint violation (TOCTOU race on duplicate name)
+      if ((err as any)?.code === "23505") {
+        return res.status(409).json({
+          message: "A tag with this name already exists.",
+          code: "TAG_NAME_CONFLICT",
+        });
       }
       throw err;
     }

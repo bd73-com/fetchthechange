@@ -474,10 +474,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async setMonitorTags(monitorId: number, tagIds: number[]): Promise<void> {
-    await db.delete(monitorTags).where(eq(monitorTags.monitorId, monitorId));
-    if (tagIds.length > 0) {
-      await db.insert(monitorTags).values(tagIds.map(tagId => ({ monitorId, tagId })));
-    }
+    await db.transaction(async (tx) => {
+      await tx.delete(monitorTags).where(eq(monitorTags.monitorId, monitorId));
+      if (tagIds.length > 0) {
+        await tx.insert(monitorTags).values(tagIds.map(tagId => ({ monitorId, tagId })));
+      }
+    });
   }
 
   async getMonitorsWithTags(userId: string): Promise<(Monitor & { tags: { id: number; name: string; colour: string }[] })[]> {
