@@ -167,10 +167,11 @@ describe("error_logs dedup column migration at startup", () => {
     const app = makeMockApp();
     await registerRoutes(app as any, app as any);
 
-    // db.execute should have been called 5 times:
+    // db.execute should have been called 11 times:
     // 3 for the ALTER TABLE error_logs statements (first_occurrence, occurrence_count, deleted_at)
     // 2 for the api_keys table creation (CREATE TABLE + CREATE INDEX)
-    expect(mockDbExecute).toHaveBeenCalledTimes(5);
+    // 6 for notification channel tables (3 CREATE TABLE + 2 indexes + 1 unique index)
+    expect(mockDbExecute).toHaveBeenCalledTimes(11);
 
     // Verify specific DDL statements were issued (drizzle sql`` produces SQL objects)
     const callStrings = mockDbExecute.mock.calls.map((c: any[]) => {
@@ -180,6 +181,9 @@ describe("error_logs dedup column migration at startup", () => {
     });
     expect(callStrings.some((s: string) => s.includes("api_keys"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("api_keys_user_revoked_idx"))).toBe(true);
+    expect(callStrings.some((s: string) => s.includes("notification_channels"))).toBe(true);
+    expect(callStrings.some((s: string) => s.includes("delivery_log"))).toBe(true);
+    expect(callStrings.some((s: string) => s.includes("slack_connections"))).toBe(true);
   });
 
   it("still registers all route groups when migration succeeds", async () => {

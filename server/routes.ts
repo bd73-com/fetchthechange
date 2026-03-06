@@ -93,6 +93,55 @@ export async function registerRoutes(
     console.error("Could not ensure api_keys table — API key routes will be disabled:", e);
   }
 
+  // Ensure notification channel tables exist (notification_channels, delivery_log, slack_connections).
+  // Without this, channel management routes return 503 "not available yet"
+  // if schema:push has not been run after these tables were added to the schema.
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS notification_channels (
+        id SERIAL PRIMARY KEY,
+        monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+        channel TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        config JSONB NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS notification_channels_monitor_idx ON notification_channels(monitor_id)`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS notification_channels_monitor_channel_uniq ON notification_channels(monitor_id, channel)`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS delivery_log (
+        id SERIAL PRIMARY KEY,
+        monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+        change_id INTEGER NOT NULL REFERENCES monitor_changes(id),
+        channel TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 1,
+        response JSONB,
+        delivered_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS delivery_log_monitor_created_idx ON delivery_log(monitor_id, created_at)`);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS slack_connections (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL UNIQUE REFERENCES users(id),
+        team_id TEXT NOT NULL,
+        team_name TEXT NOT NULL,
+        bot_token TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+  } catch (e) {
+    console.error("Could not ensure notification channel tables:", e);
+  }
+
   // Setup Auth (must be before rate limiter so req.user is populated)
   await setupAuth(app);
 
