@@ -822,12 +822,14 @@ export async function registerRoutes(
   // GET /api/integrations/slack/status
   app.get(api.integrations.slack.status.path, isAuthenticated, async (req: any, res) => {
     const tablesReady = await channelTablesExist();
-    const clientIdSet = !!process.env.SLACK_CLIENT_ID;
+    const oauthReady =
+      Boolean(process.env.SLACK_CLIENT_ID?.trim()) &&
+      Boolean(process.env.SLACK_CLIENT_SECRET?.trim());
 
     if (!tablesReady) {
       return res.json({ connected: false, available: false, unavailableReason: "setup_incomplete" as const });
     }
-    if (!clientIdSet) {
+    if (!oauthReady) {
       return res.json({ connected: false, available: false, unavailableReason: "not_configured" as const });
     }
 

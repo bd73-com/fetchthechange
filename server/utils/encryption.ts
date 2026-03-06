@@ -19,7 +19,12 @@ function getEncryptionKey(): Buffer {
 const ENCRYPTED_TOKEN_RE = /^[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/;
 
 export function isValidEncryptedToken(value: string): boolean {
-  return ENCRYPTED_TOKEN_RE.test(value);
+  if (!ENCRYPTED_TOKEN_RE.test(value)) return false;
+  const [ivB64, ciphertextB64, tagB64] = value.split(":");
+  const iv = Buffer.from(ivB64, "base64");
+  const ciphertext = Buffer.from(ciphertextB64, "base64");
+  const tag = Buffer.from(tagB64, "base64");
+  return iv.length === IV_LENGTH && ciphertext.length > 0 && tag.length === TAG_LENGTH;
 }
 
 export function encryptToken(plaintext: string): string {

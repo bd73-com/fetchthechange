@@ -618,11 +618,13 @@ describe("GET /api/monitors/:id/deliveries", () => {
 describe("GET /api/integrations/slack/status", () => {
   const ENDPOINT = "/api/integrations/slack/status";
   const savedClientId = process.env.SLACK_CLIENT_ID;
+  const savedClientSecret = process.env.SLACK_CLIENT_SECRET;
 
   beforeEach(async () => {
     await ensureRoutes();
     resetMocks();
     process.env.SLACK_CLIENT_ID = "test-client-id";
+    process.env.SLACK_CLIENT_SECRET = "test-client-secret";
   });
 
   afterEach(() => {
@@ -630,6 +632,11 @@ describe("GET /api/integrations/slack/status", () => {
       process.env.SLACK_CLIENT_ID = savedClientId;
     } else {
       delete process.env.SLACK_CLIENT_ID;
+    }
+    if (savedClientSecret !== undefined) {
+      process.env.SLACK_CLIENT_SECRET = savedClientSecret;
+    } else {
+      delete process.env.SLACK_CLIENT_SECRET;
     }
   });
 
@@ -682,6 +689,15 @@ describe("GET /api/integrations/slack/status", () => {
 
   it("returns not_configured when SLACK_CLIENT_ID is empty string", async () => {
     process.env.SLACK_CLIENT_ID = "";
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "not_configured" });
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
+
+  it("returns not_configured when SLACK_CLIENT_SECRET is missing", async () => {
+    delete process.env.SLACK_CLIENT_SECRET;
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
