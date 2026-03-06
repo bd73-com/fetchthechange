@@ -785,10 +785,19 @@ export async function registerRoutes(
     return createHmac("sha256", secret).update(userId).digest("hex");
   }
 
+  /** Validate the request Host header against the REPLIT_DOMAINS allowlist. */
+  function getValidatedAppUrl(req: any): string | null {
+    const host = req.get("host");
+    if (!host) return null;
+    const allowed = process.env.REPLIT_DOMAINS?.split(",").map((d: string) => d.trim()) || [];
+    if (allowed.length > 0 && !allowed.includes(host)) return null;
+    return `https://${host}`;
+  }
+
   // GET /api/integrations/slack/install
   app.get(api.integrations.slack.install.path, isAuthenticated, async (req: any, res) => {
     if (!(await channelTablesExist())) {
-      return res.status(503).json({ message: "Slack integration is not available yet.", code: "NOT_CONFIGURED" });
+      return res.status(503).json({ message: "Slack integration is not available.", code: "NOT_CONFIGURED" });
     }
 
     const userId = req.user.claims.sub;
@@ -802,12 +811,16 @@ export async function registerRoutes(
 
     const clientId = process.env.SLACK_CLIENT_ID;
     if (!clientId) {
-      return res.status(501).json({ message: "Slack integration is not configured on this server.", code: "NOT_CONFIGURED" });
+      return res.status(501).json({ message: "Slack integration is not available.", code: "NOT_CONFIGURED" });
+    }
+
+    const appUrl = getValidatedAppUrl(req);
+    if (!appUrl) {
+      return res.status(400).json({ message: "Invalid request host.", code: "BAD_REQUEST" });
     }
 
     const state = `${userId}:${signSlackState(userId)}`;
     const scopes = "chat:write,channels:read,groups:read";
-    const appUrl = `https://${req.get("host")}`;
     const redirectUri = `${appUrl}/api/integrations/slack/callback`;
 
     const url = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(state)}`;
@@ -841,7 +854,10 @@ export async function registerRoutes(
         return res.redirect("/?slack=error&reason=not_configured");
       }
 
-      const appUrl = `https://${req.get("host")}`;
+      const appUrl = getValidatedAppUrl(req);
+      if (!appUrl) {
+        return res.redirect("/?slack=error&reason=invalid_host");
+      }
       const redirectUri = `${appUrl}/api/integrations/slack/callback`;
 
       const tokenResp = await fetch("https://slack.com/api/oauth.v2.access", {

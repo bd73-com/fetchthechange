@@ -212,7 +212,7 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             </p>
           ) : !slackStatus?.available ? (
             <p className="text-sm text-muted-foreground">
-              Slack integration is not configured on this server.
+              Slack integration is not available.
             </p>
           ) : !slackStatus?.connected ? (
             <div className="space-y-2">

@@ -767,14 +767,15 @@ describe("GET /api/integrations/slack/install", () => {
     });
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(501);
-    expect(res._json.message).toContain("not configured");
+    expect(res._json.message).toContain("not available");
   });
 
   it("redirects to Slack OAuth URL for pro tier with client ID set", async () => {
     process.env.SLACK_CLIENT_ID = "test-client-id";
     process.env.SLACK_CLIENT_SECRET = "test-client-secret";
-    mockGetUser.mockResolvedValueOnce({ tier: "pro" });
     delete process.env.REPLIT_DOMAINS;
+
+    mockGetUser.mockResolvedValueOnce({ tier: "pro" });
 
     const req = makeReq("user1", {
       protocol: "https",
@@ -786,10 +787,10 @@ describe("GET /api/integrations/slack/install", () => {
     expect(res._redirectUrl).toContain("chat:write");
   });
 
-  it("uses request host for redirect_uri, not REPLIT_DOMAINS", async () => {
+  it("uses request host for redirect_uri when host is in REPLIT_DOMAINS", async () => {
     process.env.SLACK_CLIENT_ID = "test-client-id";
     process.env.SLACK_CLIENT_SECRET = "test-client-secret";
-    process.env.REPLIT_DOMAINS = "replit-domain.repl.co";
+    process.env.REPLIT_DOMAINS = "replit-domain.repl.co,custom-domain.example.com";
     mockGetUser.mockResolvedValueOnce({ tier: "pro" });
 
     const req = makeReq("user1", {
@@ -804,9 +805,27 @@ describe("GET /api/integrations/slack/install", () => {
     delete process.env.REPLIT_DOMAINS;
   });
 
+  it("returns 400 when Host header is not in REPLIT_DOMAINS", async () => {
+    process.env.SLACK_CLIENT_ID = "test-client-id";
+    process.env.SLACK_CLIENT_SECRET = "test-client-secret";
+    process.env.REPLIT_DOMAINS = "legit-domain.example.com";
+    mockGetUser.mockResolvedValueOnce({ tier: "pro" });
+
+    const req = makeReq("user1", {
+      protocol: "https",
+      get: () => "evil-domain.attacker.com",
+    });
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json.code).toBe("BAD_REQUEST");
+
+    delete process.env.REPLIT_DOMAINS;
+  });
+
   it("works for power tier users", async () => {
     process.env.SLACK_CLIENT_ID = "test-client-id";
     process.env.SLACK_CLIENT_SECRET = "test-client-secret";
+    delete process.env.REPLIT_DOMAINS;
     mockGetUser.mockResolvedValueOnce({ tier: "power" });
 
     const req = makeReq("user1", {
