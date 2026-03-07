@@ -34,7 +34,7 @@ export default function BlogComparison() {
     publisher: { "@type": "Organization", name: "FetchTheChange" },
     mainEntityOfPage: getCanonicalUrl(BLOG_PATH),
     datePublished: PUBLISH_DATE,
-    dateModified: new Date().toISOString().split("T")[0],
+    dateModified: PUBLISH_DATE,
   }), []);
 
   return (

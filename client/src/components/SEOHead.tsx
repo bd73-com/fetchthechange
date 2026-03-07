@@ -58,6 +58,8 @@ export default function SEOHead({
     ];
 
     const created: HTMLElement[] = [];
+    const previousValues: { el: HTMLElement; attr: string; value: string }[] =
+      [];
 
     metaTags.forEach((tag) => {
       const selector = tag.name
@@ -65,6 +67,11 @@ export default function SEOHead({
         : `meta[property="${tag.property}"]`;
       const existing = document.head.querySelector<HTMLMetaElement>(selector);
       if (existing) {
+        previousValues.push({
+          el: existing,
+          attr: "content",
+          value: existing.getAttribute("content") ?? "",
+        });
         existing.setAttribute("content", tag.content);
       } else {
         const meta = document.createElement("meta");
@@ -80,6 +87,11 @@ export default function SEOHead({
       'link[rel="canonical"]',
     );
     if (canonicalLink) {
+      previousValues.push({
+        el: canonicalLink,
+        attr: "href",
+        value: canonicalLink.getAttribute("href") ?? "",
+      });
       canonicalLink.setAttribute("href", canonicalUrl);
     } else {
       canonicalLink = document.createElement("link");
@@ -98,7 +110,12 @@ export default function SEOHead({
     }
 
     return () => {
-      created.forEach((el) => el.remove());
+      created.forEach((el) => {
+        el.remove();
+      });
+      previousValues.forEach((pv) => {
+        pv.el.setAttribute(pv.attr, pv.value);
+      });
       jsonLdScript?.remove();
     };
   }, [title, description, path, ogType, ogTitle, ogDescription, twitterTitle, twitterDescription, jsonLd]);
