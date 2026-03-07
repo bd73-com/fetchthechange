@@ -325,3 +325,57 @@ describe("notificationPreferencesInputSchema", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("slack status response schema", () => {
+  const schema = api.integrations.slack.status.responses[200];
+
+  it("accepts valid response with tables-not-ready reason", () => {
+    const result = schema.safeParse({
+      connected: false,
+      available: false,
+      unavailableReason: "tables-not-ready",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts valid response with oauth-not-configured reason", () => {
+    const result = schema.safeParse({
+      connected: false,
+      available: false,
+      unavailableReason: "oauth-not-configured",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts valid response without unavailableReason", () => {
+    const result = schema.safeParse({
+      connected: false,
+      available: true,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts valid connected response with teamName", () => {
+    const result = schema.safeParse({
+      connected: true,
+      available: true,
+      teamName: "My Workspace",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects unknown unavailableReason values", () => {
+    const result = schema.safeParse({
+      connected: false,
+      available: false,
+      unavailableReason: "unavailable",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects response missing required fields", () => {
+    expect(schema.safeParse({ connected: false }).success).toBe(false);
+    expect(schema.safeParse({ available: true }).success).toBe(false);
+    expect(schema.safeParse({}).success).toBe(false);
+  });
+});

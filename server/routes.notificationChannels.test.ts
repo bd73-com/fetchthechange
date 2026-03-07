@@ -678,6 +678,15 @@ describe("GET /api/integrations/slack/status", () => {
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 
+  it("returns tables-not-ready when tables are missing but OAuth is configured", async () => {
+    mockChannelTablesExist.mockResolvedValueOnce(false);
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "tables-not-ready" });
+    expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
+
   it("does not include unavailableReason when Slack is available", async () => {
     mockGetSlackConnection.mockResolvedValueOnce(undefined);
 

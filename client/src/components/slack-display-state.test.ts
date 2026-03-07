@@ -34,4 +34,13 @@ describe("getSlackDisplayState", () => {
   it("returns 'connected' when slack is available and connected", () => {
     expect(getSlackDisplayState(false, { available: true, connected: true })).toBe("connected");
   });
+
+  it("prioritises unavailable over connected (available=false takes precedence)", () => {
+    expect(
+      getSlackDisplayState(false, { available: false, connected: true, unavailableReason: "oauth-not-configured" }),
+    ).toBe("not-configured");
+    expect(
+      getSlackDisplayState(false, { available: false, connected: true, unavailableReason: "tables-not-ready" }),
+    ).toBe("not-ready");
+  });
 });
