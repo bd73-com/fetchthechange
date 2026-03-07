@@ -31,4 +31,5 @@ jobs:
           git add client/src/data/changelog.ts
           git diff --cached --quiet && exit 0
           git commit -m "chore: sync changelog from GitHub releases"
+          git pull --rebase
           git push
