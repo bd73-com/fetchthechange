@@ -1,4 +1,7 @@
-export const BASE_URL = "https://ftc.bd73.com";
+// BASE_URL is injected at build time via esbuild define.
+// Set BASE_URL env var to override (default: https://ftc.bd73.com)
+declare const BASE_URL_INJECTED: string;
+export const BASE_URL = BASE_URL_INJECTED;
 export const TOKEN_STORAGE_KEY = "ftc_extension_token";
 export const TOKEN_EXPIRY_KEY = "ftc_extension_token_expiry";
 
