@@ -2,11 +2,13 @@ import { useAuth } from "@/hooks/use-auth";
 import { NotificationEmailDialog } from "@/components/NotificationEmailDialog";
 import { Button } from "@/components/ui/button";
 import { LogOut, LayoutDashboard, FileWarning, HelpCircle, Send, BookOpen } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 
 export default function DashboardNav() {
   const { user, logout } = useAuth();
+  const [location] = useLocation();
+  const isOnDashboard = location === "/" || location === "/dashboard";
 
   const { data: errorCountData } = useQuery<{ count: number }>({
     queryKey: ["/api/admin/error-logs/count"],
@@ -38,6 +40,14 @@ export default function DashboardNav() {
           <div className="hidden sm:block text-sm text-muted-foreground">
             Welcome, <span className="font-medium text-foreground">{user?.firstName || user?.email}</span>
           </div>
+          {!isOnDashboard && (
+            <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
+              <Link href="/dashboard">
+                <LayoutDashboard className="h-4 w-4 mr-2" />
+                <span className="sr-only sm:not-sr-only">Dashboard</span>
+              </Link>
+            </Button>
+          )}
           {(user?.tier === "power") && (
             <>
               <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
