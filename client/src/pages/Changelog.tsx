@@ -141,8 +141,8 @@ export default function Changelog() {
 
                   {sections.length > 0 ? (
                     <div className="space-y-4">
-                      {sections.map((section) => (
-                        <div key={section.heading}>
+                      {sections.map((section, i) => (
+                        <div key={`${section.heading}-${i}`}>
                           <Badge
                             variant={badgeVariant(section.heading)}
                             className="mb-2"
