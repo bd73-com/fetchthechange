@@ -57,33 +57,49 @@ export default function SEOHead({
       },
     ];
 
-    const elements: HTMLElement[] = [];
+    const created: HTMLElement[] = [];
 
     metaTags.forEach((tag) => {
-      const meta = document.createElement("meta");
-      if (tag.name) meta.setAttribute("name", tag.name);
-      if (tag.property) meta.setAttribute("property", tag.property);
-      meta.setAttribute("content", tag.content);
-      document.head.appendChild(meta);
-      elements.push(meta);
+      const selector = tag.name
+        ? `meta[name="${tag.name}"]`
+        : `meta[property="${tag.property}"]`;
+      const existing = document.head.querySelector<HTMLMetaElement>(selector);
+      if (existing) {
+        existing.setAttribute("content", tag.content);
+      } else {
+        const meta = document.createElement("meta");
+        if (tag.name) meta.setAttribute("name", tag.name);
+        if (tag.property) meta.setAttribute("property", tag.property);
+        meta.setAttribute("content", tag.content);
+        document.head.appendChild(meta);
+        created.push(meta);
+      }
     });
 
-    const canonicalLink = document.createElement("link");
-    canonicalLink.setAttribute("rel", "canonical");
-    canonicalLink.setAttribute("href", canonicalUrl);
-    document.head.appendChild(canonicalLink);
-    elements.push(canonicalLink);
+    let canonicalLink = document.head.querySelector<HTMLLinkElement>(
+      'link[rel="canonical"]',
+    );
+    if (canonicalLink) {
+      canonicalLink.setAttribute("href", canonicalUrl);
+    } else {
+      canonicalLink = document.createElement("link");
+      canonicalLink.setAttribute("rel", "canonical");
+      canonicalLink.setAttribute("href", canonicalUrl);
+      document.head.appendChild(canonicalLink);
+      created.push(canonicalLink);
+    }
 
+    let jsonLdScript: HTMLScriptElement | null = null;
     if (jsonLd) {
-      const script = document.createElement("script");
-      script.type = "application/ld+json";
-      script.text = JSON.stringify(jsonLd);
-      document.head.appendChild(script);
-      elements.push(script);
+      jsonLdScript = document.createElement("script");
+      jsonLdScript.type = "application/ld+json";
+      jsonLdScript.text = JSON.stringify(jsonLd);
+      document.head.appendChild(jsonLdScript);
     }
 
     return () => {
-      elements.forEach((el) => el.remove());
+      created.forEach((el) => el.remove());
+      jsonLdScript?.remove();
     };
   }, [title, description, path, ogType, ogTitle, ogDescription, twitterTitle, twitterDescription, jsonLd]);
 
