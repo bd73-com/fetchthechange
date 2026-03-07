@@ -2362,6 +2362,12 @@ export async function registerRoutes(
   });
 
   // ---------------------------------------------------------------
+  // CHROME EXTENSION API ROUTES
+  // ---------------------------------------------------------------
+  const { default: extensionRouter } = await import("./routes/extension");
+  app.use("/api/extension", extensionRouter);
+
+  // ---------------------------------------------------------------
   // API KEY MANAGEMENT & PUBLIC REST API v1 ROUTES
   // ---------------------------------------------------------------
   if (apiKeysReady) {

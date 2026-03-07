@@ -258,6 +258,32 @@ const faqSections: FAQSection[] = [
       },
     ],
   },
+  {
+    title: "Browser Extension",
+    description: "Using the FetchTheChange Chrome extension",
+    items: [
+      {
+        question: "How do I install the FetchTheChange extension?",
+        answer:
+          "The FetchTheChange extension is available on the Chrome Web Store. Search for \"FetchTheChange\" or visit the Chrome Web Store page directly. Once installed, click the extension icon in your toolbar to get started.",
+      },
+      {
+        question: "Which browsers are supported?",
+        answer:
+          "The extension works with Chrome and all Chromium-based browsers, including Microsoft Edge, Brave, and Opera.",
+      },
+      {
+        question: "Do I need a paid plan to use the extension?",
+        answer:
+          "No. The extension works with all plans, including the free plan. Your existing monitor limits apply \u2014 free users can create up to 3 monitors, Pro users up to 100, and Power users have unlimited monitors.",
+      },
+      {
+        question: "How does the element picker work?",
+        answer:
+          "Click the extension icon on any web page, then click \"Pick an element\". Your cursor becomes a crosshair \u2014 hover over any element on the page to highlight it, then click to select it. The extension generates a CSS selector automatically and shows you the current value so you can confirm you picked the right element.",
+      },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------

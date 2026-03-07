@@ -335,7 +335,7 @@ async function handleMonitorFailure(
   // Truncate error message to prevent unbounded storage in pause_reason.
   // Use spread to operate on Unicode code points, not UTF-16 code units,
   // so surrogate pairs (e.g. emoji) are never split.
-  const truncatedError = [...errorMsg].slice(0, 200).join('');
+  const truncatedError = Array.from(errorMsg).slice(0, 200).join('');
 
   // Look up the user's tier to determine the pause threshold BEFORE the atomic update,
   // so we can include the pause decision in the same UPDATE statement.
