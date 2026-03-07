@@ -1,78 +1,18 @@
-import { useEffect } from "react";
 import PublicNav from "@/components/PublicNav";
+import SEOHead from "@/components/SEOHead";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/date-format";
 import { changelog } from "@/data/changelog";
 import { parseBody, badgeVariant } from "@/data/changelog-utils";
 
-const CHANGELOG_PATH = "/changelog";
-
-function SEOHead() {
-  useEffect(() => {
-    const baseUrl =
-      import.meta.env.VITE_PUBLIC_BASE_URL ||
-      (typeof window !== "undefined"
-        ? window.location.origin
-        : "https://fetch-the-change.replit.app");
-    const canonicalUrl = `${baseUrl}${CHANGELOG_PATH}`;
-
-    document.title = "What's New | FetchTheChange";
-
-    const metaTags = [
-      {
-        name: "description",
-        content:
-          "See what's new in FetchTheChange — latest features, bug fixes, and improvements.",
-      },
-      { property: "og:title", content: "What's New | FetchTheChange" },
-      {
-        property: "og:description",
-        content:
-          "See what's new in FetchTheChange — latest features, bug fixes, and improvements.",
-      },
-      { property: "og:type", content: "website" },
-      { property: "og:url", content: canonicalUrl },
-      { name: "twitter:card", content: "summary" },
-      { name: "twitter:title", content: "What's New | FetchTheChange" },
-      {
-        name: "twitter:description",
-        content:
-          "See what's new in FetchTheChange — latest features, bug fixes, and improvements.",
-      },
-    ];
-
-    const elements: HTMLElement[] = [];
-
-    metaTags.forEach((tag) => {
-      const meta = document.createElement("meta");
-      if (tag.name) meta.setAttribute("name", tag.name);
-      if ((tag as any).property)
-        meta.setAttribute("property", (tag as any).property);
-      meta.setAttribute("content", tag.content);
-      document.head.appendChild(meta);
-      elements.push(meta);
-    });
-
-    const canonicalLink = document.createElement("link");
-    canonicalLink.setAttribute("rel", "canonical");
-    canonicalLink.setAttribute("href", canonicalUrl);
-    document.head.appendChild(canonicalLink);
-    elements.push(canonicalLink);
-
-    return () => {
-      elements.forEach((el) => {
-        el.remove();
-      });
-    };
-  }, []);
-
-  return null;
-}
-
 export default function Changelog() {
   return (
     <div className="min-h-screen bg-background">
-      <SEOHead />
+      <SEOHead
+        title="What's New | FetchTheChange"
+        description="See what's new in FetchTheChange — latest features, bug fixes, and improvements."
+        path="/changelog"
+      />
       <PublicNav />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">

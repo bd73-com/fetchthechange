@@ -1,81 +1,10 @@
-import { useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import PublicNav from "@/components/PublicNav";
 import DashboardNav from "@/components/DashboardNav";
+import SEOHead from "@/components/SEOHead";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Link } from "wouter";
-
-const DOCS_PATH = "/developer";
-
-function getCanonicalUrl() {
-  const baseUrl =
-    import.meta.env.VITE_PUBLIC_BASE_URL ||
-    (typeof window !== "undefined"
-      ? window.location.origin
-      : "https://fetch-the-change.replit.app");
-  return `${baseUrl}${DOCS_PATH}`;
-}
-
-function SEOHead() {
-  useEffect(() => {
-    const canonicalUrl = getCanonicalUrl();
-
-    document.title = "REST API Documentation | FetchTheChange Developer Docs";
-
-    const metaTags = [
-      {
-        name: "description",
-        content:
-          "FetchTheChange REST API documentation. Create monitors, pull change history, and integrate website monitoring into your CI/CD pipelines. Power plan required.",
-      },
-      {
-        property: "og:title",
-        content: "REST API Documentation | FetchTheChange Developer Docs",
-      },
-      {
-        property: "og:description",
-        content:
-          "FetchTheChange REST API documentation. Create monitors, pull change history, and integrate website monitoring into your tools.",
-      },
-      { property: "og:type", content: "article" },
-      { property: "og:url", content: canonicalUrl },
-      { name: "twitter:card", content: "summary" },
-      {
-        name: "twitter:title",
-        content: "REST API Documentation | FetchTheChange",
-      },
-      {
-        name: "twitter:description",
-        content:
-          "FetchTheChange REST API documentation for Power plan users.",
-      },
-    ];
-
-    const existingMetas: HTMLMetaElement[] = [];
-    metaTags.forEach((tag) => {
-      const meta = document.createElement("meta");
-      if (tag.name) meta.setAttribute("name", tag.name);
-      if ((tag as any).property)
-        meta.setAttribute("property", (tag as any).property);
-      meta.setAttribute("content", tag.content);
-      document.head.appendChild(meta);
-      existingMetas.push(meta);
-    });
-
-    const canonicalLink = document.createElement("link");
-    canonicalLink.setAttribute("rel", "canonical");
-    canonicalLink.setAttribute("href", canonicalUrl);
-    document.head.appendChild(canonicalLink);
-
-    return () => {
-      existingMetas.forEach((meta) => meta.remove());
-      canonicalLink.remove();
-    };
-  }, []);
-
-  return null;
-}
 
 function CodeBlock({ children }: { children: string }) {
   return (
@@ -90,7 +19,15 @@ export default function Developer() {
 
   return (
     <div className="min-h-screen bg-background">
-      <SEOHead />
+      <SEOHead
+        title="REST API Documentation | FetchTheChange Developer Docs"
+        description="FetchTheChange REST API documentation. Create monitors, pull change history, and integrate website monitoring into your CI/CD pipelines. Power plan required."
+        path="/developer"
+        ogType="article"
+        ogDescription="FetchTheChange REST API documentation. Create monitors, pull change history, and integrate website monitoring into your tools."
+        twitterTitle="REST API Documentation | FetchTheChange"
+        twitterDescription="FetchTheChange REST API documentation for Power plan users."
+      />
       {!isLoading && (user ? <DashboardNav /> : <PublicNav />)}
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20">
