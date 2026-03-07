@@ -1,56 +1,15 @@
 const esbuild = require("esbuild");
 const fs = require("fs");
 const path = require("path");
-
-const root = path.join(__dirname, "..");
-const buildDir = path.join(root, "build");
-const baseUrl = process.env.BASE_URL || "https://ftc.bd73.com";
-
-const define = {
-  BASE_URL_INJECTED: JSON.stringify(baseUrl),
-};
-
-const entries = [
-  {
-    entryPoints: [path.join(root, "src/background/service-worker.ts")],
-    outfile: path.join(buildDir, "service-worker.js"),
-    format: "esm",
-  },
-  {
-    entryPoints: [path.join(root, "src/content/picker.ts")],
-    outfile: path.join(buildDir, "picker.js"),
-    format: "iife",
-  },
-  {
-    entryPoints: [path.join(root, "src/content/auth-relay.ts")],
-    outfile: path.join(buildDir, "auth-relay.js"),
-    format: "iife",
-  },
-  {
-    entryPoints: [path.join(root, "src/popup/popup.ts")],
-    outfile: path.join(buildDir, "popup/popup.js"),
-    format: "esm",
-  },
-];
+const { root, buildDir, baseUrl, define, entries, staticAssets, copyFile, copyStaticAssets, copyManifest } = require("./config");
 
 async function main() {
   // Ensure build directory exists
   fs.mkdirSync(buildDir, { recursive: true });
 
-  // Copy static assets once
-  copyFile("src/content/picker.css", "picker.css");
-  copyFile("src/popup/popup.css", "popup/popup.css");
-  copyFile("src/popup/index.html", "popup/index.html");
-  copyDir("icons", "icons");
-
-  // Copy manifest.json with URL replacement for dev builds
-  const defaultUrl = "https://ftc.bd73.com";
-  const manifestSrc = fs.readFileSync(path.join(root, "manifest.json"), "utf8");
-  const manifestOut =
-    baseUrl !== defaultUrl
-      ? manifestSrc.replaceAll(defaultUrl, new URL(baseUrl).origin)
-      : manifestSrc;
-  fs.writeFileSync(path.join(buildDir, "manifest.json"), manifestOut);
+  // Copy static assets and manifest once
+  copyStaticAssets();
+  copyManifest();
 
   const contexts = [];
 
@@ -80,28 +39,12 @@ async function main() {
   }
 
   // Watch static assets for changes and re-copy on modification
-  const staticAssets = [
-    { src: "src/content/picker.css", dest: "picker.css" },
-    { src: "src/popup/popup.css", dest: "popup/popup.css" },
-    { src: "src/popup/index.html", dest: "popup/index.html" },
-    { src: "manifest.json", dest: "manifest.json" },
-  ];
   const assetWatchers = [];
   for (const asset of staticAssets) {
     const srcPath = path.join(root, asset.src);
     const watcher = fs.watch(srcPath, () => {
       try {
-        if (asset.src === "manifest.json") {
-          const defaultUrl = "https://ftc.bd73.com";
-          const content = fs.readFileSync(srcPath, "utf8");
-          const out =
-            baseUrl !== defaultUrl
-              ? content.replaceAll(defaultUrl, new URL(baseUrl).origin)
-              : content;
-          fs.writeFileSync(path.join(buildDir, asset.dest), out);
-        } else {
-          copyFile(asset.src, asset.dest);
-        }
+        copyFile(asset.src, asset.dest);
         console.log(`Copied ${asset.src}`);
       } catch (err) {
         console.error(`Failed to copy ${asset.src}:`, err.message);
@@ -110,7 +53,19 @@ async function main() {
     assetWatchers.push(watcher);
   }
 
+  // Watch manifest.json separately (needs URL replacement)
+  const manifestWatcher = fs.watch(path.join(root, "manifest.json"), () => {
+    try {
+      copyManifest();
+      console.log("Copied manifest.json");
+    } catch (err) {
+      console.error("Failed to copy manifest.json:", err.message);
+    }
+  });
+  assetWatchers.push(manifestWatcher);
+
   console.log(`Watching for changes... BASE_URL=${baseUrl}`);
+  console.log("Note: Type-checking is skipped in watch mode — run 'npm run typecheck' separately.");
 
   // Graceful shutdown on Ctrl+C
   process.on("SIGINT", async () => {
@@ -119,28 +74,6 @@ async function main() {
     await Promise.all(contexts.map((ctx) => ctx.dispose()));
     process.exit(0);
   });
-}
-
-function copyFile(src, dest) {
-  const srcPath = path.join(root, src);
-  const destPath = path.join(buildDir, dest);
-  fs.mkdirSync(path.dirname(destPath), { recursive: true });
-  fs.copyFileSync(srcPath, destPath);
-}
-
-function copyDir(src, dest) {
-  const srcPath = path.join(root, src);
-  const destPath = path.join(buildDir, dest);
-  fs.mkdirSync(destPath, { recursive: true });
-  for (const entry of fs.readdirSync(srcPath)) {
-    const s = path.join(srcPath, entry);
-    const d = path.join(destPath, entry);
-    if (fs.statSync(s).isDirectory()) {
-      copyDir(path.join(src, entry), path.join(dest, entry));
-    } else {
-      fs.copyFileSync(s, d);
-    }
-  }
 }
 
 main().catch((err) => {

@@ -26,7 +26,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["picker.js", "picker.css", "popup/popup.js", "popup/popup.css"],
+      "resources": ["picker.js", "picker.css"],
       "matches": ["<all_urls>"]
     }
   ],
