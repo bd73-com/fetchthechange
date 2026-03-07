@@ -1,91 +1,38 @@
-import { useEffect } from "react";
+import { useMemo } from "react";
 import { formatDate } from "@/lib/date-format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight } from "lucide-react";
 import { Link } from "wouter";
 import PublicNav from "@/components/PublicNav";
+import SEOHead, { getCanonicalUrl } from "@/components/SEOHead";
 
 const BLOG_PATH = "/blog/css-selectors-keep-breaking-why-and-how-to-fix";
 const PUBLISH_DATE = "2026-03-03";
 const AUTHOR = "Christian – developer of FetchTheChange";
 
-function getCanonicalUrl() {
-  const baseUrl = import.meta.env.VITE_PUBLIC_BASE_URL ||
-    (typeof window !== "undefined" ? window.location.origin : "https://fetch-the-change.replit.app");
-  return `${baseUrl}${BLOG_PATH}`;
-}
-
-function SEOHead() {
-  useEffect(() => {
-    const canonicalUrl = getCanonicalUrl();
-    const todayDate = new Date().toISOString().split('T')[0];
-
-    document.title = "CSS Selectors Keep Breaking? Why It Happens and How to Fix It | FetchTheChange";
-
-    const metaTags = [
-      { name: "description", content: "CSS selectors in website monitors break constantly due to hashed class names, DOM restructuring, and framework re-renders. Learn why it happens and how to build resilient selectors that survive site updates." },
-      { property: "og:title", content: "CSS Selectors Keep Breaking? Why It Happens and How to Fix It | FetchTheChange" },
-      { property: "og:description", content: "CSS selectors in website monitors break constantly due to hashed class names, DOM restructuring, and framework re-renders. Learn why it happens and how to build resilient selectors that survive site updates." },
-      { property: "og:type", content: "article" },
-      { property: "og:url", content: canonicalUrl },
-      { name: "twitter:card", content: "summary" },
-      { name: "twitter:title", content: "CSS Selectors Keep Breaking? Why It Happens and How to Fix It | FetchTheChange" },
-      { name: "twitter:description", content: "CSS selectors in website monitors break constantly due to hashed class names, DOM restructuring, and framework re-renders. Learn why it happens and how to build resilient selectors that survive site updates." },
-    ];
-
-    const existingMetas: HTMLMetaElement[] = [];
-    metaTags.forEach(tag => {
-      const meta = document.createElement("meta");
-      if (tag.name) meta.setAttribute("name", tag.name);
-      if (tag.property) meta.setAttribute("property", tag.property);
-      meta.setAttribute("content", tag.content);
-      document.head.appendChild(meta);
-      existingMetas.push(meta);
-    });
-
-    const canonicalLink = document.createElement("link");
-    canonicalLink.setAttribute("rel", "canonical");
-    canonicalLink.setAttribute("href", canonicalUrl);
-    document.head.appendChild(canonicalLink);
-
-    const jsonLd = {
-      "@context": "https://schema.org",
-      "@type": "BlogPosting",
-      "headline": "CSS Selectors Keep Breaking? Why It Happens and How to Fix It",
-      "description": "CSS selectors in website monitors break constantly due to hashed class names, DOM restructuring, and framework re-renders. Learn why it happens and how to build resilient selectors that survive site updates.",
-      "author": {
-        "@type": "Person",
-        "name": AUTHOR
-      },
-      "publisher": {
-        "@type": "Organization",
-        "name": "FetchTheChange"
-      },
-      "mainEntityOfPage": canonicalUrl,
-      "datePublished": PUBLISH_DATE,
-      "dateModified": todayDate
-    };
-
-    const script = document.createElement("script");
-    script.type = "application/ld+json";
-    script.text = JSON.stringify(jsonLd);
-    document.head.appendChild(script);
-
-    return () => {
-      existingMetas.forEach(meta => meta.remove());
-      canonicalLink.remove();
-      script.remove();
-    };
-  }, []);
-
-  return null;
-}
-
 export default function BlogSelectorBreakage() {
+  const jsonLd = useMemo(() => ({
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    headline: "CSS Selectors Keep Breaking? Why It Happens and How to Fix It",
+    description: "CSS selectors in website monitors break constantly due to hashed class names, DOM restructuring, and framework re-renders. Learn why it happens and how to build resilient selectors that survive site updates.",
+    author: { "@type": "Person", name: AUTHOR },
+    publisher: { "@type": "Organization", name: "FetchTheChange" },
+    mainEntityOfPage: getCanonicalUrl(BLOG_PATH),
+    datePublished: PUBLISH_DATE,
+    dateModified: new Date().toISOString().split("T")[0],
+  }), []);
+
   return (
     <div className="min-h-screen bg-background">
-      <SEOHead />
+      <SEOHead
+        title="CSS Selectors Keep Breaking? Why It Happens and How to Fix It | FetchTheChange"
+        description="CSS selectors in website monitors break constantly due to hashed class names, DOM restructuring, and framework re-renders. Learn why it happens and how to build resilient selectors that survive site updates."
+        path={BLOG_PATH}
+        ogType="article"
+        jsonLd={jsonLd}
+      />
       <PublicNav />
 
       <article className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">

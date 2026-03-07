@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -8,6 +7,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import PublicNav from "@/components/PublicNav";
 import DashboardNav from "@/components/DashboardNav";
+import SEOHead from "@/components/SEOHead";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -287,97 +287,23 @@ const faqSections: FAQSection[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// SEO HEAD
+// FAQ JSON-LD
 // ---------------------------------------------------------------------------
 
-const SUPPORT_PATH = "/support";
-
-function getCanonicalUrl() {
-  const baseUrl =
-    import.meta.env.VITE_PUBLIC_BASE_URL ||
-    (typeof window !== "undefined"
-      ? window.location.origin
-      : "https://fetch-the-change.replit.app");
-  return `${baseUrl}${SUPPORT_PATH}`;
-}
-
-function SEOHead() {
-  useEffect(() => {
-    const canonicalUrl = getCanonicalUrl();
-
-    document.title = "Support & Help | FetchTheChange";
-
-    const metaTags = [
-      {
-        name: "description",
-        content:
-          "Get help with FetchTheChange. Browse frequently asked questions about website monitoring, troubleshooting, and billing, or contact our support team.",
+const faqJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: faqSections.flatMap((section) =>
+    section.items.map((item) => ({
+      "@type": "Question",
+      name: item.question,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: item.answer,
       },
-      { property: "og:title", content: "Support & Help | FetchTheChange" },
-      {
-        property: "og:description",
-        content:
-          "Get help with FetchTheChange. Browse FAQs or contact our support team.",
-      },
-      { property: "og:type", content: "website" },
-      { property: "og:url", content: canonicalUrl },
-      { name: "twitter:card", content: "summary" },
-      {
-        name: "twitter:title",
-        content: "Support & Help | FetchTheChange",
-      },
-      {
-        name: "twitter:description",
-        content:
-          "Get help with FetchTheChange. Browse FAQs or contact our support team.",
-      },
-    ];
-
-    const existingMetas: HTMLMetaElement[] = [];
-    metaTags.forEach((tag) => {
-      const meta = document.createElement("meta");
-      if (tag.name) meta.setAttribute("name", tag.name);
-      if ((tag as any).property)
-        meta.setAttribute("property", (tag as any).property);
-      meta.setAttribute("content", tag.content);
-      document.head.appendChild(meta);
-      existingMetas.push(meta);
-    });
-
-    const canonicalLink = document.createElement("link");
-    canonicalLink.setAttribute("rel", "canonical");
-    canonicalLink.setAttribute("href", canonicalUrl);
-    document.head.appendChild(canonicalLink);
-
-    const jsonLd = {
-      "@context": "https://schema.org",
-      "@type": "FAQPage",
-      mainEntity: faqSections.flatMap((section) =>
-        section.items.map((item) => ({
-          "@type": "Question",
-          name: item.question,
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: item.answer,
-          },
-        })),
-      ),
-    };
-
-    const script = document.createElement("script");
-    script.type = "application/ld+json";
-    script.text = JSON.stringify(jsonLd);
-    document.head.appendChild(script);
-
-    return () => {
-      existingMetas.forEach((meta) => meta.remove());
-      canonicalLink.remove();
-      script.remove();
-    };
-  }, []);
-
-  return null;
-}
+    })),
+  ),
+};
 
 // ---------------------------------------------------------------------------
 // CONTACT FORM (authenticated only)
@@ -542,7 +468,14 @@ export default function Support() {
 
   return (
     <div className="min-h-screen bg-background">
-      <SEOHead />
+      <SEOHead
+        title="Support & Help | FetchTheChange"
+        description="Get help with FetchTheChange. Browse frequently asked questions about website monitoring, troubleshooting, and billing, or contact our support team."
+        path="/support"
+        ogDescription="Get help with FetchTheChange. Browse FAQs or contact our support team."
+        twitterDescription="Get help with FetchTheChange. Browse FAQs or contact our support team."
+        jsonLd={faqJsonLd}
+      />
       {!isLoading && (user ? <DashboardNav /> : <PublicNav />)}
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20">

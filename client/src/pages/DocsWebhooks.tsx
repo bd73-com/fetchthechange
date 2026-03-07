@@ -1,92 +1,23 @@
-import { useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import PublicNav from "@/components/PublicNav";
 import DashboardNav from "@/components/DashboardNav";
+import SEOHead from "@/components/SEOHead";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Link } from "wouter";
-
-const DOCS_PATH = "/docs/webhooks";
-
-function getCanonicalUrl() {
-  const baseUrl =
-    import.meta.env.VITE_PUBLIC_BASE_URL ||
-    (typeof window !== "undefined"
-      ? window.location.origin
-      : "https://fetch-the-change.replit.app");
-  return `${baseUrl}${DOCS_PATH}`;
-}
-
-function SEOHead() {
-  useEffect(() => {
-    const canonicalUrl = getCanonicalUrl();
-
-    document.title =
-      "Webhook Integration | FetchTheChange Developer Docs";
-
-    const metaTags = [
-      {
-        name: "description",
-        content:
-          "Learn how to receive FetchTheChange change alerts via webhooks. Covers payload format, HMAC signature verification, retries, and testing.",
-      },
-      {
-        property: "og:title",
-        content: "Webhook Integration | FetchTheChange Developer Docs",
-      },
-      {
-        property: "og:description",
-        content:
-          "Learn how to receive FetchTheChange change alerts via webhooks. Covers payload format, HMAC signature verification, retries, and testing.",
-      },
-      { property: "og:type", content: "article" },
-      { property: "og:url", content: canonicalUrl },
-      { name: "twitter:card", content: "summary" },
-      {
-        name: "twitter:title",
-        content: "Webhook Integration | FetchTheChange Developer Docs",
-      },
-      {
-        name: "twitter:description",
-        content:
-          "Learn how to receive FetchTheChange change alerts via webhooks. Covers payload format, HMAC signature verification, retries, and testing.",
-      },
-    ];
-
-    const existingMetas: HTMLMetaElement[] = [];
-    metaTags.forEach((tag) => {
-      const meta = document.createElement("meta");
-      if (tag.name) meta.setAttribute("name", tag.name);
-      if ((tag as any).property)
-        meta.setAttribute("property", (tag as any).property);
-      meta.setAttribute("content", tag.content);
-      document.head.appendChild(meta);
-      existingMetas.push(meta);
-    });
-
-    const canonicalLink = document.createElement("link");
-    canonicalLink.setAttribute("rel", "canonical");
-    canonicalLink.setAttribute("href", canonicalUrl);
-    document.head.appendChild(canonicalLink);
-
-    return () => {
-      existingMetas.forEach((meta) => {
-        meta.remove();
-      });
-      canonicalLink.remove();
-    };
-  }, []);
-
-  return null;
-}
 
 export default function DocsWebhooks() {
   const { user, isLoading } = useAuth();
 
   return (
     <div className="min-h-screen bg-background">
-      <SEOHead />
+      <SEOHead
+        title="Webhook Integration | FetchTheChange Developer Docs"
+        description="Learn how to receive FetchTheChange change alerts via webhooks. Covers payload format, HMAC signature verification, retries, and testing."
+        path="/docs/webhooks"
+        ogType="article"
+      />
       {!isLoading && (user ? <DashboardNav /> : <PublicNav />)}
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20">
