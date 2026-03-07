@@ -20,6 +20,7 @@ import Pricing from "@/pages/Pricing";
 import Support from "@/pages/Support";
 import DocsWebhooks from "@/pages/DocsWebhooks";
 import Privacy from "@/pages/Privacy";
+import Changelog from "@/pages/Changelog";
 import AdminErrors from "@/pages/AdminErrors";
 import AdminCampaigns from "@/pages/AdminCampaigns";
 import AdminCampaignDetail from "@/pages/AdminCampaignDetail";
@@ -80,6 +81,7 @@ function Router() {
       <Route path="/blog/css-selectors-keep-breaking-why-and-how-to-fix" component={BlogSelectorBreakage} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/support" component={Support} />
+      <Route path="/changelog" component={Changelog} />
       <Route path="/docs/webhooks" component={DocsWebhooks} />
       <Route path="/privacy" component={Privacy} />
       <Route path="/extension-auth" component={ExtensionAuth} />
