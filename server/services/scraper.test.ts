@@ -901,6 +901,31 @@ describe("extractValueFromHtml", () => {
     const html = `<html><body><meta class="meta-empty" content="" /></body></html>`;
     expect(extractValueFromHtml(html, ".meta-empty")).toBeNull();
   });
+
+  it("falls back to data-price attribute when text and content are empty", () => {
+    const html = `<html><body><span class="price" data-price="49.99"></span></body></html>`;
+    expect(extractValueFromHtml(html, ".price")).toBe("49.99");
+  });
+
+  it("falls back to value attribute when text, content, and data-price are empty", () => {
+    const html = `<html><body><input class="price" value="29.99" /></body></html>`;
+    expect(extractValueFromHtml(html, ".price")).toBe("29.99");
+  });
+
+  it("falls back to data-value attribute", () => {
+    const html = `<html><body><div class="price" data-value="99.00"></div></body></html>`;
+    expect(extractValueFromHtml(html, ".price")).toBe("99.00");
+  });
+
+  it("prefers text content over data attributes", () => {
+    const html = `<html><body><span class="price" data-price="10.00">$15.00</span></body></html>`;
+    expect(extractValueFromHtml(html, ".price")).toBe("$15.00");
+  });
+
+  it("prefers content attribute over data-price in fallback order", () => {
+    const html = `<html><body><meta class="price" content="20.00" data-price="30.00" /></body></html>`;
+    expect(extractValueFromHtml(html, ".price")).toBe("20.00");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -4274,6 +4299,60 @@ describe("checkMonitor HTTP status handling", () => {
     expect(result.error).toContain("HTTP 404");
   });
 
+  it("respects Retry-After header on 429 response", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("Too Many", { status: 429, headers: { 'Retry-After': '5' } }))
+      .mockResolvedValueOnce(new Response('<html><body><span class="price">$10</span></body></html>', { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    // Need to advance more than 5s for the Retry-After: 5 delay
+    const promise = checkMonitor(monitor);
+    await vi.advanceTimersByTimeAsync(6000);
+    const result = await promise;
+
+    // Should retry (429 is transient)
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$10");
+  });
+
+  it("ignores Retry-After header > 30 seconds", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("Too Many", { status: 429, headers: { 'Retry-After': '60' } }))
+      .mockResolvedValueOnce(new Response('<html><body><span class="price">$5</span></body></html>', { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    // Still retries (429 is transient), just uses default delay instead of 60s
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("ok");
+  });
+
+  it("ignores non-numeric Retry-After header", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("Too Many", { status: 429, headers: { 'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT' } }))
+      .mockResolvedValueOnce(new Response('<html><body><span class="price">$5</span></body></html>', { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("ok");
+  });
+
+  it("ignores Retry-After <= 0", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("Too Many", { status: 429, headers: { 'Retry-After': '0' } }))
+      .mockResolvedValueOnce(new Response('<html><body><span class="price">$5</span></body></html>', { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("ok");
+  });
+
   it("treats retry 200-without-match as selector_missing, not stale HTTP error", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response("<html>Error</html>", { status: 503 }))
@@ -4586,5 +4665,454 @@ describe("stealth evasion", () => {
     const gotoIdx = callOrder.indexOf("goto");
     expect(initIdx).toBeGreaterThanOrEqual(0);
     expect(gotoIdx).toBeGreaterThan(initIdx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Network error retry (fetch throws with no HTML)
+// ---------------------------------------------------------------------------
+describe("network error retry behavior", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    await vi.advanceTimersByTimeAsync(5000);
+    return promise;
+  }
+
+  it("retries fetch when initial attempt throws a network error", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+      .mockResolvedValueOnce(new Response('<html><body><span class="price">$5</span></body></html>', { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    // Should retry once on network error (no HTML received)
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$5");
+  });
+
+  it("does NOT retry when page loaded (200 OK) but selector is missing", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response('<html><body><p>No price here</p></body></html>', { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const result = await runWithTimers(monitor);
+
+    // Only 1 fetch — page loaded fine, retry won't help
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("selector_missing");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Browserless resource blocking
+// ---------------------------------------------------------------------------
+describe("withBrowserlessPage resource blocking", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getMonitorChanges: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+
+  function mockDbUpdate(returnedFailureCount: number, returnedActive = true) {
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+  }
+
+  let capturedRouteHandler: ((route: any) => Promise<void>) | null = null;
+
+  function createPlaywrightMockWithRouteCapture(pageContentHtml: string, selectorCount: number, extractedText: string | null) {
+    const locatorMock = {
+      count: vi.fn().mockResolvedValue(selectorCount),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(extractedText || ""),
+        evaluate: vi.fn().mockResolvedValue(null),
+      }),
+    };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      waitForFunction: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue(pageContentHtml),
+      locator: vi.fn().mockReturnValue(locatorMock),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
+    };
+    const contextMock = {
+      route: vi.fn().mockImplementation((_pattern: string, handler: (route: any) => Promise<void>) => {
+        capturedRouteHandler = handler;
+        return Promise.resolve(undefined);
+      }),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    return { browserMock, contextMock, pageMock, locatorMock };
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "pro" });
+    capturedRouteHandler = null;
+
+    mockConnectOverCDP.mockRejectedValue(new Error("not configured"));
+
+    const cbMock = browserlessCircuitBreaker as unknown as {
+      isAvailable: ReturnType<typeof vi.fn>;
+      recordSuccess: ReturnType<typeof vi.fn>;
+      recordInfraFailure: ReturnType<typeof vi.fn>;
+      getState: ReturnType<typeof vi.fn>;
+    };
+    cbMock.isAvailable.mockReturnValue(true);
+    cbMock.getState.mockReturnValue("closed");
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  it("blocks image resource types via route handler", async () => {
+    const { browserMock } = createPlaywrightMockWithRouteCapture(
+      '<html><body><span class="price">$10</span></body></html>', 1, "$10");
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const emptyHtml = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const promise = checkMonitor(monitor);
+    for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(1000);
+    await promise;
+
+    // Verify route handler was captured
+    expect(capturedRouteHandler).not.toBeNull();
+
+    // Simulate an image request
+    const abortFn = vi.fn();
+    const continueFn = vi.fn();
+    await capturedRouteHandler!({
+      request: () => ({
+        resourceType: () => 'image',
+        url: () => 'https://example.com/photo.jpg',
+        isNavigationRequest: () => false,
+      }),
+      abort: abortFn,
+      continue: continueFn,
+    });
+    expect(abortFn).toHaveBeenCalled();
+    expect(continueFn).not.toHaveBeenCalled();
+  });
+
+  it("blocks tracking domain requests via route handler", async () => {
+    const { browserMock } = createPlaywrightMockWithRouteCapture(
+      '<html><body><span class="price">$10</span></body></html>', 1, "$10");
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const emptyHtml = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const promise = checkMonitor(monitor);
+    for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(1000);
+    await promise;
+
+    expect(capturedRouteHandler).not.toBeNull();
+
+    // Simulate a tracking request
+    const abortFn = vi.fn();
+    const continueFn = vi.fn();
+    await capturedRouteHandler!({
+      request: () => ({
+        resourceType: () => 'script',
+        url: () => 'https://www.google-analytics.com/analytics.js',
+        isNavigationRequest: () => false,
+      }),
+      abort: abortFn,
+      continue: continueFn,
+    });
+    expect(abortFn).toHaveBeenCalled();
+    expect(continueFn).not.toHaveBeenCalled();
+  });
+
+  it("allows normal non-navigation requests through", async () => {
+    const { browserMock } = createPlaywrightMockWithRouteCapture(
+      '<html><body><span class="price">$10</span></body></html>', 1, "$10");
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const emptyHtml = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const promise = checkMonitor(monitor);
+    for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(1000);
+    await promise;
+
+    expect(capturedRouteHandler).not.toBeNull();
+
+    // Simulate a normal XHR request (not navigation, not blocked type)
+    const abortFn = vi.fn();
+    const continueFn = vi.fn();
+    await capturedRouteHandler!({
+      request: () => ({
+        resourceType: () => 'xhr',
+        url: () => 'https://api.example.com/data',
+        isNavigationRequest: () => false,
+      }),
+      abort: abortFn,
+      continue: continueFn,
+    });
+    expect(continueFn).toHaveBeenCalled();
+    expect(abortFn).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Browserless attribute fallback extraction
+// ---------------------------------------------------------------------------
+describe("Browserless attribute fallback extraction", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getMonitorChanges: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+
+  function mockDbUpdate(returnedFailureCount: number, returnedActive = true) {
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "pro" });
+
+    mockConnectOverCDP.mockRejectedValue(new Error("not configured"));
+
+    const cbMock = browserlessCircuitBreaker as unknown as {
+      isAvailable: ReturnType<typeof vi.fn>;
+      recordSuccess: ReturnType<typeof vi.fn>;
+      recordInfraFailure: ReturnType<typeof vi.fn>;
+      getState: ReturnType<typeof vi.fn>;
+    };
+    cbMock.isAvailable.mockReturnValue(true);
+    cbMock.getState.mockReturnValue("closed");
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  it("falls back to element attributes when innerText is empty in Browserless", async () => {
+    const locatorMock = {
+      count: vi.fn().mockResolvedValue(1),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue(""),
+        evaluate: vi.fn().mockResolvedValue("59.99"),
+      }),
+    };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      waitForFunction: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue('<html><body><span class="price" data-price="59.99"></span></body></html>'),
+      locator: vi.fn().mockReturnValue(locatorMock),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Test Page"),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    // Static fetch returns empty selector match to trigger Browserless fallback
+    const emptyHtml = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const promise = checkMonitor(monitor);
+    for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(1000);
+    const result = await promise;
+
+    // Value should come from the evaluate fallback (attribute extraction)
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("59.99");
+    // Verify evaluate was called (attribute fallback path)
+    expect(locatorMock.first().evaluate).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cloudflare challenge wait in Browserless
+// ---------------------------------------------------------------------------
+describe("Cloudflare challenge wait in extractWithBrowserless", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getMonitorChanges: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+
+  function mockDbUpdate(returnedFailureCount: number, returnedActive = true) {
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "pro" });
+
+    mockConnectOverCDP.mockRejectedValue(new Error("not configured"));
+
+    const cbMock = browserlessCircuitBreaker as unknown as {
+      isAvailable: ReturnType<typeof vi.fn>;
+      recordSuccess: ReturnType<typeof vi.fn>;
+      recordInfraFailure: ReturnType<typeof vi.fn>;
+      getState: ReturnType<typeof vi.fn>;
+    };
+    cbMock.isAvailable.mockReturnValue(true);
+    cbMock.getState.mockReturnValue("closed");
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  it("waits for Cloudflare challenge then re-reads content", async () => {
+    const cloudflareHtml = `<html><head><title>Just a moment...</title></head><body><p>Checking your browser before accessing</p></body></html>`;
+    const resolvedHtml = `<html><head><title>Shop</title></head><body><span class="price">$25.00</span></body></html>`;
+
+    let contentCallCount = 0;
+    const locatorMock = {
+      count: vi.fn().mockResolvedValue(1),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue("$25.00"),
+        evaluate: vi.fn().mockResolvedValue(null),
+      }),
+    };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      waitForFunction: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockImplementation(() => {
+        contentCallCount++;
+        // First call returns Cloudflare page, second returns resolved page
+        return Promise.resolve(contentCallCount === 1 ? cloudflareHtml : resolvedHtml);
+      }),
+      locator: vi.fn().mockReturnValue(locatorMock),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Shop"),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const emptyHtml = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const promise = checkMonitor(monitor);
+    for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(1000);
+    const result = await promise;
+
+    // waitForFunction should have been called (Cloudflare wait)
+    expect(pageMock.waitForFunction).toHaveBeenCalled();
+    // content() should have been called at least twice (initial + after CF resolution)
+    expect(contentCallCount).toBeGreaterThanOrEqual(2);
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$25.00");
   });
 });
