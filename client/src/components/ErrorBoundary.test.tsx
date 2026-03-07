@@ -12,12 +12,11 @@ function ThrowingChild({ shouldThrow }: { shouldThrow: boolean }) {
 
 describe("ErrorBoundary", () => {
   // Suppress React error boundary console.error noise in test output
-  const originalError = console.error;
   beforeEach(() => {
-    console.error = vi.fn();
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => {
-    console.error = originalError;
+    vi.restoreAllMocks();
   });
 
   it("renders children when there is no error", () => {

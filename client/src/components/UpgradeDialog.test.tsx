@@ -20,6 +20,8 @@ const mockPlans = {
 };
 
 describe("UpgradeDialog", () => {
+  afterEach(() => {  });
+
   it("renders the trigger button", () => {
     renderWithProviders(<UpgradeDialog currentTier="free" />);
     expect(screen.getByTestId("button-upgrade")).toBeInTheDocument();
@@ -49,8 +51,6 @@ describe("UpgradeDialog", () => {
     });
     expect(screen.getByText("Pro")).toBeInTheDocument();
     expect(screen.getByText("Upgrade to Pro")).toBeInTheDocument();
-
-    vi.restoreAllMocks();
   });
 
   it("shows 'Current Plan' badge when plan matches currentTier", async () => {
@@ -70,7 +70,5 @@ describe("UpgradeDialog", () => {
     });
     const currentPlanElements = screen.getAllByText("Current Plan");
     expect(currentPlanElements.length).toBeGreaterThanOrEqual(1);
-
-    vi.restoreAllMocks();
   });
 });
