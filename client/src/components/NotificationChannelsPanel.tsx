@@ -65,10 +65,16 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
   };
 
   const handleDeleteWebhook = () => {
-    deleteChannel.mutate({ monitorId, channel: "webhook" });
-    setWebhookUrl("");
-    setRevealedSecret(null);
-    setShowSecret(false);
+    deleteChannel.mutate(
+      { monitorId, channel: "webhook" },
+      {
+        onSuccess: () => {
+          setWebhookUrl("");
+          setRevealedSecret(null);
+          setShowSecret(false);
+        },
+      },
+    );
   };
 
   const handleRevealSecret = async () => {
