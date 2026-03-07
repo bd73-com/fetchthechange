@@ -55,12 +55,12 @@ async function injectPicker(tabId: number): Promise<void> {
 
     await chrome.scripting.insertCSS({
       target: { tabId },
-      files: ["content/picker.css"],
+      files: ["picker.css"],
     });
 
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["content/picker.js"],
+      files: ["picker.js"],
     });
   } catch (err) {
     console.error("[FTC] Failed to inject picker:", err);

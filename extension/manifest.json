@@ -6,7 +6,7 @@
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": ["https://ftc.bd73.com/*"],
   "background": {
-    "service_worker": "background/service-worker.js",
+    "service_worker": "service-worker.js",
     "type": "module"
   },
   "action": {
@@ -20,13 +20,13 @@
   "content_scripts": [
     {
       "matches": ["https://ftc.bd73.com/extension-auth*"],
-      "js": ["content/auth-relay.js"],
-      "run_at": "document_start"
+      "js": ["auth-relay.js"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["content/picker.js", "content/picker.css"],
+      "resources": ["picker.js", "picker.css", "popup/popup.js", "popup/popup.css"],
       "matches": ["<all_urls>"]
     }
   ],
