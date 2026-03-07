@@ -20,7 +20,9 @@ const mockPlans = {
 };
 
 describe("UpgradeDialog", () => {
-  afterEach(() => {  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("renders the trigger button", () => {
     renderWithProviders(<UpgradeDialog currentTier="free" />);
