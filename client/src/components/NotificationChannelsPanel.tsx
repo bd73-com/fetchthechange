@@ -16,6 +16,7 @@ import {
 import { useSlackStatus, useSlackChannels, useDisconnectSlack } from "@/hooks/use-slack";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@shared/routes";
+import { getSlackDisplayState } from "./slack-display-state";
 
 interface NotificationChannelsPanelProps {
   monitorId: number;
@@ -206,15 +207,15 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             )}
           </div>
 
-          {isFreeTier ? (
+          {getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "upgrade" ? (
             <p className="text-sm text-muted-foreground">
               Upgrade to Pro or Power to use Slack notifications.
             </p>
-          ) : slackStatus?.available === false ? (
+          ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "not-configured" ? (
             <p className="text-sm text-muted-foreground">
               Slack integration is not configured on this server. Contact your administrator to set up the Slack app.
             </p>
-          ) : !slackStatus?.connected ? (
+          ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "connect" ? (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Connect your Slack workspace to enable notifications.</p>
               <Button
@@ -230,7 +231,7 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Connected to <strong>{slackStatus.teamName}</strong>
+                  Connected to <strong>{slackStatus?.teamName}</strong>
                 </p>
                 <Button
                   variant="ghost"
