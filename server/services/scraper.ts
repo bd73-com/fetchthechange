@@ -90,6 +90,75 @@ function stealthContextOptions() {
   };
 }
 
+/** Attributes to check for values when innerText is empty. */
+const VALUE_ATTRIBUTES = ['content', 'data-price', 'value', 'data-value'] as const;
+
+/** Pattern matching known tracking/analytics domains to block in Browserless sessions. */
+const BLOCKED_TRACKING_PATTERN = /google-analytics|googletagmanager|facebook\.net|doubleclick|hotjar|segment\.io|newrelic|datadoghq/i;
+
+/** Resource types to block in Browserless sessions to speed up page load. */
+const BLOCKED_RESOURCE_TYPES = ['image', 'media', 'font'];
+
+/**
+ * Opens a Browserless page with stealth settings, resource blocking, and SSRF
+ * validation, then passes the ready page to a callback. Handles browser lifecycle
+ * (connection, context, cleanup) so callers only provide page-interaction logic.
+ */
+async function withBrowserlessPage<T>(
+  url: string,
+  callback: (page: any, consentDismissed: boolean) => Promise<T>,
+): Promise<T> {
+  const token = process.env.BROWSERLESS_TOKEN;
+  if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
+
+  await validateUrlBeforeFetch(url);
+
+  let browser;
+  try {
+    const playwrightModule = await import("playwright-core");
+    const chromium = playwrightModule.chromium;
+    if (!chromium || typeof chromium.connectOverCDP !== 'function') {
+      throw new Error("Playwright browser automation is not available");
+    }
+    browser = await chromium.connectOverCDP(
+      `wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`,
+      { timeout: 30000 },
+    );
+
+    const context = await browser.newContext(stealthContextOptions());
+    await context.route('**/*', async (route) => {
+      if (BLOCKED_RESOURCE_TYPES.includes(route.request().resourceType())) {
+        return route.abort();
+      }
+      if (BLOCKED_TRACKING_PATTERN.test(route.request().url())) {
+        return route.abort();
+      }
+      if (!route.request().isNavigationRequest()) return route.continue();
+      try {
+        await validateUrlBeforeFetch(route.request().url());
+        return route.continue();
+      } catch {
+        return route.abort();
+      }
+    });
+    const page = await context.newPage();
+
+    await page.addInitScript(stealthInitScript);
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+
+    const consentDismissed = await tryDismissConsent(page);
+    if (consentDismissed) {
+      await page.waitForTimeout(800);
+      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+    }
+
+    return await callback(page, consentDismissed);
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
 /** Stealth init script injected into browser pages before navigation to evade bot detection. */
 function stealthInitScript() {
   Object.defineProperty(navigator, 'webdriver', { get: () => false });
@@ -418,13 +487,14 @@ export function extractValueFromHtml(html: string, selector: string): string | n
   const elements = $(effectiveSelector);
   
   if (elements.length > 0) {
-    const rawValue = elements.first().text()
-      || elements.first().attr('content')
-      || elements.first().attr('data-price')
-      || elements.first().attr('value')
-      || elements.first().attr('data-value')
-      || "";
-    return normalizeValue(rawValue) || null;
+    let rawValue = elements.first().text();
+    if (!rawValue) {
+      for (const attr of VALUE_ATTRIBUTES) {
+        rawValue = elements.first().attr(attr) || "";
+        if (rawValue) break;
+      }
+    }
+    return normalizeValue(rawValue || "") || null;
   }
   return null;
 }
@@ -571,113 +641,66 @@ export async function extractWithBrowserless(url: string, selector: string, moni
   blocked: boolean,
   reason?: string
 }> {
-  const token = process.env.BROWSERLESS_TOKEN;
-  if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
-
-  // Validate URL before allowing headless navigation (SSRF gate)
-  await validateUrlBeforeFetch(url);
-
-  let browser;
-  let chromium;
   try {
-    const playwrightModule = await import("playwright-core");
-    chromium = playwrightModule.chromium;
-    if (!chromium || typeof chromium.connectOverCDP !== 'function') {
-      throw new Error("Playwright browser automation is not available");
-    }
-    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`, {
-      timeout: 30000
+    return await withBrowserlessPage(url, async (page) => {
+      const content = await page.content();
+      let block = detectPageBlockReason(content);
+
+      // Wait for Cloudflare JS challenge to auto-resolve (typically 3-8s).
+      // Check title only — avoids expensive full-DOM innerText traversal on each poll tick.
+      if (block.blocked && block.reason && /cloudflare|interstitial|just a moment/i.test(block.reason)) {
+        await page.waitForFunction(
+          () => {
+            const t = document.title?.toLowerCase() ?? '';
+            return !t.includes('just a moment') && !t.includes('checking');
+          },
+          { timeout: 15000 }
+        ).catch(() => {});
+        const resolvedContent = await page.content();
+        block = detectPageBlockReason(resolvedContent);
+      }
+
+      const trimmedSelector = selector.trim();
+      const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
+      const effectiveSelector = isClassName ? `.${trimmedSelector}` : trimmedSelector;
+
+      await page.waitForSelector(effectiveSelector, { timeout: 5000 }).catch(() => {});
+      const count = await page.locator(effectiveSelector).count();
+
+      let value: string | null = null;
+      if (count > 0) {
+        const text = await page.locator(effectiveSelector).first().innerText();
+        value = normalizeValue(text);
+        // Fallback: check common value-bearing attributes if innerText is empty
+        if (!value) {
+          const attrs = VALUE_ATTRIBUTES as readonly string[];
+          const attrValue = await page.locator(effectiveSelector).first().evaluate(
+            (el: Element, attrNames: string[]) => {
+              for (const name of attrNames) {
+                const v = el.getAttribute(name);
+                if (v) return v;
+              }
+              return null;
+            },
+            [...attrs],
+          );
+          if (attrValue) value = normalizeValue(attrValue);
+        }
+      }
+
+      return {
+        value,
+        urlAfter: page.url(),
+        title: await page.title(),
+        selectorCount: count,
+        blocked: block.blocked,
+        reason: block.reason
+      };
     });
-
-    const context = await browser.newContext(stealthContextOptions());
-    // Intercept requests: block heavy resources and enforce SSRF validation
-    await context.route('**/*', async (route) => {
-      const resourceType = route.request().resourceType();
-      if (['image', 'media', 'font'].includes(resourceType)) {
-        return route.abort();
-      }
-      // Block known tracking/analytics domains to speed up page load
-      const reqUrl = route.request().url();
-      if (/google-analytics|googletagmanager|facebook\.net|doubleclick|hotjar|segment\.io|newrelic|datadoghq/i.test(reqUrl)) {
-        return route.abort();
-      }
-      if (!route.request().isNavigationRequest()) return route.continue();
-      try {
-        await validateUrlBeforeFetch(route.request().url());
-        return route.continue();
-      } catch {
-        return route.abort();
-      }
-    });
-    const page = await context.newPage();
-
-    // Stealth evasion: patch automation fingerprints before any page JS runs
-    await page.addInitScript(stealthInitScript);
-
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-
-    const consentDismissed = await tryDismissConsent(page);
-    if (consentDismissed) {
-      await page.waitForTimeout(800);
-      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
-    }
-
-    const content = await page.content();
-    let block = detectPageBlockReason(content);
-
-    // Wait for Cloudflare JS challenge to auto-resolve (typically 3-8s).
-    // Check title only — avoids expensive full-DOM innerText traversal on each poll tick.
-    if (block.blocked && block.reason && /cloudflare|interstitial|just a moment/i.test(block.reason)) {
-      await page.waitForFunction(
-        () => {
-          const t = document.title?.toLowerCase() ?? '';
-          return !t.includes('just a moment') && !t.includes('checking');
-        },
-        { timeout: 15000 }
-      ).catch(() => {});
-      const resolvedContent = await page.content();
-      block = detectPageBlockReason(resolvedContent);
-    }
-
-    const trimmedSelector = selector.trim();
-    const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
-    const effectiveSelector = isClassName ? `.${trimmedSelector}` : trimmedSelector;
-
-    await page.waitForSelector(effectiveSelector, { timeout: 5000 }).catch(() => {});
-    const count = await page.locator(effectiveSelector).count();
-    
-    let value: string | null = null;
-    if (count > 0) {
-      const text = await page.locator(effectiveSelector).first().innerText();
-      value = normalizeValue(text);
-      // Fallback: check common value-bearing attributes if innerText is empty
-      if (!value) {
-        const attrValue = await page.locator(effectiveSelector).first().evaluate((el: Element) => {
-          return el.getAttribute('content')
-            || el.getAttribute('data-price')
-            || el.getAttribute('value')
-            || el.getAttribute('data-value')
-            || null;
-        });
-        if (attrValue) value = normalizeValue(attrValue);
-      }
-    }
-
-    return {
-      value,
-      urlAfter: page.url(),
-      title: await page.title(),
-      selectorCount: count,
-      blocked: block.blocked,
-      reason: block.reason
-    };
   } catch (error) {
     const label = monitorName ? `"${monitorName}" — browser` : "Browser";
     await ErrorLogger.error("scraper", `${label}-based extraction failed — the page may be unreachable or blocking automated access. Check that the URL loads in a normal browser.`, error instanceof Error ? error : null, { url, selector, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
     throw error;
-  } finally {
-    if (browser) await browser.close();
   }
 }
 
@@ -1205,66 +1228,15 @@ function generateStableSelector(node: Element): string | null {
  * Discover selector suggestions for a given page.
  */
 export async function discoverSelectors(
-  url: string, 
-  currentSelector: string, 
+  url: string,
+  currentSelector: string,
   expectedText?: string
 ): Promise<{
   currentSelector: { selector: string; count: number; valid: boolean };
   suggestions: SelectorSuggestion[];
   debug?: { note: string; pageTitle: string; consentClicked: boolean };
 }> {
-  const token = process.env.BROWSERLESS_TOKEN;
-  if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
-
-  // Validate URL before allowing headless navigation (SSRF gate)
-  await validateUrlBeforeFetch(url);
-
-  let browser;
-  let chromium;
-  try {
-    const playwrightModule = await import("playwright-core");
-    chromium = playwrightModule.chromium;
-    if (!chromium || typeof chromium.connectOverCDP !== 'function') {
-      throw new Error("Playwright browser automation is not available. Please try again later.");
-    }
-    browser = await chromium.connectOverCDP(`wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`, {
-      timeout: 30000
-    });
-
-    const context = await browser.newContext(stealthContextOptions());
-    // Intercept requests: block heavy resources and enforce SSRF validation
-    await context.route('**/*', async (route) => {
-      const resourceType = route.request().resourceType();
-      if (['image', 'media', 'font'].includes(resourceType)) {
-        return route.abort();
-      }
-      const reqUrl = route.request().url();
-      if (/google-analytics|googletagmanager|facebook\.net|doubleclick|hotjar|segment\.io|newrelic|datadoghq/i.test(reqUrl)) {
-        return route.abort();
-      }
-      if (!route.request().isNavigationRequest()) return route.continue();
-      try {
-        await validateUrlBeforeFetch(route.request().url());
-        return route.continue();
-      } catch {
-        return route.abort();
-      }
-    });
-    const page = await context.newPage();
-
-    // Stealth evasion: patch automation fingerprints before any page JS runs
-    await page.addInitScript(stealthInitScript);
-
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-
-    // Dismiss consent and wait for content
-    const consentClicked = await tryDismissConsent(page);
-    if (consentClicked) {
-      await page.waitForTimeout(800);
-      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
-    }
-    
+  return withBrowserlessPage(url, async (page, consentClicked) => {
     // Logging
     const pageTitle = await page.title();
     const bodyText = await page.locator('body').innerText({ timeout: 2000 }).catch(() => "");
@@ -1527,7 +1499,5 @@ export async function discoverSelectors(
       currentSelector: { selector: currentSelector, count: currentCount, valid: currentValid },
       suggestions
     };
-  } finally {
-    if (browser) await browser.close();
-  }
+  });
 }

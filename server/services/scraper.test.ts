@@ -4402,7 +4402,7 @@ describe("stealth evasion", () => {
     );
   });
 
-  it("creates browser context with viewport, screen, and Sec-CH-UA headers", async () => {
+  it("creates browser context with viewport, screen, and stealth headers", async () => {
     const emptyHtml = `<html><body><p>No match</p></body></html>`;
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
@@ -4414,14 +4414,13 @@ describe("stealth evasion", () => {
     const monitor = makeMonitor({ selector: ".price" });
     await runWithTimers(monitor);
 
+    // Verify viewport in context (UA headers are now randomized per request)
     expect(browserMock.newContext).toHaveBeenCalledWith(
       expect.objectContaining({
         viewport: { width: 1920, height: 1080 },
         screen: { width: 1920, height: 1080 },
         extraHTTPHeaders: expect.objectContaining({
-          'Sec-CH-UA': expect.stringContaining("Google Chrome"),
           'Sec-CH-UA-Mobile': '?0',
-          'Sec-CH-UA-Platform': '"Windows"',
         }),
       })
     );
