@@ -9,7 +9,7 @@ interface SlackStatus {
   connected: boolean;
   available: boolean;
   teamName?: string;
-  unavailableReason?: "unavailable";
+  unavailableReason?: "tables-not-ready" | "oauth-not-configured";
 }
 
 interface SlackChannel {

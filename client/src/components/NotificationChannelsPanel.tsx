@@ -213,9 +213,13 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             <p className="text-sm text-muted-foreground">
               Upgrade to Pro or Power to use Slack notifications.
             </p>
+          ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "not-ready" ? (
+            <p className="text-sm text-muted-foreground">
+              Slack notifications are temporarily unavailable. Please try again in a moment.
+            </p>
           ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "not-configured" ? (
             <p className="text-sm text-muted-foreground">
-              Slack integration is not configured on this server. Contact your administrator to set up the Slack app.
+              Slack notifications are not available for this service.
             </p>
           ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "connect" ? (
             <div className="space-y-2">
