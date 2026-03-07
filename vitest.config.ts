@@ -15,9 +15,6 @@ export default defineConfig({
     environment: "node",
     include: ["**/*.test.ts", "**/*.test.tsx"],
     exclude: ["node_modules", "dist", ".cache"],
-    environmentMatchGlobs: [
-      ["client/**/*.test.tsx", "jsdom"],
-    ],
     setupFiles: ["./client/src/test/setup.ts"],
   },
 });
