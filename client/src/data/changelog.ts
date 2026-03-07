@@ -8,23 +8,188 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
-    "version": "0.4.0",
+    "version": "1.3.3",
     "date": "2026-03-07",
-    "body": "### Features\n- Chrome extension with point-and-click element picker for creating monitors\n- JWT-based authentication for the Chrome extension (all tiers, 30-day tokens)\n- Smart candidate detection for prices and stock status in element picker\n- CSS selector generation with stable selectors (id/data attributes)\n- Public changelog page with timeline UI and categorized release history\n- GDPR-compliant privacy policy page for Norwegian operator\n- Claude Code slash command for Chrome extension build releases\n\n### Bug Fixes\n- Scraper robustness improvements with better error handling and detection\n- Extension build migrated to esbuild for reliable bundling\n- Environment-aware BASE_URL injection for extension builds"
+    "body": "## What's Changed\n\n* Extract shared SEOHead component from 9 pages (#101) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.2...v1.3.3"
+  },
+  {
+    "version": "1.3.2",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.1...v1.3.2"
+  },
+  {
+    "version": "1.3.1",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: populate changelog with all shipped features (#100) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.0...v1.3.1"
+  },
+  {
+    "version": "1.3.0",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add GDPR-compliant privacy policy page (#98) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.2.3...v1.3.0"
+  },
+  {
+    "version": "1.2.3",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.2.2...v1.2.3"
+  },
+  {
+    "version": "1.2.2",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.2.1...v1.2.2"
+  },
+  {
+    "version": "1.2.1",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.2.0...v1.2.1"
+  },
+  {
+    "version": "1.2.0",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Features\n\n* Add Chrome extension (all tiers) (#93) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.1.8...v1.2.0"
+  },
+  {
+    "version": "1.1.8",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve 4 TypeScript errors in scraper.ts (#95) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.1.7...v1.1.8"
+  },
+  {
+    "version": "1.1.7",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: improve Slack unavailable messaging for end users (#94) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.1.6...v1.1.7"
+  },
+  {
+    "version": "1.1.6",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.1.5...v1.1.6"
+  },
+  {
+    "version": "1.1.5",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: always show Slack section in notification channels panel (#91) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.1.4...v1.1.5"
+  },
+  {
+    "version": "1.1.4",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: remove duplicate tag badges on monitor details page (#90) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.1.3...v1.1.4"
+  },
+  {
+    "version": "1.1.3",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.1.2...v1.1.3"
+  },
+  {
+    "version": "1.1.2",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: Slack integration reliability, security hardening, and UX improvements (#88) @bd73-com\n\n## Security\n\n* fix: Slack integration reliability, security hardening, and UX improvements (#88) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.1.1...v1.1.2"
+  },
+  {
+    "version": "1.1.1",
+    "date": "2026-03-06",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: ensure tags tables exist at startup (#87) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.1.0...v1.1.1"
+  },
+  {
+    "version": "1.1.0",
+    "date": "2026-03-06",
+    "body": "## What's Changed\n\n## Features\n\n* Add monitor organisation with tags (#86) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.0.4...v1.1.0"
+  },
+  {
+    "version": "1.0.4",
+    "date": "2026-03-06",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: improve Slack integration reliability and security (#85) @bd73-com\n\n## Security\n\n* fix: improve Slack integration reliability and security (#85) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.0.3...v1.0.4"
+  },
+  {
+    "version": "1.0.3",
+    "date": "2026-03-06",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: standardize date/time formats across app (#84) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.0.2...v1.0.3"
+  },
+  {
+    "version": "1.0.2",
+    "date": "2026-03-06",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.0.1...v1.0.2"
+  },
+  {
+    "version": "1.0.1",
+    "date": "2026-03-06",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: auto-create notification channel tables on startup (#82) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.0.0...v1.0.1"
+  },
+  {
+    "version": "1.0.0",
+    "date": "2026-03-06",
+    "body": "## What's Changed\n\n## Breaking Changes\n\n* Remove API Docs link from public navigation (#81) @bd73-com\n\n## Maintenance\n\n* Remove API Docs link from public navigation (#81) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.5.3...v1.0.0"
+  },
+  {
+    "version": "0.5.3",
+    "date": "2026-03-06",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.5.2...v0.5.3"
+  },
+  {
+    "version": "0.5.2",
+    "date": "2026-03-06",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: add stealth evasion to bypass bot detection (#79) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.5.1...v0.5.2"
+  },
+  {
+    "version": "0.5.1",
+    "date": "2026-03-06",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: ensure api_keys table exists at startup (#78) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.5.0...v0.5.1"
+  },
+  {
+    "version": "0.5.0",
+    "date": "2026-03-05",
+    "body": "## What's Changed\n\n## Features\n\n* Add public REST API with API key management (Phase 3) (#77) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.4.0...v0.5.0"
+  },
+  {
+    "version": "0.4.0",
+    "date": "2026-03-05",
+    "body": "## What's Changed\n\n## Features\n\n* feat: improve scraper resilience when Browserless is unavailable (#76) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.3.1...v0.4.0"
+  },
+  {
+    "version": "0.3.1",
+    "date": "2026-03-05",
+    "body": "## What's Changed\n\n## Maintenance\n\n* docs: catch up documentation to Phase 1 (notification preferences) and Phase 2 (webhooks + Slack) (#75) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.3.0...v0.3.1"
   },
   {
     "version": "0.3.0",
-    "date": "2026-03-06",
-    "body": "### Features\n- Monitor organization with color-coded tags and labels\n- Tag-based filtering on the dashboard\n- Bulk tagging capabilities for monitors"
+    "date": "2026-03-05",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add webhook and Slack notification channels (#74) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.2.7...v0.3.0"
+  },
+  {
+    "version": "0.2.7",
+    "date": "2026-03-04",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: classify HTTP status codes in monitor fetching (#73) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.2.6...v0.2.7"
+  },
+  {
+    "version": "0.2.6",
+    "date": "2026-03-04",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: improve monitor error handling and classification (#72) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.2.5...v0.2.6"
+  },
+  {
+    "version": "0.2.5",
+    "date": "2026-03-04",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: guard notification API routes against missing tables (#71) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.2.4...v0.2.5"
+  },
+  {
+    "version": "0.2.4",
+    "date": "2026-03-04",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: skip notification cron when tables are not migrated (#70) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.2.3...v0.2.4"
+  },
+  {
+    "version": "0.2.3",
+    "date": "2026-03-04",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: Add diagnostic context to scheduler error logs (#69) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.2.2...v0.2.3"
+  },
+  {
+    "version": "0.2.2",
+    "date": "2026-03-04",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix release-drafter race condition and add test coverage (#68) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.2.1...v0.2.2"
+  },
+  {
+    "version": "0.2.1",
+    "date": "2026-03-04",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.2.0...v0.2.1"
   },
   {
     "version": "0.2.0",
-    "date": "2026-03-05",
-    "body": "### Features\n- Public REST API with programmatic monitor creation and management\n- API key-based authentication for the REST API\n- Rate limiting per subscription tier for API access\n- Developer page for API key management (Power plan)\n- Webhook notification channel for custom integrations\n- Slack notification channel with formatted messages\n- Per-monitor notification channel preferences\n\n### Bug Fixes\n- Improved scraper resilience when Browserless is unavailable\n- Slack integration reliability improvements"
-  },
-  {
-    "version": "0.1.0",
-    "date": "2026-03-03",
-    "body": "### Features\n- Per-monitor notification preferences with granular control\n- Automated release tracking with release-drafter integration\n- Semantic versioning for releases (major.minor.patch)\n- Self-healing Browserless fallback with graceful degradation to static HTML parsing\n\n### Bug Fixes\n- Event log deduplication and UI improvements\n- Error log sanitization and hardening\n- Stripe webhook signature validation fixes\n- Monitor error classification with HTTP status codes\n\n### Security\n- Security vulnerability patches\n- CSRF exemption for Bearer token routes"
+    "date": "2026-03-04",
+    "body": "## What's Changed\n\n## Breaking Changes\n\n* Remove refunds FAQ and add Support link to dashboard nav (#17) @bd73-com\n\n## Features\n\n* Add automated release tracking (#65) @bd73-com\n* Add per-monitor notification preferences (#64) @bd73-com\n* Add blog post: CSS Selectors Keep Breaking (#62) @bd73-com\n* Add batch delete with undo for admin error logs (#59) @bd73-com\n* Add delete button to EventLog entries (#53) @bd73-com\n* Add project README (#45) @bd73-com\n* Add email campaign system for user communication (#41) @bd73-com\n* Add selector validation, Browserless retry, and auto-heal recovery (#40) @bd73-com\n* Add monitor auto-pause, metrics tracking, and security hardening (#39) @bd73-com\n* Add monitor auto-pause, metrics tracking, and CodeRabbit config (#37) @bd73-com\n* Add monitor auto-pause on consecutive failures and fix EventLog refresh (#34) @bd73-com\n* Add SessionStart hook to auto-install gh CLI in web sessions (#33) @bd73-com\n* Add monitor auto-pause on consecutive failures with metrics tracking (#31) @bd73-com\n* Add monitor robustness: auto-pause, failure tracking, metrics, and jitter (#28) @bd73-com\n* Add email campaign system for user communication (#26) @bd73-com\n* Add SessionStart hook to auto-install gh CLI and dependencies (#25) @bd73-com\n* Add admin User Overview section to Event Log page (#23) @bd73-com\n* Add support page with FAQ accordions and contact form (#16) @bd73-com\n* Add /interview skill for structured feature specification planning (#15) @bd73-com\n* Add test coverage for CSRF middleware, webhook handlers, routes, and schema (#9) @bd73-com\n* Add node_modules to .gitignore (#5) @bd73-com\n* Add comprehensive test suite for scraper service (#1) @bd73-com\n\n## Bug Fixes\n\n* Fix empty Releases section by labeling PRs and adding workflow_dispatch (#66) @bd73-com\n* Fix Stripe webhook signature validation failure (#63) @bd73-com\n* Fix test email and campaign send using stale form data (#60) @bd73-com\n* Fix event log loading after schema migration (#57) @bd73-com\n* Fix timeout errors bypassing browserless fallback pipeline (#52) @bd73-com\n* Fix architecture issues: remove duplicate migrations, improve type safety, add tests (#48) @bd73-com\n* Fix /api/auth/user 500 crash from missing campaign columns (#44) @bd73-com\n* Fix review findings: safer type check, ARIA role, static import, deterministic sort (#43) @bd73-com\n* Fix code review findings and add comprehensive test coverage (#38) @bd73-com\n* Fix EventLog refresh button and remove drizzle-kit push from build (#35) @bd73-com\n* Fix deployment crash: add db:push to build step (#32) @bd73-com\n* Fix SSL security warnings by normalizing sslmode in DATABASE_URL (#30) @bd73-com\n* Fix scraper test suite crash from missing db and email mocks (#29) @bd73-com\n* Fix app crash from missing database columns by adding db:push to build (#27) @bd73-com\n* Fix support contact form silently succeeding without sending email (#22) @bd73-com\n* Fix support form 500 when SUPPORT_EMAIL unset (#21) @bd73-com\n* Fix support form email bounce and extract DashboardNav component (#20) @bd73-com\n* Fix all 10 security review findings (SSRF, info disclosure, CORS, session) (#14) @bd73-com\n* Fix review-pr and create-pr agent command implementations (#13) @bd73-com\n* Fix SSRF bypass via redirect following (#6) @bd73-com\n* Fix Stripe webhook signature verification vulnerability (#4) @bd73-com\n* Fix 4 critical security issues and improve test coverage (#2) @bd73-com\n\n## Security\n\n* Security: add missing rate limits, patch deps (#61) @bd73-com\n* Harden error-log endpoints and sanitize scraper errors (#55) @bd73-com\n\n## Maintenance\n\n* Suppress expected console noise in test output (#58) @bd73-com\n* Deduplicate error logs, add notification badge on Event Log (#56) @bd73-com\n* Streamline docs: deduplicate CLAUDE.md, README.md, replit.md (#54) @bd73-com\n* Improve Claude Code session reliability and repo hygiene (#51) @bd73-com\n* Prepare repository for public visibility with AGPL-3.0 license (#50) @bd73-com\n* Change license from MIT to AGPL-3.0 (#49) @bd73-com\n* Increase free tier from 1 to 3 monitors (#47) @bd73-com\n* Increase free tier monitor limit from 1 to 3 (#46) @bd73-com\n* Rename db:push to schema:push to prevent Replit auto-migration (#36) @bd73-com\n* Improve monitor error messages with names and fix suggestions (#24) @bd73-com\n* Show dashboard nav on Support page for authenticated users (#19) @bd73-com\n* Make PublicNav auth-aware to prevent sign-out appearance (#18) @bd73-com\n* Update /review-pr to include CodeRabbit feedback step (#12) @bd73-com\n* Validate Stripe metadata.tier against known tiers at runtime (#11) @bd73-com\n* Extract determineTierFromProduct and require merge confirmation in review-pr (#10) @bd73-com\n* Claude/list project agents rpk ps (#8) @bd73-com\n* Reduce false-positive blocked detections and fix diagnostic headers (#3) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/commits/v0.2.0"
   }
 ];

@@ -33,8 +33,17 @@ describe("parseBody", () => {
     ]);
   });
 
-  it("ignores ## headings (only matches ###)", () => {
-    const body = "## What's Changed\n- Some item\n### Features\n- Real item";
+  it("parses ## headings from real GitHub releases", () => {
+    const body = "## What's Changed\n\n## Features\n\n* Add changelog page by @user in #100\n\n**Full Changelog**: https://github.com/org/repo/compare/v1.0.0...v1.1.0";
+    const sections = parseBody(body);
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0].heading).toBe("Features");
+    expect(sections[0].items).toEqual(["Add changelog page by @user in #100"]);
+  });
+
+  it("skips the 'What's Changed' meta-heading", () => {
+    const body = "## What's Changed\n- Some item\n## Features\n- Real item";
     const sections = parseBody(body);
 
     expect(sections).toHaveLength(1);
@@ -87,6 +96,15 @@ describe("parseBody", () => {
     expect(sections).toHaveLength(2);
     expect(sections[0]).toEqual({ heading: "Features", items: [] });
     expect(sections[1]).toEqual({ heading: "Bug Fixes", items: ["A fix"] });
+  });
+
+  it("handles mixed ## and ### headings", () => {
+    const body = "## Features\n- Item A\n### Bug Fixes\n- Item B";
+    const sections = parseBody(body);
+
+    expect(sections).toHaveLength(2);
+    expect(sections[0]).toEqual({ heading: "Features", items: ["Item A"] });
+    expect(sections[1]).toEqual({ heading: "Bug Fixes", items: ["Item B"] });
   });
 
   it("does not match **bold** lines as bullet items", () => {
