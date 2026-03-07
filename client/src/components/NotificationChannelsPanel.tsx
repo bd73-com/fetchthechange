@@ -178,8 +178,7 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
           )}
         </div>
 
-        {/* Slack Channel — hidden entirely when server-side Slack is not configured */}
-        {(isFreeTier || isSlackStatusLoading || slackStatus?.available !== false) && (
+        {/* Slack Channel */}
         <div className="p-4 border rounded-lg space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -210,6 +209,10 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
           {isFreeTier ? (
             <p className="text-sm text-muted-foreground">
               Upgrade to Pro or Power to use Slack notifications.
+            </p>
+          ) : slackStatus?.available === false ? (
+            <p className="text-sm text-muted-foreground">
+              Slack integration is not configured on this server. Contact your administrator to set up the Slack app.
             </p>
           ) : !slackStatus?.connected ? (
             <div className="space-y-2">
@@ -261,7 +264,6 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             </div>
           )}
         </div>
-        )}
       </CardContent>
     </Card>
   );
