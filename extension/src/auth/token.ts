@@ -7,7 +7,8 @@ export async function getToken(): Promise<string | null> {
 
   if (!token || !expiry) return null;
 
-  if (new Date(expiry).getTime() < Date.now()) {
+  const expiryMs = new Date(expiry).getTime();
+  if (!Number.isFinite(expiryMs) || expiryMs < Date.now()) {
     await clearToken();
     return null;
   }

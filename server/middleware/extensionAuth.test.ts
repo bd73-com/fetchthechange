@@ -33,6 +33,7 @@ describe("extensionAuth middleware", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 

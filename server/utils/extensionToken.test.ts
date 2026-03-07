@@ -9,6 +9,7 @@ describe("extensionToken", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 

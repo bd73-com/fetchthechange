@@ -25,7 +25,7 @@ export default function ExtensionAuth() {
         const data = await res.json();
         window.postMessage(
           { type: "FTC_EXTENSION_TOKEN", token: data.token, expiresAt: data.expiresAt },
-          window.location.origin
+          window.location.origin,
         );
         setTokenSent(true);
         setTimeout(() => {
@@ -50,7 +50,7 @@ export default function ExtensionAuth() {
       <div className="w-full max-w-sm text-center space-y-6 px-4">
         <div className="space-y-2">
           <div className="flex items-center justify-center gap-2 mb-4">
-            <Chrome className="h-8 w-8 text-indigo-400" />
+            <Chrome className="h-8 w-8 text-primary" />
             <h1 className="text-2xl font-bold text-foreground">FetchTheChange</h1>
           </div>
           <p className="text-muted-foreground">Connect your browser extension</p>
@@ -58,7 +58,7 @@ export default function ExtensionAuth() {
 
         {tokenSent ? (
           <div className="space-y-3">
-            <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto" />
+            <CheckCircle2 className="h-12 w-12 text-emerald-500 dark:text-emerald-400 mx-auto" />
             <p className="text-foreground font-medium">Connected!</p>
             <p className="text-sm text-muted-foreground">You can close this tab.</p>
           </div>

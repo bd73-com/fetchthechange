@@ -208,7 +208,8 @@ describe("extension routes", () => {
       });
 
       expect(res.status).toBe(404);
-      expect(res.body.error).toBe("User not found");
+      expect(res.body.message).toBe("User not found");
+      expect(res.body.code).toBe("USER_NOT_FOUND");
     });
 
     it("returns 401 without token", async () => {

@@ -1,4 +1,4 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 function base64urlEncode(data: string | Buffer): string {
   const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
@@ -59,12 +59,7 @@ export function verify(token: string): { userId: string; tier: string } | null {
     const actual = base64urlDecode(sig);
 
     if (expected.length !== actual.length) return null;
-    // Constant-time comparison
-    let diff = 0;
-    for (let i = 0; i < expected.length; i++) {
-      diff |= expected[i] ^ actual[i];
-    }
-    if (diff !== 0) return null;
+    if (!timingSafeEqual(expected, actual)) return null;
 
     // Decode payload
     const decoded = JSON.parse(base64urlDecode(payload).toString("utf8"));

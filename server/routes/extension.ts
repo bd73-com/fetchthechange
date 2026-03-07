@@ -45,7 +45,7 @@ router.get("/verify", extensionAuth, async (req: any, res) => {
     const { id: userId, tier } = req.extensionUser!;
     const user = await authStorage.getUser(userId);
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({ message: "User not found", code: "USER_NOT_FOUND" });
     }
     res.json({ userId, tier: user.tier || tier, email: user.email || "" });
   } catch (error: any) {
