@@ -7,6 +7,8 @@ import { Separator } from "@/components/ui/separator";
 import { Zap } from "lucide-react";
 
 const PRIVACY_PATH = "/privacy";
+const SUPPORT_EMAIL =
+  import.meta.env.VITE_SUPPORT_EMAIL || "ftc@bd73.com";
 
 function getCanonicalUrl() {
   const baseUrl =
@@ -113,7 +115,7 @@ export default function Privacy() {
             </p>
             <p className="text-muted-foreground mt-3">
               Contact for privacy matters:{" "}
-              <strong className="text-foreground">privacy@ftc.bd73.com</strong>
+              <strong className="text-foreground">{SUPPORT_EMAIL}</strong>
             </p>
           </section>
 
@@ -348,7 +350,7 @@ export default function Privacy() {
             </ul>
             <p className="text-muted-foreground mt-4">
               To exercise any of these rights, email{" "}
-              <strong className="text-foreground">privacy@ftc.bd73.com</strong>.
+              <strong className="text-foreground">{SUPPORT_EMAIL}</strong>.
               We will respond within 30 days. You also have the right to lodge a
               complaint with the Norwegian supervisory authority:
             </p>
@@ -380,7 +382,7 @@ export default function Privacy() {
               encryption in transit, hashed credentials, HMAC-signed webhook
               payloads, and access controls. No system is perfectly secure; if you
               discover a vulnerability, please contact us at{" "}
-              <strong className="text-foreground">privacy@ftc.bd73.com</strong>.
+              <strong className="text-foreground">{SUPPORT_EMAIL}</strong>.
             </p>
           </section>
 
@@ -410,7 +412,7 @@ export default function Privacy() {
             </p>
             <p className="text-muted-foreground mt-2">
               Email:{" "}
-              <strong className="text-foreground">privacy@ftc.bd73.com</strong>
+              <strong className="text-foreground">{SUPPORT_EMAIL}</strong>
             </p>
           </section>
         </div>
