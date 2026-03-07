@@ -71,7 +71,7 @@ export class DatabaseStorage implements IStorage {
     return monitor;
   }
 
-  async updateMonitor(id: number, updates: Partial<InsertMonitor>): Promise<Monitor> {
+  async updateMonitor(id: number, updates: Partial<typeof monitors.$inferInsert>): Promise<Monitor> {
     const [updated] = await db.update(monitors).set(updates).where(eq(monitors.id, id)).returning();
     return updated;
   }
