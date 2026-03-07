@@ -44,7 +44,7 @@ export default function DashboardNav() {
             <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
               <Link href="/dashboard">
                 <LayoutDashboard className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Dashboard</span>
+                <span className="sr-only sm:not-sr-only">Dashboard</span>
               </Link>
             </Button>
           )}
