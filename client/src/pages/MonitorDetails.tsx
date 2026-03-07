@@ -350,24 +350,18 @@ export default function MonitorDetails() {
                   </div>
                   <div className="space-y-1 sm:col-span-2">
                     <span className="text-sm text-muted-foreground">Tags</span>
-                    <div className="flex flex-wrap gap-1 items-center">
-                      {(monitor as any).tags?.map((tag: { id: number; name: string; colour: string }) => (
-                        <TagBadge
-                          key={tag.id}
-                          tag={tag}
-                          onRemove={() => {
-                            const currentIds = ((monitor as any).tags || []).map((t: any) => t.id);
-                            setMonitorTags({ monitorId: monitor.id, tagIds: currentIds.filter((tid: number) => tid !== tag.id) });
-                          }}
-                        />
-                      ))}
-                    </div>
-                    {!isFreeTier && (
+                    {!isFreeTier ? (
                       <TagPicker
                         selectedTagIds={((monitor as any).tags || []).map((t: any) => t.id)}
                         onChange={(ids) => setMonitorTags({ monitorId: monitor.id, tagIds: ids })}
                         maxTags={tagAssignLimit === Infinity ? undefined : tagAssignLimit}
                       />
+                    ) : (
+                      <div className="flex flex-wrap gap-1 items-center">
+                        {(monitor as any).tags?.map((tag: { id: number; name: string; colour: string }) => (
+                          <TagBadge key={tag.id} tag={tag} />
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>

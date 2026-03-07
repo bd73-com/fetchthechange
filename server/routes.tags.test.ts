@@ -701,6 +701,26 @@ describe("GET /api/monitors/:id (with tags)", () => {
     expect(res._json.tags).toHaveLength(1);
   });
 
+  it("returns each tag exactly once (no duplicates)", async () => {
+    const monitor = {
+      id: 1,
+      userId: "user1",
+      name: "Site A",
+      tags: [
+        { id: 10, name: "Work", colour: "#ef4444" },
+        { id: 20, name: "Personal", colour: "#3b82f6" },
+      ],
+    };
+    mockGetMonitorWithTags.mockResolvedValueOnce(monitor);
+
+    const res = await callHandler("get", "/api/monitors/:id", makeReq());
+    expect(res._status).toBe(200);
+    const tagIds = res._json.tags.map((t: any) => t.id);
+    const uniqueIds = [...new Set(tagIds)];
+    expect(tagIds).toEqual(uniqueIds);
+    expect(tagIds).toHaveLength(2);
+  });
+
   it("returns 404 when monitor not found", async () => {
     mockGetMonitorWithTags.mockResolvedValueOnce(undefined);
 
@@ -713,5 +733,38 @@ describe("GET /api/monitors/:id (with tags)", () => {
 
     const res = await callHandler("get", "/api/monitors/:id", makeReq("user1"));
     expect(res._status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: GET /api/monitors (no duplicate tags in list response)
+// ---------------------------------------------------------------------------
+describe("GET /api/monitors (tag uniqueness)", () => {
+  beforeEach(async () => {
+    await ensureRoutes();
+    resetMocks();
+  });
+
+  it("each monitor's tags array contains no duplicate tag IDs", async () => {
+    const monitorsData = [
+      {
+        id: 1,
+        userId: "user1",
+        name: "Site A",
+        tags: [
+          { id: 10, name: "Work", colour: "#ef4444" },
+          { id: 20, name: "Personal", colour: "#3b82f6" },
+        ],
+      },
+      { id: 2, userId: "user1", name: "Site B", tags: [{ id: 10, name: "Work", colour: "#ef4444" }] },
+    ];
+    mockGetMonitorsWithTags.mockResolvedValueOnce(monitorsData);
+
+    const res = await callHandler("get", "/api/monitors", makeReq());
+    expect(res._status).toBe(200);
+    for (const monitor of res._json) {
+      const tagIds = monitor.tags.map((t: any) => t.id);
+      expect(tagIds).toEqual([...new Set(tagIds)]);
+    }
   });
 });
