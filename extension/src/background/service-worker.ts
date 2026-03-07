@@ -1,4 +1,4 @@
-import { MSG } from "../shared/constants";
+import { BASE_URL, MSG } from "../shared/constants";
 import { setToken } from "../auth/token";
 
 // Listen for messages from popup and content scripts
@@ -21,7 +21,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (senderUrl) {
       try {
         const parsed = new URL(senderUrl);
-        if (parsed.origin !== "https://ftc.bd73.com" || !parsed.pathname.startsWith("/extension-auth")) {
+        const expectedOrigin = new URL(BASE_URL).origin;
+        if (parsed.origin !== expectedOrigin || !parsed.pathname.startsWith("/extension-auth")) {
           sendResponse({ ok: false, error: "unexpected origin" });
           return false;
         }

@@ -75,8 +75,16 @@ async function main() {
   copyFile("src/content/picker.css", "picker.css");
   copyFile("src/popup/popup.css", "popup/popup.css");
   copyFile("src/popup/index.html", "popup/index.html");
-  copyFile("manifest.json", "manifest.json");
   copyDir("icons", "icons");
+
+  // Copy manifest.json and replace production URLs if BASE_URL is overridden
+  const defaultUrl = "https://ftc.bd73.com";
+  const manifestSrc = fs.readFileSync(path.join(root, "manifest.json"), "utf8");
+  const manifestOut =
+    baseUrl !== defaultUrl
+      ? manifestSrc.replaceAll(defaultUrl, new URL(baseUrl).origin)
+      : manifestSrc;
+  fs.writeFileSync(path.join(buildDir, "manifest.json"), manifestOut);
 
   console.log(`Build complete. BASE_URL=${baseUrl}`);
 }

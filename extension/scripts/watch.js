@@ -41,8 +41,16 @@ async function main() {
   copyFile("src/content/picker.css", "picker.css");
   copyFile("src/popup/popup.css", "popup/popup.css");
   copyFile("src/popup/index.html", "popup/index.html");
-  copyFile("manifest.json", "manifest.json");
   copyDir("icons", "icons");
+
+  // Copy manifest.json with URL replacement for dev builds
+  const defaultUrl = "https://ftc.bd73.com";
+  const manifestSrc = fs.readFileSync(path.join(root, "manifest.json"), "utf8");
+  const manifestOut =
+    baseUrl !== defaultUrl
+      ? manifestSrc.replaceAll(defaultUrl, new URL(baseUrl).origin)
+      : manifestSrc;
+  fs.writeFileSync(path.join(buildDir, "manifest.json"), manifestOut);
 
   const contexts = [];
 
@@ -71,11 +79,43 @@ async function main() {
     contexts.push(ctx);
   }
 
+  // Watch static assets for changes and re-copy on modification
+  const staticAssets = [
+    { src: "src/content/picker.css", dest: "picker.css" },
+    { src: "src/popup/popup.css", dest: "popup/popup.css" },
+    { src: "src/popup/index.html", dest: "popup/index.html" },
+    { src: "manifest.json", dest: "manifest.json" },
+  ];
+  const assetWatchers = [];
+  for (const asset of staticAssets) {
+    const srcPath = path.join(root, asset.src);
+    const watcher = fs.watch(srcPath, () => {
+      try {
+        if (asset.src === "manifest.json") {
+          const defaultUrl = "https://ftc.bd73.com";
+          const content = fs.readFileSync(srcPath, "utf8");
+          const out =
+            baseUrl !== defaultUrl
+              ? content.replaceAll(defaultUrl, new URL(baseUrl).origin)
+              : content;
+          fs.writeFileSync(path.join(buildDir, asset.dest), out);
+        } else {
+          copyFile(asset.src, asset.dest);
+        }
+        console.log(`Copied ${asset.src}`);
+      } catch (err) {
+        console.error(`Failed to copy ${asset.src}:`, err.message);
+      }
+    });
+    assetWatchers.push(watcher);
+  }
+
   console.log(`Watching for changes... BASE_URL=${baseUrl}`);
 
   // Graceful shutdown on Ctrl+C
   process.on("SIGINT", async () => {
     console.log("\nStopping watchers...");
+    assetWatchers.forEach((w) => w.close());
     await Promise.all(contexts.map((ctx) => ctx.dispose()));
     process.exit(0);
   });

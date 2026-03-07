@@ -21,7 +21,7 @@
     {
       "matches": ["https://ftc.bd73.com/extension-auth*"],
       "js": ["auth-relay.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
