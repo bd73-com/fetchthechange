@@ -8,71 +8,23 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
-    version: "0.4.0",
-    date: "2026-03-07",
-    body: [
-      "### Features",
-      "- Chrome extension with point-and-click element picker for creating monitors",
-      "- JWT-based authentication for the Chrome extension (all tiers, 30-day tokens)",
-      "- Smart candidate detection for prices and stock status in element picker",
-      "- CSS selector generation with stable selectors (id/data attributes)",
-      "- Public changelog page with timeline UI and categorized release history",
-      "- GDPR-compliant privacy policy page for Norwegian operator",
-      "- Claude Code slash command for Chrome extension build releases",
-      "",
-      "### Bug Fixes",
-      "- Scraper robustness improvements with better error handling and detection",
-      "- Extension build migrated to esbuild for reliable bundling",
-      "- Environment-aware BASE_URL injection for extension builds",
-    ].join("\n"),
+    "version": "0.4.0",
+    "date": "2026-03-07",
+    "body": "### Features\n- Chrome extension with point-and-click element picker for creating monitors\n- JWT-based authentication for the Chrome extension (all tiers, 30-day tokens)\n- Smart candidate detection for prices and stock status in element picker\n- CSS selector generation with stable selectors (id/data attributes)\n- Public changelog page with timeline UI and categorized release history\n- GDPR-compliant privacy policy page for Norwegian operator\n- Claude Code slash command for Chrome extension build releases\n\n### Bug Fixes\n- Scraper robustness improvements with better error handling and detection\n- Extension build migrated to esbuild for reliable bundling\n- Environment-aware BASE_URL injection for extension builds"
   },
   {
-    version: "0.3.0",
-    date: "2026-03-06",
-    body: [
-      "### Features",
-      "- Monitor organization with color-coded tags and labels",
-      "- Tag-based filtering on the dashboard",
-      "- Bulk tagging capabilities for monitors",
-    ].join("\n"),
+    "version": "0.3.0",
+    "date": "2026-03-06",
+    "body": "### Features\n- Monitor organization with color-coded tags and labels\n- Tag-based filtering on the dashboard\n- Bulk tagging capabilities for monitors"
   },
   {
-    version: "0.2.0",
-    date: "2026-03-05",
-    body: [
-      "### Features",
-      "- Public REST API with programmatic monitor creation and management",
-      "- API key-based authentication for the REST API",
-      "- Rate limiting per subscription tier for API access",
-      "- Developer page for API key management (Power plan)",
-      "- Webhook notification channel for custom integrations",
-      "- Slack notification channel with formatted messages",
-      "- Per-monitor notification channel preferences",
-      "",
-      "### Bug Fixes",
-      "- Improved scraper resilience when Browserless is unavailable",
-      "- Slack integration reliability improvements",
-    ].join("\n"),
+    "version": "0.2.0",
+    "date": "2026-03-05",
+    "body": "### Features\n- Public REST API with programmatic monitor creation and management\n- API key-based authentication for the REST API\n- Rate limiting per subscription tier for API access\n- Developer page for API key management (Power plan)\n- Webhook notification channel for custom integrations\n- Slack notification channel with formatted messages\n- Per-monitor notification channel preferences\n\n### Bug Fixes\n- Improved scraper resilience when Browserless is unavailable\n- Slack integration reliability improvements"
   },
   {
-    version: "0.1.0",
-    date: "2026-03-03",
-    body: [
-      "### Features",
-      "- Per-monitor notification preferences with granular control",
-      "- Automated release tracking with release-drafter integration",
-      "- Semantic versioning for releases (major.minor.patch)",
-      "- Self-healing Browserless fallback with graceful degradation to static HTML parsing",
-      "",
-      "### Bug Fixes",
-      "- Event log deduplication and UI improvements",
-      "- Error log sanitization and hardening",
-      "- Stripe webhook signature validation fixes",
-      "- Monitor error classification with HTTP status codes",
-      "",
-      "### Security",
-      "- Security vulnerability patches",
-      "- CSRF exemption for Bearer token routes",
-    ].join("\n"),
-  },
+    "version": "0.1.0",
+    "date": "2026-03-03",
+    "body": "### Features\n- Per-monitor notification preferences with granular control\n- Automated release tracking with release-drafter integration\n- Semantic versioning for releases (major.minor.patch)\n- Self-healing Browserless fallback with graceful degradation to static HTML parsing\n\n### Bug Fixes\n- Event log deduplication and UI improvements\n- Error log sanitization and hardening\n- Stripe webhook signature validation fixes\n- Monitor error classification with HTTP status codes\n\n### Security\n- Security vulnerability patches\n- CSRF exemption for Bearer token routes"
+  }
 ];

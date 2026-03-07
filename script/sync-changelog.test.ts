@@ -235,7 +235,7 @@ describe("sync-changelog", () => {
     });
   });
 
-  it("writes empty array when no releases exist", async () => {
+  it("writes seed entries when no releases exist", async () => {
     mockFetch([]);
 
     await import("./sync-changelog.ts");
@@ -245,6 +245,9 @@ describe("sync-changelog", () => {
     });
 
     const written = vi.mocked(writeFileSync).mock.calls[0][1] as string;
-    expect(written).toContain("export const changelog: ChangelogEntry[] = [];");
+    // Seed entries should be included even when no GitHub releases exist
+    expect(written).toContain("export const changelog: ChangelogEntry[]");
+    expect(written).toContain("0.4.0");
+    expect(written).toContain("0.1.0");
   });
 });
