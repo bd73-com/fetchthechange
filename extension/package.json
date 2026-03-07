@@ -3,12 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "tsc && node scripts/copy-assets.js",
-    "watch": "tsc --watch",
-    "package": "npm run build && node scripts/package.js"
+    "build": "node scripts/build.js",
+    "build:dev": "cross-env BASE_URL=http://localhost:5000 node scripts/build.js",
+    "watch": "node scripts/watch.js",
+    "watch:dev": "cross-env BASE_URL=http://localhost:5000 node scripts/watch.js",
+    "typecheck": "tsc --noEmit",
+    "package": "cross-env NODE_ENV=production node scripts/build.js && node scripts/package.js"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",
+    "cross-env": "^7.0.3",
+    "esbuild": "^0.25.12",
     "typescript": "^5.5.0"
   }
 }
