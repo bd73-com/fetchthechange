@@ -12,7 +12,7 @@ import type { Request, Response, NextFunction } from 'express';
  * signature verification).
  */
 const EXEMPT_PATHS = new Set(['/api/stripe/webhook', '/api/webhooks/resend', '/api/v1/openapi.json', '/api/v1/ping']);
-const EXEMPT_PREFIXES = ['/api/campaigns/unsubscribe/', '/api/campaigns/resubscribe/', '/api/v1/'];
+const EXEMPT_PREFIXES = ['/api/campaigns/unsubscribe/', '/api/campaigns/resubscribe/', '/api/v1/', '/api/extension/'];
 const STATE_CHANGING_METHODS = new Set(['POST', 'PATCH', 'DELETE', 'PUT']);
 
 export function csrfProtection(allowedOrigins: string[], isDev: boolean) {

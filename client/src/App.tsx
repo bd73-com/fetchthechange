@@ -22,6 +22,7 @@ import DocsWebhooks from "@/pages/DocsWebhooks";
 import AdminErrors from "@/pages/AdminErrors";
 import AdminCampaigns from "@/pages/AdminCampaigns";
 import AdminCampaignDetail from "@/pages/AdminCampaignDetail";
+import ExtensionAuth from "@/pages/ExtensionAuth";
 
 // Lazy-loaded: only downloaded for authenticated Power-plan users
 const Developer = lazy(() => import("@/pages/Developer"));
@@ -79,6 +80,7 @@ function Router() {
       <Route path="/pricing" component={Pricing} />
       <Route path="/support" component={Support} />
       <Route path="/docs/webhooks" component={DocsWebhooks} />
+      <Route path="/extension-auth" component={ExtensionAuth} />
       <Route path="/developer" component={() => <ProtectedRoute component={Developer} requiredTier="power" />} />
       <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
       <Route path="/admin/campaigns" component={() => <ProtectedRoute component={AdminCampaigns} />} />

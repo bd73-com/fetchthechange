@@ -1,0 +1,14 @@
+{
+  "name": "fetchthechange-extension",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc && node scripts/copy-assets.js",
+    "watch": "tsc --watch",
+    "package": "npm run build && node scripts/package.js"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "typescript": "^5.5.0"
+  }
+}

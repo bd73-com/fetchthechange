@@ -161,6 +161,8 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
+      // Allow chrome-extension:// origins for extension API routes
+      if (origin.startsWith("chrome-extension://")) return callback(null, true);
       if (isDev) {
         try {
           const { hostname, protocol } = new URL(origin);

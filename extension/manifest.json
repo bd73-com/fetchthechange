@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "FetchTheChange",
+  "description": "Track any element on any web page for changes. Get notified when prices drop, stock updates, or content changes.",
+  "version": "1.0.0",
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": ["https://ftc.bd73.com/*"],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://ftc.bd73.com/extension-auth*"],
+      "js": ["content/auth-relay.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["content/picker.js", "content/picker.css"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
