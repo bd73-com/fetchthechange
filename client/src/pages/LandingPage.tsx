@@ -616,6 +616,19 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+{/* Chrome Extension Callout */}
+      <section className="py-12 border-t border-b">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <div className="inline-flex items-center gap-3 bg-secondary/50 rounded-lg px-6 py-4">
+            <MousePointer2 className="h-6 w-6 text-primary flex-shrink-0" />
+            <p className="text-muted-foreground">
+              <span className="font-semibold text-foreground">Available as a Chrome extension</span>
+              {" "}&mdash; add a monitor in one click, no CSS selectors needed.
+            </p>
+          </div>
+        </div>
+      </section>
+
 {/* Final CTA */}
       <section className="py-24 bg-primary text-primary-foreground">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">

@@ -311,6 +311,49 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
+    it("bypasses CSRF for POST /api/extension/monitors (prefix exemption)", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/extension/monitors",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("does NOT exempt /api/extension/token (session-auth endpoint needs CSRF)", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/extension/token",
+        headers: { origin: "chrome-extension://abcdef1234567890" },
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res._status).toBe(403);
+    });
+
+    it("bypasses CSRF for /api/extension/monitors (Bearer-auth endpoint)", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/api/extension/monitors",
+        headers: { origin: "chrome-extension://abcdef1234567890" },
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
     it("does NOT exempt /api/campaigns/ (non-unsubscribe paths)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
