@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTags } from "@/hooks/use-tags";
+import { useAuth } from "@/hooks/use-auth";
 import { TagBadge } from "@/components/TagBadge";
 import { TagManager } from "@/components/TagManager";
 import {
@@ -10,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ChevronsUpDown, Tags } from "lucide-react";
+import { TAG_LIMITS, type UserTier } from "@shared/models/auth";
 
 interface TagPickerProps {
   selectedTagIds: number[];
@@ -21,8 +23,10 @@ interface TagPickerProps {
 export function TagPicker({ selectedTagIds, onChange, maxTags, disabled }: TagPickerProps) {
   const [open, setOpen] = useState(false);
   const { data: allTags = [] } = useTags();
+  const { user } = useAuth();
 
   const selectedTags = allTags.filter(t => selectedTagIds.includes(t.id));
+  const userTier = (user?.tier || "free") as UserTier;
 
   const toggleTag = (tagId: number) => {
     if (selectedTagIds.includes(tagId)) {
@@ -34,6 +38,18 @@ export function TagPicker({ selectedTagIds, onChange, maxTags, disabled }: TagPi
   };
 
   if (allTags.length === 0) {
+    if (TAG_LIMITS[userTier] > 0) {
+      return (
+        <TagManager
+          trigger={
+            <Button variant="outline" size="sm" className="h-8 text-xs" disabled={disabled}>
+              <Tags className="h-3.5 w-3.5 mr-1" />
+              Create tags
+            </Button>
+          }
+        />
+      );
+    }
     return null;
   }
 
