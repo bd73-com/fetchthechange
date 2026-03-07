@@ -6,6 +6,18 @@ const buildDir = path.join(root, "build");
 const DEFAULT_BASE_URL = "https://ftc.bd73.com";
 const baseUrl = process.env.BASE_URL || DEFAULT_BASE_URL;
 
+// Validate BASE_URL is a well-formed http(s) URL to prevent injection via env var
+try {
+  const parsed = new URL(baseUrl);
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`BASE_URL must use http or https, got: ${parsed.protocol}`);
+  }
+} catch (err) {
+  console.error(`Invalid BASE_URL: ${baseUrl}`);
+  console.error(err.message);
+  process.exit(1);
+}
+
 const define = {
   BASE_URL_INJECTED: JSON.stringify(baseUrl),
 };
