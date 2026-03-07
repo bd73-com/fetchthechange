@@ -400,7 +400,7 @@ function renderConfirm(): void {
 }
 
 async function createMonitor(): Promise<void> {
-  if (!selection) return;
+  if (!selection || state === "creating") return;
 
   const nameInput = document.getElementById("monitor-name") as HTMLInputElement;
   const name = nameInput?.value.trim() || "Untitled monitor";
@@ -444,7 +444,7 @@ async function createMonitor(): Promise<void> {
     const data = await res.json().catch(() => null);
 
     if (data?.code === "TIER_LIMIT_REACHED") {
-      errorMessage = `${data.error || "Monitor limit reached."}`;
+      errorMessage = `${data.message || data.error || "Monitor limit reached."}`;
       state = "error";
       render();
       // Add upgrade link after render using DOM API

@@ -32,8 +32,6 @@ import { listChannels as listSlackChannels } from "./services/slackDelivery";
 import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encryption";
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
-import { sign as signExtensionToken, getExpiresAt as getExtensionTokenExpiresAt } from "./utils/extensionToken";
-import { extensionAuth } from "./middleware/extensionAuth";
 import rateLimit from "express-rate-limit";
 import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables } from "./services/ensureTables";
 
@@ -2363,101 +2361,8 @@ export async function registerRoutes(
   // ---------------------------------------------------------------
   // CHROME EXTENSION API ROUTES
   // ---------------------------------------------------------------
-
-  // POST /api/extension/token — issue JWT for the logged-in user (session auth)
-  app.post("/api/extension/token", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const user = await authStorage.getUser(userId);
-      const tier = (user?.tier || "free") as string;
-
-      const token = signExtensionToken(userId, tier);
-      const expiresAt = getExtensionTokenExpiresAt();
-
-      console.log(`[Extension] Token issued for userId=${userId}`);
-      res.json({ token, expiresAt });
-    } catch (error: any) {
-      console.error("[Extension] Failed to issue token:", error);
-      res.status(500).json({ message: "Failed to generate extension token" });
-    }
-  });
-
-  // GET /api/extension/verify — validate stored token from extension
-  app.get("/api/extension/verify", extensionAuth, async (req: any, res) => {
-    try {
-      const { id: userId, tier } = req.extensionUser!;
-      const user = await authStorage.getUser(userId);
-      if (!user) {
-        return res.status(404).json({ error: "User not found" });
-      }
-      res.json({ userId, tier: user.tier || tier, email: user.email || "" });
-    } catch (error: any) {
-      console.error("[Extension] Verify error:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // POST /api/extension/monitors — create monitor from extension
-  app.post("/api/extension/monitors", extensionAuth, createMonitorRateLimiter, async (req: any, res) => {
-    try {
-      const { id: userId, tier: tokenTier } = req.extensionUser!;
-
-      // Fetch fresh user data for tier (may have changed since token was issued)
-      const user = await authStorage.getUser(userId);
-      const tier = (user?.tier || tokenTier || "free") as UserTier;
-
-      // Tier limit check
-      const limit = TIER_LIMITS[tier] ?? TIER_LIMITS.free;
-      const currentCount = await storage.getMonitorCount(userId);
-
-      if (currentCount >= limit) {
-        const limitStr = limit === Infinity ? "unlimited" : String(limit);
-        return res.status(403).json({
-          error: `You've reached your ${tier} plan limit of ${limitStr} monitors. Upgrade to add more.`,
-          code: "TIER_LIMIT_REACHED",
-          upgradeUrl: "https://ftc.bd73.com/pricing",
-        });
-      }
-
-      // Validate input
-      const input = api.monitors.create.input.parse(req.body);
-
-      // SSRF protection
-      const urlError = await isPrivateUrl(input.url);
-      if (urlError) {
-        let hostname = "unknown";
-        try { hostname = new URL(input.url).hostname; } catch {}
-        console.warn(`[Extension] SSRF blocked for userId=${userId}, hostname=${hostname}`);
-        return res.status(400).json({ message: urlError });
-      }
-
-      if (input.selector) {
-        const selectorError = validateCssSelector(input.selector);
-        if (selectorError) {
-          return res.status(400).json({ message: selectorError });
-        }
-      }
-
-      const monitor = await storage.createMonitor({
-        ...input,
-        userId,
-      } as any);
-
-      // Run first check asynchronously
-      checkMonitor(monitor).catch(console.error);
-
-      const hostname = new URL(input.url).hostname;
-      console.log(`[Extension] Monitor created userId=${userId}, monitorId=${monitor.id}, hostname=${hostname}`);
-
-      res.status(201).json(monitor);
-    } catch (error: any) {
-      if (error.name === "ZodError") {
-        return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      }
-      console.error("[Extension] Monitor creation error:", error);
-      res.status(500).json({ message: "Failed to create monitor" });
-    }
-  });
+  const { default: extensionRouter } = await import("./routes/extension");
+  app.use("/api/extension", extensionRouter);
 
   // ---------------------------------------------------------------
   // API KEY MANAGEMENT & PUBLIC REST API v1 ROUTES

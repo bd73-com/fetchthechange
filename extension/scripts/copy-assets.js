@@ -50,4 +50,34 @@ copyDirSync(
   path.join(build, "icons")
 );
 
-console.log("Assets copied to build/");
+// Replace BASE_URL in compiled JS if FTC_BASE_URL env var is set
+const baseUrl = process.env.FTC_BASE_URL;
+if (baseUrl && baseUrl !== "https://ftc.bd73.com") {
+  const defaultUrl = "https://ftc.bd73.com";
+  const jsFiles = [];
+  function findJs(dir) {
+    for (const entry of fs.readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      if (fs.statSync(full).isDirectory()) findJs(full);
+      else if (full.endsWith(".js")) jsFiles.push(full);
+    }
+  }
+  findJs(build);
+  for (const file of jsFiles) {
+    const content = fs.readFileSync(file, "utf8");
+    if (content.includes(defaultUrl)) {
+      fs.writeFileSync(file, content.replaceAll(defaultUrl, baseUrl));
+      console.log(`  Replaced BASE_URL in ${path.relative(build, file)}`);
+    }
+  }
+  // Also update manifest.json content_scripts and host_permissions
+  const manifestPath = path.join(build, "manifest.json");
+  const manifest = fs.readFileSync(manifestPath, "utf8");
+  if (manifest.includes(defaultUrl)) {
+    fs.writeFileSync(manifestPath, manifest.replaceAll(defaultUrl, baseUrl));
+    console.log("  Replaced BASE_URL in manifest.json");
+  }
+  console.log(`Assets copied to build/ (BASE_URL=${baseUrl})`);
+} else {
+  console.log("Assets copied to build/");
+}
