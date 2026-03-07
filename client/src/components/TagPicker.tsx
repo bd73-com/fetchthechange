@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTags } from "@/hooks/use-tags";
+import { useAuth } from "@/hooks/use-auth";
 import { TagBadge } from "@/components/TagBadge";
 import { TagManager } from "@/components/TagManager";
 import {
@@ -10,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ChevronsUpDown, Tags } from "lucide-react";
+import { TAG_LIMITS, type UserTier } from "@shared/models/auth";
 
 interface TagPickerProps {
   selectedTagIds: number[];
@@ -20,9 +22,13 @@ interface TagPickerProps {
 
 export function TagPicker({ selectedTagIds, onChange, maxTags, disabled }: TagPickerProps) {
   const [open, setOpen] = useState(false);
-  const { data: allTags = [] } = useTags();
+  const { data: allTags, isLoading: isTagsLoading } = useTags();
+  const { user } = useAuth();
 
-  const selectedTags = allTags.filter(t => selectedTagIds.includes(t.id));
+  const tags = allTags ?? [];
+  const selectedTags = tags.filter(t => selectedTagIds.includes(t.id));
+  const userTier = (user?.tier || "free") as UserTier;
+  const tagLimit = TAG_LIMITS[userTier] ?? TAG_LIMITS.free;
 
   const toggleTag = (tagId: number) => {
     if (selectedTagIds.includes(tagId)) {
@@ -33,7 +39,19 @@ export function TagPicker({ selectedTagIds, onChange, maxTags, disabled }: TagPi
     }
   };
 
-  if (allTags.length === 0) {
+  if (!isTagsLoading && tags.length === 0) {
+    if (tagLimit > 0) {
+      return (
+        <TagManager
+          trigger={
+            <Button variant="outline" size="sm" className="h-8 text-xs" disabled={disabled}>
+              <Tags className="h-3.5 w-3.5 mr-1" />
+              Create tags
+            </Button>
+          }
+        />
+      );
+    }
     return null;
   }
 
@@ -65,7 +83,7 @@ export function TagPicker({ selectedTagIds, onChange, maxTags, disabled }: TagPi
         </PopoverTrigger>
         <PopoverContent className="w-56 p-2" align="start">
           <div className="space-y-1 max-h-48 overflow-y-auto">
-            {allTags.map((tag) => {
+            {tags.map((tag) => {
               const isSelected = selectedTagIds.includes(tag.id);
               const isDisabled = !isSelected && maxTags !== undefined && selectedTagIds.length >= maxTags;
               return (
