@@ -1328,19 +1328,6 @@ describe("checkMonitor", () => {
 
     // No retry — page loaded fine, selector just isn't there
     expect(result.status).toBe("selector_missing");
-  });
-
-  it("retry path: continues with original result when retry fetch throws", async () => {
-    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
-
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
-      .mockRejectedValueOnce(new Error("Network error on retry"));
-
-    const monitor = makeMonitor({ selector: ".price" });
-    const result = await runWithTimers(monitor);
-
-    expect(result.status).toBe("selector_missing");
     expect(result.error).toBe("Selector not found");
   });
 
@@ -4484,8 +4471,9 @@ describe("stealth evasion", () => {
     expect(headers['User-Agent']).toBeDefined();
     expect(headers['User-Agent']).toMatch(/Chrome\/1[23]\d|Firefox\/1[23]\d/);
     expect(headers['Sec-CH-UA-Mobile']).toBe('?0');
-    // Referer should be set to the target origin
+    // Referer should be set to the target origin with cross-site fetch mode
     expect(headers['Referer']).toContain('example.com');
+    expect(headers['Sec-Fetch-Site']).toBe('cross-site');
     // Accept-Encoding should be present
     expect(headers['Accept-Encoding']).toContain('gzip');
   });

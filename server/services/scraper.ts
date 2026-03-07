@@ -43,21 +43,26 @@ function pickUaProfile() {
 /** Returns browser-like headers with a randomly selected UA profile. */
 function browserLikeHeaders(url: string) {
   const profile = pickUaProfile();
-  const origin = new URL(url).origin;
+  let origin: string | undefined;
+  try { origin = new URL(url).origin; } catch {}
   const headers: Record<string, string> = {
     'User-Agent': profile.userAgent,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
     'Accept-Encoding': 'gzip, deflate, br',
     'Cache-Control': 'no-cache',
-    'Referer': origin + '/',
     'Upgrade-Insecure-Requests': '1',
     'Sec-Fetch-Dest': 'document',
     'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
     'Sec-Fetch-User': '?1',
     'Sec-CH-UA-Mobile': '?0',
   };
+  if (origin) {
+    headers['Referer'] = origin + '/';
+    headers['Sec-Fetch-Site'] = 'cross-site';
+  } else {
+    headers['Sec-Fetch-Site'] = 'none';
+  }
   if (profile.secChUa) {
     headers['Sec-CH-UA'] = profile.secChUa;
     headers['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
@@ -621,10 +626,14 @@ export async function extractWithBrowserless(url: string, selector: string, moni
     const content = await page.content();
     let block = detectPageBlockReason(content);
 
-    // Wait for Cloudflare JS challenge to auto-resolve (typically 3-8s)
+    // Wait for Cloudflare JS challenge to auto-resolve (typically 3-8s).
+    // Check title only — avoids expensive full-DOM innerText traversal on each poll tick.
     if (block.blocked && block.reason && /cloudflare|interstitial|just a moment/i.test(block.reason)) {
       await page.waitForFunction(
-        () => !document.title?.toLowerCase().includes('just a moment') && !document.body?.innerText?.toLowerCase().includes('checking your browser'),
+        () => {
+          const t = document.title?.toLowerCase() ?? '';
+          return !t.includes('just a moment') && !t.includes('checking');
+        },
         { timeout: 15000 }
       ).catch(() => {});
       const resolvedContent = await page.content();
