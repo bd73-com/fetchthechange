@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LayoutDashboard, RefreshCw, Loader2, Sparkles, X, Megaphone } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
+import { TIER_LIMITS, TAG_LIMITS, type UserTier } from "@shared/models/auth";
 import { useState, useEffect } from "react";
 import { useSearch } from "wouter";
 import { useTags } from "@/hooks/use-tags";
@@ -241,6 +241,18 @@ export default function Dashboard() {
             <div className="ml-auto">
               <TagManager />
             </div>
+          </div>
+        )}
+        {userTags.length === 0 && (TAG_LIMITS[userTier] ?? TAG_LIMITS.free) > 0 && monitors && monitors.length > 0 && (
+          <div className="mb-6">
+            <TagManager
+              trigger={
+                <Button variant="outline" size="sm" className="h-8 text-xs">
+                  <Tags className="h-3.5 w-3.5 mr-1" />
+                  Manage Tags
+                </Button>
+              }
+            />
           </div>
         )}
 
