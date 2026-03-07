@@ -16,6 +16,7 @@ import {
 import { useSlackStatus, useSlackChannels, useDisconnectSlack } from "@/hooks/use-slack";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@shared/routes";
+import { getSlackDisplayState } from "./slack-display-state";
 
 interface NotificationChannelsPanelProps {
   monitorId: number;
@@ -178,8 +179,7 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
           )}
         </div>
 
-        {/* Slack Channel — hidden entirely when server-side Slack is not configured */}
-        {(isFreeTier || isSlackStatusLoading || slackStatus?.available !== false) && (
+        {/* Slack Channel */}
         <div className="p-4 border rounded-lg space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -207,11 +207,17 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             )}
           </div>
 
-          {isFreeTier ? (
+          {isSlackStatusLoading && !isFreeTier ? (
+            <p className="text-sm text-muted-foreground">Loading Slack status…</p>
+          ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "upgrade" ? (
             <p className="text-sm text-muted-foreground">
               Upgrade to Pro or Power to use Slack notifications.
             </p>
-          ) : !slackStatus?.connected ? (
+          ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "not-configured" ? (
+            <p className="text-sm text-muted-foreground">
+              Slack integration is not configured on this server. Contact your administrator to set up the Slack app.
+            </p>
+          ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "connect" ? (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Connect your Slack workspace to enable notifications.</p>
               <Button
@@ -227,7 +233,7 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Connected to <strong>{slackStatus.teamName}</strong>
+                  Connected to <strong>{slackStatus?.teamName}</strong>
                 </p>
                 <Button
                   variant="ghost"
@@ -261,7 +267,6 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             </div>
           )}
         </div>
-        )}
       </CardContent>
     </Card>
   );
