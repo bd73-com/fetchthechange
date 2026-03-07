@@ -245,7 +245,6 @@ describe("sync-changelog", () => {
     });
 
     const written = vi.mocked(writeFileSync).mock.calls[0][1] as string;
-    expect(written).toContain("export const changelog: ChangelogEntry[]");
-    expect(written).toContain("[]");
+    expect(written).toContain("export const changelog: ChangelogEntry[] = [];");
   });
 });
