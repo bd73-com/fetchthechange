@@ -2,7 +2,7 @@ name: Sync Changelog
 
 on:
   release:
-    types: [published]
+    types: [published, edited]
   workflow_dispatch:
 
 permissions:
@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-node@v4
         with:
@@ -31,5 +33,5 @@ jobs:
           git add client/src/data/changelog.ts
           git diff --cached --quiet && exit 0
           git commit -m "chore: sync changelog from GitHub releases"
-          git pull --rebase
-          git push
+          git pull --rebase origin main
+          git push origin HEAD:main

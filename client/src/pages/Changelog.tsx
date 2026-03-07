@@ -60,7 +60,9 @@ function SEOHead() {
     elements.push(canonicalLink);
 
     return () => {
-      elements.forEach((el) => el.remove());
+      elements.forEach((el) => {
+        el.remove();
+      });
     };
   }, []);
 
@@ -129,7 +131,7 @@ export default function Changelog() {
                     </div>
                   ) : (
                     <p className="text-muted-foreground text-sm whitespace-pre-wrap">
-                      {entry.body}
+                      {entry.body || "No release notes provided."}
                     </p>
                   )}
                 </li>

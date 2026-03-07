@@ -22,6 +22,7 @@ describe("sync-changelog", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     exitSpy.mockRestore();
     consoleSpy.mockRestore();
     consoleErrorSpy.mockRestore();
