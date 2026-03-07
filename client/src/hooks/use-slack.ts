@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 const SLACK_STATUS_KEY = "slack-status";
 const SLACK_CHANNELS_KEY = "slack-channels";
 
-interface SlackStatus {
+export interface SlackStatus {
   connected: boolean;
   available: boolean;
   teamName?: string;

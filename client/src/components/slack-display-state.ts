@@ -3,13 +3,9 @@
  * Extracted from NotificationChannelsPanel for testability.
  */
 
-export type SlackDisplayState = "upgrade" | "not-configured" | "not-ready" | "connect" | "connected";
+import type { SlackStatus } from "@/hooks/use-slack";
 
-interface SlackStatus {
-  available: boolean;
-  connected: boolean;
-  unavailableReason?: "tables-not-ready" | "oauth-not-configured";
-}
+export type SlackDisplayState = "upgrade" | "not-configured" | "not-ready" | "connect" | "connected";
 
 export function getSlackDisplayState(
   isFreeTier: boolean,
