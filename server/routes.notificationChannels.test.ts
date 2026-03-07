@@ -659,22 +659,22 @@ describe("GET /api/integrations/slack/status", () => {
     expect(res._json).toEqual({ connected: false, available: true });
   });
 
-  it("returns available false with not_configured reason when SLACK_CLIENT_ID is not set", async () => {
+  it("returns available false with generic unavailable reason when SLACK_CLIENT_ID is not set", async () => {
     delete process.env.SLACK_CLIENT_ID;
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "not_configured" });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "unavailable" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 
-  it("returns setup_incomplete reason when both tables and SLACK_CLIENT_ID are missing", async () => {
+  it("returns same generic reason when both tables and SLACK_CLIENT_ID are missing", async () => {
     delete process.env.SLACK_CLIENT_ID;
     mockChannelTablesExist.mockResolvedValueOnce(false);
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "setup_incomplete" });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "unavailable" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 
@@ -687,22 +687,30 @@ describe("GET /api/integrations/slack/status", () => {
     expect(res._json.unavailableReason).toBeUndefined();
   });
 
-  it("returns not_configured when SLACK_CLIENT_ID is empty string", async () => {
+  it("returns unavailable when SLACK_CLIENT_ID is empty string", async () => {
     process.env.SLACK_CLIENT_ID = "";
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "not_configured" });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "unavailable" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 
-  it("returns not_configured when SLACK_CLIENT_SECRET is missing", async () => {
+  it("returns unavailable when SLACK_CLIENT_SECRET is missing", async () => {
     delete process.env.SLACK_CLIENT_SECRET;
 
     const res = await callHandler("get", ENDPOINT, makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "not_configured" });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "unavailable" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when getSlackConnection throws", async () => {
+    mockGetSlackConnection.mockRejectedValueOnce(new Error("db connection failed"));
+
+    const res = await callHandler("get", ENDPOINT, makeReq());
+    expect(res._status).toBe(500);
+    expect(res._json).toEqual({ message: "Internal server error" });
   });
 });
 
@@ -984,10 +992,10 @@ describe("channelTablesExist guards", () => {
     expect(mockGetMonitor).not.toHaveBeenCalled();
   });
 
-  it("GET /api/integrations/slack/status returns unavailable with setup_incomplete reason when channel tables missing", async () => {
+  it("GET /api/integrations/slack/status returns unavailable when channel tables missing", async () => {
     const res = await callHandler("get", "/api/integrations/slack/status", makeReq());
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "setup_incomplete" });
+    expect(res._json).toEqual({ connected: false, available: false, unavailableReason: "unavailable" });
     expect(mockGetSlackConnection).not.toHaveBeenCalled();
   });
 

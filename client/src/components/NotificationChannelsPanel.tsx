@@ -6,8 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mail, Globe, MessageSquare, Eye, EyeOff, ExternalLink, AlertCircle } from "lucide-react";
-import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Mail, Globe, MessageSquare, Eye, EyeOff, ExternalLink } from "lucide-react";
 import {
   useNotificationChannels,
   useUpsertNotificationChannel,
@@ -179,7 +178,8 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
           )}
         </div>
 
-        {/* Slack Channel */}
+        {/* Slack Channel — hidden entirely when server-side Slack is not configured */}
+        {(isFreeTier || isSlackStatusLoading || slackStatus?.available !== false) && (
         <div className="p-4 border rounded-lg space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -211,16 +211,6 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             <p className="text-sm text-muted-foreground">
               Upgrade to Pro or Power to use Slack notifications.
             </p>
-          ) : isSlackStatusLoading ? null : slackStatus?.available === false ? (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Slack integration is not available</AlertTitle>
-              <AlertDescription>
-                {slackStatus.unavailableReason === "not_configured"
-                  ? "The Slack app credentials have not been configured. Please contact your administrator."
-                  : "Slack setup is incomplete. This usually resolves after a server restart."}
-              </AlertDescription>
-            </Alert>
           ) : !slackStatus?.connected ? (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Connect your Slack workspace to enable notifications.</p>
@@ -271,6 +261,7 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             </div>
           )}
         </div>
+        )}
       </CardContent>
     </Card>
   );
