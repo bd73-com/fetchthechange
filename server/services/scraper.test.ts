@@ -1270,21 +1270,19 @@ describe("checkMonitor", () => {
     expect(mockStorage.addMonitorChange).toHaveBeenCalledWith(1, null, "$15.00");
   });
 
-  it("retries static fetch when first attempt finds no value", async () => {
+  it("skips static retry when page loaded fine but selector not found", async () => {
     const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
-    const fullHtml = `<html><body><span class="price">$10.00</span></body></html>`;
 
     const fetchSpy = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
-      .mockResolvedValueOnce(new Response(fullHtml, { status: 200 }));
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
 
     const monitor = makeMonitor({ selector: ".price" });
     const result = await runWithTimers(monitor);
 
-    // Should have been called twice (initial + retry)
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(result.status).toBe("ok");
-    expect(result.currentValue).toBe("$10.00");
+    // Should only call fetch once — no retry when page loaded fine but selector is missing
+    // (re-fetching the same content won't help; falls through to Browserless)
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("selector_missing");
   });
 
   it("uses fetchWithCurl fallback on UND_ERR_HEADERS_OVERFLOW", async () => {
@@ -1319,22 +1317,17 @@ describe("checkMonitor", () => {
     expect(result.currentValue).toBe("$8.88");
   });
 
-  it("retry path: updates block status when retry also detects blocked content", async () => {
+  it("reports selector_missing without retry when page loaded but selector not found", async () => {
     const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
-    const blockedHtml = `
-      <html><head><title>Access Denied</title></head>
-      <body><p>You are blocked.</p></body>
-      </html>`;
 
     vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
-      .mockResolvedValueOnce(new Response(blockedHtml, { status: 200 }));
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
 
     const monitor = makeMonitor({ selector: ".price" });
     const result = await runWithTimers(monitor);
 
-    expect(result.status).toBe("blocked");
-    expect(result.error).toContain("Access denied");
+    // No retry — page loaded fine, selector just isn't there
+    expect(result.status).toBe("selector_missing");
   });
 
   it("retry path: continues with original result when retry fetch throws", async () => {
@@ -1351,22 +1344,17 @@ describe("checkMonitor", () => {
     expect(result.error).toBe("Selector not found");
   });
 
-  it("retry path: uses fetchWithCurl on UND_ERR_HEADERS_OVERFLOW during retry", async () => {
-    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
-    const retryHtml = `<html><body><span class="price">$3.33</span></body></html>`;
-    const headerError = new Error("Headers overflow");
-    (headerError as any).code = "UND_ERR_HEADERS_OVERFLOW";
+  it("does not retry fetch when page loaded fine but selector is missing", async () => {
+    const emptyHtml = `<html><body><p>No price here</p></body></html>`;
 
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
-      .mockRejectedValueOnce(headerError)
-      .mockResolvedValueOnce(new Response(retryHtml, { status: 200 }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
 
     const monitor = makeMonitor({ selector: ".price" });
     const result = await runWithTimers(monitor);
 
-    expect(result.status).toBe("ok");
-    expect(result.currentValue).toBe("$3.33");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("selector_missing");
   });
 
   it("retry path: empty retryHtml is ignored and falls through", async () => {
@@ -1452,22 +1440,19 @@ describe("checkMonitor", () => {
     expect(result.changed).toBe(false);
   });
 
-  it("retry succeeds on second static attempt when first had no value", async () => {
+  it("skips retry and falls through to browserless when page loaded but selector missing", async () => {
     const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
-    const fullHtml = `<html><body><span class="price">$10.00</span></body></html>`;
 
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
-      .mockResolvedValueOnce(new Response(fullHtml, { status: 200 }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
 
     const monitor = makeMonitor({ selector: ".price", currentValue: "$5.00" });
     const result = await runWithTimers(monitor);
 
-    expect(result.status).toBe("ok");
-    expect(result.changed).toBe(true);
-    expect(result.currentValue).toBe("$10.00");
-    expect(result.previousValue).toBe("$5.00");
-    expect(mockStorage.addMonitorChange).toHaveBeenCalledWith(1, "$5.00", "$10.00");
+    // Only 1 fetch — no retry for successful page loads with missing selector
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // Without browserless configured, falls through to selector_missing
+    expect(result.status).toBe("selector_missing");
   });
 
   it("rejects monitors targeting private/internal URLs (SSRF protection)", async () => {
@@ -3388,9 +3373,10 @@ describe("fetch timeout falls through to browserless fallback", () => {
     expect(mockConnectOverCDP).toHaveBeenCalled();
   });
 
-  it("skips static retry when fetch itself timed out", async () => {
-    // Static fetch fails with timeout — fetch should NOT be called again for retry
+  it("retries static fetch on network timeout then falls through to browserless", async () => {
+    // Static fetch fails with timeout — retried once as a network error, then falls through
     const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("The operation was aborted due to timeout"))
       .mockRejectedValueOnce(new Error("The operation was aborted due to timeout"));
 
     const { BrowserlessUsageTracker } = await import("./browserlessTracker");
@@ -3404,15 +3390,15 @@ describe("fetch timeout falls through to browserless fallback", () => {
     const monitor = makeMonitor({ selector: ".price" });
     await runWithTimers(monitor);
 
-    // fetch should only be called once (the initial attempt), NOT retried
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // fetch should be called twice (initial + retry for network error)
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("returns 'Page took too long to respond' when both static and browserless fail on timeout", async () => {
-    // Static fetch fails with timeout
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
-      new Error("The operation was aborted due to timeout")
-    );
+    // Static fetch fails with timeout (both initial and retry)
+    vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("The operation was aborted due to timeout"))
+      .mockRejectedValueOnce(new Error("The operation was aborted due to timeout"));
 
     const { BrowserlessUsageTracker } = await import("./browserlessTracker");
     (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
@@ -4484,7 +4470,7 @@ describe("stealth evasion", () => {
     expect(gotoIdx).toBeGreaterThan(initIdx);
   });
 
-  it("includes Sec-CH-UA client hints in static fetch headers", async () => {
+  it("includes modern User-Agent and anti-detection headers in static fetch", async () => {
     const html = `<html><body><span class="price">$10</span></body></html>`;
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(html, { status: 200 }));
@@ -4494,9 +4480,14 @@ describe("stealth evasion", () => {
 
     const fetchCall = fetchSpy.mock.calls[0];
     const headers = (fetchCall[1] as RequestInit)?.headers as Record<string, string>;
-    expect(headers['Sec-CH-UA']).toContain("Google Chrome");
+    // UA is randomly selected from a pool — verify it's present and modern
+    expect(headers['User-Agent']).toBeDefined();
+    expect(headers['User-Agent']).toMatch(/Chrome\/1[23]\d|Firefox\/1[23]\d/);
     expect(headers['Sec-CH-UA-Mobile']).toBe('?0');
-    expect(headers['Sec-CH-UA-Platform']).toBe('"Windows"');
+    // Referer should be set to the target origin
+    expect(headers['Referer']).toContain('example.com');
+    // Accept-Encoding should be present
+    expect(headers['Accept-Encoding']).toContain('gzip');
   });
 
   it("calls addInitScript with stealth function in discoverSelectors", async () => {
@@ -4547,15 +4538,13 @@ describe("stealth evasion", () => {
       expect.any(Object)
     );
 
-    // Verify viewport and headers in context
+    // Verify viewport in context (UA headers are now randomized per request)
     expect(browserMock.newContext).toHaveBeenCalledWith(
       expect.objectContaining({
         viewport: { width: 1920, height: 1080 },
         screen: { width: 1920, height: 1080 },
         extraHTTPHeaders: expect.objectContaining({
-          'Sec-CH-UA': expect.stringContaining("Google Chrome"),
           'Sec-CH-UA-Mobile': '?0',
-          'Sec-CH-UA-Platform': '"Windows"',
         }),
       })
     );

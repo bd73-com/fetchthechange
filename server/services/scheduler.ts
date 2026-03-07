@@ -70,45 +70,50 @@ export async function startScheduler() {
       const monitors = await storage.getAllActiveMonitors();
 
       for (const monitor of monitors) {
-        const lastChecked = monitor.lastChecked ? new Date(monitor.lastChecked) : new Date(0);
-        const now = new Date();
-        const diffMs = now.getTime() - lastChecked.getTime();
-        const diffHours = diffMs / (1000 * 60 * 60);
+        try {
+          const lastChecked = monitor.lastChecked ? new Date(monitor.lastChecked) : new Date(0);
+          const now = new Date();
+          const diffMs = now.getTime() - lastChecked.getTime();
+          const diffHours = diffMs / (1000 * 60 * 60);
 
-        let shouldCheck = false;
+          let shouldCheck = false;
 
-        // Accelerated retry: monitors affected by Browserless infra failures
-        // get retried with exponential backoff (2 min → 4 min → 8 min → 15 min cap)
-        if (monitorsNeedingRetry.has(monitor.id)) {
-          const backoff = retryBackoff.get(monitor.id) ?? { attempts: 0 };
-          const interval = Math.min(BASE_RETRY_MS * Math.pow(2, backoff.attempts), MAX_RETRY_MS);
-          if (diffMs >= interval) {
-            shouldCheck = true;
+          // Accelerated retry: monitors affected by Browserless infra failures
+          // get retried with exponential backoff (2 min → 4 min → 8 min → 15 min cap)
+          if (monitorsNeedingRetry.has(monitor.id)) {
+            const backoff = retryBackoff.get(monitor.id) ?? { attempts: 0 };
+            const interval = Math.min(BASE_RETRY_MS * Math.pow(2, backoff.attempts), MAX_RETRY_MS);
+            if (diffMs >= interval) {
+              shouldCheck = true;
+            }
+          } else {
+            // Clean up backoff entry if monitor is no longer in retry set
+            retryBackoff.delete(monitor.id);
           }
-        } else {
-          // Clean up backoff entry if monitor is no longer in retry set
-          retryBackoff.delete(monitor.id);
-        }
 
-        if (!shouldCheck) {
-          if (monitor.frequency === "hourly" && diffHours >= 1) {
-            shouldCheck = true;
-          } else if (monitor.frequency === "daily" && diffHours >= 24) {
-            shouldCheck = true;
-          } else if (!monitor.lastChecked) {
-            shouldCheck = true;
+          if (!shouldCheck) {
+            if (monitor.frequency === "hourly" && diffHours >= 1) {
+              shouldCheck = true;
+            } else if (monitor.frequency === "daily" && diffHours >= 24) {
+              shouldCheck = true;
+            } else if (!monitor.lastChecked) {
+              shouldCheck = true;
+            }
           }
-        }
 
-        if (shouldCheck) {
-          const jitterMs = Math.floor(Math.random() * 30000);
-          setTimeout(() => {
-            void runCheckWithLimit(monitor).then((started) => {
-              if (!started || !monitorsNeedingRetry.has(monitor.id)) return;
-              const b = retryBackoff.get(monitor.id) ?? { attempts: 0 };
-              retryBackoff.set(monitor.id, { attempts: b.attempts + 1 });
-            });
-          }, jitterMs);
+          if (shouldCheck) {
+            const jitterMs = Math.floor(Math.random() * 30000);
+            setTimeout(() => {
+              void runCheckWithLimit(monitor).then((started) => {
+                if (!started || !monitorsNeedingRetry.has(monitor.id)) return;
+                const b = retryBackoff.get(monitor.id) ?? { attempts: 0 };
+                retryBackoff.set(monitor.id, { attempts: b.attempts + 1 });
+              });
+            }, jitterMs);
+          }
+        } catch (monitorError) {
+          // Isolate per-monitor failures so one bad monitor can't crash the iteration
+          console.error(`[Scheduler] Error processing monitor ${monitor.id}:`, monitorError instanceof Error ? monitorError.message : monitorError);
         }
       }
     } catch (error) {

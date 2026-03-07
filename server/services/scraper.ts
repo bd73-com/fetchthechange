@@ -17,35 +17,73 @@ import { eq, sql } from "drizzle-orm";
  */
 export const monitorsNeedingRetry = new Set<number>();
 
-/** Shared browser-like headers for static fetches to reduce bot detection. */
-const BROWSER_LIKE_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Cache-Control': 'no-cache',
-  'Upgrade-Insecure-Requests': '1',
-  'Sec-Fetch-Dest': 'document',
-  'Sec-Fetch-Mode': 'navigate',
-  'Sec-Fetch-Site': 'none',
-  'Sec-Fetch-User': '?1',
-  'Sec-CH-UA': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-  'Sec-CH-UA-Mobile': '?0',
-  'Sec-CH-UA-Platform': '"Windows"',
-} as const;
-
-/** Shared browser context options for Browserless stealth sessions. */
-const STEALTH_CONTEXT_OPTIONS = {
-  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-  locale: "en-US",
-  viewport: { width: 1920, height: 1080 },
-  screen: { width: 1920, height: 1080 },
-  extraHTTPHeaders: {
-    'Sec-CH-UA': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-    'Sec-CH-UA-Mobile': '?0',
-    'Sec-CH-UA-Platform': '"Windows"',
-    'Accept-Language': 'en-US,en;q=0.9',
+/** Pool of modern User-Agent profiles to rotate per request, reducing fingerprint-based blocking. */
+const UA_PROFILES = [
+  {
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
+    secChUaPlatform: '"Windows"',
   },
-} as const;
+  {
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
+    secChUaPlatform: '"macOS"',
+  },
+  {
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0',
+    secChUa: '', // Firefox does not send Sec-CH-UA
+    secChUaPlatform: '',
+  },
+];
+
+function pickUaProfile() {
+  return UA_PROFILES[Math.floor(Math.random() * UA_PROFILES.length)];
+}
+
+/** Returns browser-like headers with a randomly selected UA profile. */
+function browserLikeHeaders(url: string) {
+  const profile = pickUaProfile();
+  const origin = new URL(url).origin;
+  const headers: Record<string, string> = {
+    'User-Agent': profile.userAgent,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Cache-Control': 'no-cache',
+    'Referer': origin + '/',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Sec-CH-UA-Mobile': '?0',
+  };
+  if (profile.secChUa) {
+    headers['Sec-CH-UA'] = profile.secChUa;
+    headers['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
+  }
+  return headers;
+}
+
+/** Returns Browserless stealth context options with a randomly selected UA profile. */
+function stealthContextOptions() {
+  const profile = pickUaProfile();
+  const extraHTTPHeaders: Record<string, string> = {
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Sec-CH-UA-Mobile': '?0',
+  };
+  if (profile.secChUa) {
+    extraHTTPHeaders['Sec-CH-UA'] = profile.secChUa;
+    extraHTTPHeaders['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
+  }
+  return {
+    userAgent: profile.userAgent,
+    locale: "en-US",
+    viewport: { width: 1920, height: 1080 },
+    screen: { width: 1920, height: 1080 },
+    extraHTTPHeaders,
+  };
+}
 
 /** Stealth init script injected into browser pages before navigation to evade bot detection. */
 function stealthInitScript() {
@@ -375,7 +413,12 @@ export function extractValueFromHtml(html: string, selector: string): string | n
   const elements = $(effectiveSelector);
   
   if (elements.length > 0) {
-    const rawValue = elements.first().text() || elements.first().attr('content') || "";
+    const rawValue = elements.first().text()
+      || elements.first().attr('content')
+      || elements.first().attr('data-price')
+      || elements.first().attr('value')
+      || elements.first().attr('data-value')
+      || "";
     return normalizeValue(rawValue) || null;
   }
   return null;
@@ -541,9 +584,18 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       timeout: 30000
     });
 
-    const context = await browser.newContext(STEALTH_CONTEXT_OPTIONS);
-    // Intercept all navigation requests (including redirects) to enforce SSRF validation
+    const context = await browser.newContext(stealthContextOptions());
+    // Intercept requests: block heavy resources and enforce SSRF validation
     await context.route('**/*', async (route) => {
+      const resourceType = route.request().resourceType();
+      if (['image', 'media', 'font'].includes(resourceType)) {
+        return route.abort();
+      }
+      // Block known tracking/analytics domains to speed up page load
+      const reqUrl = route.request().url();
+      if (/google-analytics|googletagmanager|facebook\.net|doubleclick|hotjar|segment\.io|newrelic|datadoghq/i.test(reqUrl)) {
+        return route.abort();
+      }
       if (!route.request().isNavigationRequest()) return route.continue();
       try {
         await validateUrlBeforeFetch(route.request().url());
@@ -567,7 +619,17 @@ export async function extractWithBrowserless(url: string, selector: string, moni
     }
 
     const content = await page.content();
-    const block = detectPageBlockReason(content);
+    let block = detectPageBlockReason(content);
+
+    // Wait for Cloudflare JS challenge to auto-resolve (typically 3-8s)
+    if (block.blocked && block.reason && /cloudflare|interstitial|just a moment/i.test(block.reason)) {
+      await page.waitForFunction(
+        () => !document.title?.toLowerCase().includes('just a moment') && !document.body?.innerText?.toLowerCase().includes('checking your browser'),
+        { timeout: 15000 }
+      ).catch(() => {});
+      const resolvedContent = await page.content();
+      block = detectPageBlockReason(resolvedContent);
+    }
 
     const trimmedSelector = selector.trim();
     const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
@@ -580,12 +642,23 @@ export async function extractWithBrowserless(url: string, selector: string, moni
     if (count > 0) {
       const text = await page.locator(effectiveSelector).first().innerText();
       value = normalizeValue(text);
+      // Fallback: check common value-bearing attributes if innerText is empty
+      if (!value) {
+        const attrValue = await page.locator(effectiveSelector).first().evaluate((el: Element) => {
+          return el.getAttribute('content')
+            || el.getAttribute('data-price')
+            || el.getAttribute('value')
+            || el.getAttribute('data-value')
+            || null;
+        });
+        if (attrValue) value = normalizeValue(attrValue);
+      }
     }
-    
-    return { 
-      value, 
-      urlAfter: page.url(), 
-      title: await page.title(), 
+
+    return {
+      value,
+      urlAfter: page.url(),
+      title: await page.title(),
       selectorCount: count,
       blocked: block.blocked,
       reason: block.reason
@@ -604,7 +677,7 @@ async function fetchWithCurl(url: string, monitorId?: number, monitorName?: stri
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
     const response = await ssrfSafeFetch(url, {
-      headers: BROWSER_LIKE_HEADERS,
+      headers: browserLikeHeaders(url),
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -635,14 +708,22 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     let html = "";
     let staticFetchError: string | null = null;
     let httpStatusClassification: { status: number; message: string; transient: boolean } | null = null;
+    let retryDelayMs = 2000;
     try {
       const response = await ssrfSafeFetch(monitor.url, {
-        headers: BROWSER_LIKE_HEADERS,
+        headers: browserLikeHeaders(monitor.url),
         signal: AbortSignal.timeout(20000)
       });
       if (!response.ok) {
         httpStatusClassification = classifyHttpStatus(response.status);
         staticFetchError = httpStatusClassification.message;
+        // Respect Retry-After header on 429 responses
+        if (response.status === 429) {
+          const retryAfterSec = parseInt(response.headers.get('retry-after') || '', 10);
+          if (!isNaN(retryAfterSec) && retryAfterSec > 0 && retryAfterSec <= 30) {
+            retryDelayMs = retryAfterSec * 1000;
+          }
+        }
         console.log(`[Scraper] Monitor ${monitor.id}: HTTP ${response.status} — ${httpStatusClassification.message}`);
         // Don't parse error page HTML as content for permanent errors
         html = "";
@@ -687,17 +768,24 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       console.log(`stage=static empty_response`);
     }
 
-    // Retry static fetch: on selector-not-found OR transient HTTP errors (429, 5xx)
+    // Retry static fetch only when re-fetching might help:
+    // - Transient HTTP errors (429, 5xx) — server may recover
+    // - Network/fetch errors with no HTTP response at all — connection may succeed on retry
+    // Skip retry when page loaded fine (200 OK with HTML) but selector wasn't found —
+    // re-fetching the same content won't help; proceed directly to Browserless.
+    // Also skip retry for permanent HTTP errors (404, 410, etc.) — server gave a definitive answer.
     const isTransientHttpError = httpStatusClassification?.transient === true;
-    if ((!newValue && !block.blocked && html) || isTransientHttpError) {
-      console.log(`Retry: ${isTransientHttpError ? "transient HTTP error" : "static extraction found no value"}, retrying fetch once...`);
-      await new Promise(r => setTimeout(r, 2000));
+    const isNetworkError = staticFetchError && !html && !httpStatusClassification;
+    const shouldRetryFetch = isTransientHttpError || isNetworkError;
+    if (shouldRetryFetch) {
+      console.log(`Retry: ${isTransientHttpError ? "transient HTTP error" : "fetch error (no HTML)"}, retrying fetch once after ${retryDelayMs}ms...`);
+      await new Promise(r => setTimeout(r, retryDelayMs));
       const retryStart = Date.now();
       try {
         let retryHtml = "";
         try {
           const retryResponse = await ssrfSafeFetch(monitor.url, {
-            headers: BROWSER_LIKE_HEADERS,
+            headers: browserLikeHeaders(monitor.url),
             signal: AbortSignal.timeout(20000)
           });
           if (!retryResponse.ok) {
@@ -1134,9 +1222,17 @@ export async function discoverSelectors(
       timeout: 30000
     });
 
-    const context = await browser.newContext(STEALTH_CONTEXT_OPTIONS);
-    // Intercept all navigation requests (including redirects) to enforce SSRF validation
+    const context = await browser.newContext(stealthContextOptions());
+    // Intercept requests: block heavy resources and enforce SSRF validation
     await context.route('**/*', async (route) => {
+      const resourceType = route.request().resourceType();
+      if (['image', 'media', 'font'].includes(resourceType)) {
+        return route.abort();
+      }
+      const reqUrl = route.request().url();
+      if (/google-analytics|googletagmanager|facebook\.net|doubleclick|hotjar|segment\.io|newrelic|datadoghq/i.test(reqUrl)) {
+        return route.abort();
+      }
       if (!route.request().isNavigationRequest()) return route.continue();
       try {
         await validateUrlBeforeFetch(route.request().url());
