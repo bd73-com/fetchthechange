@@ -243,7 +243,7 @@ export default function Dashboard() {
             </div>
           </div>
         )}
-        {userTags.length === 0 && TAG_LIMITS[userTier] > 0 && monitors && monitors.length > 0 && (
+        {userTags.length === 0 && (TAG_LIMITS[userTier] ?? TAG_LIMITS.free) > 0 && monitors && monitors.length > 0 && (
           <div className="mb-6">
             <TagManager
               trigger={

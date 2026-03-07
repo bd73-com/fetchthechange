@@ -22,11 +22,13 @@ interface TagPickerProps {
 
 export function TagPicker({ selectedTagIds, onChange, maxTags, disabled }: TagPickerProps) {
   const [open, setOpen] = useState(false);
-  const { data: allTags = [] } = useTags();
+  const { data: allTags, isLoading: isTagsLoading } = useTags();
   const { user } = useAuth();
 
-  const selectedTags = allTags.filter(t => selectedTagIds.includes(t.id));
+  const tags = allTags ?? [];
+  const selectedTags = tags.filter(t => selectedTagIds.includes(t.id));
   const userTier = (user?.tier || "free") as UserTier;
+  const tagLimit = TAG_LIMITS[userTier] ?? TAG_LIMITS.free;
 
   const toggleTag = (tagId: number) => {
     if (selectedTagIds.includes(tagId)) {
@@ -37,8 +39,8 @@ export function TagPicker({ selectedTagIds, onChange, maxTags, disabled }: TagPi
     }
   };
 
-  if (allTags.length === 0) {
-    if (TAG_LIMITS[userTier] > 0) {
+  if (!isTagsLoading && tags.length === 0) {
+    if (tagLimit > 0) {
       return (
         <TagManager
           trigger={
@@ -81,7 +83,7 @@ export function TagPicker({ selectedTagIds, onChange, maxTags, disabled }: TagPi
         </PopoverTrigger>
         <PopoverContent className="w-56 p-2" align="start">
           <div className="space-y-1 max-h-48 overflow-y-auto">
-            {allTags.map((tag) => {
+            {tags.map((tag) => {
               const isSelected = selectedTagIds.includes(tag.id);
               const isDisabled = !isSelected && maxTags !== undefined && selectedTagIds.length >= maxTags;
               return (
