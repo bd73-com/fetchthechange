@@ -107,6 +107,7 @@ function initPicker(): void {
     document.removeEventListener("click", onClick, true);
     document.removeEventListener("keydown", onKeyDown, true);
     document.removeEventListener("ftc-cancel-picker", cancel);
+    document.removeEventListener("mousemove", onMouseMove, true);
 
     // Remove any remaining hover highlights
     document.querySelectorAll(".ftc-picker-hover").forEach((el) => {
@@ -114,13 +115,15 @@ function initPicker(): void {
     });
   }
 
-  // Track mouse for tooltip positioning
-  document.addEventListener("mousemove", (e: MouseEvent) => {
+  function onMouseMove(e: MouseEvent): void {
     if (tooltip && tooltip.style.display !== "none") {
       tooltip.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 320)}px`;
       tooltip.style.top = `${Math.min(e.clientY + 12, window.innerHeight - 30)}px`;
     }
-  }, true);
+  }
+
+  // Track mouse for tooltip positioning
+  document.addEventListener("mousemove", onMouseMove, true);
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -158,7 +161,7 @@ function findCandidates(): Candidate[] {
     if (!el) continue;
 
     // Walk up to a meaningful element (skip spans inside divs etc.)
-    while (el && el !== document.body && el.children.length <= 1) {
+    while (el && el !== document.body && el !== document.documentElement && el.children.length <= 1) {
       el = el.parentElement;
     }
     if (!el || el === document.body) {
@@ -171,7 +174,7 @@ function findCandidates(): Candidate[] {
     if (priceRegex.test(text) || currencyRegex.test(text)) score += 3;
     if (stockRegex.test(text)) score += 2;
 
-    const classList = el.className || "";
+    const classList = typeof el.className === "string" ? el.className : "";
     if (classRegex.test(classList)) score += 2;
 
     for (const attr of Array.from(el.attributes)) {

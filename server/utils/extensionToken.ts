@@ -16,7 +16,13 @@ function getSecret(): Buffer {
       "EXTENSION_JWT_SECRET is not set. Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
     );
   }
-  return Buffer.from(secret, "hex");
+  const buf = Buffer.from(secret, "hex");
+  if (buf.length < 32) {
+    throw new Error(
+      "EXTENSION_JWT_SECRET must be at least 32 bytes (64 hex chars). Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
+    );
+  }
+  return buf;
 }
 
 const HEADER = base64urlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));

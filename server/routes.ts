@@ -2425,7 +2425,9 @@ export async function registerRoutes(
       // SSRF protection
       const urlError = await isPrivateUrl(input.url);
       if (urlError) {
-        console.warn(`[Extension] SSRF blocked for userId=${userId}, hostname=${new URL(input.url).hostname}`);
+        let hostname = "unknown";
+        try { hostname = new URL(input.url).hostname; } catch {}
+        console.warn(`[Extension] SSRF blocked for userId=${userId}, hostname=${hostname}`);
         return res.status(400).json({ message: urlError });
       }
 

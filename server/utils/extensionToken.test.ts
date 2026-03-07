@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { sign, verify, getExpiresAt } from "./extensionToken";
 
-const TEST_SECRET = "a]b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1";
+const TEST_SECRET = "a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1";
 
 describe("extensionToken", () => {
   beforeEach(() => {
@@ -67,12 +67,13 @@ describe("extensionToken", () => {
   });
 
   it("missing env var throws on sign", () => {
-    vi.stubEnv("EXTENSION_JWT_SECRET", "");
-    // Empty string should still throw since Buffer.from('', 'hex') is empty
-    // Actually let's delete it entirely
     delete process.env.EXTENSION_JWT_SECRET;
-
     expect(() => sign("user-123", "free")).toThrow("EXTENSION_JWT_SECRET");
+  });
+
+  it("short secret throws on sign", () => {
+    vi.stubEnv("EXTENSION_JWT_SECRET", "abcd1234");
+    expect(() => sign("user-123", "free")).toThrow("at least 32 bytes");
   });
 
   it("missing env var on verify returns null (getSecret throws, caught)", () => {

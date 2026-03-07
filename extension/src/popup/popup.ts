@@ -181,7 +181,7 @@ function renderAccount(): void {
     <div class="account-dropdown ${dropdownOpen ? "" : "hidden"}" id="account-dropdown">
       <div class="dropdown-email">
         ${escapeHtml(userInfo.email || userInfo.userId)}
-        <span class="tier-badge tier-${userInfo.tier}">${userInfo.tier}</span>
+        <span class="tier-badge tier-${sanitizeTier(userInfo.tier)}">${escapeHtml(userInfo.tier)}</span>
       </div>
       <a class="dropdown-item" href="${BASE_URL}/dashboard" target="_blank">Open dashboard</a>
       <div class="dropdown-divider"></div>
@@ -444,14 +444,19 @@ async function createMonitor(): Promise<void> {
     const data = await res.json().catch(() => null);
 
     if (data?.code === "TIER_LIMIT_REACHED") {
-      errorMessage = `${data.error || "Monitor limit reached."} `;
+      errorMessage = `${data.error || "Monitor limit reached."}`;
       state = "error";
       render();
-      // Add upgrade link after render
+      // Add upgrade link after render using DOM API
       const errContainer = content.querySelector(".error p");
       if (errContainer) {
-        errContainer.innerHTML +=
-          `<br><a href="${BASE_URL}/pricing" target="_blank" style="color:#6366f1;">Upgrade your plan</a>`;
+        errContainer.appendChild(document.createElement("br"));
+        const link = document.createElement("a");
+        link.href = `${BASE_URL}/pricing`;
+        link.target = "_blank";
+        link.style.color = "#6366f1";
+        link.textContent = "Upgrade your plan";
+        errContainer.appendChild(link);
       }
       return;
     }
@@ -525,6 +530,11 @@ function escapeHtml(str: string): string {
 
 function escapeAttr(str: string): string {
   return str.replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+const KNOWN_TIERS = ["free", "pro", "power"];
+function sanitizeTier(tier: string): string {
+  return KNOWN_TIERS.includes(tier) ? tier : "free";
 }
 
 // ──────────────────────────────────────────────────────────────────
