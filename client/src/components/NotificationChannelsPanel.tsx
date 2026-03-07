@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mail, Globe, MessageSquare, Eye, EyeOff, ExternalLink } from "lucide-react";
+import { Mail, Globe, MessageSquare, Eye, EyeOff, ExternalLink, Trash2 } from "lucide-react";
 import {
   useNotificationChannels,
   useUpsertNotificationChannel,
@@ -62,6 +62,13 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
       enabled: true,
       config: { url: webhookUrl || currentWebhookUrl },
     });
+  };
+
+  const handleDeleteWebhook = () => {
+    deleteChannel.mutate({ monitorId, channel: "webhook" });
+    setWebhookUrl("");
+    setRevealedSecret(null);
+    setShowSecret(false);
   };
 
   const handleRevealSecret = async () => {
@@ -156,6 +163,16 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
                   <Button onClick={handleSaveWebhook} disabled={upsertChannel.isPending} size="sm">
                     Save
                   </Button>
+                  {webhookChannel && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleDeleteWebhook}
+                      disabled={deleteChannel.isPending}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  )}
                 </div>
               </div>
 
