@@ -4,9 +4,12 @@ export function parseBody(body: string): { heading: string; items: string[] }[] 
   let current: { heading: string; items: string[] } | null = null;
 
   for (const line of body.split("\n")) {
-    const headingMatch = line.match(/^###\s+(.+)/);
+    const headingMatch = line.match(/^#{2,3}\s+(.+)/);
     if (headingMatch) {
-      current = { heading: headingMatch[1].trim(), items: [] };
+      const heading = headingMatch[1].trim();
+      // Skip meta-headings like "What's Changed"
+      if (heading.toLowerCase() === "what's changed") continue;
+      current = { heading, items: [] };
       sections.push(current);
       continue;
     }
