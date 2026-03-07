@@ -207,65 +207,81 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             )}
           </div>
 
-          {isSlackStatusLoading && !isFreeTier ? (
-            <p className="text-sm text-muted-foreground">Loading Slack status…</p>
-          ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "upgrade" ? (
-            <p className="text-sm text-muted-foreground">
-              Upgrade to Pro or Power to use Slack notifications.
-            </p>
-          ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "not-configured" ? (
-            <p className="text-sm text-muted-foreground">
-              Slack integration is not configured on this server. Contact your administrator to set up the Slack app.
-            </p>
-          ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "connect" ? (
-            <div className="space-y-2">
-              <p className="text-sm text-muted-foreground">Connect your Slack workspace to enable notifications.</p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => { window.location.href = api.integrations.slack.install.path; }}
-              >
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Connect to Slack
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">
-                  Connected to <strong>{slackStatus?.teamName}</strong>
-                </p>
+          {(() => {
+            const slackState = isSlackStatusLoading && !isFreeTier
+              ? "loading" as const
+              : getSlackDisplayState(isFreeTier, slackStatus ?? undefined);
+
+            if (slackState === "loading") return (
+              <p className="text-sm text-muted-foreground">Loading Slack status…</p>
+            );
+            if (slackState === "upgrade") return (
+              <p className="text-sm text-muted-foreground">
+                Upgrade to Pro or Power to use Slack notifications.
+              </p>
+            );
+            if (slackState === "not-ready") return (
+              <p className="text-sm text-muted-foreground">
+                Slack notifications are temporarily unavailable. Please try again in a moment.
+              </p>
+            );
+            if (slackState === "not-configured") return (
+              <p className="text-sm text-muted-foreground">
+                Slack notifications are not available for this service.
+              </p>
+            );
+            if (slackState === "connect") return (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">Connect your Slack workspace to enable notifications.</p>
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
-                  onClick={() => disconnectSlack.mutate()}
-                  disabled={disconnectSlack.isPending}
+                  onClick={() => { window.location.href = api.integrations.slack.install.path; }}
                 >
-                  Disconnect
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Connect to Slack
                 </Button>
               </div>
-              <div className="flex gap-2">
-                <Select
-                  value={selectedSlackChannel || (slackChannel?.config as any)?.channelId || ""}
-                  onValueChange={setSelectedSlackChannel}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a channel" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {slackChannelsList.map((ch) => (
-                      <SelectItem key={ch.id} value={ch.id}>
-                        #{ch.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button onClick={handleSaveSlack} disabled={upsertChannel.isPending} size="sm">
-                  Save
-                </Button>
+            );
+            // slackState === "connected"
+            return (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Connected to <strong>{slackStatus?.teamName}</strong>
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => disconnectSlack.mutate()}
+                    disabled={disconnectSlack.isPending}
+                  >
+                    Disconnect
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Select
+                    value={selectedSlackChannel || (slackChannel?.config as any)?.channelId || ""}
+                    onValueChange={setSelectedSlackChannel}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a channel" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {slackChannelsList.map((ch) => (
+                        <SelectItem key={ch.id} value={ch.id}>
+                          #{ch.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={handleSaveSlack} disabled={upsertChannel.isPending} size="sm">
+                    Save
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </CardContent>
     </Card>

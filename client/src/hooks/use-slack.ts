@@ -1,16 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import { api } from "@shared/routes";
 import { useToast } from "@/hooks/use-toast";
 
 const SLACK_STATUS_KEY = "slack-status";
 const SLACK_CHANNELS_KEY = "slack-channels";
 
-interface SlackStatus {
-  connected: boolean;
-  available: boolean;
-  teamName?: string;
-  unavailableReason?: "unavailable";
-}
+export type SlackStatus = z.infer<(typeof api)["integrations"]["slack"]["status"]["responses"][200]>;
 
 interface SlackChannel {
   id: string;

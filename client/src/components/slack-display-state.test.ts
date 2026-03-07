@@ -8,8 +8,16 @@ describe("getSlackDisplayState", () => {
     expect(getSlackDisplayState(true, { available: false, connected: false })).toBe("upgrade");
   });
 
-  it("returns 'not-configured' when slack is unavailable on the server", () => {
+  it("returns 'not-configured' when OAuth is not configured", () => {
+    expect(getSlackDisplayState(false, { available: false, connected: false, unavailableReason: "oauth-not-configured" })).toBe("not-configured");
+  });
+
+  it("returns 'not-configured' when unavailableReason is absent (fallback)", () => {
     expect(getSlackDisplayState(false, { available: false, connected: false })).toBe("not-configured");
+  });
+
+  it("returns 'not-ready' when tables are not ready", () => {
+    expect(getSlackDisplayState(false, { available: false, connected: false, unavailableReason: "tables-not-ready" })).toBe("not-ready");
   });
 
   it("returns 'connect' when slack is available but not connected", () => {
@@ -25,5 +33,14 @@ describe("getSlackDisplayState", () => {
 
   it("returns 'connected' when slack is available and connected", () => {
     expect(getSlackDisplayState(false, { available: true, connected: true })).toBe("connected");
+  });
+
+  it("prioritises unavailable over connected (available=false takes precedence)", () => {
+    expect(
+      getSlackDisplayState(false, { available: false, connected: true, unavailableReason: "oauth-not-configured" }),
+    ).toBe("not-configured");
+    expect(
+      getSlackDisplayState(false, { available: false, connected: true, unavailableReason: "tables-not-ready" }),
+    ).toBe("not-ready");
   });
 });
