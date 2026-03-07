@@ -207,7 +207,9 @@ export function NotificationChannelsPanel({ monitorId }: NotificationChannelsPan
             )}
           </div>
 
-          {getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "upgrade" ? (
+          {isSlackStatusLoading && !isFreeTier ? (
+            <p className="text-sm text-muted-foreground">Loading Slack status…</p>
+          ) : getSlackDisplayState(isFreeTier, slackStatus ?? undefined) === "upgrade" ? (
             <p className="text-sm text-muted-foreground">
               Upgrade to Pro or Power to use Slack notifications.
             </p>

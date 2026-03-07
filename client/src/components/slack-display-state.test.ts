@@ -16,7 +16,10 @@ describe("getSlackDisplayState", () => {
     expect(getSlackDisplayState(false, { available: true, connected: false })).toBe("connect");
   });
 
-  it("returns 'connect' when slack status is undefined (still loading)", () => {
+  it("returns 'connect' when slack status is undefined (loading fallback)", () => {
+    // Note: the component short-circuits with a loading message when
+    // isSlackStatusLoading is true, so this path only applies if the
+    // hook returned undefined without the loading flag.
     expect(getSlackDisplayState(false, undefined)).toBe("connect");
   });
 
