@@ -72,7 +72,7 @@ function parseBody(body: string): { heading: string; items: string[] }[] {
   let current: { heading: string; items: string[] } | null = null;
 
   for (const line of body.split("\n")) {
-    const headingMatch = line.match(/^###?\s+(.+)/);
+    const headingMatch = line.match(/^###\s+(.+)/);
     if (headingMatch) {
       current = { heading: headingMatch[1].trim(), items: [] };
       sections.push(current);
