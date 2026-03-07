@@ -633,10 +633,15 @@ export default function Support() {
             <Zap className="h-5 w-5 text-primary" />
             <span className="font-display font-bold">FetchTheChange</span>
           </div>
-          <p className="text-sm text-muted-foreground">
-            &copy; {new Date().getFullYear()} FetchTheChange. All rights
-            reserved.
-          </p>
+          <div className="flex items-center gap-4">
+            <p className="text-sm text-muted-foreground">
+              &copy; {new Date().getFullYear()} FetchTheChange. All rights
+              reserved.
+            </p>
+            <a href="/privacy" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              Privacy
+            </a>
+          </div>
         </div>
       </footer>
     </div>

@@ -658,6 +658,9 @@ export default function LandingPage() {
             &copy; {new Date().getFullYear()} Christian Ustvedt Kavli — FetchTheChange. All rights reserved. Licensed under{" "}
             <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary">AGPL-3.0</a>.
           </p>
+          <a href="/privacy" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            Privacy
+          </a>
         </div>
       </footer>
     </div>

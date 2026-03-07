@@ -19,6 +19,7 @@ import BlogSelectorBreakage from "@/pages/BlogSelectorBreakage";
 import Pricing from "@/pages/Pricing";
 import Support from "@/pages/Support";
 import DocsWebhooks from "@/pages/DocsWebhooks";
+import Privacy from "@/pages/Privacy";
 import Changelog from "@/pages/Changelog";
 import AdminErrors from "@/pages/AdminErrors";
 import AdminCampaigns from "@/pages/AdminCampaigns";
@@ -82,6 +83,7 @@ function Router() {
       <Route path="/support" component={Support} />
       <Route path="/changelog" component={Changelog} />
       <Route path="/docs/webhooks" component={DocsWebhooks} />
+      <Route path="/privacy" component={Privacy} />
       <Route path="/extension-auth" component={ExtensionAuth} />
       <Route path="/developer" component={() => <ProtectedRoute component={Developer} requiredTier="power" />} />
       <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
