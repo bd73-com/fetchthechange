@@ -85,9 +85,9 @@ describe("extensionAuth middleware", () => {
 
   it("returns 401 on expired token", () => {
     const token = sign("user-42", "free");
-    // Fast-forward 31 days
+    // Fast-forward 8 days (past 7-day expiry)
     vi.spyOn(Date, "now").mockReturnValue(
-      Date.now() + 31 * 24 * 60 * 60 * 1000
+      Date.now() + 8 * 24 * 60 * 60 * 1000
     );
 
     const req = mockReq(`Bearer ${token}`);

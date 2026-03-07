@@ -32,7 +32,6 @@ router.post("/token", isAuthenticated, async (req: any, res) => {
     const token = signExtensionToken(userId, tier);
     const expiresAt = getExtensionTokenExpiresAt();
 
-    console.log(`[Extension] Token issued for userId=${userId}`);
     res.json({ token, expiresAt });
   } catch (error: any) {
     console.error("[Extension] Failed to issue token:", error);

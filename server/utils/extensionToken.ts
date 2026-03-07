@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 function base64urlEncode(data: string | Buffer): string {
   const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
@@ -26,7 +26,7 @@ function getSecret(): Buffer {
 }
 
 const HEADER = base64urlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-const THIRTY_DAYS_SEC = 30 * 24 * 60 * 60;
+const SEVEN_DAYS_SEC = 7 * 24 * 60 * 60;
 
 export function sign(userId: string, tier: string): string {
   const secret = getSecret();
@@ -34,8 +34,9 @@ export function sign(userId: string, tier: string): string {
   const payload = {
     sub: userId,
     tier,
+    jti: randomUUID(),
     iat: now,
-    exp: now + THIRTY_DAYS_SEC,
+    exp: now + SEVEN_DAYS_SEC,
   };
   const encodedPayload = base64urlEncode(JSON.stringify(payload));
   const sigInput = `${HEADER}.${encodedPayload}`;
@@ -83,6 +84,6 @@ export function verify(token: string): { userId: string; tier: string } | null {
 }
 
 export function getExpiresAt(): string {
-  const d = new Date(Date.now() + THIRTY_DAYS_SEC * 1000);
+  const d = new Date(Date.now() + SEVEN_DAYS_SEC * 1000);
   return d.toISOString();
 }

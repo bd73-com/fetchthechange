@@ -25,13 +25,13 @@ describe("extensionToken", () => {
   });
 
   it("expired token returns null", () => {
-    // Create a token, then advance time beyond 30 days
+    // Create a token, then advance time beyond 7 days
     const token = sign("user-123", "free");
 
-    // Mock Date.now to be 31 days in the future
+    // Mock Date.now to be 8 days in the future
     const realNow = Date.now;
     vi.spyOn(Date, "now").mockReturnValue(
-      realNow() + 31 * 24 * 60 * 60 * 1000
+      realNow() + 8 * 24 * 60 * 60 * 1000
     );
 
     const result = verify(token);
@@ -85,9 +85,9 @@ describe("extensionToken", () => {
     const exp = getExpiresAt();
     const d = new Date(exp);
     expect(d.getTime()).toBeGreaterThan(Date.now());
-    // Should be roughly 30 days from now
+    // Should be roughly 7 days from now
     const diffDays = (d.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-    expect(diffDays).toBeGreaterThan(29);
-    expect(diffDays).toBeLessThan(31);
+    expect(diffDays).toBeGreaterThan(6);
+    expect(diffDays).toBeLessThan(8);
   });
 });

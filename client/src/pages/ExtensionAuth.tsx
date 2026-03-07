@@ -25,7 +25,7 @@ export default function ExtensionAuth() {
         const data = await res.json();
         window.postMessage(
           { type: "FTC_EXTENSION_TOKEN", token: data.token, expiresAt: data.expiresAt },
-          "*"
+          window.location.origin
         );
         setTokenSent(true);
         setTimeout(() => {
