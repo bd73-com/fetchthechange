@@ -81,6 +81,81 @@ describe("extensionToken", () => {
     expect(verify("some.fake.token")).toBeNull();
   });
 
+  it("each token has a unique jti claim", () => {
+    const t1 = sign("user-1", "free");
+    const t2 = sign("user-1", "free");
+
+    const p1 = JSON.parse(Buffer.from(t1.split(".")[1], "base64url").toString());
+    const p2 = JSON.parse(Buffer.from(t2.split(".")[1], "base64url").toString());
+
+    expect(p1.jti).toBeDefined();
+    expect(p2.jti).toBeDefined();
+    expect(p1.jti).not.toBe(p2.jti);
+  });
+
+  it("token is valid just before expiry (6 days 23 hours)", () => {
+    const token = sign("user-123", "pro");
+
+    const realNow = Date.now;
+    // 6 days 23 hours in the future — still within 7-day window
+    vi.spyOn(Date, "now").mockReturnValue(
+      realNow() + (7 * 24 - 1) * 60 * 60 * 1000
+    );
+
+    const result = verify(token);
+    expect(result).toEqual({ userId: "user-123", tier: "pro" });
+
+    vi.restoreAllMocks();
+  });
+
+  it("token is invalid exactly at expiry boundary", () => {
+    const token = sign("user-123", "free");
+
+    const realNow = Date.now;
+    // Exactly 7 days + 1 second in the future
+    vi.spyOn(Date, "now").mockReturnValue(
+      realNow() + (7 * 24 * 60 * 60 + 1) * 1000
+    );
+
+    const result = verify(token);
+    expect(result).toBeNull();
+
+    vi.restoreAllMocks();
+  });
+
+  it("rejects token with missing sub claim", () => {
+    // Manually craft a token with missing sub
+    const secret = Buffer.from(TEST_SECRET, "hex");
+    const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({
+      tier: "free",
+      jti: "test-jti",
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    })).toString("base64url");
+    const { createHmac } = require("node:crypto");
+    const sig = createHmac("sha256", secret).update(`${header}.${payload}`).digest().toString("base64url");
+    const token = `${header}.${payload}.${sig}`;
+
+    expect(verify(token)).toBeNull();
+  });
+
+  it("rejects token with missing tier claim", () => {
+    const secret = Buffer.from(TEST_SECRET, "hex");
+    const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({
+      sub: "user-1",
+      jti: "test-jti",
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    })).toString("base64url");
+    const { createHmac } = require("node:crypto");
+    const sig = createHmac("sha256", secret).update(`${header}.${payload}`).digest().toString("base64url");
+    const token = `${header}.${payload}.${sig}`;
+
+    expect(verify(token)).toBeNull();
+  });
+
   it("getExpiresAt returns a future ISO date", () => {
     const exp = getExpiresAt();
     const d = new Date(exp);
