@@ -45,4 +45,20 @@ describe("TagBadge", () => {
     await user.click(screen.getByLabelText("Remove tag Production"));
     expect(onRemove).toHaveBeenCalledOnce();
   });
+
+  it("does not truncate a name with exactly 20 characters", () => {
+    const tag20 = { id: 3, name: "ExactlyTwentyChars!!", colour: "#0f0" };
+    expect(tag20.name.length).toBe(20);
+    render(<TagBadge tag={tag20} />);
+    expect(screen.getByText("ExactlyTwentyChars!!")).toBeInTheDocument();
+    expect(screen.queryByTitle("ExactlyTwentyChars!!")).not.toBeInTheDocument();
+  });
+
+  it("truncates a name with 21 characters", () => {
+    const tag21 = { id: 4, name: "TwentyOneCharacters!!", colour: "#0f0" };
+    expect(tag21.name.length).toBe(21);
+    render(<TagBadge tag={tag21} />);
+    expect(screen.getByText("TwentyOneCharacters!...")).toBeInTheDocument();
+    expect(screen.getByTitle("TwentyOneCharacters!!")).toBeInTheDocument();
+  });
 });

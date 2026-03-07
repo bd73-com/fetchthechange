@@ -47,4 +47,26 @@ describe("ErrorBoundary", () => {
     expect(screen.getByTestId("button-go-home")).toBeInTheDocument();
     expect(screen.getByTestId("button-reload")).toBeInTheDocument();
   });
+
+  it("logs the caught error via console.error", () => {
+    render(
+      <ErrorBoundary>
+        <ThrowingChild shouldThrow={true} />
+      </ErrorBoundary>,
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      "ErrorBoundary caught an error:",
+      expect.any(Error),
+      expect.objectContaining({ componentStack: expect.any(String) }),
+    );
+  });
+
+  it("does not show fallback testid when children render normally", () => {
+    render(
+      <ErrorBoundary>
+        <ThrowingChild shouldThrow={false} />
+      </ErrorBoundary>,
+    );
+    expect(screen.queryByTestId("error-boundary-fallback")).not.toBeInTheDocument();
+  });
 });
