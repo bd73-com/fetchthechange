@@ -16,5 +16,10 @@ export default defineConfig({
     include: ["**/*.test.ts", "**/*.test.tsx"],
     exclude: ["node_modules", "dist", ".cache"],
     setupFiles: ["./client/src/test/setup.ts"],
+    server: {
+      deps: {
+        inline: ["@testing-library/jest-dom"],
+      },
+    },
   },
 });
