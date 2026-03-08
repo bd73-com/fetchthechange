@@ -5,6 +5,7 @@ import { processChangeNotification } from "./notification";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
+import { browserPool } from "./browserPool";
 import { validateUrlBeforeFetch, ssrfSafeFetch } from "../utils/ssrf";
 import { type Monitor, monitorMetrics, monitors } from "@shared/schema";
 import { type UserTier, PAUSE_THRESHOLDS } from "@shared/models/auth";
@@ -104,66 +105,8 @@ export const BASE_RETRY_MS = 2000;
 /** Maximum random jitter added to retry delay. */
 export const JITTER_CAP_MS = 1500;
 
-// ---------------------------------------------------------------------------
-// Warm Browser Pool — reuses CDP connections across checks
-// ---------------------------------------------------------------------------
-
-interface PoolEntry {
-  browser: any; // playwright-core Browser
-  lastUsed: number;
-}
-
-const POOL_MAX = 2;
-const POOL_IDLE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
-
-export class BrowserPool {
-  private entries: PoolEntry[] = [];
-
-  async acquire(connectFn: () => Promise<any>): Promise<{ browser: any; pooled: boolean }> {
-    const now = Date.now();
-    // Evict expired entries
-    this.entries = this.entries.filter(e => now - e.lastUsed < POOL_IDLE_EXPIRY_MS);
-
-    // Find an idle connected browser
-    for (let i = 0; i < this.entries.length; i++) {
-      const entry = this.entries[i];
-      try {
-        // Verify it is still connected by checking isConnected() if available
-        if (entry.browser.isConnected && !entry.browser.isConnected()) {
-          this.entries.splice(i, 1);
-          i--;
-          continue;
-        }
-        this.entries.splice(i, 1); // remove from pool while in use
-        return { browser: entry.browser, pooled: true };
-      } catch {
-        this.entries.splice(i, 1);
-        i--;
-      }
-    }
-
-    // No idle browser — open a new one
-    const browser = await connectFn();
-    return { browser, pooled: this.entries.length < POOL_MAX };
-  }
-
-  release(browser: any, pooled: boolean): void {
-    if (!pooled) return; // ephemeral — caller closes it
-    if (this.entries.length < POOL_MAX) {
-      this.entries.push({ browser, lastUsed: Date.now() });
-    } else {
-      // Pool full (concurrent acquires can cause this) — close to prevent leak
-      Promise.resolve(browser.close()).catch(() => {});
-    }
-  }
-
-  async drain(): Promise<void> {
-    const toClose = this.entries.splice(0);
-    await Promise.allSettled(toClose.map(e => e.browser.close()));
-  }
-}
-
-export const browserPool = new BrowserPool();
+// Re-export pool types for backward compatibility with tests/index.ts
+export { BrowserPool, browserPool } from "./browserPool";
 
 /**
  * Opens a Browserless page with stealth settings, resource blocking, and SSRF
@@ -180,7 +123,7 @@ async function withBrowserlessPage<T>(
   await validateUrlBeforeFetch(url);
 
   let browser: any;
-  let pooled = false;
+  let reusable = false;
   try {
     const playwrightModule = await import("playwright-core");
     const chromium = playwrightModule.chromium;
@@ -192,7 +135,7 @@ async function withBrowserlessPage<T>(
       `wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`,
       { timeout: 30000 },
     );
-    ({ browser, pooled } = await browserPool.acquire(connectFn));
+    ({ browser, reusable } = await browserPool.acquire(connectFn));
 
     const context = await browser.newContext(stealthContextOptions());
     await context.route('**/*', async (route: any) => {
@@ -225,8 +168,8 @@ async function withBrowserlessPage<T>(
     return await callback(page, consentDismissed);
   } finally {
     if (browser) {
-      if (pooled) {
-        browserPool.release(browser, pooled);
+      if (reusable) {
+        browserPool.release(browser, reusable);
       } else {
         await browser.close();
       }

@@ -244,7 +244,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   });
 
   // Graceful shutdown: drain warm browser pool
-  const { browserPool } = await import("./services/scraper");
+  const { browserPool } = await import("./services/browserPool");
   process.on('SIGTERM', async () => { await browserPool.drain(); process.exit(0); });
   process.on('SIGINT', async () => { await browserPool.drain(); process.exit(0); });
 })();

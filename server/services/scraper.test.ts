@@ -5206,7 +5206,7 @@ describe("BrowserPool", () => {
     const connectFn = vi.fn().mockResolvedValue(mockBrowser);
 
     const first = await pool.acquire(connectFn);
-    pool.release(first.browser, first.pooled);
+    pool.release(first.browser, first.reusable);
 
     const second = await pool.acquire(connectFn);
 
@@ -5225,7 +5225,7 @@ describe("BrowserPool", () => {
       .mockResolvedValueOnce(newBrowser);
 
     const first = await pool.acquire(connectFn);
-    pool.release(first.browser, first.pooled);
+    pool.release(first.browser, first.reusable);
 
     // Manually set lastUsed to expired (hack into private entries via any)
     const entries = (pool as any).entries;
@@ -5250,8 +5250,8 @@ describe("BrowserPool", () => {
     // Acquire both without releasing in between so both are freshly created
     const first = await pool.acquire(connectFn);
     const second = await pool.acquire(connectFn);
-    pool.release(first.browser, first.pooled);
-    pool.release(second.browser, second.pooled);
+    pool.release(first.browser, first.reusable);
+    pool.release(second.browser, second.reusable);
 
     await pool.drain();
 
@@ -5268,7 +5268,7 @@ describe("BrowserPool", () => {
       .mockResolvedValueOnce(freshBrowser);
 
     const first = await pool.acquire(connectFn);
-    pool.release(first.browser, first.pooled);
+    pool.release(first.browser, first.reusable);
 
     const second = await pool.acquire(connectFn);
 
@@ -5294,9 +5294,9 @@ describe("BrowserPool", () => {
     const third = await pool.acquire(connectFn);
 
     // Release all three — pool cap is 2, so third should be closed
-    pool.release(first.browser, first.pooled);
-    pool.release(second.browser, second.pooled);
-    pool.release(third.browser, third.pooled);
+    pool.release(first.browser, first.reusable);
+    pool.release(second.browser, second.reusable);
+    pool.release(third.browser, third.reusable);
 
     // Third browser should have been closed since pool was full
     expect(browser3.close).toHaveBeenCalled();
