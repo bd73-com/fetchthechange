@@ -124,6 +124,7 @@ async function withBrowserlessPage<T>(
 
   let browser: any;
   let reusable = false;
+  let context: any;
   try {
     const playwrightModule = await import("playwright-core");
     const chromium = playwrightModule.chromium;
@@ -137,7 +138,7 @@ async function withBrowserlessPage<T>(
     );
     ({ browser, reusable } = await browserPool.acquire(connectFn));
 
-    const context = await browser.newContext(stealthContextOptions());
+    context = await browser.newContext(stealthContextOptions());
     await context.route('**/*', async (route: any) => {
       if (BLOCKED_RESOURCE_TYPES.includes(route.request().resourceType())) {
         return route.abort();
@@ -167,6 +168,9 @@ async function withBrowserlessPage<T>(
 
     return await callback(page, consentDismissed);
   } finally {
+    // Always close the context first to release its renderer process, cookies,
+    // and localStorage — prevents cross-monitor data bleed on pooled browsers.
+    if (context?.close) await context.close().catch(() => {});
     if (browser) {
       if (reusable) {
         browserPool.release(browser, reusable);
