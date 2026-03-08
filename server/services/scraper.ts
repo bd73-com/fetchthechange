@@ -151,8 +151,10 @@ export class BrowserPool {
     if (!pooled) return; // ephemeral — caller closes it
     if (this.entries.length < POOL_MAX) {
       this.entries.push({ browser, lastUsed: Date.now() });
+    } else {
+      // Pool full (concurrent acquires can cause this) — close to prevent leak
+      Promise.resolve(browser.close()).catch(() => {});
     }
-    // If pool is full (shouldn't happen), discard
   }
 
   async drain(): Promise<void> {
@@ -1023,7 +1025,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           try {
             if (attempt > 0) {
               console.log(`[Browserless] Monitor ${monitor.id}: retrying after transient failure (attempt ${attempt + 1})`);
-              const delay = BASE_RETRY_MS * Math.pow(2, attempt) + Math.floor(Math.random() * JITTER_CAP_MS);
+              const delay = BASE_RETRY_MS * Math.pow(2, attempt - 1) + Math.floor(Math.random() * JITTER_CAP_MS);
               await new Promise(r => setTimeout(r, delay));
             }
             const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);

@@ -5277,6 +5277,35 @@ describe("BrowserPool", () => {
 
     await pool.drain();
   });
+
+  it("closes overflow browser when pool is full on release", async () => {
+    const pool = new BrowserPool();
+    const browser1 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
+    const browser2 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
+    const browser3 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
+    const connectFn = vi.fn()
+      .mockResolvedValueOnce(browser1)
+      .mockResolvedValueOnce(browser2)
+      .mockResolvedValueOnce(browser3);
+
+    // Acquire all three concurrently (all get pooled: true since pool is empty at acquire time)
+    const first = await pool.acquire(connectFn);
+    const second = await pool.acquire(connectFn);
+    const third = await pool.acquire(connectFn);
+
+    // Release all three — pool cap is 2, so third should be closed
+    pool.release(first.browser, first.pooled);
+    pool.release(second.browser, second.pooled);
+    pool.release(third.browser, third.pooled);
+
+    // Third browser should have been closed since pool was full
+    expect(browser3.close).toHaveBeenCalled();
+    // First two should NOT have been closed (they're in the pool)
+    expect(browser1.close).not.toHaveBeenCalled();
+    expect(browser2.close).not.toHaveBeenCalled();
+
+    await pool.drain();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -5288,20 +5317,24 @@ describe("Jitter backoff constants", () => {
     expect(JITTER_CAP_MS).toBe(1500);
   });
 
-  it("retry delay at attempt 0 is between BASE_RETRY_MS and BASE_RETRY_MS + JITTER_CAP_MS", () => {
-    // Simulate the formula: delay = BASE_RETRY_MS * 2^attempt + random(0, JITTER_CAP_MS)
+  it("first retry (loop attempt=1) delay is between BASE_RETRY_MS and BASE_RETRY_MS + JITTER_CAP_MS", () => {
+    // In the retry loop, attempt=1 is the first retry. Formula uses attempt-1 as exponent.
+    // delay = BASE_RETRY_MS * 2^(attempt-1) + random(0, JITTER_CAP_MS)
+    // = 2000 * 2^0 + [0, 1500) = 2000–3499
     for (let i = 0; i < 50; i++) {
-      const attempt = 0;
-      const delay = BASE_RETRY_MS * Math.pow(2, attempt) + Math.floor(Math.random() * JITTER_CAP_MS);
+      const attempt = 1; // first retry in the loop
+      const delay = BASE_RETRY_MS * Math.pow(2, attempt - 1) + Math.floor(Math.random() * JITTER_CAP_MS);
       expect(delay).toBeGreaterThanOrEqual(BASE_RETRY_MS);
       expect(delay).toBeLessThan(BASE_RETRY_MS + JITTER_CAP_MS);
     }
   });
 
-  it("retry delay at attempt 1 is between BASE_RETRY_MS*2 and BASE_RETRY_MS*2 + JITTER_CAP_MS", () => {
+  it("second retry (loop attempt=2) would scale to BASE_RETRY_MS*2 range", () => {
+    // If the loop were extended, attempt=2 would give:
+    // delay = 2000 * 2^1 + [0, 1500) = 4000–5499
     for (let i = 0; i < 50; i++) {
-      const attempt = 1;
-      const delay = BASE_RETRY_MS * Math.pow(2, attempt) + Math.floor(Math.random() * JITTER_CAP_MS);
+      const attempt = 2;
+      const delay = BASE_RETRY_MS * Math.pow(2, attempt - 1) + Math.floor(Math.random() * JITTER_CAP_MS);
       expect(delay).toBeGreaterThanOrEqual(BASE_RETRY_MS * 2);
       expect(delay).toBeLessThan(BASE_RETRY_MS * 2 + JITTER_CAP_MS);
     }
