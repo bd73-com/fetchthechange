@@ -95,11 +95,13 @@ import {
   browserPool,
   BASE_RETRY_MS,
   JITTER_CAP_MS,
+  extractWithBrowserless,
 } from "./scraper";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
 import { processChangeNotification } from "./notification";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
+import { ErrorLogger } from "./logger";
 import { db } from "../db";
 import type { Monitor } from "@shared/schema";
 
@@ -5338,5 +5340,303 @@ describe("Jitter backoff constants", () => {
       expect(delay).toBeGreaterThanOrEqual(BASE_RETRY_MS * 2);
       expect(delay).toBeLessThan(BASE_RETRY_MS * 2 + JITTER_CAP_MS);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BrowserPool — additional edge cases
+// ---------------------------------------------------------------------------
+describe("BrowserPool edge cases", () => {
+  it("connectFn failure decrements pendingAcquires (pool stays usable)", async () => {
+    const pool = new BrowserPool();
+    const connectFn = vi.fn().mockRejectedValue(new Error("connection failed"));
+
+    await expect(pool.acquire(connectFn)).rejects.toThrow("connection failed");
+
+    // pendingAcquires should be back to 0 — a subsequent acquire should work normally
+    const okBrowser = { isConnected: () => true, close: vi.fn() };
+    const okConnect = vi.fn().mockResolvedValue(okBrowser);
+    const { browser, reusable } = await pool.acquire(okConnect);
+
+    expect(browser).toBe(okBrowser);
+    expect(reusable).toBe(true);
+
+    await pool.drain();
+  });
+
+  it("isConnected() throwing evicts the entry and creates a new browser", async () => {
+    const pool = new BrowserPool();
+    const throwingBrowser = {
+      isConnected: () => { throw new Error("browser disposed"); },
+      close: vi.fn(),
+    };
+    const freshBrowser = { isConnected: () => true, close: vi.fn() };
+    const connectFn = vi.fn()
+      .mockResolvedValueOnce(throwingBrowser)
+      .mockResolvedValueOnce(freshBrowser);
+
+    // Put the throwing browser into the pool
+    const first = await pool.acquire(connectFn);
+    pool.release(first.browser, first.reusable);
+
+    // Next acquire should evict it and call connectFn again
+    const second = await pool.acquire(connectFn);
+    expect(connectFn).toHaveBeenCalledTimes(2);
+    expect(second.browser).toBe(freshBrowser);
+
+    await pool.drain();
+  });
+
+  it("release with reusable=false is a no-op (browser not added to pool)", async () => {
+    const pool = new BrowserPool();
+    const browser = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
+
+    pool.release(browser, false);
+
+    // Pool should still be empty — a new acquire should call connectFn
+    const newBrowser = { isConnected: () => true, close: vi.fn() };
+    const connectFn = vi.fn().mockResolvedValue(newBrowser);
+    const { browser: acquired } = await pool.acquire(connectFn);
+
+    expect(connectFn).toHaveBeenCalledTimes(1);
+    expect(acquired).toBe(newBrowser);
+    // Original browser should not have been touched
+    expect(browser.close).not.toHaveBeenCalled();
+
+    await pool.drain();
+  });
+
+  it("drain on empty pool resolves without error", async () => {
+    const pool = new BrowserPool();
+    await expect(pool.drain()).resolves.toBeUndefined();
+  });
+
+  it("concurrent acquires: first to resolve sees highest pendingAcquires count", async () => {
+    const pool = new BrowserPool();
+    let resolveFirst!: (b: any) => void;
+    let resolveSecond!: (b: any) => void;
+    let resolveThird!: (b: any) => void;
+
+    const browser1 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
+    const browser2 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
+    const browser3 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
+
+    const connectFn = vi.fn()
+      .mockReturnValueOnce(new Promise(r => { resolveFirst = r; }))
+      .mockReturnValueOnce(new Promise(r => { resolveSecond = r; }))
+      .mockReturnValueOnce(new Promise(r => { resolveThird = r; }));
+
+    // Start three concurrent acquires — all increment pendingAcquires to 3
+    const p1 = pool.acquire(connectFn);
+    const p2 = pool.acquire(connectFn);
+    const p3 = pool.acquire(connectFn);
+
+    // Resolve sequentially. Each acquire checks reusable BEFORE its finally block
+    // decrements pendingAcquires. Microtask ordering means each fully completes
+    // (try + finally) before the next await resumes.
+    // r1: entries(0) + pending(3) = 3 > 2 → false, then pending decrements to 2
+    // r2: entries(0) + pending(2) = 2 <= 2 → true, then pending decrements to 1
+    // r3: entries(0) + pending(1) = 1 <= 2 → true, then pending decrements to 0
+    resolveFirst(browser1);
+    resolveSecond(browser2);
+    resolveThird(browser3);
+
+    const r1 = await p1;
+    const r2 = await p2;
+    const r3 = await p3;
+
+    expect(r1.reusable).toBe(false);
+    expect(r2.reusable).toBe(true);
+    expect(r3.reusable).toBe(true);
+
+    // Without pendingAcquires tracking, all three would have been reusable=true
+    // (since entries.length=0 < POOL_MAX=2 for all). The tracking ensures the
+    // first resolver correctly sees the overcommitted state.
+    await pool.drain();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Token redaction in connectFn error path
+// ---------------------------------------------------------------------------
+describe("token redaction in Browserless connection errors", () => {
+  beforeEach(() => {
+    process.env.BROWSERLESS_TOKEN = "super-secret-token-12345";
+  });
+
+  afterEach(() => {
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  it("strips BROWSERLESS_TOKEN from error message when connectOverCDP fails", async () => {
+    const token = process.env.BROWSERLESS_TOKEN!;
+    const errorWithToken = new Error(
+      `WebSocket error: wss://production-sfo.browserless.io/stealth?token=${token} - connect refused`
+    );
+    mockConnectOverCDP.mockRejectedValue(errorWithToken);
+
+    await expect(
+      extractWithBrowserless("https://example.com", ".price")
+    ).rejects.toThrow();
+
+    try {
+      await extractWithBrowserless("https://example.com", ".price");
+    } catch (err: any) {
+      // The token should have been replaced with [REDACTED]
+      expect(err.message).not.toContain(token);
+      expect(err.message).toContain("[REDACTED]");
+    }
+  });
+
+  it("strips BROWSERLESS_TOKEN from error stack trace", async () => {
+    const token = process.env.BROWSERLESS_TOKEN!;
+    const errorWithToken = new Error("connection failed");
+    errorWithToken.stack = `Error: connection failed at wss://host?token=${token}\n    at Object.connect`;
+    mockConnectOverCDP.mockRejectedValue(errorWithToken);
+
+    try {
+      await extractWithBrowserless("https://example.com", ".price");
+    } catch (err: any) {
+      expect(err.stack).not.toContain(token);
+      expect(err.stack).toContain("[REDACTED]");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractWithBrowserless error logging uses classifyBrowserlessError
+// ---------------------------------------------------------------------------
+describe("extractWithBrowserless error classification in logs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.BROWSERLESS_TOKEN = "test-token";
+  });
+
+  afterEach(() => {
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  it("logs classified timeout message to ErrorLogger", async () => {
+    mockConnectOverCDP.mockRejectedValue(new Error("Navigation timeout of 30000ms exceeded"));
+
+    await expect(
+      extractWithBrowserless("https://example.com", ".price", 1, "My Monitor")
+    ).rejects.toThrow();
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scraper",
+      expect.stringContaining("took too long"),
+      expect.any(Error),
+      expect.objectContaining({ url: "https://example.com" }),
+    );
+  });
+
+  it("logs classified ECONNREFUSED message to ErrorLogger", async () => {
+    mockConnectOverCDP.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:443"));
+
+    await expect(
+      extractWithBrowserless("https://example.com", ".price")
+    ).rejects.toThrow();
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scraper",
+      expect.stringContaining("refused the connection"),
+      expect.any(Error),
+      expect.objectContaining({ url: "https://example.com" }),
+    );
+  });
+
+  it("includes monitor name in error label when provided", async () => {
+    mockConnectOverCDP.mockRejectedValue(new Error("some error"));
+
+    await expect(
+      extractWithBrowserless("https://example.com", ".price", 1, "Price Tracker")
+    ).rejects.toThrow();
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scraper",
+      expect.stringContaining('"Price Tracker"'),
+      expect.any(Error),
+      expect.objectContaining({ monitorName: "Price Tracker", monitorId: 1 }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Context close on pooled browser reuse
+// ---------------------------------------------------------------------------
+describe("withBrowserlessPage context cleanup", () => {
+  beforeEach(() => {
+    process.env.BROWSERLESS_TOKEN = "test-token";
+  });
+
+  afterEach(() => {
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  it("closes context before returning browser to pool on success", async () => {
+    const contextCloseFn = vi.fn().mockResolvedValue(undefined);
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockResolvedValue(undefined),
+        waitForLoadState: vi.fn().mockResolvedValue(undefined),
+        content: vi.fn().mockResolvedValue("<html><body><span class='price'>$10</span></body></html>"),
+        locator: vi.fn().mockReturnValue({
+          count: vi.fn().mockResolvedValue(1),
+          first: vi.fn().mockReturnValue({ innerText: vi.fn().mockResolvedValue("$10") }),
+        }),
+        url: vi.fn().mockReturnValue("https://example.com"),
+        title: vi.fn().mockResolvedValue("Test"),
+        getByRole: vi.fn().mockReturnValue({ count: vi.fn().mockResolvedValue(0) }),
+        frames: vi.fn().mockReturnValue([]),
+        addInitScript: vi.fn().mockResolvedValue(undefined),
+        waitForTimeout: vi.fn().mockResolvedValue(undefined),
+        waitForSelector: vi.fn().mockResolvedValue(undefined),
+      }),
+      close: contextCloseFn,
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+      isConnected: () => true,
+    };
+    mockConnectOverCDP.mockResolvedValue(browserMock);
+
+    const result = await extractWithBrowserless("https://example.com", ".price");
+
+    expect(result.value).toBe("$10");
+    // Context should be closed to prevent cross-monitor data bleed
+    expect(contextCloseFn).toHaveBeenCalled();
+    // Browser should NOT be closed (returned to pool)
+    expect(browserMock.close).not.toHaveBeenCalled();
+  });
+
+  it("closes context before returning browser to pool on error", async () => {
+    const contextCloseFn = vi.fn().mockResolvedValue(undefined);
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockRejectedValue(new Error("Navigation failed")),
+        waitForLoadState: vi.fn().mockResolvedValue(undefined),
+        addInitScript: vi.fn().mockResolvedValue(undefined),
+      }),
+      close: contextCloseFn,
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+      isConnected: () => true,
+    };
+    mockConnectOverCDP.mockResolvedValue(browserMock);
+
+    await expect(
+      extractWithBrowserless("https://example.com", ".price")
+    ).rejects.toThrow("Navigation failed");
+
+    // Context should still be closed even on error
+    expect(contextCloseFn).toHaveBeenCalled();
+    // Browser should NOT be closed (returned to pool)
+    expect(browserMock.close).not.toHaveBeenCalled();
   });
 });
