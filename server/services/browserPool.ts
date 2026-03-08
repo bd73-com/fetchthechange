@@ -27,6 +27,7 @@ const POOL_IDLE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
 export class BrowserPool {
   private entries: PoolEntry[] = [];
+  private pendingAcquires = 0;
 
   /**
    * Acquire a browser from the pool or create a new one via connectFn.
@@ -55,9 +56,18 @@ export class BrowserPool {
       }
     }
 
-    // No idle browser — open a new one
-    const browser = await connectFn();
-    return { browser, reusable: this.entries.length < POOL_MAX };
+    // No idle browser — open a new one.
+    // Track pending acquires so we can correctly decide reusability:
+    // if many connects are in flight concurrently, we account for them
+    // to avoid exceeding POOL_MAX on release.
+    this.pendingAcquires++;
+    try {
+      const browser = await connectFn();
+      const reusable = this.entries.length + this.pendingAcquires <= POOL_MAX;
+      return { browser, reusable };
+    } finally {
+      this.pendingAcquires--;
+    }
   }
 
   /**

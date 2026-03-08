@@ -132,10 +132,17 @@ async function withBrowserlessPage<T>(
       throw new Error("Playwright browser automation is not available");
     }
 
-    const connectFn = () => chromium.connectOverCDP(
-      `wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`,
-      { timeout: 30000 },
-    );
+    const wsUrl = `wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`;
+    const connectFn = async () => {
+      try {
+        return await chromium.connectOverCDP(wsUrl, { timeout: 30000 });
+      } catch (err: any) {
+        // Strip the token from error messages/stack to prevent secret leakage
+        if (err?.message) err.message = err.message.replaceAll(token, '[REDACTED]');
+        if (err?.stack) err.stack = err.stack.replaceAll(token, '[REDACTED]');
+        throw err;
+      }
+    };
     ({ browser, reusable } = await browserPool.acquire(connectFn));
 
     context = await browser.newContext(stealthContextOptions());
