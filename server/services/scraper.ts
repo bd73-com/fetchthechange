@@ -99,6 +99,70 @@ const BLOCKED_TRACKING_PATTERN = /google-analytics|googletagmanager|facebook\.ne
 /** Resource types to block in Browserless sessions to speed up page load. */
 const BLOCKED_RESOURCE_TYPES = ['image', 'media', 'font'];
 
+/** Base delay for exponential backoff on Browserless retry. */
+export const BASE_RETRY_MS = 2000;
+/** Maximum random jitter added to retry delay. */
+export const JITTER_CAP_MS = 1500;
+
+// ---------------------------------------------------------------------------
+// Warm Browser Pool — reuses CDP connections across checks
+// ---------------------------------------------------------------------------
+
+interface PoolEntry {
+  browser: any; // playwright-core Browser
+  lastUsed: number;
+}
+
+const POOL_MAX = 2;
+const POOL_IDLE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+
+export class BrowserPool {
+  private entries: PoolEntry[] = [];
+
+  async acquire(connectFn: () => Promise<any>): Promise<{ browser: any; pooled: boolean }> {
+    const now = Date.now();
+    // Evict expired entries
+    this.entries = this.entries.filter(e => now - e.lastUsed < POOL_IDLE_EXPIRY_MS);
+
+    // Find an idle connected browser
+    for (let i = 0; i < this.entries.length; i++) {
+      const entry = this.entries[i];
+      try {
+        // Verify it is still connected by checking isConnected() if available
+        if (entry.browser.isConnected && !entry.browser.isConnected()) {
+          this.entries.splice(i, 1);
+          i--;
+          continue;
+        }
+        this.entries.splice(i, 1); // remove from pool while in use
+        return { browser: entry.browser, pooled: true };
+      } catch {
+        this.entries.splice(i, 1);
+        i--;
+      }
+    }
+
+    // No idle browser — open a new one
+    const browser = await connectFn();
+    return { browser, pooled: this.entries.length < POOL_MAX };
+  }
+
+  release(browser: any, pooled: boolean): void {
+    if (!pooled) return; // ephemeral — caller closes it
+    if (this.entries.length < POOL_MAX) {
+      this.entries.push({ browser, lastUsed: Date.now() });
+    }
+    // If pool is full (shouldn't happen), discard
+  }
+
+  async drain(): Promise<void> {
+    const toClose = this.entries.splice(0);
+    await Promise.allSettled(toClose.map(e => e.browser.close()));
+  }
+}
+
+export const browserPool = new BrowserPool();
+
 /**
  * Opens a Browserless page with stealth settings, resource blocking, and SSRF
  * validation, then passes the ready page to a callback. Handles browser lifecycle
@@ -113,20 +177,23 @@ async function withBrowserlessPage<T>(
 
   await validateUrlBeforeFetch(url);
 
-  let browser;
+  let browser: any;
+  let pooled = false;
   try {
     const playwrightModule = await import("playwright-core");
     const chromium = playwrightModule.chromium;
     if (!chromium || typeof chromium.connectOverCDP !== 'function') {
       throw new Error("Playwright browser automation is not available");
     }
-    browser = await chromium.connectOverCDP(
+
+    const connectFn = () => chromium.connectOverCDP(
       `wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`,
       { timeout: 30000 },
     );
+    ({ browser, pooled } = await browserPool.acquire(connectFn));
 
     const context = await browser.newContext(stealthContextOptions());
-    await context.route('**/*', async (route) => {
+    await context.route('**/*', async (route: any) => {
       if (BLOCKED_RESOURCE_TYPES.includes(route.request().resourceType())) {
         return route.abort();
       }
@@ -155,23 +222,59 @@ async function withBrowserlessPage<T>(
 
     return await callback(page, consentDismissed);
   } finally {
-    if (browser) await browser.close();
+    if (browser) {
+      if (pooled) {
+        browserPool.release(browser, pooled);
+      } else {
+        await browser.close();
+      }
+    }
   }
 }
 
 /** Stealth init script injected into browser pages before navigation to evade bot detection. */
 function stealthInitScript() {
+  // 1. Hide webdriver flag
   Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+  // 2. navigator.plugins — realistic Chrome plugin array
+  const pluginData = [
+    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+  ];
+  const pluginArray = Object.create(PluginArray.prototype);
+  Object.defineProperty(pluginArray, 'length', { get: () => pluginData.length });
+  pluginData.forEach((p, i) => {
+    const plugin = Object.create(Plugin.prototype);
+    Object.defineProperty(plugin, 'name', { get: () => p.name });
+    Object.defineProperty(plugin, 'filename', { get: () => p.filename });
+    Object.defineProperty(plugin, 'description', { get: () => p.description });
+    Object.defineProperty(plugin, 'length', { get: () => 0 });
+    Object.defineProperty(pluginArray, i, { get: () => plugin });
+    Object.defineProperty(pluginArray, p.name, { get: () => plugin });
+  });
+  Object.defineProperty(navigator, 'plugins', { get: () => pluginArray });
+
+  // 3. navigator.languages
+  if (!navigator.languages || navigator.languages.length === 0) {
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+  }
+
+  // 4. window.chrome — absent in headless, present in real Chrome
   if (!(window as any).chrome) {
     (window as any).chrome = { runtime: {}, csi: () => ({}) };
   }
-  Object.defineProperty(navigator, 'plugins', {
-    get: () => [
-      { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-      { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-    ],
-  });
-  Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+
+  // 5. WebGL — spoof renderer/vendor away from SwiftShader
+  const getParameter = WebGLRenderingContext.prototype.getParameter;
+  WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
+    if (parameter === 37445) return 'Intel Inc.';   // UNMASKED_VENDOR_WEBGL
+    if (parameter === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+    return getParameter.call(this, parameter);
+  };
+
+  // 6. Permissions API — spoof notifications as 'prompt'
   try {
     const originalQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
     window.navigator.permissions.query = (params: any) =>
@@ -631,6 +734,28 @@ async function tryDismissConsent(page: any): Promise<boolean> {
 }
 
 /**
+ * Classifies Browserless errors into user-friendly messages.
+ */
+export function classifyBrowserlessError(errMsg: string): string {
+  if (/timeout|Timeout|timed out/.test(errMsg)) {
+    return "Page took too long to load — the site may be slow or blocking headless browsers";
+  }
+  if (/net::ERR_NAME_NOT_RESOLVED|getaddrinfo|ENOTFOUND/.test(errMsg)) {
+    return "The domain could not be resolved — check the URL is correct";
+  }
+  if (/net::ERR_CONNECTION_REFUSED|ECONNREFUSED/.test(errMsg)) {
+    return "The site refused the connection — it may be down";
+  }
+  if (/net::ERR_TOO_MANY_REDIRECTS/.test(errMsg)) {
+    return "Too many redirects — the page may require a login or cookie";
+  }
+  if (/403|Forbidden|access denied|bot detection|challenge/i.test(errMsg)) {
+    return "The site is actively blocking automated access — try a less frequent check interval";
+  }
+  return "Rendered page extraction failed — the site may block automated browsers";
+}
+
+/**
  * Retries extraction using Browserless.
  */
 export async function extractWithBrowserless(url: string, selector: string, monitorId?: number, monitorName?: string): Promise<{
@@ -699,7 +824,8 @@ export async function extractWithBrowserless(url: string, selector: string, moni
     });
   } catch (error) {
     const label = monitorName ? `"${monitorName}" — browser` : "Browser";
-    await ErrorLogger.error("scraper", `${label}-based extraction failed — the page may be unreachable or blocking automated access. Check that the URL loads in a normal browser.`, error instanceof Error ? error : null, { url, selector, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
+    const classified = classifyBrowserlessError(error instanceof Error ? error.message : "Unknown error");
+    await ErrorLogger.error("scraper", `${label}-based extraction failed: ${classified}`, error instanceof Error ? error : null, { url, selector, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
     throw error;
   }
 }
@@ -897,7 +1023,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           try {
             if (attempt > 0) {
               console.log(`[Browserless] Monitor ${monitor.id}: retrying after transient failure (attempt ${attempt + 1})`);
-              await new Promise(r => setTimeout(r, 3000));
+              const delay = BASE_RETRY_MS * Math.pow(2, attempt) + Math.floor(Math.random() * JITTER_CAP_MS);
+              await new Promise(r => setTimeout(r, delay));
             }
             const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
             browserlessSuccess = true;

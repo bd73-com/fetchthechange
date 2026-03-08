@@ -242,4 +242,9 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
     console.log(`serving on port ${port}`);
   });
+
+  // Graceful shutdown: drain warm browser pool
+  const { browserPool } = await import("./services/scraper");
+  process.on('SIGTERM', async () => { await browserPool.drain(); process.exit(0); });
+  process.on('SIGINT', async () => { await browserPool.drain(); process.exit(0); });
 })();

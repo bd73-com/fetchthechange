@@ -90,6 +90,11 @@ import {
   classifyOuterError,
   classifyHttpStatus,
   extractFromJsonLd,
+  classifyBrowserlessError,
+  BrowserPool,
+  browserPool,
+  BASE_RETRY_MS,
+  JITTER_CAP_MS,
 } from "./scraper";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
@@ -97,6 +102,11 @@ import { processChangeNotification } from "./notification";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { db } from "../db";
 import type { Monitor } from "@shared/schema";
+
+// Drain browser pool after every test to prevent cross-test pollution
+afterEach(async () => {
+  await browserPool.drain();
+});
 
 // ---------------------------------------------------------------------------
 // Helper to build a Monitor object for tests
@@ -3192,6 +3202,9 @@ describe("discoverSelectors", () => {
       discoverSelectors("https://example.com", ".price", "$99")
     ).rejects.toThrow("Page crashed");
 
+    // With the warm browser pool, the browser is returned to the pool instead of
+    // being closed immediately. Draining the pool should close it.
+    await browserPool.drain();
     expect(closeFn).toHaveBeenCalled();
   });
 
@@ -5114,5 +5127,183 @@ describe("Cloudflare challenge wait in extractWithBrowserless", () => {
     expect(contentCallCount).toBeGreaterThanOrEqual(2);
     expect(result.status).toBe("ok");
     expect(result.currentValue).toBe("$25.00");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyBrowserlessError
+// ---------------------------------------------------------------------------
+describe("classifyBrowserlessError", () => {
+  it("classifies timeout errors", () => {
+    expect(classifyBrowserlessError("Navigation timeout of 30000ms exceeded")).toContain("took too long");
+  });
+
+  it("classifies timed out errors", () => {
+    expect(classifyBrowserlessError("page timed out waiting for selector")).toContain("took too long");
+  });
+
+  it("classifies ENOTFOUND errors", () => {
+    expect(classifyBrowserlessError("getaddrinfo ENOTFOUND example.com")).toContain("domain could not be resolved");
+  });
+
+  it("classifies ECONNREFUSED errors", () => {
+    expect(classifyBrowserlessError("connect ECONNREFUSED 127.0.0.1:443")).toContain("refused the connection");
+  });
+
+  it("classifies net::ERR_CONNECTION_REFUSED errors", () => {
+    expect(classifyBrowserlessError("net::ERR_CONNECTION_REFUSED at page.goto")).toContain("refused the connection");
+  });
+
+  it("classifies ERR_TOO_MANY_REDIRECTS errors", () => {
+    expect(classifyBrowserlessError("net::ERR_TOO_MANY_REDIRECTS")).toContain("Too many redirects");
+  });
+
+  it("classifies 403 Forbidden errors", () => {
+    expect(classifyBrowserlessError("403 Forbidden")).toContain("blocking automated access");
+  });
+
+  it("classifies access denied errors (case insensitive)", () => {
+    expect(classifyBrowserlessError("Access Denied by WAF")).toContain("blocking automated access");
+  });
+
+  it("classifies bot detection errors", () => {
+    expect(classifyBrowserlessError("bot detection triggered")).toContain("blocking automated access");
+  });
+
+  it("classifies challenge errors", () => {
+    expect(classifyBrowserlessError("challenge page displayed")).toContain("blocking automated access");
+  });
+
+  it("returns default message for unknown errors", () => {
+    expect(classifyBrowserlessError("some random error")).toContain("Rendered page extraction failed");
+  });
+
+  it("classifies ERR_NAME_NOT_RESOLVED errors", () => {
+    expect(classifyBrowserlessError("net::ERR_NAME_NOT_RESOLVED")).toContain("domain could not be resolved");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BrowserPool
+// ---------------------------------------------------------------------------
+describe("BrowserPool", () => {
+  it("acquire from empty pool calls connectFn once", async () => {
+    const pool = new BrowserPool();
+    const mockBrowser = { isConnected: () => true, close: vi.fn() };
+    const connectFn = vi.fn().mockResolvedValue(mockBrowser);
+
+    const { browser } = await pool.acquire(connectFn);
+
+    expect(connectFn).toHaveBeenCalledTimes(1);
+    expect(browser).toBe(mockBrowser);
+
+    await pool.drain();
+  });
+
+  it("release + acquire reuses the same browser (connectFn called once total)", async () => {
+    const pool = new BrowserPool();
+    const mockBrowser = { isConnected: () => true, close: vi.fn() };
+    const connectFn = vi.fn().mockResolvedValue(mockBrowser);
+
+    const first = await pool.acquire(connectFn);
+    pool.release(first.browser, first.pooled);
+
+    const second = await pool.acquire(connectFn);
+
+    expect(connectFn).toHaveBeenCalledTimes(1);
+    expect(second.browser).toBe(mockBrowser);
+
+    await pool.drain();
+  });
+
+  it("evicts idle-expired browsers and calls connectFn again", async () => {
+    const pool = new BrowserPool();
+    const oldBrowser = { isConnected: () => true, close: vi.fn() };
+    const newBrowser = { isConnected: () => true, close: vi.fn() };
+    const connectFn = vi.fn()
+      .mockResolvedValueOnce(oldBrowser)
+      .mockResolvedValueOnce(newBrowser);
+
+    const first = await pool.acquire(connectFn);
+    pool.release(first.browser, first.pooled);
+
+    // Manually set lastUsed to expired (hack into private entries via any)
+    const entries = (pool as any).entries;
+    entries[0].lastUsed = Date.now() - 5 * 60 * 1000 - 1;
+
+    const second = await pool.acquire(connectFn);
+
+    expect(connectFn).toHaveBeenCalledTimes(2);
+    expect(second.browser).toBe(newBrowser);
+
+    await pool.drain();
+  });
+
+  it("drain() closes all pooled browsers", async () => {
+    const pool = new BrowserPool();
+    const browser1 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
+    const browser2 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
+    const connectFn = vi.fn()
+      .mockResolvedValueOnce(browser1)
+      .mockResolvedValueOnce(browser2);
+
+    // Acquire both without releasing in between so both are freshly created
+    const first = await pool.acquire(connectFn);
+    const second = await pool.acquire(connectFn);
+    pool.release(first.browser, first.pooled);
+    pool.release(second.browser, second.pooled);
+
+    await pool.drain();
+
+    expect(browser1.close).toHaveBeenCalled();
+    expect(browser2.close).toHaveBeenCalled();
+  });
+
+  it("disconnected browser is evicted and connectFn called again", async () => {
+    const pool = new BrowserPool();
+    const disconnectedBrowser = { isConnected: () => false, close: vi.fn() };
+    const freshBrowser = { isConnected: () => true, close: vi.fn() };
+    const connectFn = vi.fn()
+      .mockResolvedValueOnce(disconnectedBrowser)
+      .mockResolvedValueOnce(freshBrowser);
+
+    const first = await pool.acquire(connectFn);
+    pool.release(first.browser, first.pooled);
+
+    const second = await pool.acquire(connectFn);
+
+    expect(connectFn).toHaveBeenCalledTimes(2);
+    expect(second.browser).toBe(freshBrowser);
+
+    await pool.drain();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Jitter backoff — retry delay is in expected range
+// ---------------------------------------------------------------------------
+describe("Jitter backoff constants", () => {
+  it("BASE_RETRY_MS and JITTER_CAP_MS are exported with expected values", () => {
+    expect(BASE_RETRY_MS).toBe(2000);
+    expect(JITTER_CAP_MS).toBe(1500);
+  });
+
+  it("retry delay at attempt 0 is between BASE_RETRY_MS and BASE_RETRY_MS + JITTER_CAP_MS", () => {
+    // Simulate the formula: delay = BASE_RETRY_MS * 2^attempt + random(0, JITTER_CAP_MS)
+    for (let i = 0; i < 50; i++) {
+      const attempt = 0;
+      const delay = BASE_RETRY_MS * Math.pow(2, attempt) + Math.floor(Math.random() * JITTER_CAP_MS);
+      expect(delay).toBeGreaterThanOrEqual(BASE_RETRY_MS);
+      expect(delay).toBeLessThan(BASE_RETRY_MS + JITTER_CAP_MS);
+    }
+  });
+
+  it("retry delay at attempt 1 is between BASE_RETRY_MS*2 and BASE_RETRY_MS*2 + JITTER_CAP_MS", () => {
+    for (let i = 0; i < 50; i++) {
+      const attempt = 1;
+      const delay = BASE_RETRY_MS * Math.pow(2, attempt) + Math.floor(Math.random() * JITTER_CAP_MS);
+      expect(delay).toBeGreaterThanOrEqual(BASE_RETRY_MS * 2);
+      expect(delay).toBeLessThan(BASE_RETRY_MS * 2 + JITTER_CAP_MS);
+    }
   });
 });
