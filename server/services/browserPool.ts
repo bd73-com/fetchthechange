@@ -36,8 +36,12 @@ export class BrowserPool {
    */
   async acquire(connectFn: () => Promise<PoolableBrowser>): Promise<{ browser: PoolableBrowser; reusable: boolean }> {
     const now = Date.now();
-    // Evict expired entries
+    // Evict expired entries and close their CDP sessions
+    const expired = this.entries.filter(e => now - e.lastUsed >= POOL_IDLE_EXPIRY_MS);
     this.entries = this.entries.filter(e => now - e.lastUsed < POOL_IDLE_EXPIRY_MS);
+    for (const e of expired) {
+      Promise.resolve(e.browser.close()).catch(() => {});
+    }
 
     // Find an idle connected browser
     for (let i = 0; i < this.entries.length; i++) {
@@ -45,6 +49,7 @@ export class BrowserPool {
       try {
         if (!entry.browser.isConnected()) {
           this.entries.splice(i, 1);
+          Promise.resolve(entry.browser.close()).catch(() => {});
           i--;
           continue;
         }
@@ -52,6 +57,7 @@ export class BrowserPool {
         return { browser: entry.browser, reusable: true };
       } catch {
         this.entries.splice(i, 1);
+        Promise.resolve(entry.browser.close()).catch(() => {});
         i--;
       }
     }

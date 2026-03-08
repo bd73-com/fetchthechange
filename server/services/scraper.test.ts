@@ -5218,7 +5218,7 @@ describe("BrowserPool", () => {
     await pool.drain();
   });
 
-  it("evicts idle-expired browsers and calls connectFn again", async () => {
+  it("evicts idle-expired browsers, closes them, and calls connectFn again", async () => {
     const pool = new BrowserPool();
     const oldBrowser = { isConnected: () => true, close: vi.fn() };
     const newBrowser = { isConnected: () => true, close: vi.fn() };
@@ -5237,6 +5237,8 @@ describe("BrowserPool", () => {
 
     expect(connectFn).toHaveBeenCalledTimes(2);
     expect(second.browser).toBe(newBrowser);
+    // Expired browser should be closed to free the CDP session
+    expect(oldBrowser.close).toHaveBeenCalled();
 
     await pool.drain();
   });
@@ -5261,7 +5263,7 @@ describe("BrowserPool", () => {
     expect(browser2.close).toHaveBeenCalled();
   });
 
-  it("disconnected browser is evicted and connectFn called again", async () => {
+  it("disconnected browser is evicted, closed, and connectFn called again", async () => {
     const pool = new BrowserPool();
     const disconnectedBrowser = { isConnected: () => false, close: vi.fn() };
     const freshBrowser = { isConnected: () => true, close: vi.fn() };
@@ -5276,6 +5278,8 @@ describe("BrowserPool", () => {
 
     expect(connectFn).toHaveBeenCalledTimes(2);
     expect(second.browser).toBe(freshBrowser);
+    // Evicted browser should be closed to free the CDP session
+    expect(disconnectedBrowser.close).toHaveBeenCalled();
 
     await pool.drain();
   });
@@ -5364,7 +5368,7 @@ describe("BrowserPool edge cases", () => {
     await pool.drain();
   });
 
-  it("isConnected() throwing evicts the entry and creates a new browser", async () => {
+  it("isConnected() throwing evicts the entry, closes it, and creates a new browser", async () => {
     const pool = new BrowserPool();
     const throwingBrowser = {
       isConnected: () => { throw new Error("browser disposed"); },
@@ -5383,6 +5387,8 @@ describe("BrowserPool edge cases", () => {
     const second = await pool.acquire(connectFn);
     expect(connectFn).toHaveBeenCalledTimes(2);
     expect(second.browser).toBe(freshBrowser);
+    // Evicted browser should be closed to free the CDP session
+    expect(throwingBrowser.close).toHaveBeenCalled();
 
     await pool.drain();
   });

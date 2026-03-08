@@ -153,13 +153,17 @@ async function withBrowserlessPage<T>(
       if (BLOCKED_TRACKING_PATTERN.test(route.request().url())) {
         return route.abort();
       }
-      if (!route.request().isNavigationRequest()) return route.continue();
-      try {
-        await validateUrlBeforeFetch(route.request().url());
-        return route.continue();
-      } catch {
-        return route.abort();
+      // Validate all HTTP(S) requests against SSRF rules, not just navigations.
+      // Non-HTTP schemes (about:, data:, blob:) are safe to pass through.
+      const requestUrl = route.request().url();
+      if (/^https?:/i.test(requestUrl)) {
+        try {
+          await validateUrlBeforeFetch(requestUrl);
+        } catch {
+          return route.abort();
+        }
       }
+      return route.continue();
     });
     const page = await context.newPage();
 
