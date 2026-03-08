@@ -7,6 +7,13 @@ import PublicNav from "@/components/PublicNav";
 
 const blogPosts = [
   {
+    slug: "website-change-monitoring-use-cases-beyond-price-tracking",
+    title: "5 Real-World Use Cases for Website Change Monitoring (Beyond Price Tracking)",
+    description: "Website change monitoring isn't just for tracking prices. Five practical use cases — from regulatory compliance to job postings — with concrete selector strategies for each.",
+    category: "Use Cases",
+    date: "2026-03-07",
+  },
+  {
     slug: "css-selectors-keep-breaking-why-and-how-to-fix",
     title: "CSS Selectors Keep Breaking? Why It Happens and How to Fix It",
     description: "CSS selectors in website monitors break constantly due to hashed class names, DOM restructuring, and framework re-renders. Learn why it happens and how to build resilient selectors.",
