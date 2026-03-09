@@ -451,7 +451,9 @@ async function handleMonitorFailure(
     const warningThreshold = Math.floor(threshold / 2);
     if (newFailureCount === warningThreshold && monitor.healthAlertSentAt === null) {
       if (tier === "power") {
-        storage.setHealthAlertSent(monitor.id).catch(() => {});
+        await storage.setHealthAlertSent(monitor.id).catch((err) => {
+          console.error(`[Scraper] Failed to mark health alert sent for monitor ${monitor.id}:`, err);
+        });
         const nextPauseIn = threshold - newFailureCount;
         try {
           await sendHealthWarningEmail(monitor, newFailureCount, nextPauseIn, truncatedError);
@@ -1165,14 +1167,20 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         // Update lastHealthyAt on every successful check
         storage.updateLastHealthyAt(monitor.id).catch(() => {});
 
-        // Send recovery email if we previously sent a health warning
+        // Send recovery email if we previously sent a health warning.
+        // Re-check healthAlertSentAt from DB to avoid duplicate recovery emails
+        // if two concurrent checks both see a stale in-memory value.
         if (monitor.healthAlertSentAt !== null) {
-          try {
-            await sendRecoveryEmail(monitor, newValue ?? "");
-          } catch (recoveryErr) {
-            console.error(`[Scraper] Recovery email failed for monitor ${monitor.id}:`, recoveryErr);
+          const freshMonitor = await storage.getMonitor(monitor.id);
+          if (freshMonitor?.healthAlertSentAt !== null) {
+            // Clear first to prevent a concurrent check from also sending
+            await storage.clearHealthAlert(monitor.id).catch(() => {});
+            try {
+              await sendRecoveryEmail(monitor, newValue ?? "");
+            } catch (recoveryErr) {
+              console.error(`[Scraper] Recovery email failed for monitor ${monitor.id}:`, recoveryErr);
+            }
           }
-          storage.clearHealthAlert(monitor.id).catch(() => {});
         }
 
         if (changed) {

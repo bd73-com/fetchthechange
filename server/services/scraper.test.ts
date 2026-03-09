@@ -5,6 +5,7 @@ vi.mock("../storage", () => ({
   storage: {
     updateMonitor: vi.fn().mockResolvedValue({}),
     addMonitorChange: vi.fn().mockResolvedValue({ id: 1, monitorId: 1, oldValue: null, newValue: null, detectedAt: new Date() }),
+    getMonitor: vi.fn().mockResolvedValue(null),
     getMonitorChanges: vi.fn().mockResolvedValue([]),
     getUser: vi.fn().mockResolvedValue({ id: "user1", tier: "free" }),
     updateLastHealthyAt: vi.fn().mockResolvedValue(undefined),

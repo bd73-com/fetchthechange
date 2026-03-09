@@ -181,14 +181,21 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
         <div className="space-y-1">
           <CardTitle className="text-xl font-semibold line-clamp-1 flex items-center gap-2" title={monitor.name}>
-            <span
-              className={`inline-block h-2.5 w-2.5 rounded-full shrink-0 ${healthDotStyles[getHealthState(monitor)]}`}
-              title={getHealthTooltip(monitor, getHealthState(monitor))}
-            />
-            {monitor.name}
-            {getHealthState(monitor) === "degraded" && (
-              <span className="text-xs font-medium text-amber-500">({monitor.consecutiveFailures})</span>
-            )}
+            {(() => {
+              const health = getHealthState(monitor);
+              return (
+                <>
+                  <span
+                    className={`inline-block h-2.5 w-2.5 rounded-full shrink-0 ${healthDotStyles[health]}`}
+                    title={getHealthTooltip(monitor, health)}
+                  />
+                  {monitor.name}
+                  {health === "degraded" && (
+                    <span className="text-xs font-medium text-amber-500">({monitor.consecutiveFailures})</span>
+                  )}
+                </>
+              );
+            })()}
           </CardTitle>
           <a
             href={monitor.url}

@@ -259,7 +259,7 @@ export async function sendHealthWarningEmail(
   // Compute "last healthy" display string
   let lastHealthyDisplay = "never";
   if (monitor.lastHealthyAt) {
-    const hoursAgo = Math.round((Date.now() - new Date(monitor.lastHealthyAt).getTime()) / 3600000);
+    const hoursAgo = Math.max(1, Math.round((Date.now() - new Date(monitor.lastHealthyAt).getTime()) / 3600000));
     if (hoursAgo < 24) {
       lastHealthyDisplay = `${hoursAgo} hour${hoursAgo === 1 ? "" : "s"} ago`;
     } else {
@@ -303,7 +303,7 @@ FetchTheChange Team`,
         <p><strong>Failures until auto-pause:</strong> ${nextPauseIn}</p>
         <p><strong>Last successful check:</strong> ${escapeHtml(lastHealthyDisplay)}</p>
         <hr/>
-        <p><a href="${escapeHtml(dashboardUrl)}/monitors/${monitor.id}">View Monitor Dashboard</a></p>
+        <p><a href="${safeHref(dashboardUrl + "/monitors/" + monitor.id)}">View Monitor Dashboard</a></p>
         <br/>
         <p>FetchTheChange will keep retrying automatically.</p>
         <p>FetchTheChange Team</p>
@@ -359,7 +359,7 @@ export async function sendRecoveryEmail(
   let degradedForMs = 0;
   if (monitor.healthAlertSentAt) {
     degradedForMs = Date.now() - new Date(monitor.healthAlertSentAt).getTime();
-    const hours = Math.round(degradedForMs / 3600000);
+    const hours = Math.max(1, Math.round(degradedForMs / 3600000));
     if (hours >= 48) {
       const days = Math.round(hours / 24);
       degradedDisplay = `${days} day${days === 1 ? "" : "s"}`;
@@ -398,7 +398,7 @@ FetchTheChange Team`,
         <pre>${escapeHtml(recoveredValue)}</pre>${degradedDisplay ? `
         <p><strong>Was degraded for:</strong> ${escapeHtml(degradedDisplay)}</p>` : ""}
         <hr/>
-        <p><a href="${escapeHtml(dashboardUrl)}/monitors/${monitor.id}">View Monitor Dashboard</a></p>
+        <p><a href="${safeHref(dashboardUrl + "/monitors/" + monitor.id)}">View Monitor Dashboard</a></p>
         <br/>
         <p>FetchTheChange Team</p>
       `
