@@ -5,14 +5,20 @@ vi.mock("../storage", () => ({
   storage: {
     updateMonitor: vi.fn().mockResolvedValue({}),
     addMonitorChange: vi.fn().mockResolvedValue({ id: 1, monitorId: 1, oldValue: null, newValue: null, detectedAt: new Date() }),
+    getMonitor: vi.fn().mockResolvedValue(null),
     getMonitorChanges: vi.fn().mockResolvedValue([]),
     getUser: vi.fn().mockResolvedValue({ id: "user1", tier: "free" }),
+    updateLastHealthyAt: vi.fn().mockResolvedValue(undefined),
+    clearHealthAlert: vi.fn().mockResolvedValue(undefined),
+    setHealthAlertSent: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
 vi.mock("./email", () => ({
   sendNotificationEmail: vi.fn().mockResolvedValue({ success: true }),
   sendAutoPauseEmail: vi.fn().mockResolvedValue({ success: true }),
+  sendHealthWarningEmail: vi.fn().mockResolvedValue({ success: true }),
+  sendRecoveryEmail: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 vi.mock("./notification", () => ({
@@ -130,6 +136,8 @@ function makeMonitor(overrides: Partial<Monitor> = {}): Monitor {
     emailEnabled: false,
     consecutiveFailures: 0,
     pauseReason: null,
+    healthAlertSentAt: null,
+    lastHealthyAt: null,
     createdAt: new Date(),
     ...overrides,
   };

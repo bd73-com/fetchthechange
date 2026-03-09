@@ -13,6 +13,11 @@ export interface IStorage {
   updateMonitor(id: number, updates: any): Promise<Monitor>;
   deleteMonitor(id: number): Promise<void>;
 
+  // Monitor health alerts
+  setHealthAlertSent(monitorId: number): Promise<void>;
+  clearHealthAlert(monitorId: number): Promise<void>;
+  updateLastHealthyAt(monitorId: number): Promise<void>;
+
   getMonitorChanges(monitorId: number): Promise<MonitorChange[]>;
   addMonitorChange(monitorId: number, oldValue: string | null, newValue: string | null): Promise<MonitorChange>;
 
@@ -96,6 +101,18 @@ export class DatabaseStorage implements IStorage {
     await db.delete(browserlessUsage).where(eq(browserlessUsage.monitorId, id));
     await db.delete(resendUsage).where(eq(resendUsage.monitorId, id));
     await db.delete(monitors).where(eq(monitors.id, id));
+  }
+
+  async setHealthAlertSent(monitorId: number): Promise<void> {
+    await db.update(monitors).set({ healthAlertSentAt: new Date() }).where(eq(monitors.id, monitorId));
+  }
+
+  async clearHealthAlert(monitorId: number): Promise<void> {
+    await db.update(monitors).set({ healthAlertSentAt: null }).where(eq(monitors.id, monitorId));
+  }
+
+  async updateLastHealthyAt(monitorId: number): Promise<void> {
+    await db.update(monitors).set({ lastHealthyAt: new Date() }).where(eq(monitors.id, monitorId));
   }
 
   async getMonitorChanges(monitorId: number): Promise<MonitorChange[]> {

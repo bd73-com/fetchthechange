@@ -61,6 +61,7 @@ const plans = [
       "Per-monitor notification email override",
       "Unlimited monitor tags",
       "Change sensitivity threshold",
+      "Monitor health alerts (early warning & recovery emails)",
       "JavaScript-rendered pages",
       "Fix Selector tool",
       "Full change history",

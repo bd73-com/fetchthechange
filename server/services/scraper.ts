@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import { storage } from "../storage";
-import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
+import { sendNotificationEmail, sendAutoPauseEmail, sendHealthWarningEmail, sendRecoveryEmail } from "./email";
 import { processChangeNotification } from "./notification";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
@@ -426,6 +426,9 @@ async function handleMonitorFailure(
       pauseReason: shouldPenalize
         ? sql`CASE WHEN ${monitors.consecutiveFailures} + 1 >= ${threshold} THEN 'Auto-paused after ' || (${monitors.consecutiveFailures} + 1)::text || ${pauseSuffix} ELSE ${monitors.pauseReason} END`
         : monitors.pauseReason,
+      healthAlertSentAt: shouldPenalize
+        ? sql`CASE WHEN ${monitors.consecutiveFailures} + 1 >= ${threshold} THEN NULL ELSE ${monitors.healthAlertSentAt} END`
+        : monitors.healthAlertSentAt,
     })
     .where(eq(monitors.id, monitor.id))
     .returning({
@@ -444,6 +447,22 @@ async function handleMonitorFailure(
 
   if (shouldPause && monitor.emailEnabled) {
     await sendAutoPauseEmail(monitor, newFailureCount, truncatedError).catch(() => {});
+  }
+
+  // Early warning: fire at halfway point before auto-pause (Power tier only)
+  if (shouldPenalize && !shouldPause) {
+    const warningThreshold = Math.floor(threshold / 2);
+    if (newFailureCount === warningThreshold && monitor.healthAlertSentAt === null) {
+      if (tier === "power") {
+        const nextPauseIn = threshold - newFailureCount;
+        try {
+          await sendHealthWarningEmail(monitor, newFailureCount, nextPauseIn, truncatedError);
+          await storage.setHealthAlertSent(monitor.id);
+        } catch (warningErr) {
+          console.error(`[Scraper] Health warning email failed for monitor ${monitor.id}:`, warningErr);
+        }
+      }
+    }
   }
 
   return { newFailureCount, paused: shouldPause };
@@ -1145,6 +1164,25 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           lastError: null,
           consecutiveFailures: 0,
         });
+
+        // Update lastHealthyAt on every successful check
+        storage.updateLastHealthyAt(monitor.id).catch(() => {});
+
+        // Send recovery email if we previously sent a health warning.
+        // Re-check healthAlertSentAt from DB to avoid duplicate recovery emails
+        // if two concurrent checks both see a stale in-memory value.
+        if (monitor.healthAlertSentAt !== null) {
+          const freshMonitor = await storage.getMonitor(monitor.id);
+          if (freshMonitor?.healthAlertSentAt !== null) {
+            // Clear first to prevent a concurrent check from also sending
+            await storage.clearHealthAlert(monitor.id).catch(() => {});
+            try {
+              await sendRecoveryEmail(monitor, newValue ?? "");
+            } catch (recoveryErr) {
+              console.error(`[Scraper] Recovery email failed for monitor ${monitor.id}:`, recoveryErr);
+            }
+          }
+        }
 
         if (changed) {
           const change = await storage.addMonitorChange(monitor.id, oldValue, newValue);

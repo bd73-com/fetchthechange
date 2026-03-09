@@ -16,6 +16,7 @@ import { useSearch } from "wouter";
 import { useTags } from "@/hooks/use-tags";
 import { TagManager } from "@/components/TagManager";
 import { Tags } from "lucide-react";
+import { needsAttention } from "@/lib/monitor-health";
 
 // TODO: Remove banner code after 2026-02-27 (cutoff date)
 const BANNER_CUTOFF = new Date("2026-02-27T00:00:00Z");
@@ -30,6 +31,7 @@ export default function Dashboard() {
 
   const { data: userTags = [] } = useTags();
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [needsAttentionFilter, setNeedsAttentionFilter] = useState(false);
 
   const [bannerDismissed, setBannerDismissed] = useState(() => {
     try { return localStorage.getItem(BANNER_KEY) === "1"; } catch { return false; }
@@ -202,6 +204,38 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Needs attention filter */}
+        {monitors && monitors.length > 0 && (() => {
+          const attentionCount = monitors.filter(m => needsAttention(m)).length;
+          if (attentionCount === 0) return null;
+          return (
+            <div className="flex items-center gap-2 flex-wrap mb-4">
+              <button
+                type="button"
+                onClick={() => setNeedsAttentionFilter(false)}
+                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+                  !needsAttentionFilter
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-secondary/50 text-muted-foreground border-border/50 hover:bg-secondary"
+                }`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setNeedsAttentionFilter(true)}
+                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+                  needsAttentionFilter
+                    ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30"
+                    : "bg-secondary/50 text-muted-foreground border-border/50 hover:bg-secondary"
+                }`}
+              >
+                Needs attention ({attentionCount})
+              </button>
+            </div>
+          );
+        })()}
+
         {/* Tag filter bar */}
         {userTags.length > 0 && monitors && monitors.length > 0 && (
           <div className="flex items-center gap-2 flex-wrap mb-6">
@@ -257,9 +291,12 @@ export default function Dashboard() {
         )}
 
         {(() => {
-          const filteredMonitors = selectedTagIds.length === 0
+          let filteredMonitors = selectedTagIds.length === 0
             ? monitors
             : monitors?.filter(m => (m as any).tags?.some((t: any) => selectedTagIds.includes(t.id)));
+          if (needsAttentionFilter && filteredMonitors) {
+            filteredMonitors = filteredMonitors.filter(m => needsAttention(m));
+          }
 
           if (!monitors || monitors.length === 0) {
             return (

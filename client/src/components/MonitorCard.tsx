@@ -16,6 +16,23 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { TagBadge } from "@/components/TagBadge";
 
+import { type HealthState, getHealthState } from "@/lib/monitor-health";
+
+const healthDotStyles: Record<HealthState, string> = {
+  healthy: "bg-green-500",
+  degraded: "bg-amber-500",
+  paused: "bg-red-500",
+};
+
+function getHealthTooltip(monitor: Monitor, state: HealthState): string {
+  if (state === "healthy") return "Checks passing";
+  if (state === "degraded") return `${monitor.consecutiveFailures} consecutive failure${monitor.consecutiveFailures === 1 ? "" : "s"} — monitoring continues`;
+  if (monitor.pauseReason) {
+    return monitor.pauseReason.length > 80 ? monitor.pauseReason.slice(0, 80) + "\u2026" : monitor.pauseReason;
+  }
+  return "Paused";
+}
+
 interface MonitorCardProps {
   monitor: Monitor & { tags?: { id: number; name: string; colour: string }[] };
 }
@@ -157,8 +174,24 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
     <Card className="card-hover overflow-hidden border-border/50 bg-card/50 backdrop-blur-sm relative group">
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
         <div className="space-y-1">
-          <CardTitle className="text-xl font-semibold line-clamp-1" title={monitor.name}>
-            {monitor.name}
+          <CardTitle className="text-xl font-semibold line-clamp-1 flex items-center gap-2" title={monitor.name}>
+            {(() => {
+              const health = getHealthState(monitor);
+              return (
+                <>
+                  <span
+                    className={`inline-block h-2.5 w-2.5 rounded-full shrink-0 ${healthDotStyles[health]}`}
+                    title={getHealthTooltip(monitor, health)}
+                    aria-label={getHealthTooltip(monitor, health)}
+                    role="status"
+                  />
+                  {monitor.name}
+                  {health === "degraded" && (
+                    <span className="text-xs font-medium text-amber-500">({monitor.consecutiveFailures})</span>
+                  )}
+                </>
+              );
+            })()}
           </CardTitle>
           <a
             href={monitor.url}
