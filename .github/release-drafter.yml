@@ -41,7 +41,7 @@ autolabeler:
       - '/^Implement\b/i'
       - '/^Create\b/i'
       - '/^Introduce\b/i'
-      - '/\bfeat\b/i'
+      - '/^feat(\([\w-]+\))?:/i'
   - label: fix
     title:
       - '/^Fix\b/i'
@@ -51,7 +51,6 @@ autolabeler:
   - label: breaking
     title:
       - '/\bbreaking\b/i'
-      - '/^Remove\b/i'
   - label: chore
     title:
       - '/^Refactor\b/i'
@@ -59,7 +58,12 @@ autolabeler:
       - '/^Upgrade\b/i'
       - '/^Clean\b/i'
       - '/^Bump\b/i'
+      - '/^Remove\b/i'
       - '/\bchore\b/i'
+      - '/\.claude\//i'
+      - '/\bskill\b/i'
+      - '/\bsubagent\b/i'
+      - '/\bslash command\b/i'
   - label: docs
     title:
       - '/\bdocs\b/i'
