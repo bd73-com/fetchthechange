@@ -8,9 +8,9 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
-    "version": "2.0.0",
+    "version": "1.16.1",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Maintenance\n\n* Remove auto-merge from /magicwand pipeline (#130) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.16.0...v2.0.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* Remove auto-merge from /magicwand pipeline (#130) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.16.0...v1.16.1"
   },
   {
     "version": "1.16.0",
