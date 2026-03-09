@@ -13,6 +13,7 @@ const mockGetMonitor = vi.fn().mockResolvedValue(undefined);
 const mockGetMonitorChannels = vi.fn().mockResolvedValue([]);
 const mockAddDeliveryLog = vi.fn().mockResolvedValue({ id: 1 });
 const mockGetSlackConnection = vi.fn().mockResolvedValue(undefined);
+const mockGetMonitorConditions = vi.fn().mockResolvedValue([]);
 
 vi.mock("../storage", () => ({
   storage: {
@@ -29,6 +30,7 @@ vi.mock("../storage", () => ({
     getMonitorChannels: (...args: any[]) => mockGetMonitorChannels(...args),
     addDeliveryLog: (...args: any[]) => mockAddDeliveryLog(...args),
     getSlackConnection: (...args: any[]) => mockGetSlackConnection(...args),
+    getMonitorConditions: (...args: any[]) => mockGetMonitorConditions(...args),
   },
 }));
 
@@ -248,6 +250,8 @@ describe("processChangeNotification", () => {
     // Default: no channel rows (backwards-compatible with emailEnabled)
     mockGetMonitorChannels.mockResolvedValue([]);
     mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
+    mockGetMonitorConditions.mockResolvedValue([]);
   });
 
   it("returns null when emailEnabled is false", async () => {
@@ -371,6 +375,7 @@ describe("processDigestBatch", () => {
     vi.clearAllMocks();
     mockGetMonitorChannels.mockResolvedValue([]);
     mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
   });
 
   it("returns null when no pending digest entries exist", async () => {
@@ -437,6 +442,7 @@ describe("processQueuedNotifications", () => {
     vi.clearAllMocks();
     mockGetMonitorChannels.mockResolvedValue([]);
     mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
   });
 
   it("does nothing when no ready entries exist", async () => {
@@ -496,6 +502,7 @@ describe("decision tree edge cases", () => {
     vi.clearAllMocks();
     mockGetMonitorChannels.mockResolvedValue([]);
     mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
   });
 
   it("emailEnabled=false is the master off switch", async () => {
@@ -608,6 +615,7 @@ describe("processDigestBatch edge cases", () => {
     vi.clearAllMocks();
     mockGetMonitorChannels.mockResolvedValue([]);
     mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
   });
 
   it("returns null when queued changes can't be found in monitor changes", async () => {
@@ -648,6 +656,7 @@ describe("processQueuedNotifications edge cases", () => {
     vi.clearAllMocks();
     mockGetMonitorChannels.mockResolvedValue([]);
     mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
   });
 
   it("marks entries as delivered when monitor has emailEnabled=false", async () => {
@@ -775,6 +784,7 @@ describe("processDigestCron", () => {
     vi.clearAllMocks();
     mockGetMonitorChannels.mockResolvedValue([]);
     mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
   });
 
   it("does nothing when no digest preferences exist", async () => {
@@ -834,6 +844,7 @@ describe("multi-channel delivery", () => {
     vi.clearAllMocks();
     mockGetMonitorChannels.mockResolvedValue([]);
     mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
     mockWebhookDeliver.mockResolvedValue({ success: true, statusCode: 200 });
     mockSlackDeliver.mockResolvedValue({ success: true, slackTs: "123" });
     mockGetSlackConnection.mockResolvedValue(undefined);
@@ -1054,6 +1065,65 @@ describe("multi-channel delivery", () => {
     // Should not throw even when log write fails
     await expect(processChangeNotification(monitor, change, false)).resolves.not.toThrow();
     expect(mockSendNotificationEmail).toHaveBeenCalled();
+  });
+});
+
+describe("processChangeNotification with conditions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetMonitorChannels.mockResolvedValue([]);
+    mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
+  });
+
+  it("calls getMonitorConditions for every change", async () => {
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange();
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+    await processChangeNotification(monitor, change, false);
+    expect(mockGetMonitorConditions).toHaveBeenCalledWith(monitor.id);
+  });
+
+  it("returns null when conditions exist and none pass (no delivery)", async () => {
+    mockGetMonitorConditions.mockResolvedValue([
+      { id: 1, monitorId: 1, type: "numeric_lt", value: "0", groupIndex: 0, createdAt: new Date() },
+    ]);
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange({ oldValue: "$49/mo", newValue: "$59/mo" });
+    const result = await processChangeNotification(monitor, change, false);
+    expect(result).toBeNull();
+    expect(mockSendNotificationEmail).not.toHaveBeenCalled();
+  });
+
+  it("delivers normally when conditions pass", async () => {
+    mockGetMonitorConditions.mockResolvedValue([
+      { id: 1, monitorId: 1, type: "numeric_lt", value: "999999", groupIndex: 0, createdAt: new Date() },
+    ]);
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange({ oldValue: "$49/mo", newValue: "$59/mo" });
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+    const result = await processChangeNotification(monitor, change, false);
+    expect(result).toEqual({ success: true });
+    expect(mockSendNotificationEmail).toHaveBeenCalled();
+  });
+
+  it("delivers normally when no conditions exist (backwards compat)", async () => {
+    mockGetMonitorConditions.mockResolvedValue([]);
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange();
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+    const result = await processChangeNotification(monitor, change, false);
+    expect(result).toEqual({ success: true });
+  });
+
+  it("logs info when conditions block notification", async () => {
+    mockGetMonitorConditions.mockResolvedValue([
+      { id: 1, monitorId: 1, type: "numeric_lt", value: "0", groupIndex: 0, createdAt: new Date() },
+    ]);
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange({ oldValue: "$49/mo", newValue: "$59/mo" });
+    await processChangeNotification(monitor, change, false);
+    expect(ErrorLogger.info).toHaveBeenCalled();
   });
 });
 

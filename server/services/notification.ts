@@ -5,6 +5,7 @@ import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery
 import { deliver as deliverSlack } from "./slackDelivery";
 import { decryptToken } from "../utils/encryption";
 import { ErrorLogger } from "./logger";
+import { evaluateConditions } from "./conditions";
 
 export function isInQuietHours(prefs: NotificationPreference, now: Date): boolean {
   if (!prefs.quietHoursStart || !prefs.quietHoursEnd || !prefs.timezone) {
@@ -399,6 +400,20 @@ export async function processChangeNotification(
   // Check if any channel is active (backwards compat: falls back to emailEnabled)
   if (!(await hasActiveChannels(monitor))) {
     return null;
+  }
+
+  // Evaluate conditions — skip notification if conditions exist and none pass
+  const conditions = await storage.getMonitorConditions(monitor.id);
+  if (conditions.length > 0) {
+    const passes = evaluateConditions(conditions, change.oldValue, change.newValue);
+    if (!passes) {
+      await ErrorLogger.info(
+        "scheduler",
+        `Conditions blocked notification for monitor "${monitor.name}"`,
+        { monitorId: monitor.id, conditionCount: conditions.length },
+      );
+      return null;
+    }
   }
 
   let prefs: NotificationPreference | undefined;

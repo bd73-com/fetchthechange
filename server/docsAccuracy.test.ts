@@ -240,9 +240,19 @@ describe("Support FAQ documentation accuracy", () => {
   });
 
   it("Monitor Health section has 6 FAQ items", () => {
-    const section = sliceSection(supportSource, '"Monitor Health"', '"Webhooks & Slack"');
+    const section = sliceSection(supportSource, '"Monitor Health"', '"Alert Conditions"');
     const questionCount = (section.match(/question:/g) || []).length;
     expect(questionCount).toBe(6);
+  });
+
+  it("has an Alert Conditions FAQ section", () => {
+    expect(supportSource).toContain('"Alert Conditions"');
+  });
+
+  it("Alert Conditions section has 7 FAQ items", () => {
+    const section = sliceSection(supportSource, '"Alert Conditions"', '"Webhooks & Slack"');
+    const questionCount = (section.match(/question:/g) || []).length;
+    expect(questionCount).toBe(7);
   });
 });
 
@@ -310,6 +320,22 @@ describe("Pricing page feature list accuracy", () => {
     const freeToPower = pricingSource.slice(0, pricingSource.indexOf('"Power"'));
     expect(freeToPower).not.toContain("Monitor health alerts");
   });
+
+  it("Free plan mentions 1 condition limit", () => {
+    const freeSection = sliceSection(pricingSource, '"Free"', '"Pro"');
+    expect(freeSection).toContain("condition");
+  });
+
+  it("Pro plan lists unlimited alert conditions", () => {
+    const proSection = sliceSection(pricingSource, '"Pro"', '"Power"');
+    expect(proSection).toContain("conditions");
+  });
+
+  it("Power plan lists alert conditions with AND/OR logic", () => {
+    const powerStart = pricingSource.indexOf('"Power"');
+    const powerSection = pricingSource.slice(powerStart);
+    expect(powerSection).toContain("AND/OR");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -347,6 +373,16 @@ describe("UpgradeDialog feature list consistency with Pricing", () => {
   it("pro features do not include monitor health alerts", () => {
     const proSection = sliceSection(upgradeSource, "pro: [", "],");
     expect(proSection).not.toContain("health alerts");
+  });
+
+  it("pro features include unlimited alert conditions", () => {
+    const proSection = sliceSection(upgradeSource, "pro: [", "],");
+    expect(proSection).toContain("conditions");
+  });
+
+  it("power features include alert conditions with AND/OR", () => {
+    const powerSection = sliceSection(upgradeSource, "power: [", "],");
+    expect(powerSection).toContain("AND/OR");
   });
 });
 

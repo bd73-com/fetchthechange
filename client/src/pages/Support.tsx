@@ -171,6 +171,47 @@ const faqSections: FAQSection[] = [
     ],
   },
   {
+    title: "Alert Conditions",
+    description: "Filter when notifications fire based on value criteria.",
+    items: [
+      {
+        question: "What are alert conditions?",
+        answer:
+          "Alert conditions let you filter when notifications fire. Instead of being alerted every time a monitored value changes, you only receive a notification when the new value meets your criteria — for example, when a price drops below $150, or when a page starts saying 'In Stock'.",
+      },
+      {
+        question: "How many conditions can I add?",
+        answer:
+          "Free plan users can add 1 condition per monitor. Pro and Power users can add unlimited conditions per monitor.",
+      },
+      {
+        question: "What condition types are available?",
+        answer:
+          "Numeric conditions (less than, greater than, changed by more than N%), text conditions (contains, does not contain, equals exactly), and regex pattern matching for advanced use cases.",
+      },
+      {
+        question: "Does the change still get recorded if the condition is not met?",
+        answer:
+          "Yes. The change is always recorded in your monitor's change history. Conditions only control whether a notification is sent — they never suppress the history record.",
+      },
+      {
+        question: "How does AND/OR logic work?",
+        answer:
+          "Conditions in the same group are combined with AND — all must pass. Multiple groups are combined with OR — if any group passes entirely, the notification fires. Most users will use a single group (all AND). Pro and Power users can add multiple groups for more complex logic.",
+      },
+      {
+        question: "Why is my numeric condition not triggering?",
+        answer:
+          "Numeric conditions extract the first number from the monitored value. If the value contains no number (for example, 'Out of stock'), the condition is treated as not met. Check that your CSS selector is capturing a value that contains a number.",
+      },
+      {
+        question: "Can I test a condition without waiting for the next check?",
+        answer:
+          "Not yet — but you can use the 'Check now' button on a monitor to trigger an immediate check, which will evaluate your conditions against the current live value.",
+      },
+    ],
+  },
+  {
     title: "Webhooks & Slack",
     description: "Send change alerts to your own systems or Slack workspace.",
     items: [

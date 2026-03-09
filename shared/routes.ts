@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertMonitorSchema, monitors, monitorChanges, notificationPreferences, notificationChannels, deliveryLog, slackConnections, apiKeys, tags } from './schema';
+import { insertMonitorSchema, monitors, monitorChanges, notificationPreferences, notificationChannels, deliveryLog, slackConnections, apiKeys, tags, monitorConditions } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -90,6 +90,18 @@ export const setMonitorTagsSchema = z.object({
     (ids) => new Set(ids).size === ids.length,
     { message: "Duplicate tag IDs are not allowed" }
   ),
+});
+
+export const conditionTypeSchema = z.enum([
+  "numeric_lt", "numeric_lte", "numeric_gt", "numeric_gte",
+  "numeric_change_pct", "text_contains", "text_not_contains",
+  "text_equals", "regex",
+]);
+
+export const createConditionSchema = z.object({
+  type: conditionTypeSchema,
+  value: z.string().min(1).max(500),
+  groupIndex: z.number().int().min(0).max(9).default(0),
 });
 
 export const tagResponseSchema = z.object({
@@ -247,6 +259,38 @@ export const api = {
         path: '/api/monitors/:id/deliveries',
         responses: {
           200: z.array(z.custom<typeof deliveryLog.$inferSelect>()),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+        },
+      },
+    },
+    conditions: {
+      list: {
+        method: 'GET' as const,
+        path: '/api/monitors/:id/conditions',
+        responses: {
+          200: z.array(z.custom<typeof monitorConditions.$inferSelect>()),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+        },
+      },
+      create: {
+        method: 'POST' as const,
+        path: '/api/monitors/:id/conditions',
+        input: createConditionSchema,
+        responses: {
+          201: z.custom<typeof monitorConditions.$inferSelect>(),
+          403: z.object({ error: z.string(), code: z.string() }),
+          404: errorSchemas.notFound,
+          401: errorSchemas.unauthorized,
+          422: errorSchemas.validation,
+        },
+      },
+      delete: {
+        method: 'DELETE' as const,
+        path: '/api/monitors/:id/conditions/:conditionId',
+        responses: {
+          204: z.void(),
           404: errorSchemas.notFound,
           401: errorSchemas.unauthorized,
         },

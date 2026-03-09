@@ -19,6 +19,7 @@ import { ArrowLeft, RefreshCw, Trash2, ExternalLink, Calendar, Clock, Loader2, E
 import { FixSelectorModal } from "@/components/FixSelectorModal";
 import { NotificationPreferencesForm } from "@/components/NotificationPreferencesForm";
 import { NotificationChannelsPanel } from "@/components/NotificationChannelsPanel";
+import { ConditionsPanel } from "@/components/ConditionsPanel";
 import { DeliveryLog } from "@/components/DeliveryLog";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -464,6 +465,7 @@ export default function MonitorDetails() {
         {!isEditing && (
           <>
             <NotificationChannelsPanel monitorId={monitor.id} />
+            <ConditionsPanel monitorId={monitor.id} />
             <DeliveryLog monitorId={monitor.id} />
           </>
         )}

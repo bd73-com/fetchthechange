@@ -48,6 +48,7 @@ export const monitorsRelations = relations(monitors, ({ one, many }) => ({
   notificationChannels: many(notificationChannels),
   deliveryLogs: many(deliveryLog),
   monitorTags: many(monitorTags),
+  monitorConditions: many(monitorConditions),
 }));
 
 export const monitorChangesRelations = relations(monitorChanges, ({ one }) => ({
@@ -401,6 +402,33 @@ export const monitorTagsRelations = relations(monitorTags, ({ one }) => ({
 }));
 
 export type MonitorTag = typeof monitorTags.$inferSelect;
+
+// Monitor conditions — per-monitor alert conditions that gate notifications
+export const monitorConditions = pgTable("monitor_conditions", {
+  id: serial("id").primaryKey(),
+  monitorId: integer("monitor_id")
+    .notNull()
+    .references(() => monitors.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  // 'numeric_lt' | 'numeric_lte' | 'numeric_gt' | 'numeric_gte' |
+  // 'numeric_change_pct' | 'text_contains' | 'text_not_contains' |
+  // 'text_equals' | 'regex'
+  value: text("value").notNull(),  // threshold number as string, or text/regex pattern
+  groupIndex: integer("group_index").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  monitorIdx: index("monitor_conditions_monitor_idx").on(table.monitorId),
+}));
+
+export const monitorConditionsRelations = relations(monitorConditions, ({ one }) => ({
+  monitor: one(monitors, {
+    fields: [monitorConditions.monitorId],
+    references: [monitors.id],
+  }),
+}));
+
+export type MonitorCondition = typeof monitorConditions.$inferSelect;
+export type InsertMonitorCondition = typeof monitorConditions.$inferInsert;
 
 export const insertMonitorSchema = createInsertSchema(monitors).omit({
   id: true,

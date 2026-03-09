@@ -1,4 +1,4 @@
-import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, apiKeys, tags, monitorTags, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection, type ApiKey, type Tag } from "@shared/schema";
+import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, apiKeys, tags, monitorTags, monitorConditions, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection, type ApiKey, type Tag, type MonitorCondition } from "@shared/schema";
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
 import { eq, desc, and, or, isNull, lte, lt, gte, sql, inArray } from "drizzle-orm";
@@ -47,6 +47,12 @@ export interface IStorage {
   setMonitorTags(monitorId: number, tagIds: number[]): Promise<void>;
   getMonitorsWithTags(userId: string): Promise<(Monitor & { tags: { id: number; name: string; colour: string }[] })[]>;
   getMonitorWithTags(id: number): Promise<(Monitor & { tags: { id: number; name: string; colour: string }[] }) | undefined>;
+
+  // Monitor conditions
+  getMonitorConditions(monitorId: number): Promise<MonitorCondition[]>;
+  addMonitorCondition(monitorId: number, type: string, value: string, groupIndex: number): Promise<MonitorCondition>;
+  deleteMonitorCondition(id: number, monitorId: number): Promise<void>;
+  countMonitorConditions(monitorId: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -528,6 +534,31 @@ export class DatabaseStorage implements IStorage {
     if (!monitor) return undefined;
     const monitorTagsList = await this.getMonitorTags(id);
     return { ...monitor, tags: monitorTagsList };
+  }
+  // Monitor conditions
+  async getMonitorConditions(monitorId: number): Promise<MonitorCondition[]> {
+    return await db.select().from(monitorConditions)
+      .where(eq(monitorConditions.monitorId, monitorId))
+      .orderBy(monitorConditions.groupIndex, monitorConditions.id);
+  }
+
+  async addMonitorCondition(monitorId: number, type: string, value: string, groupIndex: number): Promise<MonitorCondition> {
+    const [condition] = await db.insert(monitorConditions)
+      .values({ monitorId, type, value, groupIndex })
+      .returning();
+    return condition;
+  }
+
+  async deleteMonitorCondition(id: number, monitorId: number): Promise<void> {
+    await db.delete(monitorConditions)
+      .where(and(eq(monitorConditions.id, id), eq(monitorConditions.monitorId, monitorId)));
+  }
+
+  async countMonitorConditions(monitorId: number): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` })
+      .from(monitorConditions)
+      .where(eq(monitorConditions.monitorId, monitorId));
+    return Number(result[0]?.count ?? 0);
   }
 }
 
