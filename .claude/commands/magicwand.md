@@ -1,4 +1,4 @@
-Run the full release pipeline for the current branch: write and pass tests, security review, architecture review, code review, skeptic adversarial review, documentation review, extension rebuild if needed, create a PR, then review and merge it.
+Run the full release pipeline for the current branch: write and pass tests, security review, architecture review, code review, skeptic adversarial review, documentation review, extension rebuild if needed, and create a PR.
 
 ## Instructions
 
@@ -28,11 +28,11 @@ Print a progress banner before starting each phase:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🪄 /magicwand — Phase <N> of 9: <PHASE_NAME>
+  🪄 /magicwand — Phase <N> of 8: <PHASE_NAME>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-### Phase 1 of 9 — Write Tests
+### Phase 1 of 8 — Write Tests
 
 Read `.claude/commands/write-tests.md` and execute every step in that file for the current branch.
 
@@ -40,7 +40,7 @@ For every test that fails to pass after being written, log it as a FOUND entry a
 
 A phase is complete when `npm run test` exits with code 0 and all newly written tests pass.
 
-### Phase 2 of 9 — Security Review
+### Phase 2 of 8 — Security Review
 
 Read `.claude/commands/review-security.md` and execute every step in that file for the current branch.
 
@@ -48,7 +48,7 @@ For every vulnerability or security finding identified, log a FOUND entry. Fix i
 
 A phase is complete when all critical and high-severity security findings have been remediated and `npm run check && npm run test` exit with code 0.
 
-### Phase 3 of 9 — Architecture Review
+### Phase 3 of 8 — Architecture Review
 
 Read `.claude/commands/review-architecture.md` and execute every step in that file for the current branch.
 
@@ -56,7 +56,7 @@ For every architectural or design issue identified, log a FOUND entry. Fix it im
 
 A phase is complete when all blocking architectural issues have been remediated and `npm run check && npm run test` exit with code 0.
 
-### Phase 4 of 9 — Code Review
+### Phase 4 of 8 — Code Review
 
 Read `.claude/commands/review-code.md` and execute every step in that file for the current branch.
 
@@ -64,7 +64,7 @@ For every bug, regression risk, or quality issue identified, log a FOUND entry. 
 
 A phase is complete when all bugs and quality issues identified by the review have been resolved and `npm run check && npm run test` exit with code 0.
 
-### Phase 5 of 9 — Skeptic Review
+### Phase 5 of 8 — Skeptic Review
 
 Invoke the skeptic by calling the **Agent tool** with `subagent_type: "skeptic"`. Pass it a prompt containing:
 
@@ -101,7 +101,7 @@ npm run check && npm run test
 
 A phase is complete when all `<discovery>` tags have a FOUND + FIXED log entry each, and `npm run check && npm run test` exit with code 0.
 
-### Phase 6 of 9 — Documentation Review
+### Phase 6 of 8 — Documentation Review
 
 Read `.claude/commands/review-doc.md` and execute every step in that file for the current branch.
 
@@ -109,7 +109,7 @@ For every documentation surface classified as UPDATE REQUIRED or NEW SECTION NEE
 
 A phase is complete when all UPDATE REQUIRED and NEW SECTION NEEDED surfaces have been patched and `npm run check` exits with code 0.
 
-### Phase 7 of 9 — Extension Release
+### Phase 7 of 8 — Extension Release
 
 Before delegating, pre-check whether extension files changed:
 
@@ -123,7 +123,7 @@ If match (exit code 0): read `.claude/commands/extension-release.md` and execute
 
 A phase is complete when either the skip condition is met, or `extension/fetchthechange-extension.zip` exists, is larger than 1 KB, and the version in `extension/manifest.json` has been bumped.
 
-### Phase 8 of 9 — Create PR
+### Phase 8 of 8 — Create PR
 
 Read `.claude/commands/create-pr.md` and execute every step in that file.
 
@@ -141,15 +141,9 @@ After the PR is created, infer the appropriate release label and apply it:
 
 A phase is complete when `gh pr view` returns a valid open PR URL with a release label applied.
 
-### Phase 9 of 9 — Review and Merge PR
-
-Read `.claude/commands/review-pr.md` and execute every step in that file.
-
-A phase is complete when the PR has been squash-merged into main and the feature branch has been deleted.
-
 ## Final summary
 
-After all 9 phases complete successfully, print the following two sections.
+After all 8 phases complete successfully, print the following two sections.
 
 ### Section 1 — Pipeline summary
 
@@ -160,7 +154,7 @@ After all 9 phases complete successfully, print the following two sections.
 
   Branch:   <branch name>
   PR:       <PR URL>
-  Status:   Merged ✓
+  Status:   PR Created ✓
 
   Phases completed:
     ✓ Phase 1 — Write Tests
@@ -171,7 +165,6 @@ After all 9 phases complete successfully, print the following two sections.
     ✓ Phase 6 — Documentation Review
     ✓ Phase 7 — Extension Release    (skipped / rebuilt <version>)
     ✓ Phase 8 — Create PR
-    ✓ Phase 9 — Review and Merge PR
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -228,10 +221,6 @@ Print a consolidated report of every issue logged across all phases. Group by ph
 
   ── Phase 8 — Create PR ──────────────────
   (no issues)
-
-  ── Phase 9 — Review & Merge PR ─────────
-  #8  FOUND:  <description>
-      FIXED:  <what was done>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
