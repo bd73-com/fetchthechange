@@ -10,7 +10,49 @@ vi.mock("../db", () => ({
   },
 }));
 
-import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables } from "./ensureTables";
+import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables } from "./ensureTables";
+
+describe("ensureMonitorHealthColumns", () => {
+  beforeEach(() => {
+    mockExecute.mockReset();
+  });
+
+  it("executes 2 ALTER TABLE statements and returns true", async () => {
+    mockExecute.mockResolvedValue([]);
+    const result = await ensureMonitorHealthColumns();
+    expect(result).toBe(true);
+    expect(mockExecute).toHaveBeenCalledTimes(2);
+  });
+
+  it("emits correct DDL for health_alert_sent_at and last_healthy_at", async () => {
+    mockExecute.mockResolvedValue([]);
+    await ensureMonitorHealthColumns();
+    const statements = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(statements.some((s: string) => s.includes("health_alert_sent_at"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("last_healthy_at"))).toBe(true);
+  });
+
+  it("returns false and does not throw on error", async () => {
+    mockExecute.mockRejectedValue(new Error("permission denied"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await ensureMonitorHealthColumns();
+    expect(result).toBe(false);
+    errorSpy.mockRestore();
+  });
+
+  it("logs an error when migration fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockExecute.mockRejectedValue(new Error("permission denied"));
+    await ensureMonitorHealthColumns();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Could not ensure monitor health columns — health alerts will not work:",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
+});
 
 describe("ensureErrorLogColumns", () => {
   beforeEach(() => {

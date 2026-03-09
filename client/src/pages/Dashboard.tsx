@@ -291,12 +291,11 @@ export default function Dashboard() {
         )}
 
         {(() => {
-          let filteredMonitors = selectedTagIds.length === 0
-            ? monitors
-            : monitors?.filter(m => (m as any).tags?.some((t: any) => selectedTagIds.includes(t.id)));
-          if (needsAttentionFilter && filteredMonitors) {
-            filteredMonitors = filteredMonitors.filter(m => needsAttention(m));
-          }
+          const filteredMonitors = monitors?.filter(m => {
+            if (selectedTagIds.length > 0 && !(m as any).tags?.some((t: any) => selectedTagIds.includes(t.id))) return false;
+            if (needsAttentionFilter && !needsAttention(m)) return false;
+            return true;
+          });
 
           if (!monitors || monitors.length === 0) {
             return (
