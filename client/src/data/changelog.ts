@@ -8,6 +8,46 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    "version": "1.7.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Features\n\n* feat: scraper anti-bot improvements (jitter backoff, stealth init, browser pool, better errors) (#108) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.6.2...v1.7.0"
+  },
+  {
+    "version": "1.6.2",
+    "date": "2026-03-08",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: inline jest-dom dep to fix Replit subpath resolution (#110) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.6.1...v1.6.2"
+  },
+  {
+    "version": "1.6.1",
+    "date": "2026-03-08",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve @testing-library/jest-dom/vitest import failure in Replit (#109) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.6.0...v1.6.1"
+  },
+  {
+    "version": "1.6.0",
+    "date": "2026-03-08",
+    "body": "## What's Changed\n\n## Features\n\n* Add blog post: website change monitoring use cases beyond price tracking (#107) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.5.1...v1.6.0"
+  },
+  {
+    "version": "1.5.1",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: move jsdom to dependencies for Replit compatibility (#106) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.5.0...v1.5.1"
+  },
+  {
+    "version": "1.5.0",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Features\n\n* Add Dashboard button to nav bar for non-dashboard pages (#105) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.4.0...v1.5.0"
+  },
+  {
+    "version": "1.4.0",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add React component testing with Testing Library (#104) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.4...v1.4.0"
+  },
+  {
+    "version": "1.3.4",
+    "date": "2026-03-07",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: sync changelog with real GitHub releases (#103) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.3...v1.3.4"
+  },
+  {
     "version": "1.3.3",
     "date": "2026-03-07",
     "body": "## What's Changed\n\n* Extract shared SEOHead component from 9 pages (#101) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.2...v1.3.3"
