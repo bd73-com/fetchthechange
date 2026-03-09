@@ -2,7 +2,8 @@ import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPage
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { api, channelTypeSchema, webhookConfigInputSchema, slackConfigInputSchema, createTagSchema, updateTagSchema, setMonitorTagsSchema } from "@shared/routes";
+import { api, channelTypeSchema, webhookConfigInputSchema, slackConfigInputSchema, createTagSchema, updateTagSchema, setMonitorTagsSchema, createConditionSchema } from "@shared/routes";
+import { isSafeRegex } from "./services/conditions";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { authStorage } from "./replit_integrations/auth/storage";
@@ -699,6 +700,107 @@ export async function registerRoutes(
     const channel = req.query.channel as string | undefined;
     const entries = await storage.getDeliveryLog(id, limit, channel);
     res.json(entries);
+  });
+
+  // ---------------------------------------------------------------
+  // MONITOR CONDITIONS ROUTES
+  // ---------------------------------------------------------------
+
+  // GET /api/monitors/:id/conditions
+  app.get(api.monitors.conditions.list.path, isAuthenticated, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const monitor = await storage.getMonitor(id);
+    if (!monitor) return res.status(404).json({ message: "Not found" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(404).json({ message: "Not found" });
+
+    const conditions = await storage.getMonitorConditions(id);
+    res.json(conditions);
+  });
+
+  // POST /api/monitors/:id/conditions
+  app.post(api.monitors.conditions.create.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const monitor = await storage.getMonitor(id);
+      if (!monitor) return res.status(404).json({ message: "Not found" });
+      if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(404).json({ message: "Not found" });
+
+      // Tier check: Free users capped at 1 condition per monitor
+      const user = await authStorage.getUser(req.user.claims.sub);
+      const tier = ((user as any)?.tier || "free") as UserTier;
+      const isFreeTier = tier === "free";
+      if (isFreeTier) {
+        const count = await storage.countMonitorConditions(id);
+        if (count >= 1) {
+          return res.status(403).json({
+            message: "Free plan supports 1 condition per monitor. Upgrade to Pro or Power for unlimited conditions.",
+            code: "TIER_LIMIT_REACHED",
+          });
+        }
+      }
+
+      const input = createConditionSchema.parse(req.body);
+
+      // Validate numeric condition values are actually numbers
+      if (input.type.startsWith("numeric_")) {
+        const parsed = parseFloat(input.value);
+        if (!Number.isFinite(parsed)) {
+          return res.status(422).json({
+            message: "Numeric condition value must be a valid number.",
+            code: "VALIDATION_ERROR",
+          });
+        }
+        if (input.type === "numeric_change_pct" && parsed <= 0) {
+          return res.status(422).json({
+            message: "Percentage threshold must be a positive number.",
+            code: "VALIDATION_ERROR",
+          });
+        }
+      }
+
+      // Validate regex at save time
+      if (input.type === "regex") {
+        if (!isSafeRegex(input.value)) {
+          return res.status(422).json({
+            message: "Invalid or unsafe regular expression. Avoid nested quantifiers like (a+)+ which can cause slowdowns.",
+            code: "INVALID_REGEX",
+          });
+        }
+      }
+
+      const condition = await storage.addMonitorCondition(id, input.type, input.value, input.groupIndex);
+
+      // TOCTOU guard: if a concurrent request also inserted, roll back
+      if (isFreeTier) {
+        const postInsertCount = await storage.countMonitorConditions(id);
+        if (postInsertCount > 1) {
+          await storage.deleteMonitorCondition(condition.id, id);
+          return res.status(403).json({
+            message: "Free plan supports 1 condition per monitor. Upgrade to Pro or Power for unlimited conditions.",
+            code: "TIER_LIMIT_REACHED",
+          });
+        }
+      }
+
+      res.status(201).json(condition);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
+      }
+      throw err;
+    }
+  });
+
+  // DELETE /api/monitors/:id/conditions/:conditionId
+  app.delete(api.monitors.conditions.delete.path, isAuthenticated, async (req: any, res) => {
+    const id = Number(req.params.id);
+    const conditionId = Number(req.params.conditionId);
+    const monitor = await storage.getMonitor(id);
+    if (!monitor) return res.status(404).json({ message: "Not found" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(404).json({ message: "Not found" });
+
+    await storage.deleteMonitorCondition(conditionId, id);
+    res.status(204).send();
   });
 
   // ---------------------------------------------------------------
