@@ -182,6 +182,8 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
                   <span
                     className={`inline-block h-2.5 w-2.5 rounded-full shrink-0 ${healthDotStyles[health]}`}
                     title={getHealthTooltip(monitor, health)}
+                    aria-label={getHealthTooltip(monitor, health)}
+                    role="status"
                   />
                   {monitor.name}
                   {health === "degraded" && (

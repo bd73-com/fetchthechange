@@ -331,6 +331,11 @@ export async function sendRecoveryEmail(
   monitor: Monitor,
   recoveredValue: string
 ): Promise<EmailResult> {
+  // Truncate for email display (full value is stored in DB)
+  const displayValue = recoveredValue.length > 500
+    ? recoveredValue.slice(0, 500) + "\u2026"
+    : recoveredValue;
+
   const user = await authStorage.getUser(monitor.userId);
   if (!user) {
     return { success: false, error: "User not found" };
@@ -377,7 +382,7 @@ export async function sendRecoveryEmail(
 Your monitor "${sanitizePlainText(monitor.name)}" has recovered and is healthy again.
 
 URL: ${sanitizePlainText(monitor.url)}
-Current value: ${sanitizePlainText(recoveredValue)}${degradedDisplay ? `\nWas degraded for: ${degradedDisplay}` : ""}
+Current value: ${sanitizePlainText(displayValue)}${degradedDisplay ? `\nWas degraded for: ${degradedDisplay}` : ""}
 
 Visit your dashboard: ${dashboardUrl}/monitors/${monitor.id}
 
@@ -387,7 +392,7 @@ FetchTheChange Team`,
         <p>Your monitor <strong>${escapeHtml(monitor.name)}</strong> has recovered and is healthy again.</p>
         <p><strong>URL:</strong> <a href="${safeHref(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
         <p><strong>Current value:</strong></p>
-        <pre>${escapeHtml(recoveredValue)}</pre>${degradedDisplay ? `
+        <pre>${escapeHtml(displayValue)}</pre>${degradedDisplay ? `
         <p><strong>Was degraded for:</strong> ${escapeHtml(degradedDisplay)}</p>` : ""}
         <hr/>
         <p><a href="${safeHref(dashboardUrl + "/monitors/" + monitor.id)}">View Monitor Dashboard</a></p>

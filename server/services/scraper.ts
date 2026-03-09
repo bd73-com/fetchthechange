@@ -451,12 +451,10 @@ async function handleMonitorFailure(
     const warningThreshold = Math.floor(threshold / 2);
     if (newFailureCount === warningThreshold && monitor.healthAlertSentAt === null) {
       if (tier === "power") {
-        await storage.setHealthAlertSent(monitor.id).catch((err) => {
-          console.error(`[Scraper] Failed to mark health alert sent for monitor ${monitor.id}:`, err);
-        });
         const nextPauseIn = threshold - newFailureCount;
         try {
           await sendHealthWarningEmail(monitor, newFailureCount, nextPauseIn, truncatedError);
+          await storage.setHealthAlertSent(monitor.id);
         } catch (warningErr) {
           console.error(`[Scraper] Health warning email failed for monitor ${monitor.id}:`, warningErr);
         }
