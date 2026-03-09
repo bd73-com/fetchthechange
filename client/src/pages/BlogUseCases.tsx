@@ -208,7 +208,7 @@ export default function BlogUseCases() {
 
           <h2 className="text-2xl font-display font-bold mt-10 mb-4">Getting Started</h2>
           <p>
-            All of these use cases work with FetchTheChange's free tier, which includes up to 5 monitors. For the use cases that need JavaScript rendering — job postings, SaaS changelogs, and availability tracking — FetchTheChange handles JS-heavy sites out of the box. For availability monitoring where speed matters, Pro and Power plans offer hourly checks.
+            All of these use cases work with FetchTheChange's free tier, which includes up to 3 monitors. For the use cases that need JavaScript rendering — job postings, SaaS changelogs, and availability tracking — FetchTheChange handles JS-heavy sites out of the box. For availability monitoring where speed matters, Pro and Power plans offer hourly checks.
           </p>
           <p>
             The point isn't which tool you use — it's recognising that website monitoring solves problems far beyond price tracking. Once you start thinking of any "I need to know when X changes on Y's website" situation as a monitoring problem, the use cases are everywhere.
