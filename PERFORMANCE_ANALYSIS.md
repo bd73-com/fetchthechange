@@ -272,17 +272,3 @@ The application has a **well-structured foundation** with good defensive pattern
 The architecture is fundamentally sound — single-process with cron scheduling is fine for the current Replit deployment model up to ~500 monitors. The circuit breaker, browser pool, and rate limiting show good engineering. However, the missing indexes and N+1 query patterns will cause measurable degradation before reaching that threshold. Priorities #1–#3 above should be addressed before the next growth milestone.
 
 ---
-
-```xml
-<discovery category="blocker">N+1 query in notification.ts:processQueuedNotifications — loads ALL changes per-monitor to find individual entries by changeId</discovery>
-<discovery category="blocker">monitors table has no index on userId or active — every scheduler tick and API request does a sequential scan</discovery>
-<discovery category="blocker">monitor_changes table has no index on monitorId — every history/notification query scans the fastest-growing table</discovery>
-<discovery category="gotcha">Slack channel cache (routes.ts:854) has no eviction policy — entries accumulate indefinitely per-user</discovery>
-<discovery category="gotcha">getMonitorChanges() has no LIMIT — serves unbounded results to both API and internal notification pipelines</discovery>
-<discovery category="pattern">Connection pool size is 10 (pg default) — all optimizations must stay within this budget; MAX_CONCURRENT_CHECKS is also 10</discovery>
-<discovery category="pattern">Browser pool is capped at 2 idle instances — scraper concurrency is bounded by external Browserless service, not local resources</discovery>
-```
-
-```
-<promise>PERFORMANCE_ANALYST_COMPLETE</promise>
-```
