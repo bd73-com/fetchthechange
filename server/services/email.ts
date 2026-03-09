@@ -48,6 +48,41 @@ function safeHref(url: string | null | undefined): string {
   return escaped;
 }
 
+interface EmailInfra {
+  resend: InstanceType<typeof Resend>;
+  fromAddress: string;
+}
+
+/**
+ * Shared preamble for all email-sending functions.
+ * Checks the global Resend usage cap and ensures an API key is configured.
+ * Returns either the Resend client + from address, or an early-exit EmailResult.
+ */
+async function prepareEmailInfra(
+  monitorId: number,
+  mockLabel: string,
+): Promise<EmailInfra | EmailResult> {
+  const resendCapCheck = await ResendUsageTracker.canSendEmail();
+  if (!resendCapCheck.allowed) {
+    console.log(`[Email] Resend cap reached for ${mockLabel}, monitor ${monitorId}: ${resendCapCheck.reason}`);
+    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
+  }
+
+  if (!process.env.RESEND_API_KEY) {
+    console.log(`[MOCK EMAIL] ${mockLabel} for monitor ${monitorId}`);
+    return { success: false, error: "RESEND_API_KEY not configured" };
+  }
+
+  return {
+    resend: new Resend(process.env.RESEND_API_KEY),
+    fromAddress: process.env.RESEND_FROM || "onboarding@resend.dev",
+  };
+}
+
+function isEmailResult(v: EmailInfra | EmailResult): v is EmailResult {
+  return "success" in v;
+}
+
 async function canSendEmail(monitor: Monitor): Promise<{ allowed: boolean; reason?: string }> {
   const user = await authStorage.getUser(monitor.userId);
   const tier = (user?.tier || "free") as UserTier;
@@ -84,22 +119,9 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     return { success: false, error: emailCheck.reason || "Email rate limit exceeded" };
   }
 
-  const resendCapCheck = await ResendUsageTracker.canSendEmail();
-  if (!resendCapCheck.allowed) {
-    console.log(`[Email] Resend cap reached for monitor ${monitor.id}: ${resendCapCheck.reason}`);
-    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
-  }
-
-  if (!process.env.RESEND_API_KEY) {
-    console.log("RESEND_API_KEY not set. Skipping email.");
-    console.log(`[MOCK EMAIL] To: User of Monitor ${monitor.id}`);
-    console.log(`[MOCK EMAIL] Subject: FetchTheChange: ${monitor.name}`);
-    console.log(`[MOCK EMAIL] Body: Value changed from "${oldValue}" to "${newValue}"`);
-    return { success: false, error: "RESEND_API_KEY not configured" };
-  }
-
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  const fromAddress = process.env.RESEND_FROM || 'onboarding@resend.dev';
+  const infra = await prepareEmailInfra(monitor.id, "notification");
+  if (isEmailResult(infra)) return infra;
+  const { resend, fromAddress } = infra;
 
   try {
     const user = await authStorage.getUser(monitor.userId);
@@ -163,19 +185,9 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
 }
 
 export async function sendAutoPauseEmail(monitor: Monitor, failureCount: number, lastError: string | null): Promise<EmailResult> {
-  const resendCapCheck = await ResendUsageTracker.canSendEmail();
-  if (!resendCapCheck.allowed) {
-    console.log(`[Email] Resend cap reached for auto-pause email, monitor ${monitor.id}: ${resendCapCheck.reason}`);
-    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
-  }
-
-  if (!process.env.RESEND_API_KEY) {
-    console.log(`[MOCK EMAIL] Auto-pause notification for monitor ${monitor.id} "${monitor.name}" after ${failureCount} failures`);
-    return { success: false, error: "RESEND_API_KEY not configured" };
-  }
-
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  const fromAddress = process.env.RESEND_FROM || 'onboarding@resend.dev';
+  const infra = await prepareEmailInfra(monitor.id, "auto-pause");
+  if (isEmailResult(infra)) return infra;
+  const { resend, fromAddress } = infra;
 
   try {
     const user = await authStorage.getUser(monitor.userId);
@@ -242,19 +254,9 @@ export async function sendHealthWarningEmail(
     return { success: false, error: "Health warning emails are Power-tier only" };
   }
 
-  const resendCapCheck = await ResendUsageTracker.canSendEmail();
-  if (!resendCapCheck.allowed) {
-    console.log(`[Email] Resend cap reached for health warning, monitor ${monitor.id}: ${resendCapCheck.reason}`);
-    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
-  }
-
-  if (!process.env.RESEND_API_KEY) {
-    console.log(`[MOCK EMAIL] Health warning for monitor ${monitor.id} "${monitor.name}" — ${consecutiveFailures} failures`);
-    return { success: false, error: "RESEND_API_KEY not configured" };
-  }
-
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  const fromAddress = process.env.RESEND_FROM || 'onboarding@resend.dev';
+  const infra = await prepareEmailInfra(monitor.id, "health warning");
+  if (isEmailResult(infra)) return infra;
+  const { resend, fromAddress } = infra;
 
   // Compute "last healthy" display string
   let lastHealthyDisplay = "never";
@@ -340,19 +342,9 @@ export async function sendRecoveryEmail(
     return { success: false, error: "Recovery emails are Power-tier only" };
   }
 
-  const resendCapCheck = await ResendUsageTracker.canSendEmail();
-  if (!resendCapCheck.allowed) {
-    console.log(`[Email] Resend cap reached for recovery email, monitor ${monitor.id}: ${resendCapCheck.reason}`);
-    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
-  }
-
-  if (!process.env.RESEND_API_KEY) {
-    console.log(`[MOCK EMAIL] Recovery for monitor ${monitor.id} "${monitor.name}"`);
-    return { success: false, error: "RESEND_API_KEY not configured" };
-  }
-
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  const fromAddress = process.env.RESEND_FROM || 'onboarding@resend.dev';
+  const infra = await prepareEmailInfra(monitor.id, "recovery");
+  if (isEmailResult(infra)) return infra;
+  const { resend, fromAddress } = infra;
 
   // Compute "was degraded for" display string
   let degradedDisplay = "";
@@ -430,19 +422,9 @@ export async function sendDigestEmail(monitor: Monitor, changes: MonitorChange[]
     return { success: false, error: emailCheck.reason || "Email rate limit exceeded" };
   }
 
-  const resendCapCheck = await ResendUsageTracker.canSendEmail();
-  if (!resendCapCheck.allowed) {
-    console.log(`[Email] Resend cap reached for digest, monitor ${monitor.id}: ${resendCapCheck.reason}`);
-    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
-  }
-
-  if (!process.env.RESEND_API_KEY) {
-    console.log(`[MOCK EMAIL] Digest for monitor ${monitor.id} "${monitor.name}" with ${changes.length} changes`);
-    return { success: false, error: "RESEND_API_KEY not configured" };
-  }
-
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  const fromAddress = process.env.RESEND_FROM || 'onboarding@resend.dev';
+  const infra = await prepareEmailInfra(monitor.id, "digest");
+  if (isEmailResult(infra)) return infra;
+  const { resend, fromAddress } = infra;
 
   try {
     const user = await authStorage.getUser(monitor.userId);

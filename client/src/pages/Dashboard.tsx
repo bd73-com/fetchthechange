@@ -16,6 +16,7 @@ import { useSearch } from "wouter";
 import { useTags } from "@/hooks/use-tags";
 import { TagManager } from "@/components/TagManager";
 import { Tags } from "lucide-react";
+import { needsAttention } from "@/lib/monitor-health";
 
 // TODO: Remove banner code after 2026-02-27 (cutoff date)
 const BANNER_CUTOFF = new Date("2026-02-27T00:00:00Z");
@@ -205,7 +206,7 @@ export default function Dashboard() {
 
         {/* Needs attention filter */}
         {monitors && monitors.length > 0 && (() => {
-          const attentionCount = monitors.filter(m => !m.active || m.consecutiveFailures > 0).length;
+          const attentionCount = monitors.filter(m => needsAttention(m)).length;
           if (attentionCount === 0) return null;
           return (
             <div className="flex items-center gap-2 flex-wrap mb-4">
@@ -294,7 +295,7 @@ export default function Dashboard() {
             ? monitors
             : monitors?.filter(m => (m as any).tags?.some((t: any) => selectedTagIds.includes(t.id)));
           if (needsAttentionFilter && filteredMonitors) {
-            filteredMonitors = filteredMonitors.filter(m => !m.active || m.consecutiveFailures > 0);
+            filteredMonitors = filteredMonitors.filter(m => needsAttention(m));
           }
 
           if (!monitors || monitors.length === 0) {

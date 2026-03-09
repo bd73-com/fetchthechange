@@ -16,13 +16,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { TagBadge } from "@/components/TagBadge";
 
-type HealthState = "healthy" | "degraded" | "paused";
-
-function getHealthState(monitor: Monitor): HealthState {
-  if (!monitor.active) return "paused";
-  if (monitor.consecutiveFailures > 0) return "degraded";
-  return "healthy";
-}
+import { type HealthState, getHealthState } from "@/lib/monitor-health";
 
 const healthDotStyles: Record<HealthState, string> = {
   healthy: "bg-green-500",
