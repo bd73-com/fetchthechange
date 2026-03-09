@@ -255,7 +255,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.0.0",
     "date": "2026-03-06",
-    "body": "## What's Changed\n\n## Maintenance\n\n* Remove API Docs link from public navigation (#81) @bd73-com\n\n## Maintenance\n\n* Remove API Docs link from public navigation (#81) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.5.3...v1.0.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* Remove API Docs link from public navigation (#81) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.5.3...v1.0.0"
   },
   {
     "version": "0.5.3",
