@@ -5,6 +5,7 @@ import { processChangeNotification } from "./notification";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
+import { browserPool } from "./browserPool";
 import { validateUrlBeforeFetch, ssrfSafeFetch } from "../utils/ssrf";
 import { type Monitor, monitorMetrics, monitors } from "@shared/schema";
 import { type UserTier, PAUSE_THRESHOLDS } from "@shared/models/auth";
@@ -99,6 +100,14 @@ const BLOCKED_TRACKING_PATTERN = /google-analytics|googletagmanager|facebook\.ne
 /** Resource types to block in Browserless sessions to speed up page load. */
 const BLOCKED_RESOURCE_TYPES = ['image', 'media', 'font'];
 
+/** Base delay for exponential backoff on Browserless retry. */
+export const BASE_RETRY_MS = 2000;
+/** Maximum random jitter added to retry delay. */
+export const JITTER_CAP_MS = 1500;
+
+// Re-export pool types for backward compatibility with tests/index.ts
+export { BrowserPool, browserPool } from "./browserPool";
+
 /**
  * Opens a Browserless page with stealth settings, resource blocking, and SSRF
  * validation, then passes the ready page to a callback. Handles browser lifecycle
@@ -113,33 +122,48 @@ async function withBrowserlessPage<T>(
 
   await validateUrlBeforeFetch(url);
 
-  let browser;
+  let browser: any;
+  let reusable = false;
+  let context: any;
   try {
     const playwrightModule = await import("playwright-core");
     const chromium = playwrightModule.chromium;
     if (!chromium || typeof chromium.connectOverCDP !== 'function') {
       throw new Error("Playwright browser automation is not available");
     }
-    browser = await chromium.connectOverCDP(
-      `wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`,
-      { timeout: 30000 },
-    );
 
-    const context = await browser.newContext(stealthContextOptions());
-    await context.route('**/*', async (route) => {
+    const wsUrl = `wss://production-sfo.browserless.io/stealth?token=${encodeURIComponent(token)}`;
+    const connectFn = async () => {
+      try {
+        return await chromium.connectOverCDP(wsUrl, { timeout: 30000 });
+      } catch (err: any) {
+        // Strip the token from error messages/stack to prevent secret leakage
+        if (err?.message) err.message = err.message.replaceAll(token, '[REDACTED]');
+        if (err?.stack) err.stack = err.stack.replaceAll(token, '[REDACTED]');
+        throw err;
+      }
+    };
+    ({ browser, reusable } = await browserPool.acquire(connectFn));
+
+    context = await browser.newContext(stealthContextOptions());
+    await context.route('**/*', async (route: any) => {
       if (BLOCKED_RESOURCE_TYPES.includes(route.request().resourceType())) {
         return route.abort();
       }
       if (BLOCKED_TRACKING_PATTERN.test(route.request().url())) {
         return route.abort();
       }
-      if (!route.request().isNavigationRequest()) return route.continue();
-      try {
-        await validateUrlBeforeFetch(route.request().url());
-        return route.continue();
-      } catch {
-        return route.abort();
+      // Validate all HTTP(S) requests against SSRF rules, not just navigations.
+      // Non-HTTP schemes (about:, data:, blob:) are safe to pass through.
+      const requestUrl = route.request().url();
+      if (/^https?:/i.test(requestUrl)) {
+        try {
+          await validateUrlBeforeFetch(requestUrl);
+        } catch {
+          return route.abort();
+        }
       }
+      return route.continue();
     });
     const page = await context.newPage();
 
@@ -155,23 +179,62 @@ async function withBrowserlessPage<T>(
 
     return await callback(page, consentDismissed);
   } finally {
-    if (browser) await browser.close();
+    // Always close the context first to release its renderer process, cookies,
+    // and localStorage — prevents cross-monitor data bleed on pooled browsers.
+    if (context?.close) await context.close().catch(() => {});
+    if (browser) {
+      if (reusable) {
+        browserPool.release(browser, reusable);
+      } else {
+        await browser.close();
+      }
+    }
   }
 }
 
 /** Stealth init script injected into browser pages before navigation to evade bot detection. */
 function stealthInitScript() {
+  // 1. Hide webdriver flag
   Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+  // 2. navigator.plugins — realistic Chrome plugin array
+  const pluginData = [
+    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+  ];
+  const pluginArray = Object.create(PluginArray.prototype);
+  Object.defineProperty(pluginArray, 'length', { get: () => pluginData.length });
+  pluginData.forEach((p, i) => {
+    const plugin = Object.create(Plugin.prototype);
+    Object.defineProperty(plugin, 'name', { get: () => p.name });
+    Object.defineProperty(plugin, 'filename', { get: () => p.filename });
+    Object.defineProperty(plugin, 'description', { get: () => p.description });
+    Object.defineProperty(plugin, 'length', { get: () => 0 });
+    Object.defineProperty(pluginArray, i, { get: () => plugin });
+    Object.defineProperty(pluginArray, p.name, { get: () => plugin });
+  });
+  Object.defineProperty(navigator, 'plugins', { get: () => pluginArray });
+
+  // 3. navigator.languages
+  if (!navigator.languages || navigator.languages.length === 0) {
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+  }
+
+  // 4. window.chrome — absent in headless, present in real Chrome
   if (!(window as any).chrome) {
     (window as any).chrome = { runtime: {}, csi: () => ({}) };
   }
-  Object.defineProperty(navigator, 'plugins', {
-    get: () => [
-      { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-      { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-    ],
-  });
-  Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+
+  // 5. WebGL — spoof renderer/vendor away from SwiftShader
+  const getParameter = WebGLRenderingContext.prototype.getParameter;
+  WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
+    if (parameter === 37445) return 'Intel Inc.';   // UNMASKED_VENDOR_WEBGL
+    if (parameter === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+    return getParameter.call(this, parameter);
+  };
+
+  // 6. Permissions API — spoof notifications as 'prompt'
   try {
     const originalQuery = window.navigator.permissions.query.bind(window.navigator.permissions);
     window.navigator.permissions.query = (params: any) =>
@@ -631,6 +694,28 @@ async function tryDismissConsent(page: any): Promise<boolean> {
 }
 
 /**
+ * Classifies Browserless errors into user-friendly messages.
+ */
+export function classifyBrowserlessError(errMsg: string): string {
+  if (/timeout|Timeout|timed out/.test(errMsg)) {
+    return "Page took too long to load — the site may be slow or blocking headless browsers";
+  }
+  if (/net::ERR_NAME_NOT_RESOLVED|getaddrinfo|ENOTFOUND/.test(errMsg)) {
+    return "The domain could not be resolved — check the URL is correct";
+  }
+  if (/net::ERR_CONNECTION_REFUSED|ECONNREFUSED/.test(errMsg)) {
+    return "The site refused the connection — it may be down";
+  }
+  if (/net::ERR_TOO_MANY_REDIRECTS/.test(errMsg)) {
+    return "Too many redirects — the page may require a login or cookie";
+  }
+  if (/403|Forbidden|access denied|bot detection|challenge/i.test(errMsg)) {
+    return "The site is actively blocking automated access — try a less frequent check interval";
+  }
+  return "Rendered page extraction failed — the site may block automated browsers";
+}
+
+/**
  * Retries extraction using Browserless.
  */
 export async function extractWithBrowserless(url: string, selector: string, monitorId?: number, monitorName?: string): Promise<{
@@ -699,7 +784,8 @@ export async function extractWithBrowserless(url: string, selector: string, moni
     });
   } catch (error) {
     const label = monitorName ? `"${monitorName}" — browser` : "Browser";
-    await ErrorLogger.error("scraper", `${label}-based extraction failed — the page may be unreachable or blocking automated access. Check that the URL loads in a normal browser.`, error instanceof Error ? error : null, { url, selector, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
+    const classified = classifyBrowserlessError(error instanceof Error ? error.message : "Unknown error");
+    await ErrorLogger.error("scraper", `${label}-based extraction failed: ${classified}`, error instanceof Error ? error : null, { url, selector, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
     throw error;
   }
 }
@@ -897,7 +983,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           try {
             if (attempt > 0) {
               console.log(`[Browserless] Monitor ${monitor.id}: retrying after transient failure (attempt ${attempt + 1})`);
-              await new Promise(r => setTimeout(r, 3000));
+              const delay = BASE_RETRY_MS * Math.pow(2, attempt - 1) + Math.floor(Math.random() * JITTER_CAP_MS);
+              await new Promise(r => setTimeout(r, delay));
             }
             const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
             browserlessSuccess = true;
