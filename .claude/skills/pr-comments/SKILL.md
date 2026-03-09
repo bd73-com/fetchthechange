@@ -13,6 +13,7 @@ Fetch all review comments on a GitHub PR, triage them by actionability, fix vali
    ```bash
    gh pr view --repo bd73-com/fetchthechange --json number -q .number
    ```
+   If this fails (no PR exists for the current branch), ask the user for the PR number or URL before proceeding.
 
 2. **Fetch all comment sources in parallel:**
    ```bash
@@ -20,10 +21,10 @@ Fetch all review comments on a GitHub PR, triage them by actionability, fix vali
    gh pr view --repo bd73-com/fetchthechange {number} --json comments --jq '.comments'
 
    # Review summaries and review-level comments
-   gh api repos/bd73-com/fetchthechange/pulls/{number}/reviews
+   gh api repos/bd73-com/fetchthechange/pulls/{number}/reviews --paginate
 
    # Inline review comments (file-level threads)
-   gh api repos/bd73-com/fetchthechange/pulls/{number}/comments
+   gh api repos/bd73-com/fetchthechange/pulls/{number}/comments --paginate
    ```
 
 3. **Filter out noise.** Discard comments from `github-actions[bot]` and other CI bots unless the comment body contains an explicit error message, failure description, or actionable suggestion. Keep all comments from `coderabbitai[bot]` and human reviewers.
@@ -33,6 +34,8 @@ Fetch all review comments on a GitHub PR, triage them by actionability, fix vali
    - **already-fixed** — a subsequent commit on the branch already addresses it
    - **false-positive** — the reviewer misread the code or the suggestion is incorrect
    - **needs-discussion** — ambiguous; requires human judgment
+
+   **Outdated comments:** If a comment has `line: null` but `original_line` is set, the comment references code that has since been changed by a force-push. Read the file at the current HEAD to determine if the issue still applies. If the code has changed beyond recognition, classify as **already-fixed** with a note that the referenced lines were superseded.
 
 5. **Present the triage table to the user.** Output a markdown table:
    ```
@@ -55,22 +58,36 @@ Fetch all review comments on a GitHub PR, triage them by actionability, fix vali
 
 8. **Show all draft replies to the user and get explicit confirmation before posting each one.** NEVER auto-post or auto-resolve. Present each reply and wait for approval.
 
-9. **Post approved replies.**
+9. **Post approved replies.** Use heredoc syntax to avoid shell escaping issues with backticks, quotes, and special characters in reply text.
    - For inline comments, reply to the thread:
      ```bash
      gh api repos/bd73-com/fetchthechange/pulls/{number}/comments/{comment_id}/replies \
-       -f body="{approved reply text}"
+       -f body="$(cat <<'REPLY_EOF'
+     {approved reply text}
+     REPLY_EOF
+     )"
      ```
    - For general PR comments:
      ```bash
-     gh pr comment --repo bd73-com/fetchthechange {number} --body "{approved reply text}"
+     gh pr comment --repo bd73-com/fetchthechange {number} --body "$(cat <<'REPLY_EOF'
+     {approved reply text}
+     REPLY_EOF
+     )"
      ```
 
-10. **Resolve threads only with explicit user approval.** After posting a reply, ask whether the thread should be resolved. Do not batch-resolve.
-
-11. **Push all fix commits.**
+10. **Resolve threads only with explicit user approval.** After posting a reply, ask whether the thread should be resolved. Do not batch-resolve. To resolve, use the GraphQL API with the thread's `node_id` (available as `node_id` on each review comment from the REST response):
     ```bash
-    git push -u origin {branch-name}
+    gh api graphql --repo bd73-com/fetchthechange -f query='
+      mutation($threadId: ID!) {
+        resolveReviewThread(input: {threadId: $threadId}) {
+          thread { isResolved }
+        }
+      }' -f threadId="{node_id}"
+    ```
+
+11. **Push all fix commits.** Always run `npm run build` before pushing to verify the production bundle is not broken.
+    ```bash
+    npm run build && git push -u origin {branch-name}
     ```
 
 12. **Final summary.** Output a table of actions taken:
@@ -88,4 +105,6 @@ Fetch all review comments on a GitHub PR, triage them by actionability, fix vali
 - NEVER modify code without first reading the full file to understand context — prevents blind fixes that break surrounding logic.
 - NEVER force-push or amend commits that are already on the remote — create new fix commits instead.
 - ALWAYS identify `coderabbitai[bot]` as the primary reviewer bot — not Copilot, not other bots.
-- ALWAYS run `npm run build` in addition to check and test before pushing if the fixes are substantial (more than 3 files changed).
+- ALWAYS run `npm run build` before pushing — matches the project-wide requirement in CLAUDE.md.
+- ALWAYS use `--paginate` on `gh api` calls that return comment lists — PRs with heavy review activity exceed the default 30-item page size.
+- ALWAYS use heredoc syntax when posting reply text via `gh api` or `gh pr comment` — prevents shell escaping failures with backticks, quotes, and dollar signs in code review replies.
