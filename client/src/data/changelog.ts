@@ -10,7 +10,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.7.0",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Features\n\n* feat: scraper anti-bot improvements (jitter backoff, stealth init, browser pool, better errors) (#108) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.6.2...v1.7.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: scraper anti-bot improvements (jitter backoff, stealth init, browser pool, better errors) (#108) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.6.2...v1.7.0"
   },
   {
     "version": "1.6.2",
@@ -25,7 +25,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.6.0",
     "date": "2026-03-08",
-    "body": "## What's Changed\n\n## Features\n\n* Add blog post: website change monitoring use cases beyond price tracking (#107) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.5.1...v1.6.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* Add blog post: website change monitoring use cases beyond price tracking (#107) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.5.1...v1.6.0"
   },
   {
     "version": "1.5.1",
@@ -40,7 +40,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.4.0",
     "date": "2026-03-07",
-    "body": "## What's Changed\n\n## Features\n\n* feat: add React component testing with Testing Library (#104) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.4...v1.4.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: add React component testing with Testing Library (#104) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.4...v1.4.0"
   },
   {
     "version": "1.3.4",
@@ -180,7 +180,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "0.4.0",
     "date": "2026-03-05",
-    "body": "## What's Changed\n\n## Features\n\n* feat: improve scraper resilience when Browserless is unavailable (#76) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.3.1...v0.4.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: improve scraper resilience when Browserless is unavailable (#76) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.3.1...v0.4.0"
   },
   {
     "version": "0.3.1",
