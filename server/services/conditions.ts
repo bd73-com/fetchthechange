@@ -1,5 +1,23 @@
 import type { MonitorCondition } from "@shared/schema";
 
+/** Maximum length of newValue to test against regex (ReDoS mitigation). */
+const REGEX_INPUT_MAX_LENGTH = 10_000;
+
+/**
+ * Reject regex patterns with nested quantifiers that can cause catastrophic backtracking.
+ * E.g. (a+)+ or (a*)*  or (a{1,}){1,}
+ */
+const CATASTROPHIC_PATTERN = /(\((?:[^()]*[+*}{][^()]*)\))[+*]|\(\?[^)]*[+*][^)]*\)[+*]/;
+
+export function isSafeRegex(pattern: string): boolean {
+  try {
+    new RegExp(pattern);
+  } catch {
+    return false;
+  }
+  return !CATASTROPHIC_PATTERN.test(pattern);
+}
+
 /**
  * Extract the first number from a string, stripping commas.
  * Returns null if no number is found.
@@ -58,7 +76,10 @@ function evaluateSingle(
       }
       case "regex": {
         try {
-          return new RegExp(condition.value, "i").test(newValue ?? "");
+          if (!isSafeRegex(condition.value)) return false;
+          // Cap input length to mitigate ReDoS on large scraped content
+          const input = (newValue ?? "").slice(0, REGEX_INPUT_MAX_LENGTH);
+          return new RegExp(condition.value, "i").test(input);
         } catch {
           return false;
         }

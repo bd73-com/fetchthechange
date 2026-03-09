@@ -280,7 +280,7 @@ export const api = {
         input: createConditionSchema,
         responses: {
           201: z.custom<typeof monitorConditions.$inferSelect>(),
-          403: z.object({ error: z.string(), code: z.string() }),
+          403: z.object({ message: z.string(), code: z.string() }),
           404: errorSchemas.notFound,
           401: errorSchemas.unauthorized,
           422: errorSchemas.validation,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evaluateConditions, extractNumber } from "./conditions";
+import { evaluateConditions, extractNumber, isSafeRegex } from "./conditions";
 import type { MonitorCondition } from "@shared/schema";
 
 function makeCondition(overrides: Partial<MonitorCondition> = {}): MonitorCondition {
@@ -163,5 +163,37 @@ describe("evaluateConditions", () => {
   it("newValue null: text_contains returns false", () => {
     const c = makeCondition({ type: "text_contains", value: "test" });
     expect(evaluateConditions([c], null, null)).toBe(false);
+  });
+
+  // ReDoS protection
+  it("regex: returns false for catastrophic backtracking patterns", () => {
+    const c = makeCondition({ type: "regex", value: "(a+)+" });
+    expect(evaluateConditions([c], null, "aaaaaaaaaaaa")).toBe(false);
+  });
+});
+
+describe("isSafeRegex", () => {
+  it("accepts simple patterns", () => {
+    expect(isSafeRegex("\\bIn Stock\\b")).toBe(true);
+  });
+
+  it("accepts normal quantifiers", () => {
+    expect(isSafeRegex("\\d+\\.\\d+")).toBe(true);
+  });
+
+  it("rejects nested quantifiers (a+)+", () => {
+    expect(isSafeRegex("(a+)+")).toBe(false);
+  });
+
+  it("rejects nested quantifiers (a*)*", () => {
+    expect(isSafeRegex("(a*)*")).toBe(false);
+  });
+
+  it("rejects invalid regex", () => {
+    expect(isSafeRegex("[invalid")).toBe(false);
+  });
+
+  it("accepts simple group with quantifier", () => {
+    expect(isSafeRegex("(abc)+")).toBe(true);
   });
 });

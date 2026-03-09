@@ -3,6 +3,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { api, channelTypeSchema, webhookConfigInputSchema, slackConfigInputSchema, createTagSchema, updateTagSchema, setMonitorTagsSchema, createConditionSchema } from "@shared/routes";
+import { isSafeRegex } from "./services/conditions";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { authStorage } from "./replit_integrations/auth/storage";
@@ -731,7 +732,7 @@ export async function registerRoutes(
         const count = await storage.countMonitorConditions(id);
         if (count >= 1) {
           return res.status(403).json({
-            error: "Free plan supports 1 condition per monitor. Upgrade to Pro or Power for unlimited conditions.",
+            message: "Free plan supports 1 condition per monitor. Upgrade to Pro or Power for unlimited conditions.",
             code: "TIER_LIMIT_REACHED",
           });
         }
@@ -741,11 +742,9 @@ export async function registerRoutes(
 
       // Validate regex at save time
       if (input.type === "regex") {
-        try {
-          new RegExp(input.value);
-        } catch (err: any) {
+        if (!isSafeRegex(input.value)) {
           return res.status(422).json({
-            error: `Invalid regular expression: ${err.message}`,
+            message: "Invalid or unsafe regular expression. Avoid nested quantifiers like (a+)+ which can cause slowdowns.",
             code: "INVALID_REGEX",
           });
         }

@@ -251,7 +251,6 @@ describe("processChangeNotification", () => {
     mockGetMonitorChannels.mockResolvedValue([]);
     mockAddDeliveryLog.mockResolvedValue({ id: 1 });
     mockGetMonitorConditions.mockResolvedValue([]);
-    mockGetMonitorConditions.mockResolvedValue([]);
   });
 
   it("returns null when emailEnabled is false", async () => {
