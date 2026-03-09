@@ -47,6 +47,8 @@ function makeMonitor(): Monitor {
     emailEnabled: true,
     consecutiveFailures: 0,
     pauseReason: null,
+    healthAlertSentAt: null,
+    lastHealthyAt: null,
     createdAt: new Date(),
   };
 }
@@ -187,7 +189,7 @@ describe("Support FAQ documentation accuracy", () => {
   });
 
   it("Tags section has 5 FAQ items", () => {
-    const section = sliceSection(supportSource, '"Tags"', '"Webhooks & Slack"');
+    const section = sliceSection(supportSource, '"Tags"', '"Monitor Health"');
     const questionCount = (section.match(/question:/g) || []).length;
     expect(questionCount).toBe(5);
   });
@@ -231,6 +233,16 @@ describe("Support FAQ documentation accuracy", () => {
   it("preserves the original Account & Billing section", () => {
     expect(supportSource).toContain('"Account & Billing"');
     expect(supportSource).toContain("How do I upgrade my plan?");
+  });
+
+  it("has a Monitor Health FAQ section", () => {
+    expect(supportSource).toContain('"Monitor Health"');
+  });
+
+  it("Monitor Health section has 6 FAQ items", () => {
+    const section = sliceSection(supportSource, '"Monitor Health"', '"Webhooks & Slack"');
+    const questionCount = (section.match(/question:/g) || []).length;
+    expect(questionCount).toBe(6);
   });
 });
 
@@ -287,6 +299,17 @@ describe("Pricing page feature list accuracy", () => {
     expect(powerSection).toContain("Quiet hours & daily digest mode");
     expect(powerSection).toContain("Per-monitor notification email override");
   });
+
+  it("Power plan lists monitor health alerts", () => {
+    const powerStart = pricingSource.indexOf('"Power"');
+    const powerSection = pricingSource.slice(powerStart);
+    expect(powerSection).toContain("Monitor health alerts");
+  });
+
+  it("Free and Pro plans do not list monitor health alerts", () => {
+    const freeToPower = pricingSource.slice(0, pricingSource.indexOf('"Power"'));
+    expect(freeToPower).not.toContain("Monitor health alerts");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -314,6 +337,16 @@ describe("UpgradeDialog feature list consistency with Pricing", () => {
   it("pro features do NOT include sensitivity threshold", () => {
     const proSection = sliceSection(upgradeSource, "pro: [", "],");
     expect(proSection).not.toContain("sensitivity threshold");
+  });
+
+  it("power features include monitor health alerts", () => {
+    const powerSection = sliceSection(upgradeSource, "power: [", "],");
+    expect(powerSection).toContain("health alerts");
+  });
+
+  it("pro features do not include monitor health alerts", () => {
+    const proSection = sliceSection(upgradeSource, "pro: [", "],");
+    expect(proSection).not.toContain("health alerts");
   });
 });
 

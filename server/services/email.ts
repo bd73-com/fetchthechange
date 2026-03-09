@@ -225,6 +225,200 @@ FetchTheChange Team`,
   }
 }
 
+export async function sendHealthWarningEmail(
+  monitor: Monitor,
+  consecutiveFailures: number,
+  nextPauseIn: number,
+  lastError: string
+): Promise<EmailResult> {
+  const user = await authStorage.getUser(monitor.userId);
+  if (!user) {
+    return { success: false, error: "User not found" };
+  }
+
+  const tier = (user.tier || "free") as UserTier;
+  if (tier !== "power") {
+    console.debug(`[Email] Health warning skipped (non-Power tier) for monitor ${monitor.id}`);
+    return { success: false, error: "Health warning emails are Power-tier only" };
+  }
+
+  const resendCapCheck = await ResendUsageTracker.canSendEmail();
+  if (!resendCapCheck.allowed) {
+    console.log(`[Email] Resend cap reached for health warning, monitor ${monitor.id}: ${resendCapCheck.reason}`);
+    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
+  }
+
+  if (!process.env.RESEND_API_KEY) {
+    console.log(`[MOCK EMAIL] Health warning for monitor ${monitor.id} "${monitor.name}" — ${consecutiveFailures} failures`);
+    return { success: false, error: "RESEND_API_KEY not configured" };
+  }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const fromAddress = process.env.RESEND_FROM || 'onboarding@resend.dev';
+
+  // Compute "last healthy" display string
+  let lastHealthyDisplay = "never";
+  if (monitor.lastHealthyAt) {
+    const hoursAgo = Math.round((Date.now() - new Date(monitor.lastHealthyAt).getTime()) / 3600000);
+    if (hoursAgo < 24) {
+      lastHealthyDisplay = `${hoursAgo} hour${hoursAgo === 1 ? "" : "s"} ago`;
+    } else {
+      const daysAgo = Math.round(hoursAgo / 24);
+      lastHealthyDisplay = `${daysAgo} day${daysAgo === 1 ? "" : "s"} ago`;
+    }
+  }
+
+  try {
+    const recipientEmail = user.notificationEmail || user.email;
+    if (!recipientEmail) {
+      return { success: false, error: "User has no email address" };
+    }
+
+    const dashboardUrl = "https://fetch-the-change.replit.app";
+
+    const response = await resend.emails.send({
+      from: fromAddress,
+      to: recipientEmail,
+      subject: `⚠️ Monitor struggling: ${sanitizePlainText(monitor.name)}`,
+      text: `Hello,
+
+Your monitor "${sanitizePlainText(monitor.name)}" is struggling.
+
+URL: ${sanitizePlainText(monitor.url)}
+Consecutive failures: ${consecutiveFailures}
+Current error: ${sanitizePlainText(lastError)}
+Failures until auto-pause: ${nextPauseIn}
+Last successful check: ${lastHealthyDisplay}
+
+Visit your dashboard to investigate: ${dashboardUrl}/monitors/${monitor.id}
+
+FetchTheChange will keep retrying automatically.
+
+FetchTheChange Team`,
+      html: `
+        <h2>Monitor Struggling</h2>
+        <p>Your monitor <strong>${escapeHtml(monitor.name)}</strong> has failed <strong>${consecutiveFailures}</strong> consecutive time${consecutiveFailures === 1 ? "" : "s"}.</p>
+        <p><strong>URL:</strong> <a href="${safeHref(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
+        <p><strong>Current error:</strong> ${escapeHtml(lastError)}</p>
+        <p><strong>Failures until auto-pause:</strong> ${nextPauseIn}</p>
+        <p><strong>Last successful check:</strong> ${escapeHtml(lastHealthyDisplay)}</p>
+        <hr/>
+        <p><a href="${escapeHtml(dashboardUrl)}/monitors/${monitor.id}">View Monitor Dashboard</a></p>
+        <br/>
+        <p>FetchTheChange will keep retrying automatically.</p>
+        <p>FetchTheChange Team</p>
+      `
+    });
+
+    if (response.error) {
+      await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, undefined, false).catch(() => {});
+      await ErrorLogger.warning("email", `Health warning email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: response.error.message });
+      return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
+    }
+
+    await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, response.data?.id, true).catch(() => {});
+    await ErrorLogger.info("email", `Health warning email sent`, { monitorId: monitor.id, monitorName: monitor.name, consecutiveFailures, tier });
+    return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
+  } catch (error: any) {
+    await ErrorLogger.warning("email", `Health warning email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
+    return { success: false, error: error.message };
+  }
+}
+
+export async function sendRecoveryEmail(
+  monitor: Monitor,
+  recoveredValue: string
+): Promise<EmailResult> {
+  const user = await authStorage.getUser(monitor.userId);
+  if (!user) {
+    return { success: false, error: "User not found" };
+  }
+
+  const tier = (user.tier || "free") as UserTier;
+  if (tier !== "power") {
+    console.debug(`[Email] Recovery email skipped (non-Power tier) for monitor ${monitor.id}`);
+    return { success: false, error: "Recovery emails are Power-tier only" };
+  }
+
+  const resendCapCheck = await ResendUsageTracker.canSendEmail();
+  if (!resendCapCheck.allowed) {
+    console.log(`[Email] Resend cap reached for recovery email, monitor ${monitor.id}: ${resendCapCheck.reason}`);
+    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
+  }
+
+  if (!process.env.RESEND_API_KEY) {
+    console.log(`[MOCK EMAIL] Recovery for monitor ${monitor.id} "${monitor.name}"`);
+    return { success: false, error: "RESEND_API_KEY not configured" };
+  }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const fromAddress = process.env.RESEND_FROM || 'onboarding@resend.dev';
+
+  // Compute "was degraded for" display string
+  let degradedDisplay = "";
+  let degradedForMs = 0;
+  if (monitor.healthAlertSentAt) {
+    degradedForMs = Date.now() - new Date(monitor.healthAlertSentAt).getTime();
+    const hours = Math.round(degradedForMs / 3600000);
+    if (hours >= 48) {
+      const days = Math.round(hours / 24);
+      degradedDisplay = `${days} day${days === 1 ? "" : "s"}`;
+    } else {
+      degradedDisplay = `${hours} hour${hours === 1 ? "" : "s"}`;
+    }
+  }
+
+  try {
+    const recipientEmail = user.notificationEmail || user.email;
+    if (!recipientEmail) {
+      return { success: false, error: "User has no email address" };
+    }
+
+    const dashboardUrl = "https://fetch-the-change.replit.app";
+
+    const response = await resend.emails.send({
+      from: fromAddress,
+      to: recipientEmail,
+      subject: `✅ Monitor recovered: ${sanitizePlainText(monitor.name)}`,
+      text: `Hello,
+
+Your monitor "${sanitizePlainText(monitor.name)}" has recovered and is healthy again.
+
+URL: ${sanitizePlainText(monitor.url)}
+Current value: ${sanitizePlainText(recoveredValue)}${degradedDisplay ? `\nWas degraded for: ${degradedDisplay}` : ""}
+
+Visit your dashboard: ${dashboardUrl}/monitors/${monitor.id}
+
+FetchTheChange Team`,
+      html: `
+        <h2>Monitor Recovered</h2>
+        <p>Your monitor <strong>${escapeHtml(monitor.name)}</strong> has recovered and is healthy again.</p>
+        <p><strong>URL:</strong> <a href="${safeHref(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
+        <p><strong>Current value:</strong></p>
+        <pre>${escapeHtml(recoveredValue)}</pre>${degradedDisplay ? `
+        <p><strong>Was degraded for:</strong> ${escapeHtml(degradedDisplay)}</p>` : ""}
+        <hr/>
+        <p><a href="${escapeHtml(dashboardUrl)}/monitors/${monitor.id}">View Monitor Dashboard</a></p>
+        <br/>
+        <p>FetchTheChange Team</p>
+      `
+    });
+
+    if (response.error) {
+      await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, undefined, false).catch(() => {});
+      await ErrorLogger.warning("email", `Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: response.error.message });
+      return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
+    }
+
+    await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, response.data?.id, true).catch(() => {});
+    await ErrorLogger.info("email", `Recovery email sent`, { monitorId: monitor.id, monitorName: monitor.name, recoveredValue, degradedForMs });
+    return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
+  } catch (error: any) {
+    await ErrorLogger.warning("email", `Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
+    return { success: false, error: error.message };
+  }
+}
+
 export async function sendDigestEmail(monitor: Monitor, changes: MonitorChange[], emailOverride?: string): Promise<EmailResult> {
   if (changes.length === 0) {
     return { success: false, error: "No changes to include in digest" };

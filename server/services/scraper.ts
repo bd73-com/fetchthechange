@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import { storage } from "../storage";
-import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
+import { sendNotificationEmail, sendAutoPauseEmail, sendHealthWarningEmail, sendRecoveryEmail } from "./email";
 import { processChangeNotification } from "./notification";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
@@ -444,6 +444,22 @@ async function handleMonitorFailure(
 
   if (shouldPause && monitor.emailEnabled) {
     await sendAutoPauseEmail(monitor, newFailureCount, truncatedError).catch(() => {});
+  }
+
+  // Early warning: fire at halfway point before auto-pause (Power tier only)
+  if (shouldPenalize && !shouldPause) {
+    const warningThreshold = Math.floor(threshold / 2);
+    if (newFailureCount === warningThreshold && monitor.healthAlertSentAt === null) {
+      if (tier === "power") {
+        storage.setHealthAlertSent(monitor.id).catch(() => {});
+        const nextPauseIn = threshold - newFailureCount;
+        try {
+          await sendHealthWarningEmail(monitor, newFailureCount, nextPauseIn, truncatedError);
+        } catch (warningErr) {
+          console.error(`[Scraper] Health warning email failed for monitor ${monitor.id}:`, warningErr);
+        }
+      }
+    }
   }
 
   return { newFailureCount, paused: shouldPause };
@@ -1145,6 +1161,19 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           lastError: null,
           consecutiveFailures: 0,
         });
+
+        // Update lastHealthyAt on every successful check
+        storage.updateLastHealthyAt(monitor.id).catch(() => {});
+
+        // Send recovery email if we previously sent a health warning
+        if (monitor.healthAlertSentAt !== null) {
+          try {
+            await sendRecoveryEmail(monitor, newValue ?? "");
+          } catch (recoveryErr) {
+            console.error(`[Scraper] Recovery email failed for monitor ${monitor.id}:`, recoveryErr);
+          }
+          storage.clearHealthAlert(monitor.id).catch(() => {});
+        }
 
         if (changed) {
           const change = await storage.addMonitorChange(monitor.id, oldValue, newValue);

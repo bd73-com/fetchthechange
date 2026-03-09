@@ -135,6 +135,42 @@ const faqSections: FAQSection[] = [
     ],
   },
   {
+    title: "Monitor Health",
+    description: "Understanding monitor health indicators and alert emails.",
+    items: [
+      {
+        question: "What does the coloured dot next to my monitor mean?",
+        answer:
+          "Green means the monitor is checking successfully. Amber means it has encountered one or more consecutive failures but is still active and retrying. Red means the monitor has been paused — either automatically after repeated failures, or manually.",
+      },
+      {
+        question: "What is a health warning email?",
+        answer:
+          "A health warning email is sent when a monitor hits the halfway point before auto-pause — for example, after 5 consecutive failures on the Power plan (which auto-pauses at 10). It tells you what error the monitor is seeing and how many more failures will trigger auto-pause, so you can investigate before monitoring stops.",
+      },
+      {
+        question: "Which plans receive health warning emails?",
+        answer:
+          "Health warning and recovery emails are available on the Power plan only. All plans show the coloured health indicator and failure count on the dashboard.",
+      },
+      {
+        question: "What is a recovery email?",
+        answer:
+          "A recovery email is sent when a monitor that previously triggered a health warning starts succeeding again. It tells you the monitor is healthy, shows the current value it retrieved, and summarises how long it was struggling.",
+      },
+      {
+        question: "Will I get a health warning email every time a check fails?",
+        answer:
+          "No. You receive one health warning per failure streak — at the halfway point before auto-pause. If the monitor keeps failing after the warning, you will not receive additional warnings until it recovers and then starts failing again.",
+      },
+      {
+        question: "My monitor is amber but I haven't received a warning email. Why?",
+        answer:
+          "Health warning emails are Power-plan exclusive. If you are on the Free or Pro plan, the amber indicator is still shown on the dashboard so you can see the monitor is struggling, but no email is sent. You can upgrade to Power to enable health alert emails.",
+      },
+    ],
+  },
+  {
     title: "Webhooks & Slack",
     description: "Send change alerts to your own systems or Slack workspace.",
     items: [

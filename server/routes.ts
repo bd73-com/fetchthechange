@@ -144,6 +144,8 @@ export async function registerRoutes(
         emailEnabled: true,
         consecutiveFailures: 0,
         pauseReason: null,
+        healthAlertSentAt: null,
+        lastHealthyAt: null,
         createdAt: new Date()
       };
 

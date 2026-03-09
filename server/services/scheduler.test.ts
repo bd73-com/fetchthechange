@@ -122,6 +122,8 @@ function makeMonitor(overrides: Partial<Monitor> = {}): Monitor {
     emailEnabled: false,
     consecutiveFailures: 0,
     pauseReason: null,
+    healthAlertSentAt: null,
+    lastHealthyAt: null,
     createdAt: new Date(),
     ...overrides,
   };

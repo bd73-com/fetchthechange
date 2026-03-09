@@ -288,6 +288,8 @@ describe("create monitor response schema", () => {
       emailEnabled: true,
       consecutiveFailures: 0,
       pauseReason: null,
+      healthAlertSentAt: null,
+      lastHealthyAt: null,
       createdAt: new Date().toISOString(),
       selectorWarning: "The CSS selector didn't match any elements on the page's static HTML.",
     };
@@ -315,6 +317,8 @@ describe("create monitor response schema", () => {
       emailEnabled: true,
       consecutiveFailures: 0,
       pauseReason: null,
+      healthAlertSentAt: null,
+      lastHealthyAt: null,
       createdAt: new Date().toISOString(),
     };
     const result = createResponseSchema.safeParse(payload);

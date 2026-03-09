@@ -98,6 +98,18 @@ export class DatabaseStorage implements IStorage {
     await db.delete(monitors).where(eq(monitors.id, id));
   }
 
+  async setHealthAlertSent(monitorId: number): Promise<void> {
+    await db.update(monitors).set({ healthAlertSentAt: new Date() }).where(eq(monitors.id, monitorId));
+  }
+
+  async clearHealthAlert(monitorId: number): Promise<void> {
+    await db.update(monitors).set({ healthAlertSentAt: null }).where(eq(monitors.id, monitorId));
+  }
+
+  async updateLastHealthyAt(monitorId: number): Promise<void> {
+    await db.update(monitors).set({ lastHealthyAt: new Date() }).where(eq(monitors.id, monitorId));
+  }
+
   async getMonitorChanges(monitorId: number): Promise<MonitorChange[]> {
     return await db.select()
       .from(monitorChanges)

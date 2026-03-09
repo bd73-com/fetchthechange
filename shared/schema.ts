@@ -24,6 +24,8 @@ export const monitors = pgTable("monitors", {
   emailEnabled: boolean("email_enabled").default(true).notNull(),
   consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
   pauseReason: text("pause_reason"),
+  healthAlertSentAt: timestamp("health_alert_sent_at"),
+  lastHealthyAt: timestamp("last_healthy_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -410,6 +412,8 @@ export const insertMonitorSchema = createInsertSchema(monitors).omit({
   lastError: true,
   consecutiveFailures: true,
   pauseReason: true,
+  healthAlertSentAt: true,
+  lastHealthyAt: true,
   createdAt: true
 });
 
