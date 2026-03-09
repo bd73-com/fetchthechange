@@ -167,12 +167,13 @@ describe("error_logs dedup column migration at startup", () => {
     const app = makeMockApp();
     await registerRoutes(app as any, app as any);
 
-    // db.execute should have been called 16 times:
+    // db.execute should have been called 18 times:
+    // 2 for the ALTER TABLE monitors statements (health_alert_sent_at, last_healthy_at)
     // 3 for the ALTER TABLE error_logs statements (first_occurrence, occurrence_count, deleted_at)
     // 2 for the api_keys table creation (CREATE TABLE + CREATE INDEX)
     // 6 for notification channel tables (3 CREATE TABLE + 2 indexes + 1 unique index)
     // 5 for tag tables (2 CREATE TABLE + 2 indexes + 1 unique index)
-    expect(mockDbExecute).toHaveBeenCalledTimes(16);
+    expect(mockDbExecute).toHaveBeenCalledTimes(18);
 
     // Verify specific DDL statements were issued (drizzle sql`` produces SQL objects)
     const callStrings = mockDbExecute.mock.calls.map((c: any[]) => {
@@ -391,8 +392,10 @@ describe("error_logs dedup column migration at startup", () => {
   it("logs error and continues when notification channel table creation fails", async () => {
     vi.clearAllMocks();
     const channelError = new Error("permission denied for schema public");
-    // error_logs ALTERs succeed (3), api_keys succeed (2), then channel tables fail
+    // monitor health ALTERs succeed (2), error_logs ALTERs succeed (3), api_keys succeed (2), then channel tables fail
     mockDbExecute
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 1
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 2
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 3
@@ -428,8 +431,10 @@ describe("error_logs dedup column migration at startup", () => {
   it("registers channel routes even when notification channel tables fail to create", async () => {
     vi.clearAllMocks();
     const channelError = new Error("connection timeout");
-    // error_logs and api_keys succeed, channel tables fail
+    // monitor health ALTERs succeed (2), error_logs and api_keys succeed, channel tables fail
     mockDbExecute
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 1
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 2
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 3

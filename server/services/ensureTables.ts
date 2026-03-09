@@ -98,6 +98,20 @@ export async function ensureChannelTables(): Promise<void> {
 }
 
 /**
+ * Ensures monitor health-alert columns exist (added in PR #113).
+ * Without this, db.select().from(monitors) fails when the schema
+ * references columns the database doesn't have yet.
+ */
+export async function ensureMonitorHealthColumns(): Promise<void> {
+  try {
+    await db.execute(sql`ALTER TABLE monitors ADD COLUMN IF NOT EXISTS health_alert_sent_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE monitors ADD COLUMN IF NOT EXISTS last_healthy_at TIMESTAMP`);
+  } catch (e) {
+    console.warn("Could not ensure monitor health columns:", e);
+  }
+}
+
+/**
  * Ensures tags and monitor_tags tables exist (added in PR #86).
  * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
  */

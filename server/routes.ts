@@ -33,7 +33,7 @@ import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encry
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit from "express-rate-limit";
-import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables } from "./services/ensureTables";
+import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns } from "./services/ensureTables";
 
 
 // ------------------------------------------------------------------
@@ -59,6 +59,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  await ensureMonitorHealthColumns();
   await ensureErrorLogColumns();
   const apiKeysReady = await ensureApiKeysTable();
   await ensureChannelTables();

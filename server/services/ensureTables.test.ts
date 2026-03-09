@@ -10,7 +10,35 @@ vi.mock("../db", () => ({
   },
 }));
 
-import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables } from "./ensureTables";
+import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables } from "./ensureTables";
+
+describe("ensureMonitorHealthColumns", () => {
+  beforeEach(() => {
+    mockExecute.mockReset();
+  });
+
+  it("executes 2 ALTER TABLE statements without throwing", async () => {
+    mockExecute.mockResolvedValue([]);
+    await ensureMonitorHealthColumns();
+    expect(mockExecute).toHaveBeenCalledTimes(2);
+  });
+
+  it("catches errors and does not throw", async () => {
+    mockExecute.mockRejectedValue(new Error("permission denied"));
+    await expect(ensureMonitorHealthColumns()).resolves.toBeUndefined();
+  });
+
+  it("logs a warning when an error occurs", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockExecute.mockRejectedValue(new Error("permission denied"));
+    await ensureMonitorHealthColumns();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Could not ensure monitor health columns:",
+      expect.any(Error),
+    );
+    warnSpy.mockRestore();
+  });
+});
 
 describe("ensureErrorLogColumns", () => {
   beforeEach(() => {
