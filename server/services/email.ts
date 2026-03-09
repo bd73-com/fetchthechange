@@ -408,7 +408,7 @@ FetchTheChange Team`,
     }
 
     await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, response.data?.id, true).catch(() => {});
-    await ErrorLogger.info("email", `Recovery email sent`, { monitorId: monitor.id, monitorName: monitor.name, recoveredValue, degradedForMs });
+    await ErrorLogger.info("email", `Recovery email sent`, { monitorId: monitor.id, monitorName: monitor.name, recoveredValue: displayValue, degradedForMs });
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
     await ErrorLogger.warning("email", `Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
