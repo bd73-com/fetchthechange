@@ -449,7 +449,10 @@ async function handleMonitorFailure(
     await sendAutoPauseEmail(monitor, newFailureCount, truncatedError).catch(() => {});
   }
 
-  // Early warning: fire at halfway point before auto-pause (Power tier only)
+  // Early warning: fire at halfway point before auto-pause (Power tier only).
+  // NOTE: Health warning emails bypass the processChangeNotification pipeline
+  // (no delivery_log, no quiet hours, no webhook/Slack) — they are operational
+  // alerts sent directly via email. See recovery-email comment in checkMonitor.
   if (shouldPenalize && !shouldPause) {
     const warningThreshold = Math.floor(threshold / 2);
     if (newFailureCount === warningThreshold && monitor.healthAlertSentAt === null) {
@@ -1166,18 +1169,28 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         });
 
         // Update lastHealthyAt on every successful check
-        storage.updateLastHealthyAt(monitor.id).catch(() => {});
+        try {
+          await storage.updateLastHealthyAt(monitor.id);
+        } catch (healthErr) {
+          console.error(`[Scraper] Failed to update lastHealthyAt for monitor ${monitor.id}:`, healthErr);
+        }
 
         // Send recovery email if we previously sent a health warning.
+        // NOTE: Health/recovery emails are sent directly (not via the
+        // processChangeNotification → notification queue → delivery log pipeline)
+        // because they are operational alerts, not content-change notifications.
+        // This means they won't appear in delivery_log, don't respect quiet
+        // hours/digest mode, and are email-only (no webhook/Slack).
         // Re-check healthAlertSentAt from DB to avoid duplicate recovery emails
         // if two concurrent checks both see a stale in-memory value.
         if (monitor.healthAlertSentAt !== null) {
           const freshMonitor = await storage.getMonitor(monitor.id);
           if (freshMonitor?.healthAlertSentAt !== null) {
-            // Clear first to prevent a concurrent check from also sending
-            await storage.clearHealthAlert(monitor.id).catch(() => {});
+            // Send first, then clear — if the email fails the flag stays set
+            // so the next successful check retries the recovery notification.
             try {
               await sendRecoveryEmail(monitor, newValue ?? "");
+              await storage.clearHealthAlert(monitor.id);
             } catch (recoveryErr) {
               console.error(`[Scraper] Recovery email failed for monitor ${monitor.id}:`, recoveryErr);
             }

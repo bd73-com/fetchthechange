@@ -28,11 +28,13 @@ const POOL_IDLE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 export class BrowserPool {
   private entries: PoolEntry[] = [];
   private pendingAcquires = 0;
+  /** Tracks which browsers were acquired as reusable (caller doesn't need to remember). */
+  private reusableSet = new WeakSet<PoolableBrowser>();
 
   /**
    * Acquire a browser from the pool or create a new one via connectFn.
-   * @returns `reusable: true` means the caller should return it via release().
-   *          `reusable: false` means the caller should close it directly.
+   * Call release(browser) when done — the pool decides internally whether
+   * to reclaim or close it.
    */
   async acquire(connectFn: () => Promise<PoolableBrowser>): Promise<{ browser: PoolableBrowser; reusable: boolean }> {
     const now = Date.now();
@@ -40,7 +42,7 @@ export class BrowserPool {
     const expired = this.entries.filter(e => now - e.lastUsed >= POOL_IDLE_EXPIRY_MS);
     this.entries = this.entries.filter(e => now - e.lastUsed < POOL_IDLE_EXPIRY_MS);
     for (const e of expired) {
-      Promise.resolve(e.browser.close()).catch(() => {});
+      void Promise.resolve(e.browser.close()).catch(() => {});
     }
 
     // Find an idle connected browser
@@ -49,15 +51,16 @@ export class BrowserPool {
       try {
         if (!entry.browser.isConnected()) {
           this.entries.splice(i, 1);
-          Promise.resolve(entry.browser.close()).catch(() => {});
+          void Promise.resolve(entry.browser.close()).catch(() => {});
           i--;
           continue;
         }
         this.entries.splice(i, 1); // remove from pool while in use
+        this.reusableSet.add(entry.browser);
         return { browser: entry.browser, reusable: true };
       } catch {
         this.entries.splice(i, 1);
-        Promise.resolve(entry.browser.close()).catch(() => {});
+        void Promise.resolve(entry.browser.close()).catch(() => {});
         i--;
       }
     }
@@ -70,6 +73,7 @@ export class BrowserPool {
     try {
       const browser = await connectFn();
       const reusable = this.entries.length + this.pendingAcquires <= POOL_MAX;
+      if (reusable) this.reusableSet.add(browser);
       return { browser, reusable };
     } finally {
       this.pendingAcquires--;
@@ -77,16 +81,20 @@ export class BrowserPool {
   }
 
   /**
-   * Return a browser to the pool, or close it if the pool is full.
-   * Only call this when `reusable` was true from acquire().
+   * Return a browser to the pool, or close it if it was ephemeral or the pool is full.
+   * Safe to call for any browser returned by acquire() — the pool tracks reusability
+   * internally so callers don't need to thread the boolean through.
    */
-  release(browser: PoolableBrowser, reusable: boolean): void {
+  release(browser: PoolableBrowser, _reusable?: boolean): void {
+    // Support both old (explicit boolean) and new (auto-tracked) call styles.
+    const reusable = _reusable ?? this.reusableSet.has(browser);
+    this.reusableSet.delete(browser);
     if (!reusable) return; // ephemeral — caller closes it
     if (this.entries.length < POOL_MAX) {
       this.entries.push({ browser, lastUsed: Date.now() });
     } else {
       // Pool full (concurrent acquires can cause this) — close to prevent leak
-      Promise.resolve(browser.close()).catch(() => {});
+      void Promise.resolve(browser.close()).catch(() => {});
     }
   }
 
