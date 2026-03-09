@@ -396,6 +396,77 @@ describe("conditions routes", () => {
       expect(res._status).toBe(201);
     });
 
+    it("numeric type with non-numeric value → 422 VALIDATION_ERROR", async () => {
+      mockGetMonitor.mockResolvedValue(ownedMonitor);
+      mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });
+      mockCountMonitorConditions.mockResolvedValue(0);
+
+      const req = makeReq("user1", {
+        body: { type: "numeric_gt", value: "abc", groupIndex: 0 },
+      });
+      const res = await callHandler("post", "/api/monitors/:id/conditions", req);
+      expect(res._status).toBe(422);
+      expect(res._json.code).toBe("VALIDATION_ERROR");
+      expect(res._json.message).toMatch(/valid number/i);
+    });
+
+    it("numeric_change_pct with zero value → 422", async () => {
+      mockGetMonitor.mockResolvedValue(ownedMonitor);
+      mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });
+      mockCountMonitorConditions.mockResolvedValue(0);
+
+      const req = makeReq("user1", {
+        body: { type: "numeric_change_pct", value: "0", groupIndex: 0 },
+      });
+      const res = await callHandler("post", "/api/monitors/:id/conditions", req);
+      expect(res._status).toBe(422);
+      expect(res._json.message).toMatch(/positive/i);
+    });
+
+    it("numeric_change_pct with negative value → 422", async () => {
+      mockGetMonitor.mockResolvedValue(ownedMonitor);
+      mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });
+      mockCountMonitorConditions.mockResolvedValue(0);
+
+      const req = makeReq("user1", {
+        body: { type: "numeric_change_pct", value: "-5", groupIndex: 0 },
+      });
+      const res = await callHandler("post", "/api/monitors/:id/conditions", req);
+      expect(res._status).toBe(422);
+    });
+
+    it("TOCTOU: free-tier concurrent insert → second is rolled back", async () => {
+      mockGetMonitor.mockResolvedValue(ownedMonitor);
+      mockGetUser.mockResolvedValue({ id: "user1", tier: "free" });
+      mockCountMonitorConditions
+        .mockResolvedValueOnce(0)  // pre-insert check passes
+        .mockResolvedValueOnce(2); // post-insert check detects race
+      const created = { id: 99, monitorId: 1, type: "numeric_lt", value: "100", groupIndex: 0, createdAt: new Date() };
+      mockAddMonitorCondition.mockResolvedValue(created);
+      mockDeleteMonitorCondition.mockResolvedValue(undefined);
+
+      const req = makeReq("user1", {
+        body: { type: "numeric_lt", value: "100", groupIndex: 0 },
+      });
+      const res = await callHandler("post", "/api/monitors/:id/conditions", req);
+      expect(res._status).toBe(403);
+      expect(res._json.code).toBe("TIER_LIMIT_REACHED");
+      expect(mockDeleteMonitorCondition).toHaveBeenCalledWith(99, 1);
+    });
+
+    it("alternation regex (a|b)+ → 422 INVALID_REGEX", async () => {
+      mockGetMonitor.mockResolvedValue(ownedMonitor);
+      mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });
+      mockCountMonitorConditions.mockResolvedValue(0);
+
+      const req = makeReq("user1", {
+        body: { type: "regex", value: "(a|b)+", groupIndex: 0 },
+      });
+      const res = await callHandler("post", "/api/monitors/:id/conditions", req);
+      expect(res._status).toBe(422);
+      expect(res._json.code).toBe("INVALID_REGEX");
+    });
+
     it("value empty string → 422", async () => {
       mockGetMonitor.mockResolvedValue(ownedMonitor);
       mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });

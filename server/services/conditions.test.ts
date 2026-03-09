@@ -196,4 +196,24 @@ describe("isSafeRegex", () => {
   it("accepts simple group with quantifier", () => {
     expect(isSafeRegex("(abc)+")).toBe(true);
   });
+
+  it("rejects alternation group with quantifier (a|a)+", () => {
+    expect(isSafeRegex("(a|a)+")).toBe(false);
+  });
+
+  it("rejects alternation group with star (cat|dog)*", () => {
+    expect(isSafeRegex("(cat|dog)*")).toBe(false);
+  });
+
+  it("accepts alternation without quantifier (a|b)", () => {
+    expect(isSafeRegex("(a|b)")).toBe(true);
+  });
+
+  it("rejects (\\w+)+", () => {
+    expect(isSafeRegex("(\\w+)+")).toBe(false);
+  });
+
+  it("rejects ([a-zA-Z]+)*", () => {
+    expect(isSafeRegex("([a-zA-Z]+)*")).toBe(false);
+  });
 });

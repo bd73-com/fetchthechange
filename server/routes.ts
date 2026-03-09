@@ -728,7 +728,8 @@ export async function registerRoutes(
       // Tier check: Free users capped at 1 condition per monitor
       const user = await authStorage.getUser(req.user.claims.sub);
       const tier = ((user as any)?.tier || "free") as UserTier;
-      if (tier === "free") {
+      const isFreeTier = tier === "free";
+      if (isFreeTier) {
         const count = await storage.countMonitorConditions(id);
         if (count >= 1) {
           return res.status(403).json({
@@ -739,6 +740,23 @@ export async function registerRoutes(
       }
 
       const input = createConditionSchema.parse(req.body);
+
+      // Validate numeric condition values are actually numbers
+      if (input.type.startsWith("numeric_")) {
+        const parsed = parseFloat(input.value);
+        if (!Number.isFinite(parsed)) {
+          return res.status(422).json({
+            message: "Numeric condition value must be a valid number.",
+            code: "VALIDATION_ERROR",
+          });
+        }
+        if (input.type === "numeric_change_pct" && parsed <= 0) {
+          return res.status(422).json({
+            message: "Percentage threshold must be a positive number.",
+            code: "VALIDATION_ERROR",
+          });
+        }
+      }
 
       // Validate regex at save time
       if (input.type === "regex") {
@@ -751,6 +769,19 @@ export async function registerRoutes(
       }
 
       const condition = await storage.addMonitorCondition(id, input.type, input.value, input.groupIndex);
+
+      // TOCTOU guard: if a concurrent request also inserted, roll back
+      if (isFreeTier) {
+        const postInsertCount = await storage.countMonitorConditions(id);
+        if (postInsertCount > 1) {
+          await storage.deleteMonitorCondition(condition.id, id);
+          return res.status(403).json({
+            message: "Free plan supports 1 condition per monitor. Upgrade to Pro or Power for unlimited conditions.",
+            code: "TIER_LIMIT_REACHED",
+          });
+        }
+      }
+
       res.status(201).json(condition);
     } catch (err) {
       if (err instanceof z.ZodError) {

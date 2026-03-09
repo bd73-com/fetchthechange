@@ -1,13 +1,19 @@
+import { runInNewContext } from "vm";
 import type { MonitorCondition } from "@shared/schema";
 
 /** Maximum length of newValue to test against regex (ReDoS mitigation). */
 const REGEX_INPUT_MAX_LENGTH = 10_000;
 
+/** Timeout in ms for regex evaluation via vm sandbox. */
+const REGEX_TIMEOUT_MS = 200;
+
 /**
  * Reject regex patterns with nested quantifiers that can cause catastrophic backtracking.
- * E.g. (a+)+ or (a*)*  or (a{1,}){1,}
+ * Catches: (a+)+, (a*)*, (a{1,}){1,}, (\w+)+, ([a-z]+)*, and alternation groups
+ * like (a|a)+ where overlapping alternatives cause exponential branching.
  */
 const CATASTROPHIC_PATTERN = /(\((?:[^()]*[+*}{][^()]*)\))[+*]|\(\?[^)]*[+*][^)]*\)[+*]/;
+const ALTERNATION_GROUP_WITH_QUANTIFIER = /\([^()]*\|[^()]*\)[+*]/;
 
 export function isSafeRegex(pattern: string): boolean {
   try {
@@ -15,7 +21,25 @@ export function isSafeRegex(pattern: string): boolean {
   } catch {
     return false;
   }
-  return !CATASTROPHIC_PATTERN.test(pattern);
+  if (CATASTROPHIC_PATTERN.test(pattern)) return false;
+  if (ALTERNATION_GROUP_WITH_QUANTIFIER.test(pattern)) return false;
+  return true;
+}
+
+/**
+ * Run a regex test in a sandboxed vm context with a hard timeout.
+ * Returns false if the regex times out or throws.
+ */
+function safeRegexTest(pattern: string, input: string): boolean {
+  try {
+    return runInNewContext(
+      `new RegExp(pattern, "i").test(input)`,
+      { pattern, input },
+      { timeout: REGEX_TIMEOUT_MS },
+    ) as boolean;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -75,14 +99,10 @@ function evaluateSingle(
         return newValue.trim().toLowerCase() === condition.value.trim().toLowerCase();
       }
       case "regex": {
-        try {
-          if (!isSafeRegex(condition.value)) return false;
-          // Cap input length to mitigate ReDoS on large scraped content
-          const input = (newValue ?? "").slice(0, REGEX_INPUT_MAX_LENGTH);
-          return new RegExp(condition.value, "i").test(input);
-        } catch {
-          return false;
-        }
+        if (!isSafeRegex(condition.value)) return false;
+        // Cap input length and evaluate in sandboxed vm with timeout
+        const input = (newValue ?? "").slice(0, REGEX_INPUT_MAX_LENGTH);
+        return safeRegexTest(condition.value, input);
       }
       default:
         return false;
