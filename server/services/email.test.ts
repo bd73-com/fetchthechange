@@ -24,6 +24,8 @@ vi.mock("../replit_integrations/auth/storage", () => ({
 vi.mock("./logger", () => ({
   ErrorLogger: {
     error: vi.fn().mockResolvedValue(undefined),
+    warning: vi.fn().mockResolvedValue(undefined),
+    info: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -44,7 +46,7 @@ vi.mock("drizzle-orm", () => ({
   sql: (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
 }));
 
-import { sendNotificationEmail, sendAutoPauseEmail, sendDigestEmail } from "./email";
+import { sendNotificationEmail, sendAutoPauseEmail, sendDigestEmail, sendHealthWarningEmail, sendRecoveryEmail } from "./email";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { ResendUsageTracker } from "./resendTracker";
 import { ErrorLogger } from "./logger";
@@ -68,6 +70,8 @@ function makeMonitor(overrides: Partial<Monitor> = {}): Monitor {
     emailEnabled: true,
     consecutiveFailures: 3,
     pauseReason: "Auto-paused after 3 consecutive failures",
+    healthAlertSentAt: null,
+    lastHealthyAt: null,
     createdAt: new Date(),
     ...overrides,
   };
@@ -746,6 +750,431 @@ describe("sendDigestEmail", () => {
 
     expect(ResendUsageTracker.recordUsage).toHaveBeenCalledWith(
       "user1", 1, "user@example.com", "email_digest", true
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sendHealthWarningEmail
+// ---------------------------------------------------------------------------
+describe("sendHealthWarningEmail", () => {
+  const originalResendKey = process.env.RESEND_API_KEY;
+
+  function powerUser() {
+    return {
+      id: "user1",
+      email: "user@example.com",
+      firstName: null,
+      lastName: null,
+      profileImageUrl: null,
+      tier: "power" as const,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      notificationEmail: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.RESEND_API_KEY = "re_test_key";
+    mockSend.mockResolvedValue({ data: { id: "email_hw" }, error: null });
+  });
+
+  afterEach(() => {
+    if (originalResendKey !== undefined) {
+      process.env.RESEND_API_KEY = originalResendKey;
+    } else {
+      delete process.env.RESEND_API_KEY;
+    }
+  });
+
+  it("returns early when user is not found", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(null);
+    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "timeout");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("User not found");
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("returns early for non-Power tier user", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce({
+      ...powerUser(),
+      tier: "pro",
+    } as any);
+    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "timeout");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Power-tier only");
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("returns early for free tier user", async () => {
+    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "timeout");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Power-tier only");
+  });
+
+  it("returns early when Resend cap is reached", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    vi.mocked(ResendUsageTracker.canSendEmail).mockResolvedValueOnce({
+      allowed: false,
+      reason: "Cap reached",
+    });
+    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "timeout");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Cap reached");
+  });
+
+  it("returns early when RESEND_API_KEY is not set", async () => {
+    delete process.env.RESEND_API_KEY;
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "timeout");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("RESEND_API_KEY not configured");
+  });
+
+  it("returns error when user has no email", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce({
+      ...powerUser(),
+      email: null,
+      notificationEmail: null,
+    } as any);
+    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "timeout");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("User has no email address");
+  });
+
+  it("sends email with correct subject and failure info for Power user", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    const monitor = makeMonitor({ name: "Price Tracker" });
+    const result = await sendHealthWarningEmail(monitor, 5, 5, "DNS timeout");
+
+    expect(result.success).toBe(true);
+    expect(result.id).toBe("email_hw");
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "user@example.com",
+        subject: expect.stringContaining("Price Tracker"),
+        text: expect.stringContaining("5"),
+        html: expect.stringContaining("DNS timeout"),
+      })
+    );
+  });
+
+  it("includes nextPauseIn count in email body", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    await sendHealthWarningEmail(makeMonitor(), 5, 5, "error");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).toContain("Failures until auto-pause: 5");
+    expect(call.html).toContain("5");
+  });
+
+  it("shows 'never' when lastHealthyAt is null", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    await sendHealthWarningEmail(makeMonitor({ lastHealthyAt: null }), 5, 5, "error");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).toContain("Last successful check: never");
+  });
+
+  it("shows hours ago when lastHealthyAt is recent", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600000);
+    await sendHealthWarningEmail(makeMonitor({ lastHealthyAt: twoHoursAgo }), 5, 5, "error");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).toContain("hours ago");
+  });
+
+  it("shows days ago when lastHealthyAt is old", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3600000);
+    await sendHealthWarningEmail(makeMonitor({ lastHealthyAt: threeDaysAgo }), 5, 5, "error");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).toContain("days ago");
+  });
+
+  it("clamps sub-hour lastHealthyAt to 1 hour", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60000);
+    await sendHealthWarningEmail(makeMonitor({ lastHealthyAt: fiveMinutesAgo }), 5, 5, "error");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).toContain("1 hour ago");
+  });
+
+  it("uses notificationEmail when available", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce({
+      ...powerUser(),
+      notificationEmail: "alerts@example.com",
+    } as any);
+    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "error");
+
+    expect(result.success).toBe(true);
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "alerts@example.com" })
+    );
+  });
+
+  it("escapes HTML in error message", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    await sendHealthWarningEmail(makeMonitor(), 5, 5, '<script>alert("xss")</script>');
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.html).not.toContain("<script>");
+    expect(call.html).toContain("&lt;script&gt;");
+  });
+
+  it("records usage on successful send", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    await sendHealthWarningEmail(makeMonitor(), 5, 5, "error");
+
+    expect(ResendUsageTracker.recordUsage).toHaveBeenCalledWith(
+      "user1", 1, "user@example.com", "email_hw", true
+    );
+  });
+
+  it("records failed usage when Resend returns an error", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    mockSend.mockResolvedValueOnce({ data: null, error: { message: "Invalid" } });
+
+    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "error");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Invalid");
+    expect(ResendUsageTracker.recordUsage).toHaveBeenCalledWith(
+      "user1", 1, "user@example.com", undefined, false
+    );
+  });
+
+  it("handles thrown exceptions gracefully", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    mockSend.mockRejectedValueOnce(new Error("Network error"));
+
+    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "error");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Network error");
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "email",
+      expect.stringContaining("Health warning email failed"),
+      expect.objectContaining({ monitorId: 1 })
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sendRecoveryEmail
+// ---------------------------------------------------------------------------
+describe("sendRecoveryEmail", () => {
+  const originalResendKey = process.env.RESEND_API_KEY;
+
+  function powerUser() {
+    return {
+      id: "user1",
+      email: "user@example.com",
+      firstName: null,
+      lastName: null,
+      profileImageUrl: null,
+      tier: "power" as const,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      notificationEmail: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.RESEND_API_KEY = "re_test_key";
+    mockSend.mockResolvedValue({ data: { id: "email_rec" }, error: null });
+  });
+
+  afterEach(() => {
+    if (originalResendKey !== undefined) {
+      process.env.RESEND_API_KEY = originalResendKey;
+    } else {
+      delete process.env.RESEND_API_KEY;
+    }
+  });
+
+  it("returns early when user is not found", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(null);
+    const result = await sendRecoveryEmail(makeMonitor(), "$19.99");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("User not found");
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("returns early for non-Power tier", async () => {
+    // Default mock returns free tier
+    const result = await sendRecoveryEmail(makeMonitor(), "$19.99");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Power-tier only");
+  });
+
+  it("returns early for pro tier", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce({
+      ...powerUser(),
+      tier: "pro",
+    } as any);
+    const result = await sendRecoveryEmail(makeMonitor(), "$19.99");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Power-tier only");
+  });
+
+  it("returns early when Resend cap is reached", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    vi.mocked(ResendUsageTracker.canSendEmail).mockResolvedValueOnce({
+      allowed: false,
+      reason: "Daily limit",
+    });
+    const result = await sendRecoveryEmail(makeMonitor(), "$19.99");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Daily limit");
+  });
+
+  it("returns early when RESEND_API_KEY is not set", async () => {
+    delete process.env.RESEND_API_KEY;
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    const result = await sendRecoveryEmail(makeMonitor(), "$19.99");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("RESEND_API_KEY not configured");
+  });
+
+  it("returns error when user has no email", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce({
+      ...powerUser(),
+      email: null,
+      notificationEmail: null,
+    } as any);
+    const result = await sendRecoveryEmail(makeMonitor(), "$19.99");
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("User has no email address");
+  });
+
+  it("sends recovery email with correct subject and value", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    const monitor = makeMonitor({ name: "Price Tracker" });
+    const result = await sendRecoveryEmail(monitor, "$19.99");
+
+    expect(result.success).toBe(true);
+    expect(result.id).toBe("email_rec");
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "user@example.com",
+        subject: expect.stringContaining("Price Tracker"),
+        text: expect.stringContaining("$19.99"),
+        html: expect.stringContaining("$19.99"),
+      })
+    );
+  });
+
+  it("subject contains 'recovered'", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    await sendRecoveryEmail(makeMonitor({ name: "My Monitor" }), "value");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.subject).toContain("recovered");
+  });
+
+  it("omits degraded duration when healthAlertSentAt is null", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    await sendRecoveryEmail(makeMonitor({ healthAlertSentAt: null }), "value");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).not.toContain("Was degraded for");
+    expect(call.html).not.toContain("Was degraded for");
+  });
+
+  it("includes degraded duration when healthAlertSentAt is set (hours)", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    const sixHoursAgo = new Date(Date.now() - 6 * 3600000);
+    await sendRecoveryEmail(makeMonitor({ healthAlertSentAt: sixHoursAgo }), "value");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).toContain("Was degraded for:");
+    expect(call.text).toMatch(/\d+ hours?/);
+  });
+
+  it("shows days when degraded for 48+ hours", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3600000);
+    await sendRecoveryEmail(makeMonitor({ healthAlertSentAt: threeDaysAgo }), "value");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).toContain("days");
+  });
+
+  it("clamps sub-hour degraded duration to 1 hour", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60000);
+    await sendRecoveryEmail(makeMonitor({ healthAlertSentAt: tenMinutesAgo }), "value");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.text).toContain("Was degraded for: 1 hour");
+  });
+
+  it("escapes HTML in recovered value", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    await sendRecoveryEmail(makeMonitor(), '<script>evil()</script>');
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.html).not.toContain("<script>");
+    expect(call.html).toContain("&lt;script&gt;");
+  });
+
+  it("uses notificationEmail when available", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce({
+      ...powerUser(),
+      notificationEmail: "alerts@example.com",
+    } as any);
+    const result = await sendRecoveryEmail(makeMonitor(), "value");
+
+    expect(result.success).toBe(true);
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "alerts@example.com" })
+    );
+  });
+
+  it("records usage on successful send", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    await sendRecoveryEmail(makeMonitor(), "value");
+
+    expect(ResendUsageTracker.recordUsage).toHaveBeenCalledWith(
+      "user1", 1, "user@example.com", "email_rec", true
+    );
+  });
+
+  it("records failed usage when Resend returns an error", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    mockSend.mockResolvedValueOnce({ data: null, error: { message: "Bounced" } });
+
+    const result = await sendRecoveryEmail(makeMonitor(), "value");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Bounced");
+    expect(ResendUsageTracker.recordUsage).toHaveBeenCalledWith(
+      "user1", 1, "user@example.com", undefined, false
+    );
+  });
+
+  it("handles thrown exceptions gracefully", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
+    mockSend.mockRejectedValueOnce(new Error("Connection reset"));
+
+    const result = await sendRecoveryEmail(makeMonitor(), "value");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Connection reset");
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "email",
+      expect.stringContaining("Recovery email failed"),
+      expect.objectContaining({ monitorId: 1 })
     );
   });
 });
