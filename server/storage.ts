@@ -13,6 +13,11 @@ export interface IStorage {
   updateMonitor(id: number, updates: any): Promise<Monitor>;
   deleteMonitor(id: number): Promise<void>;
 
+  // Monitor health alerts
+  setHealthAlertSent(monitorId: number): Promise<void>;
+  clearHealthAlert(monitorId: number): Promise<void>;
+  updateLastHealthyAt(monitorId: number): Promise<void>;
+
   getMonitorChanges(monitorId: number): Promise<MonitorChange[]>;
   addMonitorChange(monitorId: number, oldValue: string | null, newValue: string | null): Promise<MonitorChange>;
 
