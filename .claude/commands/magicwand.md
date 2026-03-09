@@ -2,23 +2,26 @@ Run the full release pipeline for the current branch: write and pass tests, secu
 
 ## Instructions
 
+This command accepts an optional `--from=N` argument (e.g. `/magicwand --from=3`). When provided, skip phases 1 through N-1 and begin execution at Phase N. All issue-tracking rules still apply from the starting phase onward. If `--from` is not provided, start at Phase 1.
+
 This command is an orchestrator. It executes each phase below in strict order by reading the named command file and following its instructions completely. If any phase fails or exits with an error, stop immediately and do not proceed to the next phase.
 
-**Issue tracking rule:** Maintain a running internal log throughout the entire pipeline. Every time an issue is found — a failing test, a security vulnerability, an architectural problem, a bug, a doc gap, or a skeptic discovery — record it with this structure:
+**Issue tracking rule:** Maintain a running issue table throughout the entire pipeline. Every time an issue is found — a failing test, a security vulnerability, an architectural problem, a bug, a doc gap, or a skeptic discovery — append a row:
 
-```
-[Phase N — <phase name>] FOUND: <brief description of the issue> (file:line if applicable)
-[Phase N — <phase name>] FIXED: <brief description of what was done to fix it>
-```
+| # | Phase | Category | Found | File:Line | Fixed |
+|---|-------|----------|-------|-----------|-------|
 
-Every FOUND entry must have a corresponding FIXED entry before the phase completes. A phase is never complete while any FOUND entry in that phase has no corresponding FIXED entry. Do not move to the next phase until every issue from the current phase is resolved.
+- `#` is sequential across all phases (never resets per phase).
+- `Category` is one of: `test`, `security`, `architecture`, `code`, `skeptic:blocker`, `skeptic:gotcha`, `skeptic:pattern`, `doc`, `pr`.
+- Every row must have both Found and Fixed filled before the phase completes.
+- Do not move to the next phase while any row in the current phase has an empty Fixed cell.
 
 If a phase cannot complete, print the failure banner and stop:
 
 ```
 ✗ /magicwand stopped at phase: <PHASE_NAME>
   Reason: <error summary>
-  Fix the issue above and re-run /magicwand, or run /<phase-command> directly to resume from this phase.
+  Fix the issue above, then resume with: /magicwand --from=<N>
 ```
 
 Print a progress banner before starting each phase:
@@ -63,19 +66,12 @@ A phase is complete when all bugs and quality issues identified by the review ha
 
 ### Phase 5 of 9 — Skeptic Review
 
-Invoke the skeptic subagent against the current branch:
+Invoke the skeptic by calling the **Agent tool** with `subagent_type: "skeptic"`. Pass it a prompt containing:
 
-Use the skeptic agent to review all changes on this branch against main. Pass it the output of:
+1. The branch name (from `git branch --show-current`)
+2. The full diff (from `git diff main...HEAD`)
 
-```bash
-git diff main...HEAD
-```
-
-and the current branch name from:
-
-```bash
-git branch --show-current
-```
+The prompt should ask the skeptic to review all changes on this branch against main.
 
 Wait for the skeptic to emit one of its completion signals before continuing:
 
@@ -88,7 +84,7 @@ If BLOCKED or ESCALATE: print the failure banner and stop:
 ```
 ✗ /magicwand stopped at phase: Skeptic Review
   Reason: <BLOCKED or ESCALATE message from skeptic>
-  Human decision required. Resolve the issue above, then re-run /magicwand.
+  Human decision required. Resolve the issue above, then resume with: /magicwand --from=5
 ```
 
 If SKEPTIC_COMPLETE: parse every `<discovery>` tag from the skeptic's output and triage as follows:
@@ -115,15 +111,15 @@ A phase is complete when all UPDATE REQUIRED and NEW SECTION NEEDED surfaces hav
 
 ### Phase 7 of 9 — Extension Release
 
-Read `.claude/commands/extension-release.md` and execute every step in that file.
+Before delegating, pre-check whether extension files changed:
 
-If the command determines that no rebuild is required (no extension files changed), print:
-
-```
-✓ Phase 7 skipped — no extension changes detected
+```bash
+git diff main...HEAD --name-only | grep -qE '^extension/(src/|manifest\.json|package\.json|tsconfig\.json|scripts/)'
 ```
 
-and continue to Phase 8.
+If no match (exit code 1): print `✓ Phase 7 skipped — no extension changes detected` and continue to Phase 8. Do not read or execute `extension-release.md`.
+
+If match (exit code 0): read `.claude/commands/extension-release.md` and execute every step in that file.
 
 A phase is complete when either the skip condition is met, or `extension/fetchthechange-extension.zip` exists, is larger than 1 KB, and the version in `extension/manifest.json` has been bumped.
 
@@ -131,7 +127,19 @@ A phase is complete when either the skip condition is met, or `extension/fetchth
 
 Read `.claude/commands/create-pr.md` and execute every step in that file.
 
-A phase is complete when `gh pr view` returns a valid open PR URL for the current branch.
+After the PR is created, infer the appropriate release label and apply it:
+
+1. Examine all commits and diffs on the branch to determine the change type.
+2. Pick exactly one label from: `feature`, `fix`, `breaking`, `chore`, `docs`, `security`.
+   - New user-facing capability → `feature`
+   - Bug fix → `fix`
+   - Breaking API or schema change → `breaking`
+   - Security patch or hardening → `security`
+   - Documentation-only changes → `docs`
+   - Everything else (refactor, deps, CI) → `chore`
+3. Apply it: `gh pr edit --add-label "<label>" --repo bd73-com/fetchthechange`
+
+A phase is complete when `gh pr view` returns a valid open PR URL with a release label applied.
 
 ### Phase 9 of 9 — Review and Merge PR
 
@@ -235,4 +243,4 @@ Rules for this report:
 - Phase 5 must also include the skeptic's Final Verdict line and discovery counts.
 - Every phase must appear even if it has no issues — print `(none)` or `(no issues)`.
 - If total issues fixed does not equal total issues found, print a warning: `⚠ WARNING: <N> issue(s) were found but not resolved.` and list them explicitly.
-- Do not omit or summarise issues — every FOUND/FIXED pair from the internal log must appear verbatim.
+- Do not omit or summarise issues — every row from the issue table must appear verbatim.
