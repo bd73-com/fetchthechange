@@ -43,3 +43,7 @@ See `README.md` for project overview, tech stack, structure, and setup.
 - `.claude/skills/skill-creator/` — guide for creating new skills that encode FetchTheChange conventions
 - `.claude/skills/blog/` — adding a new blog post (page component + Blog.tsx index entry + App.tsx route); enforced by `blog-integrity.test.ts`
 - `.claude/skills/pr-comments/` — retrieving, triaging, and resolving GitHub PR review comments
+- `.claude/skills/add-api-route/` — adding a new API endpoint (route constant, Zod schema, storage method, ownership check, SSRF, tier gate, CSRF exemption)
+- `.claude/skills/add-page/` — adding a new public page (SEOHead, getCanonicalUrl, PublicNav, shadcn/ui, Tailwind tokens, App.tsx registration)
+- `.claude/skills/add-notification-channel/` — adding a new notification channel (encrypted credentials, delivery service, tier gate, OAuth CSRF exemption)
+- `.claude/skills/changelog/` — keeping the changelog up to date (sync-changelog.ts workflow, never edit changelog.ts by hand, seed entries)
