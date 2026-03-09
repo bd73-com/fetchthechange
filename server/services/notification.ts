@@ -403,13 +403,23 @@ export async function processChangeNotification(
   }
 
   // Evaluate conditions — skip notification if conditions exist and none pass
-  const conditions = await storage.getMonitorConditions(monitor.id);
+  let conditions: Awaited<ReturnType<typeof storage.getMonitorConditions>> = [];
+  try {
+    conditions = await storage.getMonitorConditions(monitor.id);
+  } catch (err) {
+    await ErrorLogger.error(
+      "scheduler",
+      `Failed to load conditions for monitor ${monitor.id}, proceeding with notification`,
+      err instanceof Error ? err : new Error(String(err)),
+    );
+    // Fall through — send notification when conditions cannot be checked
+  }
   if (conditions.length > 0) {
     const passes = evaluateConditions(conditions, change.oldValue, change.newValue);
     if (!passes) {
       await ErrorLogger.info(
         "scheduler",
-        `Conditions blocked notification for monitor "${monitor.name}"`,
+        `Conditions blocked notification for monitor ${monitor.id}`,
         { monitorId: monitor.id, conditionCount: conditions.length },
       );
       return null;

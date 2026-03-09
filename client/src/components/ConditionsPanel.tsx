@@ -110,6 +110,7 @@ export function ConditionsPanel({ monitorId }: ConditionsPanelProps) {
                       <Button
                         variant="ghost"
                         size="sm"
+                        aria-label={`Delete condition: ${typeInfo?.label || c.type} ${c.value}`}
                         onClick={() => deleteCondition.mutate({ monitorId, conditionId: c.id })}
                         disabled={deleteCondition.isPending}
                       >
@@ -128,7 +129,7 @@ export function ConditionsPanel({ monitorId }: ConditionsPanelProps) {
           <div className="space-y-3 pt-2 border-t">
             <div className="flex flex-col sm:flex-row gap-2">
               <Select value={newType} onValueChange={setNewType}>
-                <SelectTrigger className="sm:w-[220px]">
+                <SelectTrigger className="sm:w-[220px]" aria-label="Condition type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -139,13 +140,14 @@ export function ConditionsPanel({ monitorId }: ConditionsPanelProps) {
               </Select>
               <Input
                 placeholder={selectedType?.placeholder || "Value"}
+                aria-label="Condition value"
                 value={newValue}
                 onChange={(e) => setNewValue(e.target.value)}
                 className="flex-1"
               />
               {!isFreeTier && (
                 <Select value={String(newGroup)} onValueChange={(v) => setNewGroup(Number(v))}>
-                  <SelectTrigger className="w-[100px]">
+                  <SelectTrigger className="w-[100px]" aria-label="Condition group">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

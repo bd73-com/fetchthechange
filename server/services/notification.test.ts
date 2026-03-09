@@ -1124,6 +1124,17 @@ describe("processChangeNotification with conditions", () => {
     await processChangeNotification(monitor, change, false);
     expect(ErrorLogger.info).toHaveBeenCalled();
   });
+
+  it("proceeds with notification when getMonitorConditions throws", async () => {
+    mockGetMonitorConditions.mockRejectedValue(new Error("DB connection failed"));
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange();
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+    const result = await processChangeNotification(monitor, change, false);
+    expect(result).toEqual({ success: true });
+    expect(ErrorLogger.error).toHaveBeenCalled();
+    expect(mockSendNotificationEmail).toHaveBeenCalled();
+  });
 });
 
 describe("multi-channel digest delivery", () => {
