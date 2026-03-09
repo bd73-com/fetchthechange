@@ -34,9 +34,10 @@ Do not proceed until the working tree is clean.
 ## Step 3 — Gather Branch Context
 
 ```bash
+git fetch origin main
 git branch --show-current
-git diff main...HEAD --stat
-git log main..HEAD --oneline
+git diff origin/main...HEAD --stat
+git log origin/main..HEAD --oneline
 ```
 
 If there are no commits ahead of `main`, output:
@@ -52,7 +53,7 @@ Extract from the branch name:
 ## Step 4 — Read the Full Diff
 
 ```bash
-git diff main...HEAD
+git diff origin/main...HEAD
 ```
 
 Read the entire diff carefully. For each changed file, identify:
