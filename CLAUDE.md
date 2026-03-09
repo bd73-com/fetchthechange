@@ -37,3 +37,7 @@ See `README.md` for project overview, tech stack, structure, and setup.
   gh pr create --repo bd73-com/fetchthechange --title "..." --body "..."
   gh pr list --repo bd73-com/fetchthechange
 ```
+
+## Skills
+
+- `.claude/skills/skill-creator/` — guide for creating new skills that encode FetchTheChange conventions
