@@ -426,6 +426,9 @@ async function handleMonitorFailure(
       pauseReason: shouldPenalize
         ? sql`CASE WHEN ${monitors.consecutiveFailures} + 1 >= ${threshold} THEN 'Auto-paused after ' || (${monitors.consecutiveFailures} + 1)::text || ${pauseSuffix} ELSE ${monitors.pauseReason} END`
         : monitors.pauseReason,
+      healthAlertSentAt: shouldPenalize
+        ? sql`CASE WHEN ${monitors.consecutiveFailures} + 1 >= ${threshold} THEN NULL ELSE ${monitors.healthAlertSentAt} END`
+        : monitors.healthAlertSentAt,
     })
     .where(eq(monitors.id, monitor.id))
     .returning({
