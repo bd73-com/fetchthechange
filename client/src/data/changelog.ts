@@ -8,6 +8,11 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    "version": "2.0.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Maintenance\n\n* Remove auto-merge from /magicwand pipeline (#130) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.16.0...v2.0.0"
+  },
+  {
     "version": "1.16.0",
     "date": "2026-03-09",
     "body": "## What's Changed\n\n## Features\n\n* Conditional alerts — filter notifications by numeric, text, and regex rules (#129) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.15.1...v1.16.0"
@@ -20,22 +25,22 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.15.0",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Features\n\n* feat: add four Claude Code skills (#127) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.14.0...v1.15.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: add four Claude Code skills (#127) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.14.0...v1.15.0"
   },
   {
     "version": "1.14.0",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Features\n\n* feat: add .claude/skills/pr-comments/ skill (#126) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.13.0...v1.14.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: add .claude/skills/pr-comments/ skill (#126) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.13.0...v1.14.0"
   },
   {
     "version": "1.13.0",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Features\n\n* feat: add .claude/skills/blog/ skill (#125) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.12.0...v1.13.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: add .claude/skills/blog/ skill (#125) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.12.0...v1.13.0"
   },
   {
     "version": "1.12.0",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Features\n\n* feat: install skill-creator framework (#124) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.11.3...v1.12.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: install skill-creator framework (#124) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.11.3...v1.12.0"
   },
   {
     "version": "1.11.3",
@@ -55,7 +60,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.11.0",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Features\n\n* Add pr-creation subagent for automated PR generation (#122) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.10.2...v1.11.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* Add pr-creation subagent for automated PR generation (#122) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.10.2...v1.11.0"
   },
   {
     "version": "1.10.2",
@@ -70,7 +75,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.10.0",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Features\n\n* feat: add skeptic subagent and /magicwand slash command (#117) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.9.1...v1.10.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: add skeptic subagent and /magicwand slash command (#117) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.9.1...v1.10.0"
   },
   {
     "version": "1.9.1",
@@ -80,7 +85,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.9.0",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Features\n\n* feat: add /magicwand slash command (#116) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.8.2...v1.9.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: add /magicwand slash command (#116) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.8.2...v1.9.0"
   },
   {
     "version": "1.8.2",
@@ -95,7 +100,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.8.0",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Features\n\n* feat: add /review-doc slash command (#112) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.7.1...v1.8.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: add /review-doc slash command (#112) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.7.1...v1.8.0"
   },
   {
     "version": "1.7.1",
@@ -120,7 +125,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.6.0",
     "date": "2026-03-08",
-    "body": "## What's Changed\n\n## Features\n\n* Add blog post: website change monitoring use cases beyond price tracking (#107) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.5.1...v1.6.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* Add blog post: website change monitoring use cases beyond price tracking (#107) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.5.1...v1.6.0"
   },
   {
     "version": "1.5.1",
@@ -135,7 +140,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.4.0",
     "date": "2026-03-07",
-    "body": "## What's Changed\n\n## Features\n\n* feat: add React component testing with Testing Library (#104) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.4...v1.4.0"
+    "body": "## What's Changed\n\n## Maintenance\n\n* feat: add React component testing with Testing Library (#104) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.4...v1.4.0"
   },
   {
     "version": "1.3.4",
