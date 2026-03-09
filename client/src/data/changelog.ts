@@ -10,7 +10,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.7.0",
     "date": "2026-03-09",
-    "body": "## What's Changed\n\n## Maintenance\n\n* feat: scraper anti-bot improvements (jitter backoff, stealth init, browser pool, better errors) (#108) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.6.2...v1.7.0"
+    "body": "## What's Changed\n\n## Features\n\n* feat: scraper anti-bot improvements (jitter backoff, stealth init, browser pool, better errors) (#108) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.6.2...v1.7.0"
   },
   {
     "version": "1.6.2",
