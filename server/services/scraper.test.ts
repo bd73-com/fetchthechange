@@ -104,7 +104,7 @@ import {
   extractWithBrowserless,
 } from "./scraper";
 import { storage } from "../storage";
-import { sendNotificationEmail, sendAutoPauseEmail } from "./email";
+import { sendNotificationEmail, sendAutoPauseEmail, sendHealthWarningEmail, sendRecoveryEmail } from "./email";
 import { processChangeNotification } from "./notification";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { ErrorLogger } from "./logger";
@@ -5652,5 +5652,318 @@ describe("withBrowserlessPage context cleanup", () => {
     expect(contextCloseFn).toHaveBeenCalled();
     // Browser should NOT be closed (returned to pool)
     expect(browserMock.close).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BrowserPool — WeakSet auto-detection of reusability
+// ---------------------------------------------------------------------------
+describe("BrowserPool WeakSet auto-detection", () => {
+  it("release() without explicit boolean auto-detects reusable browser", async () => {
+    const pool = new BrowserPool();
+    const mockBrowser = { isConnected: () => true, close: vi.fn() };
+    const connectFn = vi.fn().mockResolvedValue(mockBrowser);
+
+    const { browser } = await pool.acquire(connectFn);
+    // Call release without the boolean — pool should auto-detect via WeakSet
+    pool.release(browser);
+
+    // Verify it was returned to pool by acquiring again without connectFn call
+    const second = await pool.acquire(connectFn);
+    expect(connectFn).toHaveBeenCalledTimes(1);
+    expect(second.browser).toBe(mockBrowser);
+
+    await pool.drain();
+  });
+
+  it("release() without boolean for ephemeral browser is a no-op", async () => {
+    const pool = new BrowserPool();
+    // Fill up pending acquires to force reusable=false
+    const browsers = [];
+    const connectFn = vi.fn();
+    for (let i = 0; i < 3; i++) {
+      const b = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
+      browsers.push(b);
+      connectFn.mockResolvedValueOnce(b);
+    }
+
+    // Acquire 3 concurrently — first will be reusable=false due to pendingAcquires
+    const results = await Promise.all([
+      pool.acquire(connectFn),
+      pool.acquire(connectFn),
+      pool.acquire(connectFn),
+    ]);
+
+    const ephemeral = results.find(r => !r.reusable);
+    if (ephemeral) {
+      // Release without explicit boolean — should NOT add to pool
+      pool.release(ephemeral.browser);
+      expect(ephemeral.browser.close).not.toHaveBeenCalled();
+    }
+
+    await pool.drain();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Health warning email trigger in handleMonitorFailure
+// ---------------------------------------------------------------------------
+describe("health warning email in checkMonitor failure path", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(storage.updateMonitor).mockResolvedValue({} as any);
+    vi.mocked(storage.getUser as any).mockResolvedValue({ id: "user1", tier: "power" });
+    vi.mocked(storage.setHealthAlertSent).mockResolvedValue(undefined);
+    vi.mocked(storage.updateLastHealthyAt).mockResolvedValue(undefined);
+    vi.mocked(sendHealthWarningEmail).mockResolvedValue({ success: true });
+    vi.mocked(sendAutoPauseEmail).mockResolvedValue({ success: true });
+    // db.update mock returns failure count from the CASE expression
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ consecutiveFailures: 5, active: true }]),
+        }),
+      }),
+    } as any);
+  });
+
+  it("sends health warning at halfway threshold for power tier", async () => {
+    // Power tier threshold is 10, so warning fires at 5
+    const monitor = makeMonitor({
+      consecutiveFailures: 4, // will become 5 after this failure
+      healthAlertSentAt: null,
+      emailEnabled: true,
+    });
+
+    // Mock fetch to return a page where the selector is missing
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response("<html><body><p>no match</p></body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })
+    );
+
+    try {
+      await checkMonitor(monitor);
+
+      expect(sendHealthWarningEmail).toHaveBeenCalledWith(
+        monitor,
+        5,        // consecutiveFailures
+        5,        // nextPauseIn (10 - 5)
+        expect.any(String), // truncatedError
+      );
+      expect(storage.setHealthAlertSent).toHaveBeenCalledWith(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does NOT send health warning for free tier", async () => {
+    vi.mocked(storage.getUser as any).mockResolvedValue({ id: "user1", tier: "free" });
+    // Free tier threshold is 5, halfway is 2
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ consecutiveFailures: 2, active: true }]),
+        }),
+      }),
+    } as any);
+
+    const monitor = makeMonitor({
+      consecutiveFailures: 1,
+      healthAlertSentAt: null,
+      emailEnabled: true,
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response("<html><body><p>no match</p></body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })
+    );
+
+    try {
+      await checkMonitor(monitor);
+      expect(sendHealthWarningEmail).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does NOT send health warning if healthAlertSentAt is already set", async () => {
+    const monitor = makeMonitor({
+      consecutiveFailures: 4,
+      healthAlertSentAt: new Date(), // already sent
+      emailEnabled: true,
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response("<html><body><p>no match</p></body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })
+    );
+
+    try {
+      await checkMonitor(monitor);
+      expect(sendHealthWarningEmail).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recovery email flow on successful check (TOCTOU)
+// ---------------------------------------------------------------------------
+describe("recovery email on successful check", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(storage.updateMonitor).mockResolvedValue({} as any);
+    vi.mocked(storage.updateLastHealthyAt).mockResolvedValue(undefined);
+    vi.mocked(storage.clearHealthAlert).mockResolvedValue(undefined);
+    vi.mocked(sendRecoveryEmail).mockResolvedValue({ success: true });
+    vi.mocked(storage.getMonitorChanges).mockResolvedValue([]);
+  });
+
+  it("sends recovery email and clears flag when healthAlertSentAt is set", async () => {
+    const alertDate = new Date("2026-03-08T00:00:00Z");
+    const monitor = makeMonitor({
+      currentValue: "$99",
+      healthAlertSentAt: alertDate,
+    });
+    // Fresh DB read confirms alert is still set
+    vi.mocked(storage.getMonitor).mockResolvedValue(makeMonitor({ healthAlertSentAt: alertDate }));
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('<html><body><span class="price">$99</span></body></html>', {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })
+    );
+
+    try {
+      await checkMonitor(monitor);
+
+      expect(storage.getMonitor).toHaveBeenCalledWith(1);
+      expect(sendRecoveryEmail).toHaveBeenCalledWith(monitor, "$99");
+      // clearHealthAlert should be called AFTER sendRecoveryEmail succeeds
+      expect(storage.clearHealthAlert).toHaveBeenCalledWith(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does NOT send recovery email when healthAlertSentAt is null", async () => {
+    const monitor = makeMonitor({
+      currentValue: "$99",
+      healthAlertSentAt: null,
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('<html><body><span class="price">$99</span></body></html>', {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })
+    );
+
+    try {
+      await checkMonitor(monitor);
+
+      expect(sendRecoveryEmail).not.toHaveBeenCalled();
+      expect(storage.clearHealthAlert).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("skips recovery if fresh DB read shows healthAlertSentAt already cleared (TOCTOU)", async () => {
+    const monitor = makeMonitor({
+      currentValue: "$99",
+      healthAlertSentAt: new Date(), // stale in-memory value
+    });
+    // Fresh DB read shows another concurrent check already cleared it
+    vi.mocked(storage.getMonitor).mockResolvedValue(makeMonitor({ healthAlertSentAt: null }));
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('<html><body><span class="price">$99</span></body></html>', {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })
+    );
+
+    try {
+      await checkMonitor(monitor);
+
+      expect(storage.getMonitor).toHaveBeenCalledWith(1);
+      expect(sendRecoveryEmail).not.toHaveBeenCalled();
+      expect(storage.clearHealthAlert).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does NOT clear flag if recovery email throws (retry on next success)", async () => {
+    const monitor = makeMonitor({
+      currentValue: "$99",
+      healthAlertSentAt: new Date(),
+    });
+    vi.mocked(storage.getMonitor).mockResolvedValue(makeMonitor({ healthAlertSentAt: new Date() }));
+    vi.mocked(sendRecoveryEmail).mockRejectedValue(new Error("Resend API down"));
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('<html><body><span class="price">$99</span></body></html>', {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })
+    );
+
+    try {
+      await checkMonitor(monitor);
+
+      expect(sendRecoveryEmail).toHaveBeenCalled();
+      // Flag should NOT be cleared — email failed, so next check retries
+      expect(storage.clearHealthAlert).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateLastHealthyAt on successful check
+// ---------------------------------------------------------------------------
+describe("updateLastHealthyAt on success", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(storage.updateMonitor).mockResolvedValue({} as any);
+    vi.mocked(storage.updateLastHealthyAt).mockResolvedValue(undefined);
+    vi.mocked(storage.getMonitorChanges).mockResolvedValue([]);
+  });
+
+  it("calls updateLastHealthyAt on a successful check", async () => {
+    const monitor = makeMonitor({ currentValue: "$99" });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('<html><body><span class="price">$99</span></body></html>', {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      })
+    );
+
+    try {
+      await checkMonitor(monitor);
+      expect(storage.updateLastHealthyAt).toHaveBeenCalledWith(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
