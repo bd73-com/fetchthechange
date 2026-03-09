@@ -17,26 +17,40 @@ describe("ensureMonitorHealthColumns", () => {
     mockExecute.mockReset();
   });
 
-  it("executes 2 ALTER TABLE statements without throwing", async () => {
+  it("executes 2 ALTER TABLE statements and returns true", async () => {
     mockExecute.mockResolvedValue([]);
-    await ensureMonitorHealthColumns();
+    const result = await ensureMonitorHealthColumns();
+    expect(result).toBe(true);
     expect(mockExecute).toHaveBeenCalledTimes(2);
   });
 
-  it("catches errors and does not throw", async () => {
-    mockExecute.mockRejectedValue(new Error("permission denied"));
-    await expect(ensureMonitorHealthColumns()).resolves.toBeUndefined();
+  it("emits correct DDL for health_alert_sent_at and last_healthy_at", async () => {
+    mockExecute.mockResolvedValue([]);
+    await ensureMonitorHealthColumns();
+    const statements = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(statements.some((s: string) => s.includes("health_alert_sent_at"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("last_healthy_at"))).toBe(true);
   });
 
-  it("logs a warning when an error occurs", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("returns false and does not throw on error", async () => {
+    mockExecute.mockRejectedValue(new Error("permission denied"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await ensureMonitorHealthColumns();
+    expect(result).toBe(false);
+    errorSpy.mockRestore();
+  });
+
+  it("logs an error when migration fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockExecute.mockRejectedValue(new Error("permission denied"));
     await ensureMonitorHealthColumns();
-    expect(warnSpy).toHaveBeenCalledWith(
-      "Could not ensure monitor health columns:",
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Could not ensure monitor health columns — health alerts will not work:",
       expect.any(Error),
     );
-    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 });
 

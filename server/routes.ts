@@ -59,7 +59,10 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
-  await ensureMonitorHealthColumns();
+  const healthColumnsReady = await ensureMonitorHealthColumns();
+  if (!healthColumnsReady) {
+    console.error("CRITICAL: Monitor health columns missing — health alerts and recovery emails will be disabled");
+  }
   await ensureErrorLogColumns();
   const apiKeysReady = await ensureApiKeysTable();
   await ensureChannelTables();

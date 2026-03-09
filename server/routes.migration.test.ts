@@ -208,6 +208,7 @@ describe("error_logs dedup column migration at startup", () => {
     vi.clearAllMocks();
     mockDbExecute.mockRejectedValue(new Error("relation \"error_logs\" does not exist"));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     process.env.APP_OWNER_ID = "owner-123";
 
     const { registerRoutes } = await import("./routes");
@@ -224,6 +225,7 @@ describe("error_logs dedup column migration at startup", () => {
     expect(deleteRoutes).toContain("/api/admin/error-logs/:id");
 
     warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("logs a warning when migration fails", async () => {
@@ -231,6 +233,7 @@ describe("error_logs dedup column migration at startup", () => {
     const migrationError = new Error("connection refused");
     mockDbExecute.mockRejectedValue(migrationError);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     process.env.APP_OWNER_ID = "owner-123";
 
     const { registerRoutes } = await import("./routes");
@@ -242,6 +245,7 @@ describe("error_logs dedup column migration at startup", () => {
       migrationError,
     );
     warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("does not throw when first execute succeeds but second fails", async () => {
@@ -250,6 +254,7 @@ describe("error_logs dedup column migration at startup", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockRejectedValueOnce(new Error("syntax error"));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     process.env.APP_OWNER_ID = "owner-123";
 
     const { registerRoutes } = await import("./routes");
@@ -262,6 +267,7 @@ describe("error_logs dedup column migration at startup", () => {
     const getRoutes = Object.keys(registeredRoutes["get"] ?? {});
     expect(getRoutes.length).toBeGreaterThan(0);
     warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("issues DDL for notification_channels with correct columns and constraints", async () => {
