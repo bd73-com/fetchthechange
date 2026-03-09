@@ -8,6 +8,101 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    "version": "1.16.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Features\n\n* Conditional alerts — filter notifications by numeric, text, and regex rules (#129) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.15.1...v1.16.0"
+  },
+  {
+    "version": "1.15.1",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: improve /magicwand resumability, skeptic invocation, and label verification (#128) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.15.0...v1.15.1"
+  },
+  {
+    "version": "1.15.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add four Claude Code skills (#127) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.14.0...v1.15.0"
+  },
+  {
+    "version": "1.14.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add .claude/skills/pr-comments/ skill (#126) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.13.0...v1.14.0"
+  },
+  {
+    "version": "1.13.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add .claude/skills/blog/ skill (#125) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.12.0...v1.13.0"
+  },
+  {
+    "version": "1.12.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Features\n\n* feat: install skill-creator framework (#124) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.11.3...v1.12.0"
+  },
+  {
+    "version": "1.11.3",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.11.2...v1.11.3"
+  },
+  {
+    "version": "1.11.2",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.11.1...v1.11.2"
+  },
+  {
+    "version": "1.11.1",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.11.0...v1.11.1"
+  },
+  {
+    "version": "1.11.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Features\n\n* Add pr-creation subagent for automated PR generation (#122) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.10.2...v1.11.0"
+  },
+  {
+    "version": "1.10.2",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.10.1...v1.10.2"
+  },
+  {
+    "version": "1.10.1",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Maintenance\n\n* docs: add performance analysis report with bottleneck inventory (#118) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.10.0...v1.10.1"
+  },
+  {
+    "version": "1.10.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add skeptic subagent and /magicwand slash command (#117) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.9.1...v1.10.0"
+  },
+  {
+    "version": "1.9.1",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: deployment crash from missing health columns + security/arch hardening (#115) @bd73-com\n\n## Security\n\n* fix: deployment crash from missing health columns + security/arch hardening (#115) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.9.0...v1.9.1"
+  },
+  {
+    "version": "1.9.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add /magicwand slash command (#116) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.8.2...v1.9.0"
+  },
+  {
+    "version": "1.8.2",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n* Monitor health alerts — early warning, recovery emails, dashboard indicators (#113) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.8.1...v1.8.2"
+  },
+  {
+    "version": "1.8.1",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.8.0...v1.8.1"
+  },
+  {
+    "version": "1.8.0",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add /review-doc slash command (#112) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.7.1...v1.8.0"
+  },
+  {
+    "version": "1.7.1",
+    "date": "2026-03-09",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.7.0...v1.7.1"
+  },
+  {
     "version": "1.7.0",
     "date": "2026-03-09",
     "body": "## What's Changed\n\n## Features\n\n* feat: scraper anti-bot improvements (jitter backoff, stealth init, browser pool, better errors) (#108) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.6.2...v1.7.0"
@@ -25,7 +120,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.6.0",
     "date": "2026-03-08",
-    "body": "## What's Changed\n\n## Maintenance\n\n* Add blog post: website change monitoring use cases beyond price tracking (#107) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.5.1...v1.6.0"
+    "body": "## What's Changed\n\n## Features\n\n* Add blog post: website change monitoring use cases beyond price tracking (#107) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.5.1...v1.6.0"
   },
   {
     "version": "1.5.1",
@@ -40,7 +135,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "1.4.0",
     "date": "2026-03-07",
-    "body": "## What's Changed\n\n## Maintenance\n\n* feat: add React component testing with Testing Library (#104) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.4...v1.4.0"
+    "body": "## What's Changed\n\n## Features\n\n* feat: add React component testing with Testing Library (#104) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.3.4...v1.4.0"
   },
   {
     "version": "1.3.4",
@@ -180,7 +275,7 @@ export const changelog: ChangelogEntry[] = [
   {
     "version": "0.4.0",
     "date": "2026-03-05",
-    "body": "## What's Changed\n\n## Maintenance\n\n* feat: improve scraper resilience when Browserless is unavailable (#76) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.3.1...v0.4.0"
+    "body": "## What's Changed\n\n## Features\n\n* feat: improve scraper resilience when Browserless is unavailable (#76) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v0.3.1...v0.4.0"
   },
   {
     "version": "0.3.1",
