@@ -57,7 +57,6 @@ autolabeler:
       - '/^Remove\b/i'  # For breaking removals, manually add 'breaking' label
       - '/\bchore\b/i'
       - '/\.claude\//i'
-      - '/\bskill\b/i'
       - '/\bsubagent\b/i'
       - '/\bslash command\b/i'
   - label: docs
