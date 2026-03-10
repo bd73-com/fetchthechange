@@ -141,16 +141,18 @@ describe("ensureMonitorConditionsTable", () => {
     mockExecute.mockReset();
   });
 
-  it("executes CREATE TABLE and CREATE INDEX without throwing", async () => {
+  it("returns true when CREATE TABLE and CREATE INDEX succeed", async () => {
     mockExecute.mockResolvedValue([]);
-    await ensureMonitorConditionsTable();
+    const result = await ensureMonitorConditionsTable();
+    expect(result).toBe(true);
     // 1 CREATE TABLE + 1 CREATE INDEX = 2
     expect(mockExecute).toHaveBeenCalledTimes(2);
   });
 
-  it("catches errors and does not throw", async () => {
+  it("returns false and does not throw on error", async () => {
     mockExecute.mockRejectedValue(new Error("connection refused"));
-    await expect(ensureMonitorConditionsTable()).resolves.toBeUndefined();
+    const result = await ensureMonitorConditionsTable();
+    expect(result).toBe(false);
   });
 
   it("logs error when table creation fails", async () => {

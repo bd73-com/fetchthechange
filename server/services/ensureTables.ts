@@ -118,7 +118,7 @@ export async function ensureMonitorHealthColumns(): Promise<boolean> {
  * Without this, condition routes return 500 "relation monitor_conditions does not exist"
  * if schema:push has not been run after this table was added to the schema.
  */
-export async function ensureMonitorConditionsTable(): Promise<void> {
+export async function ensureMonitorConditionsTable(): Promise<boolean> {
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS monitor_conditions (
@@ -131,8 +131,10 @@ export async function ensureMonitorConditionsTable(): Promise<void> {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS monitor_conditions_monitor_idx ON monitor_conditions(monitor_id)`);
+    return true;
   } catch (e) {
     console.error("Could not ensure monitor_conditions table:", e);
+    return false;
   }
 }
 

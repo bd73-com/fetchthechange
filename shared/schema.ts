@@ -404,6 +404,7 @@ export const monitorTagsRelations = relations(monitorTags, ({ one }) => ({
 export type MonitorTag = typeof monitorTags.$inferSelect;
 
 // Monitor conditions — per-monitor alert conditions that gate notifications
+// SYNC: raw DDL mirror lives in server/services/ensureTables.ts — keep both in sync
 export const monitorConditions = pgTable("monitor_conditions", {
   id: serial("id").primaryKey(),
   monitorId: integer("monitor_id")
