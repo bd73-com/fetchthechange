@@ -47,3 +47,13 @@ See `README.md` for project overview, tech stack, structure, and setup.
 - `.claude/skills/add-page/` — adding a new public page (SEOHead, getCanonicalUrl, PublicNav, shadcn/ui, Tailwind tokens, App.tsx registration)
 - `.claude/skills/add-notification-channel/` — adding a new notification channel (encrypted credentials, delivery service, tier gate, OAuth CSRF exemption)
 - `.claude/skills/changelog/` — keeping the changelog up to date (sync-changelog.ts workflow, never edit changelog.ts by hand, seed entries)
+
+## Agents
+
+- `.claude/agents/architect.md` — system-wide architectural analysis (read-only)
+- `.claude/agents/bug-reporter.md` — out-of-scope bug triage and GitHub Issue filing (read-only); invoked by magicwand Phase 6
+- `.claude/agents/performance-analyst.md` — performance bottleneck identification (read-only)
+- `.claude/agents/plan-reviewer.md` — implementation plan validation (read-only)
+- `.claude/agents/pr-creation.md` — automated PR generation
+- `.claude/agents/security-auditor.md` — OWASP security analysis (read-only)
+- `.claude/agents/skeptic.md` — adversarial review for edge cases and failure modes (read-only); invoked by magicwand Phase 5
