@@ -51,7 +51,7 @@ See `README.md` for project overview, tech stack, structure, and setup.
 ## Agents
 
 - `.claude/agents/architect.md` — system-wide architectural analysis (read-only)
-- `.claude/agents/bug-reporter.md` — out-of-scope bug triage and GitHub Issue filing (read-only); invoked by magicwand Phase 6
+- `.claude/agents/bug-reporter.md` — out-of-scope bug triage and structured report preparation (read-only); invoked by magicwand Phase 6
 - `.claude/agents/performance-analyst.md` — performance bottleneck identification (read-only)
 - `.claude/agents/plan-reviewer.md` — implementation plan validation (read-only)
 - `.claude/agents/pr-creation.md` — automated PR generation
