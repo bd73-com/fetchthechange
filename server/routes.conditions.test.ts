@@ -175,6 +175,7 @@ vi.mock("./services/ensureTables", () => ({
   ensureChannelTables: vi.fn().mockResolvedValue(undefined),
   ensureTagTables: vi.fn().mockResolvedValue(undefined),
   ensureMonitorHealthColumns: vi.fn().mockResolvedValue(undefined),
+  ensureMonitorConditionsTable: vi.fn().mockResolvedValue(true),
 }));
 
 // ---------------------------------------------------------------------------
@@ -435,14 +436,19 @@ describe("conditions routes", () => {
       expect(res._status).toBe(422);
     });
 
-    it("TOCTOU: free-tier concurrent insert → second is rolled back", async () => {
+    it("TOCTOU: free-tier concurrent insert → later insert is rolled back", async () => {
       mockGetMonitor.mockResolvedValue(ownedMonitor);
       mockGetUser.mockResolvedValue({ id: "user1", tier: "free" });
       mockCountMonitorConditions
         .mockResolvedValueOnce(0)  // pre-insert check passes
         .mockResolvedValueOnce(2); // post-insert check detects race
+      // Our insert got id=99, but there's an earlier condition id=50
       const created = { id: 99, monitorId: 1, type: "numeric_lt", value: "100", groupIndex: 0, createdAt: new Date() };
       mockAddMonitorCondition.mockResolvedValue(created);
+      mockGetMonitorConditions.mockResolvedValue([
+        { id: 50, monitorId: 1, type: "numeric_gt", value: "10", groupIndex: 0, createdAt: new Date() },
+        created,
+      ]);
       mockDeleteMonitorCondition.mockResolvedValue(undefined);
 
       const req = makeReq("user1", {
@@ -451,6 +457,7 @@ describe("conditions routes", () => {
       const res = await callHandler("post", "/api/monitors/:id/conditions", req);
       expect(res._status).toBe(403);
       expect(res._json.code).toBe("TIER_LIMIT_REACHED");
+      // Deletes its own (later) condition, not the earlier one
       expect(mockDeleteMonitorCondition).toHaveBeenCalledWith(99, 1);
     });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { getTableColumns } from "drizzle-orm";
-import { notificationChannels, deliveryLog, slackConnections } from "@shared/schema";
+import { notificationChannels, deliveryLog, slackConnections, monitorConditions } from "@shared/schema";
 
 const mockExecute = vi.fn();
 
@@ -10,7 +10,7 @@ vi.mock("../db", () => ({
   },
 }));
 
-import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables } from "./ensureTables";
+import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable } from "./ensureTables";
 
 describe("ensureMonitorHealthColumns", () => {
   beforeEach(() => {
@@ -136,6 +136,37 @@ describe("ensureChannelTables", () => {
   });
 });
 
+describe("ensureMonitorConditionsTable", () => {
+  beforeEach(() => {
+    mockExecute.mockReset();
+  });
+
+  it("returns true when CREATE TABLE and CREATE INDEX succeed", async () => {
+    mockExecute.mockResolvedValue([]);
+    const result = await ensureMonitorConditionsTable();
+    expect(result).toBe(true);
+    // 1 CREATE TABLE + 1 CREATE INDEX = 2
+    expect(mockExecute).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns false and does not throw on error", async () => {
+    mockExecute.mockRejectedValue(new Error("connection refused"));
+    const result = await ensureMonitorConditionsTable();
+    expect(result).toBe(false);
+  });
+
+  it("logs error when table creation fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockExecute.mockRejectedValue(new Error("connection refused"));
+    await ensureMonitorConditionsTable();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Could not ensure monitor_conditions table:",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Schema sync guard — ensures ensureTables.ts DDL stays in sync with Drizzle.
 // If a column is added/removed in shared/schema.ts, this test fails and
@@ -148,6 +179,7 @@ describe("schema sync between ensureTables DDL and Drizzle schema", () => {
     notification_channels: ["id", "monitor_id", "channel", "enabled", "config", "created_at", "updated_at"],
     delivery_log: ["id", "monitor_id", "change_id", "channel", "status", "attempt", "response", "delivered_at", "created_at"],
     slack_connections: ["id", "user_id", "team_id", "team_name", "bot_token", "scope", "created_at", "updated_at"],
+    monitor_conditions: ["id", "monitor_id", "type", "value", "group_index", "created_at"],
   };
 
   function drizzleColumnNames(table: Parameters<typeof getTableColumns>[0]): string[] {
@@ -164,5 +196,9 @@ describe("schema sync between ensureTables DDL and Drizzle schema", () => {
 
   it("slack_connections columns match Drizzle schema", () => {
     expect(DDL_COLUMNS.slack_connections.sort()).toEqual(drizzleColumnNames(slackConnections));
+  });
+
+  it("monitor_conditions columns match Drizzle schema", () => {
+    expect(DDL_COLUMNS.monitor_conditions.sort()).toEqual(drizzleColumnNames(monitorConditions));
   });
 });
