@@ -114,10 +114,6 @@ export async function ensureMonitorHealthColumns(): Promise<boolean> {
 }
 
 /**
- * Ensures tags and monitor_tags tables exist (added in PR #86).
- * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
- */
-/**
  * Ensures monitor_conditions table exists.
  * Without this, condition routes return 500 "relation monitor_conditions does not exist"
  * if schema:push has not been run after this table was added to the schema.
@@ -140,6 +136,10 @@ export async function ensureMonitorConditionsTable(): Promise<void> {
   }
 }
 
+/**
+ * Ensures tags and monitor_tags tables exist (added in PR #86).
+ * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
+ */
 export async function ensureTagTables(): Promise<void> {
   try {
     await db.execute(sql`
