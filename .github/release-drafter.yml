@@ -37,11 +37,7 @@ categories:
 autolabeler:
   - label: feature
     title:
-      - '/^Add\b/i'
-      - '/^Implement\b/i'
-      - '/^Create\b/i'
-      - '/^Introduce\b/i'
-      - '/\bfeat\b/i'
+      - '/^feat(\([\w-]+\))?:/i'
   - label: fix
     title:
       - '/^Fix\b/i'
@@ -51,7 +47,6 @@ autolabeler:
   - label: breaking
     title:
       - '/\bbreaking\b/i'
-      - '/^Remove\b/i'
   - label: chore
     title:
       - '/^Refactor\b/i'
@@ -59,7 +54,11 @@ autolabeler:
       - '/^Upgrade\b/i'
       - '/^Clean\b/i'
       - '/^Bump\b/i'
+      - '/^Remove\b/i'  # For breaking removals, manually add 'breaking' label
       - '/\bchore\b/i'
+      - '/\.claude\//i'
+      - '/\bsubagent\b/i'
+      - '/\bslash command\b/i'
   - label: docs
     title:
       - '/\bdocs\b/i'
