@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon, Globe, MessageSquare } from "lucide-react";
+import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon, Globe, MessageSquare, ShieldAlert } from "lucide-react";
 import { useUpdateMonitor, useMonitorHistory } from "@/hooks/use-monitors";
 import { useNotificationPreferences } from "@/hooks/use-notification-preferences";
 import { useNotificationChannels } from "@/hooks/use-notification-channels";
@@ -212,6 +212,14 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
                   +{monitor.tags.length - 2} more
                 </span>
               )}
+            </div>
+          )}
+          {monitor.lastStatus === "blocked" && (monitor.consecutiveFailures ?? 0) >= 2 && (
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <ShieldAlert className="h-3 w-3 text-orange-500 shrink-0" />
+              <span className="text-xs font-medium text-orange-500">
+                Bot blocked — site is resisting automated access
+              </span>
             </div>
           )}
         </div>

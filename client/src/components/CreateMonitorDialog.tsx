@@ -25,7 +25,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Loader2, HelpCircle } from "lucide-react";
+import { Plus, Loader2, HelpCircle, ShieldAlert } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { detectBotProtectedUrl } from "@/lib/bot-protection";
 import {
   Tooltip,
   TooltipContent,
@@ -40,11 +42,12 @@ import { useToast } from "@/hooks/use-toast";
 export function CreateMonitorDialog() {
   const [open, setOpen] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [botWarning, setBotWarning] = useState<string | null>(null);
 
   // Reset tag selection when dialog closes (cancel or dismiss)
   const handleOpenChange = (isOpen: boolean) => {
     setOpen(isOpen);
-    if (!isOpen) setSelectedTagIds([]);
+    if (!isOpen) { setSelectedTagIds([]); setBotWarning(null); }
   };
   const { mutate, isPending } = useCreateMonitor();
   const { mutate: setMonitorTags } = useSetMonitorTags();
@@ -120,12 +123,25 @@ export function CreateMonitorDialog() {
                 <FormItem>
                   <FormLabel>URL</FormLabel>
                   <FormControl>
-                    <Input placeholder="https://example.com/monitoring" {...field} />
+                    <Input
+                      placeholder="https://example.com/monitoring"
+                      {...field}
+                      onBlur={(e) => { field.onBlur(); setBotWarning(detectBotProtectedUrl(e.target.value)); }}
+                      onChange={(e) => { field.onChange(e); setBotWarning(null); }}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
             />
+            {botWarning && (
+              <Alert className="border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400">
+                <ShieldAlert className="h-4 w-4 text-amber-500" />
+                <AlertDescription className="text-xs leading-relaxed">
+                  {botWarning}
+                </AlertDescription>
+              </Alert>
+            )}
             <FormField
               control={form.control}
               name="selector"
