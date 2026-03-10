@@ -16,6 +16,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { TagBadge } from "@/components/TagBadge";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { detectBotProtectedUrl } from "@/lib/bot-protection";
 import { type HealthState, getHealthState } from "@/lib/monitor-health";
 
 const healthDotStyles: Record<HealthState, string> = {
@@ -45,6 +47,7 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
   const hasWebhook = channels.some((c) => c.channel === "webhook" && c.enabled);
   const hasSlack = channels.some((c) => c.channel === "slack" && c.enabled);
   const [isEditing, setIsEditing] = useState(false);
+  const [editBotWarning, setEditBotWarning] = useState<string | null>(null);
 
   const lastChange = history?.[0];
   const previousValue = lastChange?.oldValue;
@@ -99,11 +102,24 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
                   <FormItem>
                     <FormLabel>URL</FormLabel>
                     <FormControl>
-                      <Input {...field} data-testid="input-url" />
+                      <Input
+                        {...field}
+                        data-testid="input-url"
+                        onBlur={(e) => { field.onBlur(); setEditBotWarning(detectBotProtectedUrl(e.target.value)); }}
+                        onChange={(e) => { field.onChange(e); setEditBotWarning(null); }}
+                      />
                     </FormControl>
                   </FormItem>
                 )}
               />
+              {editBotWarning && (
+                <Alert className="border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400">
+                  <ShieldAlert className="h-4 w-4 text-amber-500" />
+                  <AlertDescription className="text-xs leading-relaxed">
+                    {editBotWarning}
+                  </AlertDescription>
+                </Alert>
+              )}
               <FormField
                 control={form.control}
                 name="selector"

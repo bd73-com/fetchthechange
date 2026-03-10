@@ -70,6 +70,8 @@ export function CreateMonitorDialog() {
   });
 
   const onSubmit = (data: InsertMonitor) => {
+    // Ensure bot-protection warning is visible even if onBlur never fired (e.g. paste-and-submit)
+    setBotWarning(detectBotProtectedUrl(data.url));
     mutate(data, {
       onSuccess: ({ monitor }) => {
         if (selectedTagIds.length > 0 && monitor?.id) {

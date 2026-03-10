@@ -312,6 +312,11 @@ const faqSections: FAQSection[] = [
         answer:
           "This usually happens when the CSS selector matches a parent element containing more content than expected. Try using a more specific selector that targets exactly the element you want. The Fix Selector tool can help you find better selectors.",
       },
+      {
+        question: "What does 'Bot blocked' mean on my monitor card?",
+        answer:
+          "Some websites use bot-detection systems (such as Cloudflare, Akamai, or custom solutions) that block automated access. When this happens, your monitor's checks are rejected before the page content can be read. The orange 'Bot blocked' indicator appears on your dashboard card after two consecutive blocked checks. FetchTheChange uses a real browser for every check, which works for most sites, but some sites reliably block all automated access regardless of technique. If the issue persists, there is unfortunately no workaround — the target site is actively preventing automated monitoring.",
+      },
     ],
   },
   {
