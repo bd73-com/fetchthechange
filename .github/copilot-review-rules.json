@@ -1,0 +1,157 @@
+[
+  {
+    "name": "Never hardcode tier limits",
+    "description": "Tier limits must always be read from the `TIER_LIMITS`, `BROWSERLESS_CAPS`, `PAUSE_THRESHOLDS`, `RESEND_CAPS`, `TAG_LIMITS`, `TAG_ASSIGNMENT_LIMITS`, or `API_RATE_LIMITS` constants exported from `shared/models/auth.ts`. Never use literal numbers like 3, 100, 200, 500, etc. for tier-gated values. Import the constant and index it by the user's tier.",
+    "path_pattern": "server/**"
+  },
+  {
+    "name": "Require session ownership check",
+    "description": "Every route handler that returns or mutates user-specific data must verify ownership by checking that the resource's `userId` matches `req.user.claims.sub`. Skipping this check is a Critical authorization bypass vulnerability. The pattern is: `if (resource.userId !== req.user!.claims.sub) return res.status(403).json({ message: 'Forbidden', code: 'FORBIDDEN' });`",
+    "path_pattern": "server/routes.ts"
+  },
+  {
+    "name": "Require SSRF validation on user-supplied URLs",
+    "description": "Every user-supplied URL must be validated with `isPrivateUrl()` from `server/utils/ssrf.ts` before any HTTP request is made. This applies at monitor creation time and at fetch time. Skipping this is a Critical SSRF vulnerability that can expose internal infrastructure.",
+    "path_pattern": "server/**"
+  },
+  {
+    "name": "Database queries belong in storage layer",
+    "description": "Never put database queries or Drizzle ORM calls directly in route handlers. All database access must go through methods on the `IStorage` interface implemented in `server/storage.ts`. Route handlers call `storage.methodName()` only.",
+    "path_pattern": "server/routes.ts"
+  },
+  {
+    "name": "Validate requests with Zod schemas",
+    "description": "All incoming request bodies, query parameters, and path parameters must be validated using Zod schemas defined in `shared/routes.ts`. Use `.safeParse()` and return a 400 error with `{ message, code }` JSON if validation fails. Never trust raw `req.body` or `req.params` without validation.",
+    "path_pattern": "server/routes.ts"
+  },
+  {
+    "name": "Error responses must use standard JSON shape",
+    "description": "All API error responses must follow the `{ message: string, code: string }` JSON shape. Never return plain text errors, HTML error pages, or non-standard JSON structures from API endpoints.",
+    "path_pattern": "server/**"
+  },
+  {
+    "name": "Route constants in shared/routes.ts",
+    "description": "Never hardcode route path strings like '/api/monitors' in server or client code. Define route constants in the `api` object in `shared/routes.ts` with `method`, `path`, `responses`, and optional `input`. Reference these constants throughout the codebase.",
+    "path_pattern": "**/*.ts"
+  },
+  {
+    "name": "Encrypt credentials at rest",
+    "description": "OAuth tokens, bot tokens, API keys, and other secrets must be encrypted before storage using `encryptToken()` from `server/utils/encryption.ts`. API keys must be stored as SHA-256 hashes (`keyHash`), with only the prefix (`keyPrefix`) safe to return in responses. Never store plaintext tokens in the database. Never return stored credentials in GET responses — return a redacted placeholder only.",
+    "path_pattern": "server/**"
+  },
+  {
+    "name": "Never log decrypted secrets",
+    "description": "Never log decrypted tokens, API keys, or other secrets. Only log safe prefixes (e.g., `keyPrefix`). Decryption failures should be logged as errors but must not include the ciphertext or plaintext in log output.",
+    "path_pattern": "server/**"
+  },
+  {
+    "name": "CSRF exemptions must be explicit",
+    "description": "When adding a new route that needs CSRF exemption (e.g., OAuth callbacks, webhook receivers), add the path to `EXEMPT_PATHS` or `EXEMPT_PREFIXES` in `server/middleware/csrf.ts`. Call out the exemption explicitly in the commit message. Keep the exemption list minimal — only routes that genuinely cannot include CSRF tokens.",
+    "path_pattern": "server/middleware/csrf.ts"
+  },
+  {
+    "name": "Use semantic Tailwind color tokens",
+    "description": "Never use hardcoded hex values (#fff), RGB, or HSL color values in JSX or class names. Always use Tailwind semantic color tokens: `text-primary`, `text-muted-foreground`, `bg-secondary`, `bg-background`, `border-border`, etc. Dark mode is the default theme.",
+    "path_pattern": "client/**"
+  },
+  {
+    "name": "Use shadcn/ui primitives instead of raw HTML",
+    "description": "Never use raw HTML `<input>`, `<button>`, `<select>`, `<textarea>`, or `<dialog>` elements. Always use the shadcn/ui component equivalents imported from `@/components/ui/` (Button, Input, Select, Dialog, Card, Badge, etc.).",
+    "path_pattern": "client/**"
+  },
+  {
+    "name": "Use TanStack React Query for server state",
+    "description": "All server state must be managed with TanStack React Query (`useQuery`, `useMutation`, `useQueryClient`). Never use Redux, Zustand, or manual `useState` + `useEffect` patterns for fetching and caching server data.",
+    "path_pattern": "client/**"
+  },
+  {
+    "name": "Never use dangerouslySetInnerHTML",
+    "description": "Never use `dangerouslySetInnerHTML` with user-supplied content. This is a Critical XSS vulnerability. If HTML rendering is absolutely necessary, sanitize with a proven library first.",
+    "path_pattern": "client/**"
+  },
+  {
+    "name": "Pages require SEOHead and PublicNav",
+    "description": "Every public-facing page component must render `<SEOHead>` (imported from `@/components/SEOHead` with `getCanonicalUrl()`) as its first child and `<PublicNav />` (from `@/components/PublicNav`) immediately after. The SEO title must include the `| FetchTheChange` suffix.",
+    "path_pattern": "client/src/pages/**"
+  },
+  {
+    "name": "Routes must be placed before the NotFound fallback",
+    "description": "When adding a new `<Route>` in `App.tsx`, it must be placed before the fallback `<Route component={NotFound} />`. A route placed after the fallback will never match.",
+    "path_pattern": "client/src/App.tsx"
+  },
+  {
+    "name": "Blog posts must be prepended to blogPosts array",
+    "description": "New blog post entries in `client/src/pages/Blog.tsx` must be prepended (added to the beginning) of the `blogPosts` array for reverse-chronological ordering. Never append to the end. The blog post must also have a matching route in `App.tsx` and a page component. Enforced by `blog-integrity.test.ts`.",
+    "path_pattern": "client/src/pages/Blog.tsx"
+  },
+  {
+    "name": "Shared types use @shared/ import alias",
+    "description": "All types, schemas, and constants shared between client and server must live in the `shared/` directory and be imported using the `@shared/` path alias. Never duplicate shared types in client or server code.",
+    "path_pattern": "**/*.ts"
+  },
+  {
+    "name": "Require isAuthenticated middleware on protected routes",
+    "description": "All API routes that access user data must use the `isAuthenticated` middleware. This ensures the user has a valid session before the handler runs. Never access `req.user` without this middleware in place.",
+    "path_pattern": "server/routes.ts"
+  },
+  {
+    "name": "Tier gates must be enforced server-side",
+    "description": "Feature restrictions based on user tier (free, pro, power) must be enforced in server route handlers, not only in the client UI. A client-only tier gate is trivially bypassed. Read the user's tier and check against `TIER_LIMITS` or the relevant caps constant from `shared/models/auth.ts`.",
+    "path_pattern": "server/routes.ts"
+  },
+  {
+    "name": "Notification channels require dedicated service files",
+    "description": "Notification delivery logic must not be inlined in route handlers. Each notification channel (email, webhook, Slack, etc.) must have a dedicated service file under `server/services/`. The channel type must be added to `channelTypeSchema` in `shared/routes.ts`.",
+    "path_pattern": "server/services/**"
+  },
+  {
+    "name": "Tests must cover edge cases and error paths",
+    "description": "Test files must include assertions for edge cases (empty inputs, boundary values, null/undefined), error paths (invalid input, unauthorized access, not found), and security-relevant scenarios (ownership violations, SSRF attempts). Use `expect` assertions from Vitest, not `assert`.",
+    "path_pattern": "**/*.test.ts"
+  },
+  {
+    "name": "Avoid type: any in shared code",
+    "description": "Never use `any` type in shared code. Use precise types, `unknown` with type narrowing, or proper generics. The `shared/` directory defines the contract between client and server — type precision here prevents entire classes of bugs.",
+    "path_pattern": "shared/**"
+  },
+  {
+    "name": "Zod schemas must match Drizzle table definitions",
+    "description": "Zod validation schemas in `shared/routes.ts` must stay in sync with Drizzle table definitions in `shared/schema.ts`. When adding or modifying a column in the schema, update the corresponding Zod schema and vice versa.",
+    "path_pattern": "shared/**"
+  },
+  {
+    "name": "Never edit changelog.ts by hand",
+    "description": "The file `client/src/data/changelog.ts` is auto-generated by `script/sync-changelog.ts` from GitHub Releases. Never edit it manually. To add entries for pre-automation releases, add them to `client/src/data/changelog-seed.ts` instead.",
+    "path_pattern": "client/src/data/changelog.ts"
+  },
+  {
+    "name": "Scraper must enforce timeouts and size limits",
+    "description": "The scraper service must enforce request timeouts and response size limits to prevent resource exhaustion. Browserless usage must respect `BROWSERLESS_CAPS` from `shared/models/auth.ts`. URLs must be validated with `isPrivateUrl()` at both creation and fetch time.",
+    "path_pattern": "server/services/scraper*"
+  },
+  {
+    "name": "Webhook handlers must verify signatures",
+    "description": "Stripe webhook handlers must verify the webhook signature using `stripe.webhooks.constructEvent()` before processing. Never process an unverified webhook payload. Signing secrets must be auto-generated server-side and redacted in GET responses.",
+    "path_pattern": "server/webhookHandlers.ts"
+  },
+  {
+    "name": "React hooks must follow Rules of Hooks",
+    "description": "Hooks must only be called at the top level of functional components or custom hooks. Never call hooks inside conditions, loops, or nested functions. Custom hooks in `client/src/hooks/` must handle cleanup in `useEffect` return functions and catch async errors.",
+    "path_pattern": "client/src/hooks/**"
+  },
+  {
+    "name": "Scripts must not contain hardcoded secrets",
+    "description": "Scripts must never contain hardcoded API keys, database credentials, tokens, or other secrets. Use environment variables. Database operations in scripts must be idempotent. Stripe-related scripts must use test mode keys.",
+    "path_pattern": "script*/**"
+  },
+  {
+    "name": "No arbitrary command execution in scripts",
+    "description": "Scripts must not execute arbitrary shell commands from user input or dynamic strings. Use parameterized commands and validate all inputs. Verify output paths are within expected directories.",
+    "path_pattern": "script*/**"
+  },
+  {
+    "name": "Use gh CLI with --repo flag",
+    "description": "All `gh` CLI commands must include `--repo bd73-com/fetchthechange` because the git remote uses a local proxy and `gh` cannot infer the repository from remotes.",
+    "path_pattern": "**"
+  }
+]
