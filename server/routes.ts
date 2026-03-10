@@ -68,7 +68,18 @@ export async function registerRoutes(
   const apiKeysReady = await ensureApiKeysTable();
   await ensureChannelTables();
   await ensureTagTables();
-  const conditionsReady = await ensureMonitorConditionsTable();
+  // Per-route 503 guard (not conditional registration like apiKeysReady)
+  // because condition routes are inline — 503 gives clients a clear retry signal.
+  // Lazy retry: if startup fails (transient DB error), first request retries once.
+  let conditionsReady = await ensureMonitorConditionsTable();
+  async function requireConditionsReady(res: any): Promise<boolean> {
+    if (!conditionsReady) conditionsReady = await ensureMonitorConditionsTable();
+    if (!conditionsReady) {
+      res.status(503).json({ message: "Conditions not available", code: "SERVICE_UNAVAILABLE" });
+      return false;
+    }
+    return true;
+  }
 
   // Setup Auth (must be before rate limiter so req.user is populated)
   await setupAuth(app);
@@ -709,7 +720,7 @@ export async function registerRoutes(
 
   // GET /api/monitors/:id/conditions
   app.get(api.monitors.conditions.list.path, isAuthenticated, async (req: any, res) => {
-    if (!conditionsReady) return res.status(503).json({ message: "Conditions not available", code: "SERVICE_UNAVAILABLE" });
+    if (!(await requireConditionsReady(res))) return;
     const id = Number(req.params.id);
     const monitor = await storage.getMonitor(id);
     if (!monitor) return res.status(404).json({ message: "Not found" });
@@ -721,7 +732,7 @@ export async function registerRoutes(
 
   // POST /api/monitors/:id/conditions
   app.post(api.monitors.conditions.create.path, isAuthenticated, async (req: any, res) => {
-    if (!conditionsReady) return res.status(503).json({ message: "Conditions not available", code: "SERVICE_UNAVAILABLE" });
+    if (!(await requireConditionsReady(res))) return;
     try {
       const id = Number(req.params.id);
       const monitor = await storage.getMonitor(id);
@@ -773,18 +784,21 @@ export async function registerRoutes(
 
       const condition = await storage.addMonitorCondition(id, input.type, input.value, input.groupIndex);
 
-      // TOCTOU guard: if a concurrent request also inserted, keep the earliest (lowest ID)
+      // TOCTOU guard: if a concurrent request also inserted, keep the earliest (lowest ID).
+      // Queries are auto-committed (no explicit txn), so both inserts are visible here.
       if (isFreeTier) {
         const postInsertCount = await storage.countMonitorConditions(id);
         if (postInsertCount > 1) {
           const existing = await storage.getMonitorConditions(id);
-          const minId = Math.min(...existing.map((c) => c.id));
-          if (condition.id !== minId) {
-            await storage.deleteMonitorCondition(condition.id, id);
-            return res.status(403).json({
-              message: "Free plan supports 1 condition per monitor. Upgrade to Pro or Power for unlimited conditions.",
-              code: "TIER_LIMIT_REACHED",
-            });
+          if (existing.length > 0) {
+            const minId = Math.min(...existing.map((c) => c.id));
+            if (condition.id !== minId) {
+              await storage.deleteMonitorCondition(condition.id, id);
+              return res.status(403).json({
+                message: "Free plan supports 1 condition per monitor. Upgrade to Pro or Power for unlimited conditions.",
+                code: "TIER_LIMIT_REACHED",
+              });
+            }
           }
         }
       }
@@ -800,7 +814,7 @@ export async function registerRoutes(
 
   // DELETE /api/monitors/:id/conditions/:conditionId
   app.delete(api.monitors.conditions.delete.path, isAuthenticated, async (req: any, res) => {
-    if (!conditionsReady) return res.status(503).json({ message: "Conditions not available", code: "SERVICE_UNAVAILABLE" });
+    if (!(await requireConditionsReady(res))) return;
     const id = Number(req.params.id);
     const conditionId = Number(req.params.conditionId);
     const monitor = await storage.getMonitor(id);
