@@ -69,8 +69,13 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
   };
 
   const onSubmit = (data: any) => {
+    // Ensure bot-protection warning is visible even if onBlur never fired (e.g. paste-and-save)
+    setEditBotWarning(detectBotProtectedUrl(data.url));
     update({ id: monitor.id, ...data }, {
-      onSuccess: () => setIsEditing(false)
+      onSuccess: () => {
+        setEditBotWarning(null);
+        setIsEditing(false);
+      }
     });
   };
 
@@ -114,7 +119,7 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
               />
               {editBotWarning && (
                 <Alert className="border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400">
-                  <ShieldAlert className="h-4 w-4 text-amber-500" />
+                  <ShieldAlert className="h-4 w-4 text-amber-500" aria-hidden="true" />
                   <AlertDescription className="text-xs leading-relaxed">
                     {editBotWarning}
                   </AlertDescription>
@@ -172,7 +177,7 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
                 />
               </div>
               <div className="flex gap-2 justify-end pt-4">
-                <Button type="button" variant="outline" size="sm" onClick={() => setIsEditing(false)} data-testid="button-cancel">
+                <Button type="button" variant="outline" size="sm" onClick={() => { setEditBotWarning(null); setIsEditing(false); }} data-testid="button-cancel">
                   <X className="h-4 w-4 mr-2" /> Cancel
                 </Button>
                 <Button type="submit" size="sm" data-testid="button-save">
@@ -231,8 +236,8 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
             </div>
           )}
           {monitor.lastStatus === "blocked" && (monitor.consecutiveFailures ?? 0) >= 2 && (
-            <div className="flex items-center gap-1.5 pt-0.5">
-              <ShieldAlert className="h-3 w-3 text-orange-500 shrink-0" />
+            <div className="flex items-center gap-1.5 pt-0.5" role="status" aria-live="polite">
+              <ShieldAlert className="h-3 w-3 text-orange-500 shrink-0" aria-hidden="true" />
               <span className="text-xs font-medium text-orange-500">
                 Bot blocked — site is resisting automated access
               </span>

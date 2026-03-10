@@ -57,6 +57,13 @@ describe("detectBotProtectedUrl", () => {
     expect(detectBotProtectedUrl("https://notamazon.com/page")).toBeNull();
   });
 
+  it("does not match hosts where substring spans across label boundaries", () => {
+    // "shopify" split across "shop" and "ify" labels should not match
+    expect(detectBotProtectedUrl("https://shop.ify.com/page")).toBeNull();
+    // "bigcommerce" split across labels should not match
+    expect(detectBotProtectedUrl("https://big.commerce.net/page")).toBeNull();
+  });
+
   it("does not match path containing blocked hostname", () => {
     expect(detectBotProtectedUrl("https://safe.com/jomashop.com")).toBeNull();
   });

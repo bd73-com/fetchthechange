@@ -27,7 +27,7 @@ export function detectBotProtectedUrl(url: string): string | null {
   try {
     const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
     if (matchesExactHost(hostname)) return WARNING_MESSAGE;
-    if (BOT_PROTECTED_HOST_SUBSTRINGS.some((s) => hostname.includes(s))) return WARNING_MESSAGE;
+    if (BOT_PROTECTED_HOST_SUBSTRINGS.some((s) => hostname.split(".").some((label) => label.includes(s)))) return WARNING_MESSAGE;
     return null;
   } catch {
     return null;

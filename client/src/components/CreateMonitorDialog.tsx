@@ -138,7 +138,7 @@ export function CreateMonitorDialog() {
             />
             {botWarning && (
               <Alert className="border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400">
-                <ShieldAlert className="h-4 w-4 text-amber-500" />
+                <ShieldAlert className="h-4 w-4 text-amber-500" aria-hidden="true" />
                 <AlertDescription className="text-xs leading-relaxed">
                   {botWarning}
                 </AlertDescription>
