@@ -53,7 +53,28 @@ vi.mock("./browserlessCircuitBreaker", () => ({
 vi.mock("../utils/ssrf", () => ({
   validateUrlBeforeFetch: vi.fn().mockResolvedValue(undefined),
   ssrfSafeFetch: vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
-    return globalThis.fetch(url, init);
+    // Race the real fetch against a short timer so that unmocked retry calls
+    // (where mockRejectedValueOnce has been exhausted) fail fast under fake
+    // timers instead of hanging on real network I/O + AbortSignal.timeout.
+    // AbortController ensures the dangling fetch is cleaned up when the timeout wins.
+    const controller = new AbortController();
+    const mergedInit = { ...init, signal: controller.signal };
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error("Test: unmocked fetch call")), 50);
+    });
+    try {
+      const result = await Promise.race([
+        globalThis.fetch(url, mergedInit),
+        timeoutPromise,
+      ]);
+      clearTimeout(timeoutId!);
+      return result;
+    } catch (err) {
+      clearTimeout(timeoutId!);
+      controller.abort();
+      throw err;
+    }
   }),
 }));
 

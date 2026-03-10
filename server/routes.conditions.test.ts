@@ -461,6 +461,31 @@ describe("conditions routes", () => {
       expect(mockDeleteMonitorCondition).toHaveBeenCalledWith(99, 1);
     });
 
+    it("TOCTOU: free-tier concurrent insert → our insert wins if it has the lowest ID", async () => {
+      mockGetMonitor.mockResolvedValue(ownedMonitor);
+      mockGetUser.mockResolvedValue({ id: "user1", tier: "free" });
+      mockCountMonitorConditions
+        .mockResolvedValueOnce(0)  // pre-insert check passes
+        .mockResolvedValueOnce(2); // post-insert check detects race
+      // Our insert got id=10 (earliest), the concurrent one got id=20
+      const created = { id: 10, monitorId: 1, type: "numeric_lt", value: "100", groupIndex: 0, createdAt: new Date() };
+      mockAddMonitorCondition.mockResolvedValue(created);
+      // Return higher-ID row first to prove implementation picks Math.min, not first element
+      mockGetMonitorConditions.mockResolvedValue([
+        { id: 20, monitorId: 1, type: "numeric_gt", value: "50", groupIndex: 0, createdAt: new Date() },
+        created,
+      ]);
+
+      const req = makeReq("user1", {
+        body: { type: "numeric_lt", value: "100", groupIndex: 0 },
+      });
+      const res = await callHandler("post", "/api/monitors/:id/conditions", req);
+      // Our insert has the lowest ID, so it survives — returns 201
+      expect(res._status).toBe(201);
+      expect(res._json.id).toBe(10);
+      expect(mockDeleteMonitorCondition).not.toHaveBeenCalled();
+    });
+
     it("alternation regex (a|b)+ → 422 INVALID_REGEX", async () => {
       mockGetMonitor.mockResolvedValue(ownedMonitor);
       mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });
