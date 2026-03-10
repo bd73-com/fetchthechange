@@ -128,14 +128,14 @@ If ESCALATE: print the failure banner and stop:
 
 If BUG_REPORTER_COMPLETE: parse every `<bug>` tag from the bug reporter's output and file each as a GitHub Issue:
 
-1. For each `<bug>` tag, create a GitHub Issue. Before filing the first issue, verify that the severity labels exist (run `gh label list --repo bd73-com/fetchthechange`). If a severity label (e.g. `critical`, `high`, `medium`, `low`) does not exist, create it first with `gh label create`. Then file:
+1. For each `<bug>` tag, create a GitHub Issue. Before filing the first issue, verify that both the `bug` label and severity labels (`critical`, `high`, `medium`, `low`) exist (run `gh label list --repo bd73-com/fetchthechange`). Create any missing labels with `gh label create --repo bd73-com/fetchthechange --name "<label>"`. Then file:
    ```bash
    gh issue create --repo bd73-com/fetchthechange \
      --title "Bug: [title from bug report]" \
      --label "bug,[severity]" \
      --body "[full bug report content from inside the <bug> tag]"
    ```
-2. Log each filed issue in the issue table with category `bug` and `Fixed` set to `Filed as #<issue-number>`.
+2. For each filed issue: if the bug was deferred from an earlier phase (has an existing row with `Fixed` set to `→ Bug Report (Phase 6)`), update that row's `Fixed` cell to `Filed as #<issue-number>`. For bugs found by the bug reporter's independent scan (no existing row), add a new row with category `bug` and `Fixed` set to `Filed as #<issue-number>`.
 3. Parse the `<bug-summary>` tag and record the totals.
 
 If the bug reporter found bugs that it reclassified as **in-scope** (introduced by this branch), do NOT file them as issues. Instead, log them in the issue table with category matching the original phase and `Fixed` left empty. Print the failure banner — these must be fixed before proceeding:

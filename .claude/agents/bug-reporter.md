@@ -1,6 +1,6 @@
 ---
 name: bug-reporter
-description: Bug triage agent that identifies pre-existing and out-of-scope bugs during the magicwand pipeline, documents them as structured bug reports, and files GitHub Issues. Invoke after all review phases complete to capture bugs that should not block the current PR but must be tracked.
+description: Bug triage agent that identifies pre-existing and out-of-scope bugs during the magicwand pipeline and prepares structured bug reports for the orchestrator to file as GitHub Issues. Invoke after all review phases complete to capture bugs that should not block the current PR but must be tracked.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 disabledTools: Write, Edit, MultiEdit, NotebookEdit
 ---
@@ -34,7 +34,7 @@ server/storage.ts
 For each out-of-scope finding passed from the review phases, verify it is genuinely out of scope:
 
 1. **Is it caused by the current branch's changes?** If yes, it is NOT out of scope — flag it back as `in-scope` so the orchestrator can require a fix.
-2. **Does it exist on `main`?** Use `git diff origin/main -- <file>` to check whether the problematic code was changed on this branch. If the code is identical on `main`, the issue predates this branch.
+2. **Does it exist on `main`?** Use `git diff -U0 origin/main -- <file>` to see exactly which hunks were changed on this branch. If the problematic code does not appear in any changed hunk, the issue predates this branch and is out of scope. A whole-file diff is not enough — verify at the hunk/function level.
 3. **Is it a real bug or a style/preference issue?** Only real bugs get reports. Style issues, minor inconsistencies, and subjective preferences do not qualify.
 
 Classify each verified out-of-scope finding with a severity:
@@ -135,6 +135,14 @@ Duplicates (excluded): <N>
 Reclassified as in-scope: <N>
 New issues to file: <N>
 </bug-summary>
+```
+
+For any findings reclassified as in-scope, also emit a `<reclassified>` tag for each so the orchestrator can route them back to the correct phase:
+
+```
+<reclassified original-phase="2" original-category="security" title="Missing auth check on /api/v1/monitors">
+Reason: The branch modified the auth middleware in server/routes.ts, so this finding is in-scope.
+</reclassified>
 ```
 
 If no bugs were found, emit:
