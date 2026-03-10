@@ -72,8 +72,19 @@ export async function registerRoutes(
   // because condition routes are inline — 503 gives clients a clear retry signal.
   // Lazy retry: if startup fails (transient DB error), first request retries once.
   let conditionsReady = await ensureMonitorConditionsTable();
+  let conditionsReadyProbe: Promise<boolean> | null = null;
   async function requireConditionsReady(res: any): Promise<boolean> {
-    if (!conditionsReady) conditionsReady = await ensureMonitorConditionsTable();
+    if (!conditionsReady) {
+      conditionsReadyProbe ??= ensureMonitorConditionsTable()
+        .then((ready) => {
+          if (ready) conditionsReady = true;
+          return conditionsReady;
+        })
+        .finally(() => {
+          conditionsReadyProbe = null;
+        });
+      await conditionsReadyProbe;
+    }
     if (!conditionsReady) {
       res.status(503).json({ message: "Conditions not available", code: "SERVICE_UNAVAILABLE" });
       return false;
@@ -723,8 +734,8 @@ export async function registerRoutes(
     if (!(await requireConditionsReady(res))) return;
     const id = Number(req.params.id);
     const monitor = await storage.getMonitor(id);
-    if (!monitor) return res.status(404).json({ message: "Not found" });
-    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(404).json({ message: "Not found" });
+    if (!monitor) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
 
     const conditions = await storage.getMonitorConditions(id);
     res.json(conditions);
@@ -736,8 +747,8 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       const monitor = await storage.getMonitor(id);
-      if (!monitor) return res.status(404).json({ message: "Not found" });
-      if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(404).json({ message: "Not found" });
+      if (!monitor) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
+      if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
 
       // Tier check: Free users capped at 1 condition per monitor
       const user = await authStorage.getUser(req.user.claims.sub);
@@ -790,15 +801,19 @@ export async function registerRoutes(
         const postInsertCount = await storage.countMonitorConditions(id);
         if (postInsertCount > 1) {
           const existing = await storage.getMonitorConditions(id);
-          if (existing.length > 0) {
-            const minId = Math.min(...existing.map((c) => c.id));
-            if (condition.id !== minId) {
-              await storage.deleteMonitorCondition(condition.id, id);
-              return res.status(403).json({
-                message: "Free plan supports 1 condition per monitor. Upgrade to Pro or Power for unlimited conditions.",
-                code: "TIER_LIMIT_REACHED",
-              });
-            }
+          if (!existing.some((c) => c.id === condition.id)) {
+            return res.status(409).json({
+              message: "Condition state changed during creation. Please retry.",
+              code: "CONDITION_RACE",
+            });
+          }
+          const minId = Math.min(...existing.map((c) => c.id));
+          if (condition.id !== minId) {
+            await storage.deleteMonitorCondition(condition.id, id);
+            return res.status(403).json({
+              message: "Free plan supports 1 condition per monitor. Upgrade to Pro or Power for unlimited conditions.",
+              code: "TIER_LIMIT_REACHED",
+            });
           }
         }
       }
@@ -818,8 +833,8 @@ export async function registerRoutes(
     const id = Number(req.params.id);
     const conditionId = Number(req.params.conditionId);
     const monitor = await storage.getMonitor(id);
-    if (!monitor) return res.status(404).json({ message: "Not found" });
-    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(404).json({ message: "Not found" });
+    if (!monitor) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
+    if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
 
     await storage.deleteMonitorCondition(conditionId, id);
     res.status(204).send();

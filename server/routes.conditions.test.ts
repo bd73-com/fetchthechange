@@ -470,9 +470,10 @@ describe("conditions routes", () => {
       // Our insert got id=10 (earliest), the concurrent one got id=20
       const created = { id: 10, monitorId: 1, type: "numeric_lt", value: "100", groupIndex: 0, createdAt: new Date() };
       mockAddMonitorCondition.mockResolvedValue(created);
+      // Return higher-ID row first to prove implementation picks Math.min, not first element
       mockGetMonitorConditions.mockResolvedValue([
-        created,
         { id: 20, monitorId: 1, type: "numeric_gt", value: "50", groupIndex: 0, createdAt: new Date() },
+        created,
       ]);
 
       const req = makeReq("user1", {
