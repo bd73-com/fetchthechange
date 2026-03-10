@@ -117,6 +117,29 @@ export async function ensureMonitorHealthColumns(): Promise<boolean> {
  * Ensures tags and monitor_tags tables exist (added in PR #86).
  * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
  */
+/**
+ * Ensures monitor_conditions table exists.
+ * Without this, condition routes return 500 "relation monitor_conditions does not exist"
+ * if schema:push has not been run after this table was added to the schema.
+ */
+export async function ensureMonitorConditionsTable(): Promise<void> {
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS monitor_conditions (
+        id SERIAL PRIMARY KEY,
+        monitor_id INTEGER NOT NULL REFERENCES monitors(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        value TEXT NOT NULL,
+        group_index INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS monitor_conditions_monitor_idx ON monitor_conditions(monitor_id)`);
+  } catch (e) {
+    console.error("Could not ensure monitor_conditions table:", e);
+  }
+}
+
 export async function ensureTagTables(): Promise<void> {
   try {
     await db.execute(sql`
