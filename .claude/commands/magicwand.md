@@ -93,7 +93,7 @@ If SKEPTIC_COMPLETE: parse every `<discovery>` tag from the skeptic's output and
 
 - `category="blocker"` → mandatory fix. Log a FOUND entry. Fix immediately. Log the FIXED entry. Do not proceed to Phase 6 while any blocker remains unresolved. Exception: if the blocker is clearly a pre-existing bug in unrelated code, mark it as out-of-scope with `Fixed` set to `→ Bug Report (Phase 6)`.
 - `category="gotcha"` → mandatory fix. Log a FOUND entry. Fix immediately. Log the FIXED entry. Do not proceed while any gotcha remains unresolved. Exception: if the gotcha is clearly a pre-existing bug in unrelated code, mark it as out-of-scope with `Fixed` set to `→ Bug Report (Phase 6)`.
-- `category="pattern"` → apply the suggested hardening. Log a FOUND entry. Apply fix. Log the FIXED entry.
+- `category="pattern"` → apply the suggested hardening. Log a FOUND entry. Apply fix. Log the FIXED entry. Exception: if the pattern is clearly a pre-existing issue in unrelated code, mark it as out-of-scope with `Fixed` set to `→ Bug Report (Phase 6)`.
 
 After all discoveries are remediated, run:
 
@@ -128,7 +128,7 @@ If ESCALATE: print the failure banner and stop:
 
 If BUG_REPORTER_COMPLETE: parse every `<bug>` tag from the bug reporter's output and file each as a GitHub Issue:
 
-1. For each `<bug>` tag, create a GitHub Issue:
+1. For each `<bug>` tag, create a GitHub Issue. Before filing the first issue, verify that the severity labels exist (run `gh label list --repo bd73-com/fetchthechange`). If a severity label (e.g. `critical`, `high`, `medium`, `low`) does not exist, create it first with `gh label create`. Then file:
    ```bash
    gh issue create --repo bd73-com/fetchthechange \
      --title "Bug: [title from bug report]" \
@@ -147,6 +147,8 @@ If the bug reporter found bugs that it reclassified as **in-scope** (introduced 
 ```
 
 If the bug reporter found zero bugs and zero reclassifications, log `(no out-of-scope bugs found)` and proceed.
+
+**Resume note:** When resuming with `--from=6`, the orchestrator does not have the issue table from phases 1–5. If there were deferred out-of-scope findings, the user must re-provide them in the prompt (e.g. paste the issue table rows with `Fixed` set to `→ Bug Report (Phase 6)`). If no deferred findings are provided, the bug reporter runs only its independent scan.
 
 A phase is complete when all `<bug>` tags have been filed as GitHub Issues (or the summary shows zero bugs) and no in-scope reclassifications remain unresolved.
 
@@ -287,7 +289,7 @@ Rules for this report:
 - Issue numbers are sequential across all phases (not reset per phase).
 - Phase 5 Skeptic entries must include the discovery category tag (`[blocker]`, `[gotcha]`, `[pattern]`) before FOUND.
 - Phase 5 must also include the skeptic's Final Verdict line and discovery counts.
-- Phase 6 Bug Report entries use `FILED` instead of `FIXED`, with the GitHub Issue number. Include severity in brackets (`[high]`, `[medium]`, etc.) before FOUND. Include bug summary counts.
+- Phase 6 Bug Report entries use `FILED` instead of `FIXED`, with the GitHub Issue number. Include severity in brackets (`[high]`, `[medium]`, etc.) before FOUND. Include bug summary counts. Phase 6 entries with `FILED` count as resolved for the total issues found/fixed invariant check.
 - Every phase must appear even if it has no issues — print `(none)` or `(no issues)`.
 - If total issues fixed does not equal total issues found, print a warning: `⚠ WARNING: <N> issue(s) were found but not resolved.` and list them explicitly.
 - Do not omit or summarise issues — every row from the issue table must appear verbatim.

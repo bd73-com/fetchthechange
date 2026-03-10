@@ -34,7 +34,7 @@ server/storage.ts
 For each out-of-scope finding passed from the review phases, verify it is genuinely out of scope:
 
 1. **Is it caused by the current branch's changes?** If yes, it is NOT out of scope — flag it back as `in-scope` so the orchestrator can require a fix.
-2. **Does it exist on `main`?** Run `git stash && git checkout main` mentally (or check `git log main -- <file>`) to confirm the issue predates this branch.
+2. **Does it exist on `main`?** Use `git diff origin/main -- <file>` to check whether the problematic code was changed on this branch. If the code is identical on `main`, the issue predates this branch.
 3. **Is it a real bug or a style/preference issue?** Only real bugs get reports. Style issues, minor inconsistencies, and subjective preferences do not qualify.
 
 Classify each verified out-of-scope finding with a severity:
@@ -46,7 +46,7 @@ Classify each verified out-of-scope finding with a severity:
 
 ## Step 3 — Independent Scan
 
-Independently scan the areas of the codebase touched by the diff for pre-existing bugs. Focus on:
+Independently scan the areas of the codebase touched by the diff for pre-existing bugs. **Cap: file at most 5 independently discovered issues per pipeline run.** If more are found, include only the highest severity and note the remainder count in the `<bug-summary>`. Focus on:
 
 1. **Adjacent code** — functions called by or calling into the changed code
 2. **Shared modules** — utilities and services used by the changed files
@@ -88,10 +88,10 @@ documentation, or reasonable user expectations.]
 
 ## Step 5 — Check for Duplicates
 
-Before finalizing, check if any of the bugs you found already have open GitHub Issues:
+Before finalizing, check if any of the bugs you found already have open GitHub Issues. For each bug, search by keywords from its title:
 
 ```bash
-gh issue list --repo bd73-com/fetchthechange --state open --limit 100
+gh issue list --repo bd73-com/fetchthechange --state open --search "Bug: <keywords from title>"
 ```
 
 If a matching open issue exists, note it as `DUPLICATE of #<number>` and exclude it from the new issues to file.
