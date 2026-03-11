@@ -146,10 +146,18 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     }
   );
 
+  // Security headers
+  const helmet = (await import("helmet")).default;
+  app.use(helmet({
+    contentSecurityPolicy: false,  // CSP handled by Vite / static serving
+    crossOriginEmbedderPolicy: false,  // Allow embedded resources
+  }));
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
   const cors = (await import("cors")).default;
+  const { createCorsOriginChecker, SENSITIVE_LOG_PATHS } = await import("./middleware/cors");
   const allowedOrigins: string[] = [];
   if (process.env.REPLIT_DOMAINS) {
     for (const d of process.env.REPLIT_DOMAINS.split(',')) {
@@ -157,25 +165,11 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     }
   }
   const isDev = process.env.NODE_ENV !== 'production';
+  if (!process.env.CHROME_EXTENSION_ID?.trim()) {
+    console.warn('CHROME_EXTENSION_ID not set; chrome extension CORS requests will be rejected');
+  }
   app.use(cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      // Allow all chrome-extension:// origins (needed for extension popup requests)
-      if (origin.startsWith("chrome-extension://")) return callback(null, true);
-      if (isDev) {
-        try {
-          const { hostname, protocol } = new URL(origin);
-          if (
-            protocol === "http:" &&
-            (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1")
-          ) {
-            return callback(null, true);
-          }
-        } catch {}
-      }
-      callback(new Error('Not allowed by CORS'));
-    },
+    origin: createCorsOriginChecker(allowedOrigins, isDev),
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -186,7 +180,6 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   app.use("/api/", csrfProtection(allowedOrigins, isDev));
 
   // Logging Middleware
-  const SENSITIVE_LOG_PATHS = ['/api/stripe/', '/api/admin/', '/api/callback', '/api/login'];
   app.use((req, res, next) => {
     const start = Date.now();
     const path = req.path;

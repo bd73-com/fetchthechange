@@ -63,6 +63,7 @@
     "express-rate-limit": "^8.2.1",
     "express-session": "^1.19.0",
     "framer-motion": "^11.13.1",
+    "helmet": "^8.1.0",
     "input-otp": "^1.4.2",
     "jsdom": "^28.1.0",
     "lucide-react": "^0.453.0",
