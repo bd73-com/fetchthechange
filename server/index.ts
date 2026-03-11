@@ -147,11 +147,15 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   );
 
   // Security headers
-  const helmet = (await import("helmet")).default;
-  app.use(helmet({
-    contentSecurityPolicy: false,  // CSP handled by Vite / static serving
-    crossOriginEmbedderPolicy: false,  // Allow embedded resources
-  }));
+  try {
+    const helmet = (await import("helmet")).default;
+    app.use(helmet({
+      contentSecurityPolicy: false,  // CSP handled by Vite / static serving
+      crossOriginEmbedderPolicy: false,  // Allow embedded resources
+    }));
+  } catch {
+    console.warn("helmet not available — skipping security headers middleware");
+  }
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
