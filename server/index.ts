@@ -157,6 +157,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   app.use(express.urlencoded({ extended: false }));
 
   const cors = (await import("cors")).default;
+  const { createCorsOriginChecker, SENSITIVE_LOG_PATHS } = await import("./middleware/cors");
   const allowedOrigins: string[] = [];
   if (process.env.REPLIT_DOMAINS) {
     for (const d of process.env.REPLIT_DOMAINS.split(',')) {
@@ -165,24 +166,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   }
   const isDev = process.env.NODE_ENV !== 'production';
   app.use(cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      // Allow the specific Chrome extension origin (set CHROME_EXTENSION_ID env var)
-      if (process.env.CHROME_EXTENSION_ID && origin === `chrome-extension://${process.env.CHROME_EXTENSION_ID}`) return callback(null, true);
-      if (isDev) {
-        try {
-          const { hostname, protocol } = new URL(origin);
-          if (
-            protocol === "http:" &&
-            (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1")
-          ) {
-            return callback(null, true);
-          }
-        } catch {}
-      }
-      callback(new Error('Not allowed by CORS'));
-    },
+    origin: createCorsOriginChecker(allowedOrigins, isDev),
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -193,7 +177,6 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   app.use("/api/", csrfProtection(allowedOrigins, isDev));
 
   // Logging Middleware
-  const SENSITIVE_LOG_PATHS = ['/api/stripe/', '/api/admin/', '/api/callback', '/api/login', '/api/keys'];
   app.use((req, res, next) => {
     const start = Date.now();
     const path = req.path;
