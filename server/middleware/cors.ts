@@ -16,9 +16,13 @@ export function createCorsOriginChecker(allowedOrigins: string[], isDev: boolean
     if (isDev) {
       try {
         const { hostname, protocol } = new URL(origin);
+        const normalizedHostname =
+          hostname.startsWith("[") && hostname.endsWith("]")
+            ? hostname.slice(1, -1)
+            : hostname;
         if (
           protocol === "http:" &&
-          (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1")
+          (normalizedHostname === "localhost" || normalizedHostname === "127.0.0.1" || normalizedHostname === "::1")
         ) {
           return callback(null, true);
         }

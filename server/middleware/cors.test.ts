@@ -100,6 +100,13 @@ describe("createCorsOriginChecker", () => {
       expect(result.err).toBeInstanceOf(Error);
     });
 
+    it("allows IPv6 localhost [::1] in dev mode", async () => {
+      const checker = createCorsOriginChecker(allowedOrigins, true);
+      const result = await callChecker(checker, "http://[::1]:5173");
+      expect(result.err).toBeNull();
+      expect(result.allow).toBe(true);
+    });
+
     it("rejects https localhost in dev mode (only http allowed)", async () => {
       const checker = createCorsOriginChecker(allowedOrigins, true);
       const result = await callChecker(checker, "https://localhost:5173");
