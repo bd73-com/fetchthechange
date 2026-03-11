@@ -11,7 +11,8 @@ export function createCorsOriginChecker(allowedOrigins: string[], isDev: boolean
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     // Allow the specific Chrome extension origin (set CHROME_EXTENSION_ID env var)
-    if (process.env.CHROME_EXTENSION_ID && origin === `chrome-extension://${process.env.CHROME_EXTENSION_ID}`) return callback(null, true);
+    const extId = process.env.CHROME_EXTENSION_ID?.trim();
+    if (extId && origin === `chrome-extension://${extId}`) return callback(null, true);
     if (isDev) {
       try {
         const { hostname, protocol } = new URL(origin);

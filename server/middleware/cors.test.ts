@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { createCorsOriginChecker, SENSITIVE_LOG_PATHS } from "./cors";
 
 function callChecker(
@@ -68,6 +68,14 @@ describe("createCorsOriginChecker", () => {
       const checker = createCorsOriginChecker(allowedOrigins, false);
       const result = await callChecker(checker, "chrome-extension://anything");
       expect(result.err).toBeInstanceOf(Error);
+    });
+
+    it("trims whitespace from CHROME_EXTENSION_ID", async () => {
+      process.env.CHROME_EXTENSION_ID = "  abcdef1234567890  ";
+      const checker = createCorsOriginChecker(allowedOrigins, false);
+      const result = await callChecker(checker, "chrome-extension://abcdef1234567890");
+      expect(result.err).toBeNull();
+      expect(result.allow).toBe(true);
     });
   });
 
