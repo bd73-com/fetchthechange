@@ -146,6 +146,13 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     }
   );
 
+  // Security headers
+  const helmet = (await import("helmet")).default;
+  app.use(helmet({
+    contentSecurityPolicy: false,  // CSP handled by Vite / static serving
+    crossOriginEmbedderPolicy: false,  // Allow embedded resources
+  }));
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
@@ -161,8 +168,8 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      // Allow all chrome-extension:// origins (needed for extension popup requests)
-      if (origin.startsWith("chrome-extension://")) return callback(null, true);
+      // Allow the specific Chrome extension origin (set CHROME_EXTENSION_ID env var)
+      if (process.env.CHROME_EXTENSION_ID && origin === `chrome-extension://${process.env.CHROME_EXTENSION_ID}`) return callback(null, true);
       if (isDev) {
         try {
           const { hostname, protocol } = new URL(origin);
@@ -186,7 +193,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   app.use("/api/", csrfProtection(allowedOrigins, isDev));
 
   // Logging Middleware
-  const SENSITIVE_LOG_PATHS = ['/api/stripe/', '/api/admin/', '/api/callback', '/api/login'];
+  const SENSITIVE_LOG_PATHS = ['/api/stripe/', '/api/admin/', '/api/callback', '/api/login', '/api/keys'];
   app.use((req, res, next) => {
     const start = Date.now();
     const path = req.path;
