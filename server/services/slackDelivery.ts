@@ -70,6 +70,40 @@ function buildBlockKitMessage(monitor: Monitor, change: MonitorChange) {
   };
 }
 
+async function postMessage(
+  channelId: string,
+  botToken: string,
+  message: Record<string, unknown>
+): Promise<{ ok: boolean; error?: string; ts?: string }> {
+  const response = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${botToken}`,
+    },
+    body: JSON.stringify({
+      channel: channelId,
+      ...message,
+    }),
+  });
+  return response.json() as Promise<{ ok: boolean; error?: string; ts?: string }>;
+}
+
+async function joinChannel(
+  channelId: string,
+  botToken: string
+): Promise<{ ok: boolean; error?: string }> {
+  const response = await fetch("https://slack.com/api/conversations.join", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${botToken}`,
+    },
+    body: JSON.stringify({ channel: channelId }),
+  });
+  return response.json() as Promise<{ ok: boolean; error?: string }>;
+}
+
 export async function deliver(
   monitor: Monitor,
   change: MonitorChange,
@@ -79,19 +113,20 @@ export async function deliver(
   const message = buildBlockKitMessage(monitor, change);
 
   try {
-    const response = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${botToken}`,
-      },
-      body: JSON.stringify({
-        channel: channelId,
-        ...message,
-      }),
-    });
+    let data = await postMessage(channelId, botToken, message);
 
-    const data = await response.json() as { ok: boolean; error?: string; ts?: string };
+    if (!data.ok && data.error === "not_in_channel") {
+      console.log(`[Slack] Bot not in channel ${channelId}, attempting to join...`);
+      const joinResult = await joinChannel(channelId, botToken);
+
+      if (joinResult.ok) {
+        console.log(`[Slack] Joined channel ${channelId}, retrying message...`);
+        data = await postMessage(channelId, botToken, message);
+      } else {
+        console.warn(`[Slack] Failed to join channel ${channelId} (error=${joinResult.error})`);
+        return { success: false, error: joinResult.error || "Failed to join channel" };
+      }
+    }
 
     if (data.ok) {
       console.log(`[Slack] Message posted (monitorId=${monitor.id}, channel=${channelId})`);

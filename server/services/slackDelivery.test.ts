@@ -98,6 +98,43 @@ describe("slackDelivery", () => {
       expect(result.error).toBe("channel_not_found");
     });
 
+    it("auto-joins channel on not_in_channel and retries successfully", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: true }),
+        })
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: true, ts: "9999.0001" }),
+        });
+
+      const result = await deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+      expect(result.success).toBe(true);
+      expect(result.slackTs).toBe("9999.0001");
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+      expect(mockFetch.mock.calls[0][0]).toBe("https://slack.com/api/chat.postMessage");
+      expect(mockFetch.mock.calls[1][0]).toBe("https://slack.com/api/conversations.join");
+      expect(mockFetch.mock.calls[2][0]).toBe("https://slack.com/api/chat.postMessage");
+    });
+
+    it("returns error when auto-join fails (e.g. private channel)", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: false, error: "method_not_supported_for_channel_type" }),
+        });
+
+      const result = await deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("method_not_supported_for_channel_type");
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
     it("handles network error", async () => {
       mockFetch.mockRejectedValue(new Error("Network failure"));
 
