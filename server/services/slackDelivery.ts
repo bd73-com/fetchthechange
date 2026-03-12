@@ -85,6 +85,7 @@ async function postMessage(
       channel: channelId,
       ...message,
     }),
+    signal: AbortSignal.timeout(10_000),
   });
   return response.json() as Promise<{ ok: boolean; error?: string; ts?: string }>;
 }
@@ -100,6 +101,7 @@ async function joinChannel(
       Authorization: `Bearer ${botToken}`,
     },
     body: JSON.stringify({ channel: channelId }),
+    signal: AbortSignal.timeout(10_000),
   });
   return response.json() as Promise<{ ok: boolean; error?: string }>;
 }
@@ -149,6 +151,7 @@ export async function listChannels(botToken: string): Promise<SlackChannel[]> {
       headers: {
         Authorization: `Bearer ${botToken}`,
       },
+      signal: AbortSignal.timeout(10_000),
     }
   );
 
