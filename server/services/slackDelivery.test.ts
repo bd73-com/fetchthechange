@@ -243,6 +243,46 @@ describe("slackDelivery", () => {
       expect(joinCalls).toHaveLength(1);
     });
 
+    it("does not deduplicate joins across different bot tokens", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: true }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: true }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, ts: "1111" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, ts: "2222" }),
+        });
+
+      const [result1, result2] = await Promise.all([
+        deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token-A"),
+        deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token-B"),
+      ]);
+
+      expect(result1.success).toBe(true);
+      expect(result2.success).toBe(true);
+      const joinCalls = mockFetch.mock.calls.filter(
+        (c) => c[0] === "https://slack.com/api/conversations.join"
+      );
+      expect(joinCalls).toHaveLength(2);
+    });
+
     it("returns error when auto-join fails (e.g. private channel)", async () => {
       mockFetch
         .mockResolvedValueOnce({
@@ -295,6 +335,17 @@ describe("slackDelivery", () => {
       });
 
       await expect(listChannels("bad-token")).rejects.toThrow("Slack API error: invalid_auth");
+    });
+
+    it("throws on HTTP failure with status code", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 502,
+      });
+
+      await expect(listChannels("xoxb-token")).rejects.toThrow("slack_http_502");
+      const fetchCall = mockFetch.mock.calls[0];
+      expect(fetchCall[1].signal).toBeInstanceOf(AbortSignal);
     });
 
     it("returns empty array when channels key is missing from response", async () => {
