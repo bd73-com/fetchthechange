@@ -138,9 +138,9 @@ export async function deliver(
     console.warn(`[Slack] Delivery failed (monitorId=${monitor.id}, channelId=${channelId}, error=${data.error})`);
     return { success: false, error: data.error || "Unknown Slack API error" };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[Slack] Delivery failed (monitorId=${monitor.id}, channelId=${channelId}, error=${message})`);
-    return { success: false, error: message };
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Slack] Delivery failed (monitorId=${monitor.id}, channelId=${channelId}, error=${errMsg})`);
+    return { success: false, error: errMsg };
   }
 }
 
