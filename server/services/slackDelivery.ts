@@ -1,5 +1,8 @@
 import type { Monitor, MonitorChange } from "@shared/schema";
 
+// In-flight join promises keyed by channelId to avoid concurrent join storms
+const pendingJoins = new Map<string, Promise<{ ok: boolean; error?: string }>>();
+
 export interface SlackDeliveryResult {
   success: boolean;
   error?: string;
@@ -87,6 +90,9 @@ async function postMessage(
     }),
     signal: AbortSignal.timeout(10_000),
   });
+  if (!response.ok) {
+    return { ok: false, error: `slack_http_${response.status}` };
+  }
   return response.json() as Promise<{ ok: boolean; error?: string; ts?: string }>;
 }
 
@@ -103,6 +109,9 @@ async function joinChannel(
     body: JSON.stringify({ channel: channelId }),
     signal: AbortSignal.timeout(10_000),
   });
+  if (!response.ok) {
+    return { ok: false, error: `slack_http_${response.status}` };
+  }
   return response.json() as Promise<{ ok: boolean; error?: string }>;
 }
 
@@ -119,7 +128,15 @@ export async function deliver(
 
     if (!data.ok && data.error === "not_in_channel") {
       console.log(`[Slack] Bot not in channel ${channelId}, attempting to join...`);
-      const joinResult = await joinChannel(channelId, botToken);
+
+      let joinPromise = pendingJoins.get(channelId);
+      if (!joinPromise) {
+        joinPromise = joinChannel(channelId, botToken);
+        pendingJoins.set(channelId, joinPromise);
+        const cleanup = () => pendingJoins.delete(channelId);
+        joinPromise.then(cleanup, cleanup);
+      }
+      const joinResult = await joinPromise;
 
       if (joinResult.ok) {
         console.log(`[Slack] Joined channel ${channelId}, retrying message...`);
@@ -154,6 +171,10 @@ export async function listChannels(botToken: string): Promise<SlackChannel[]> {
       signal: AbortSignal.timeout(10_000),
     }
   );
+
+  if (!response.ok) {
+    throw new Error(`Slack API error: slack_http_${response.status}`);
+  }
 
   const data = await response.json() as {
     ok: boolean;

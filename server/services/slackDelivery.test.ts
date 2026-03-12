@@ -47,6 +47,7 @@ describe("slackDelivery", () => {
   describe("deliver", () => {
     it("posts message successfully", async () => {
       mockFetch.mockResolvedValue({
+        ok: true,
         json: () => Promise.resolve({ ok: true, ts: "1234567890.123456" }),
       });
 
@@ -57,6 +58,7 @@ describe("slackDelivery", () => {
 
     it("sends correct headers and body", async () => {
       mockFetch.mockResolvedValue({
+        ok: true,
         json: () => Promise.resolve({ ok: true }),
       });
 
@@ -74,8 +76,32 @@ describe("slackDelivery", () => {
       expect(body.blocks.length).toBeGreaterThan(0);
     });
 
+    it("passes AbortSignal timeout to fetch", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      });
+
+      await deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+
+      const options = mockFetch.mock.calls[0][1];
+      expect(options.signal).toBeDefined();
+    });
+
+    it("returns clean error on HTTP 502 from Slack", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 502,
+      });
+
+      const result = await deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("slack_http_502");
+    });
+
     it("includes Block Kit sections for monitor data", async () => {
       mockFetch.mockResolvedValue({
+        ok: true,
         json: () => Promise.resolve({ ok: true }),
       });
 
@@ -90,6 +116,7 @@ describe("slackDelivery", () => {
 
     it("handles Slack API error", async () => {
       mockFetch.mockResolvedValue({
+        ok: true,
         json: () => Promise.resolve({ ok: false, error: "channel_not_found" }),
       });
 
@@ -101,12 +128,15 @@ describe("slackDelivery", () => {
     it("auto-joins channel on not_in_channel and retries successfully", async () => {
       mockFetch
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
         })
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: true }),
         })
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: true, ts: "9999.0001" }),
         });
 
@@ -123,12 +153,15 @@ describe("slackDelivery", () => {
     it("returns error when retry after auto-join still fails", async () => {
       mockFetch
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
         })
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: true }),
         })
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: false, error: "token_revoked" }),
         });
 
@@ -141,12 +174,15 @@ describe("slackDelivery", () => {
     it("sends correct channel and token in conversations.join call", async () => {
       mockFetch
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
         })
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: true }),
         })
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: true, ts: "1111.2222" }),
         });
 
@@ -161,6 +197,7 @@ describe("slackDelivery", () => {
     it("catches network error during join attempt", async () => {
       mockFetch
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
         })
         .mockRejectedValueOnce(new Error("Connection reset"));
@@ -173,9 +210,11 @@ describe("slackDelivery", () => {
     it("returns error when auto-join fails (e.g. private channel)", async () => {
       mockFetch
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
         })
         .mockResolvedValueOnce({
+          ok: true,
           json: () => Promise.resolve({ ok: false, error: "method_not_supported_for_channel_type" }),
         });
 
@@ -197,6 +236,7 @@ describe("slackDelivery", () => {
   describe("listChannels", () => {
     it("returns channel list", async () => {
       mockFetch.mockResolvedValue({
+        ok: true,
         json: () => Promise.resolve({
           ok: true,
           channels: [
@@ -214,6 +254,7 @@ describe("slackDelivery", () => {
 
     it("throws on Slack API error", async () => {
       mockFetch.mockResolvedValue({
+        ok: true,
         json: () => Promise.resolve({ ok: false, error: "invalid_auth" }),
       });
 
@@ -222,6 +263,7 @@ describe("slackDelivery", () => {
 
     it("returns empty array when channels key is missing from response", async () => {
       mockFetch.mockResolvedValue({
+        ok: true,
         json: () => Promise.resolve({ ok: true }),
       });
 
@@ -231,6 +273,7 @@ describe("slackDelivery", () => {
 
     it("returns empty array when channels is empty", async () => {
       mockFetch.mockResolvedValue({
+        ok: true,
         json: () => Promise.resolve({ ok: true, channels: [] }),
       });
 
@@ -242,6 +285,7 @@ describe("slackDelivery", () => {
   describe("deliver edge cases", () => {
     it("handles null oldValue and newValue", async () => {
       mockFetch.mockResolvedValue({
+        ok: true,
         json: () => Promise.resolve({ ok: true }),
       });
 
@@ -260,6 +304,7 @@ describe("slackDelivery", () => {
 
     it("handles missing error field in Slack response", async () => {
       mockFetch.mockResolvedValue({
+        ok: true,
         json: () => Promise.resolve({ ok: false }),
       });
 
