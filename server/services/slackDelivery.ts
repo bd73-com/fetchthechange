@@ -1,5 +1,8 @@
 import type { Monitor, MonitorChange } from "@shared/schema";
 
+// In-flight join promises keyed by botToken:channelId to avoid concurrent join storms
+const pendingJoins = new Map<string, Promise<{ ok: boolean; error?: string }>>();
+
 export interface SlackDeliveryResult {
   success: boolean;
   error?: string;
@@ -35,7 +38,7 @@ function buildBlockKitMessage(monitor: Monitor, change: MonitorChange) {
           },
           {
             type: "mrkdwn",
-            text: `*Detected at:*\n${change.detectedAt.toISOString()}`,
+            text: `*Detected at:*\n${change.detectedAt.toLocaleString("en-GB", { timeZone: "Europe/Berlin", timeZoneName: "short", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}`,
           },
         ],
       },
@@ -70,6 +73,48 @@ function buildBlockKitMessage(monitor: Monitor, change: MonitorChange) {
   };
 }
 
+async function postMessage(
+  channelId: string,
+  botToken: string,
+  message: Record<string, unknown>
+): Promise<{ ok: boolean; error?: string; ts?: string }> {
+  const response = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${botToken}`,
+    },
+    body: JSON.stringify({
+      channel: channelId,
+      ...message,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    return { ok: false, error: `slack_http_${response.status}` };
+  }
+  return response.json() as Promise<{ ok: boolean; error?: string; ts?: string }>;
+}
+
+async function joinChannel(
+  channelId: string,
+  botToken: string
+): Promise<{ ok: boolean; error?: string }> {
+  const response = await fetch("https://slack.com/api/conversations.join", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${botToken}`,
+    },
+    body: JSON.stringify({ channel: channelId }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    return { ok: false, error: `slack_http_${response.status}` };
+  }
+  return response.json() as Promise<{ ok: boolean; error?: string }>;
+}
+
 export async function deliver(
   monitor: Monitor,
   change: MonitorChange,
@@ -79,19 +124,29 @@ export async function deliver(
   const message = buildBlockKitMessage(monitor, change);
 
   try {
-    const response = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${botToken}`,
-      },
-      body: JSON.stringify({
-        channel: channelId,
-        ...message,
-      }),
-    });
+    let data = await postMessage(channelId, botToken, message);
 
-    const data = await response.json() as { ok: boolean; error?: string; ts?: string };
+    if (!data.ok && data.error === "not_in_channel") {
+      console.log(`[Slack] Bot not in channel ${channelId}, attempting to join...`);
+
+      const joinKey = `${botToken}:${channelId}`;
+      let joinPromise = pendingJoins.get(joinKey);
+      if (!joinPromise) {
+        joinPromise = joinChannel(channelId, botToken);
+        pendingJoins.set(joinKey, joinPromise);
+        const cleanup = () => pendingJoins.delete(joinKey);
+        joinPromise.then(cleanup, cleanup);
+      }
+      const joinResult = await joinPromise;
+
+      if (joinResult.ok) {
+        console.log(`[Slack] Joined channel ${channelId}, retrying message...`);
+        data = await postMessage(channelId, botToken, message);
+      } else {
+        console.warn(`[Slack] Failed to join channel ${channelId} (error=${joinResult.error})`);
+        return { success: false, error: joinResult.error || "Failed to join channel" };
+      }
+    }
 
     if (data.ok) {
       console.log(`[Slack] Message posted (monitorId=${monitor.id}, channel=${channelId})`);
@@ -101,9 +156,9 @@ export async function deliver(
     console.warn(`[Slack] Delivery failed (monitorId=${monitor.id}, channelId=${channelId}, error=${data.error})`);
     return { success: false, error: data.error || "Unknown Slack API error" };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[Slack] Delivery failed (monitorId=${monitor.id}, channelId=${channelId}, error=${message})`);
-    return { success: false, error: message };
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Slack] Delivery failed (monitorId=${monitor.id}, channelId=${channelId}, error=${errMsg})`);
+    return { success: false, error: errMsg };
   }
 }
 
@@ -114,8 +169,13 @@ export async function listChannels(botToken: string): Promise<SlackChannel[]> {
       headers: {
         Authorization: `Bearer ${botToken}`,
       },
+      signal: AbortSignal.timeout(10_000),
     }
   );
+
+  if (!response.ok) {
+    throw new Error(`Slack API error: slack_http_${response.status}`);
+  }
 
   const data = await response.json() as {
     ok: boolean;
