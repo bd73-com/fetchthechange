@@ -16,6 +16,12 @@ export default defineConfig({
     include: ["**/*.test.ts", "**/*.test.tsx"],
     exclude: ["node_modules", "dist", ".cache"],
     setupFiles: ["./client/src/test/setup.ts"],
+    pool: "forks",
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
     server: {
       deps: {
         inline: ["@testing-library/jest-dom"],
