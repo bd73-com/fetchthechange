@@ -29,16 +29,20 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   const app = express();
   const httpServer = createServer(app);
 
-  // Security headers — helmet is mandatory; refuse to start without it
+  // Security headers — helmet is bundled in production builds;
+  // in dev mode it may fail to resolve, so degrade gracefully.
   try {
     const helmet = (await import("helmet")).default;
     app.use(helmet({
       contentSecurityPolicy: false,  // CSP handled by Vite / static serving
       crossOriginEmbedderPolicy: false,  // Allow embedded resources
     }));
-  } catch (err) {
-    console.error("FATAL: helmet failed to load — refusing to start without security headers", err);
-    process.exit(1);
+  } catch {
+    if (process.env.NODE_ENV === "production") {
+      console.error("FATAL: helmet failed to load in production — refusing to start without security headers");
+      process.exit(1);
+    }
+    console.warn("WARNING: helmet not available — security headers disabled (dev mode)");
   }
 
   // Initialize Stripe schema and sync
