@@ -19,6 +19,7 @@ export interface IStorage {
   updateLastHealthyAt(monitorId: number): Promise<void>;
 
   getMonitorChanges(monitorId: number): Promise<MonitorChange[]>;
+  getMonitorChangesByIds(changeIds: number[]): Promise<MonitorChange[]>;
   addMonitorChange(monitorId: number, oldValue: string | null, newValue: string | null): Promise<MonitorChange>;
 
   getAllActiveMonitors(): Promise<Monitor[]>;
@@ -126,6 +127,13 @@ export class DatabaseStorage implements IStorage {
       .from(monitorChanges)
       .where(eq(monitorChanges.monitorId, monitorId))
       .orderBy(desc(monitorChanges.detectedAt));
+  }
+
+  async getMonitorChangesByIds(changeIds: number[]): Promise<MonitorChange[]> {
+    if (changeIds.length === 0) return [];
+    return await db.select()
+      .from(monitorChanges)
+      .where(inArray(monitorChanges.id, changeIds));
   }
 
   async addMonitorChange(monitorId: number, oldValue: string | null, newValue: string | null): Promise<MonitorChange> {

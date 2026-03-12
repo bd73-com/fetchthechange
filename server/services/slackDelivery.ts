@@ -93,7 +93,33 @@ async function postMessage(
   if (!response.ok) {
     return { ok: false, error: `slack_http_${response.status}` };
   }
-  return response.json() as Promise<{ ok: boolean; error?: string; ts?: string }>;
+  const data = await response.json() as { ok: boolean; error?: string; ts?: string };
+
+  // Handle rate limiting: retry once after the Retry-After delay (up to 5s)
+  if (!data.ok && data.error === "ratelimited") {
+    const retryAfter = Number(response.headers.get("Retry-After") || "1");
+    const delay = Math.min(retryAfter, 5) * 1000;
+    console.log(`[Slack] Rate limited, retrying after ${delay}ms`);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    const retryResponse = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${botToken}`,
+      },
+      body: JSON.stringify({
+        channel: channelId,
+        ...message,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!retryResponse.ok) {
+      return { ok: false, error: `slack_http_${retryResponse.status}` };
+    }
+    return retryResponse.json() as Promise<{ ok: boolean; error?: string; ts?: string }>;
+  }
+
+  return data;
 }
 
 async function joinChannel(
@@ -163,29 +189,55 @@ export async function deliver(
 }
 
 export async function listChannels(botToken: string): Promise<SlackChannel[]> {
-  const response = await fetch(
-    "https://slack.com/api/conversations.list?types=public_channel,private_channel&exclude_archived=true&limit=1000",
-    {
-      headers: {
-        Authorization: `Bearer ${botToken}`,
-      },
-      signal: AbortSignal.timeout(10_000),
+  const allChannels: SlackChannel[] = [];
+  let cursor: string | undefined;
+  // Safety limit to avoid infinite loops
+  const maxPages = 10;
+
+  for (let page = 0; page < maxPages; page++) {
+    const params = new URLSearchParams({
+      types: "public_channel,private_channel",
+      exclude_archived: "true",
+      limit: "1000",
+    });
+    if (cursor) {
+      params.set("cursor", cursor);
     }
-  );
 
-  if (!response.ok) {
-    throw new Error(`Slack API error: slack_http_${response.status}`);
+    const response = await fetch(
+      `https://slack.com/api/conversations.list?${params}`,
+      {
+        headers: {
+          Authorization: `Bearer ${botToken}`,
+        },
+        signal: AbortSignal.timeout(10_000),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Slack API error: slack_http_${response.status}`);
+    }
+
+    const data = await response.json() as {
+      ok: boolean;
+      error?: string;
+      channels?: Array<{ id: string; name: string }>;
+      response_metadata?: { next_cursor?: string };
+    };
+
+    if (!data.ok) {
+      throw new Error(`Slack API error: ${data.error}`);
+    }
+
+    for (const c of data.channels || []) {
+      allChannels.push({ id: c.id, name: c.name });
+    }
+
+    cursor = data.response_metadata?.next_cursor;
+    if (!cursor) {
+      break;
+    }
   }
 
-  const data = await response.json() as {
-    ok: boolean;
-    error?: string;
-    channels?: Array<{ id: string; name: string }>;
-  };
-
-  if (!data.ok) {
-    throw new Error(`Slack API error: ${data.error}`);
-  }
-
-  return (data.channels || []).map((c) => ({ id: c.id, name: c.name }));
+  return allChannels;
 }

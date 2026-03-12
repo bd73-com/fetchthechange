@@ -473,15 +473,8 @@ export async function processDigestBatch(
     return null;
   }
 
-  const allChanges = await storage.getMonitorChanges(monitor.id);
-  const changesById = new Map(allChanges.map((c) => [c.id, c]));
-  const changes: MonitorChange[] = [];
-  for (const entry of entries) {
-    const change = changesById.get(entry.changeId);
-    if (change) {
-      changes.push(change);
-    }
-  }
+  const changeIds = entries.map((e) => e.changeId);
+  const changes = await storage.getMonitorChangesByIds(changeIds);
 
   if (changes.length === 0) {
     return null;
@@ -526,8 +519,9 @@ export async function processQueuedNotifications(): Promise<void> {
         continue;
       }
 
-      const allChanges = await storage.getMonitorChanges(monitorId);
-      const changesById = new Map(allChanges.map((c) => [c.id, c]));
+      const changeIds = entries.map((e) => e.changeId);
+      const fetchedChanges = await storage.getMonitorChangesByIds(changeIds);
+      const changesById = new Map(fetchedChanges.map((c) => [c.id, c]));
       const emailOverride = prefs?.notificationEmail || undefined;
 
       for (const entry of entries) {
