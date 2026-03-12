@@ -16,6 +16,8 @@ export default defineConfig({
     include: ["**/*.test.ts", "**/*.test.tsx"],
     exclude: ["node_modules", "dist", ".cache"],
     setupFiles: ["./client/src/test/setup.ts"],
+    pool: "forks",
+    maxWorkers: 1,
     server: {
       deps: {
         inline: ["@testing-library/jest-dom"],
