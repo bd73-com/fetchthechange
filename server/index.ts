@@ -29,6 +29,18 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   const app = express();
   const httpServer = createServer(app);
 
+  // Security headers — helmet is mandatory; refuse to start without it
+  try {
+    const helmet = (await import("helmet")).default;
+    app.use(helmet({
+      contentSecurityPolicy: false,  // CSP handled by Vite / static serving
+      crossOriginEmbedderPolicy: false,  // Allow embedded resources
+    }));
+  } catch (err) {
+    console.error("FATAL: helmet failed to load — refusing to start without security headers", err);
+    process.exit(1);
+  }
+
   // Initialize Stripe schema and sync
   async function initStripe() {
     const databaseUrl = process.env.DATABASE_URL;
@@ -145,13 +157,6 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       }
     }
   );
-
-  // Security headers
-  const helmet = (await import("helmet")).default;
-  app.use(helmet({
-    contentSecurityPolicy: false,  // CSP handled by Vite / static serving
-    crossOriginEmbedderPolicy: false,  // Allow embedded resources
-  }));
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
