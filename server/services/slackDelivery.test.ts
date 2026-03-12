@@ -120,6 +120,56 @@ describe("slackDelivery", () => {
       expect(mockFetch.mock.calls[2][0]).toBe("https://slack.com/api/chat.postMessage");
     });
 
+    it("returns error when retry after auto-join still fails", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: true }),
+        })
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: false, error: "token_revoked" }),
+        });
+
+      const result = await deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("token_revoked");
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("sends correct channel and token in conversations.join call", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: true }),
+        })
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: true, ts: "1111.2222" }),
+        });
+
+      await deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+
+      const [joinUrl, joinOpts] = mockFetch.mock.calls[1];
+      expect(joinUrl).toBe("https://slack.com/api/conversations.join");
+      expect(joinOpts.headers.Authorization).toBe("Bearer xoxb-token");
+      expect(JSON.parse(joinOpts.body)).toEqual({ channel: "C0123" });
+    });
+
+    it("catches network error during join attempt", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        .mockRejectedValueOnce(new Error("Connection reset"));
+
+      const result = await deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Connection reset");
+    });
+
     it("returns error when auto-join fails (e.g. private channel)", async () => {
       mockFetch
         .mockResolvedValueOnce({
