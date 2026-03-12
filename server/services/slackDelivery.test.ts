@@ -207,6 +207,42 @@ describe("slackDelivery", () => {
       expect(result.error).toBe("Connection reset");
     });
 
+    it("deduplicates concurrent join attempts for the same channel", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: true }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, ts: "1111" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, ts: "2222" }),
+        });
+
+      const [result1, result2] = await Promise.all([
+        deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token"),
+        deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token"),
+      ]);
+
+      expect(result1.success).toBe(true);
+      expect(result2.success).toBe(true);
+      const joinCalls = mockFetch.mock.calls.filter(
+        (c) => c[0] === "https://slack.com/api/conversations.join"
+      );
+      expect(joinCalls).toHaveLength(1);
+    });
+
     it("returns error when auto-join fails (e.g. private channel)", async () => {
       mockFetch
         .mockResolvedValueOnce({

@@ -1,6 +1,6 @@
 import type { Monitor, MonitorChange } from "@shared/schema";
 
-// In-flight join promises keyed by channelId to avoid concurrent join storms
+// In-flight join promises keyed by botToken:channelId to avoid concurrent join storms
 const pendingJoins = new Map<string, Promise<{ ok: boolean; error?: string }>>();
 
 export interface SlackDeliveryResult {
@@ -38,7 +38,7 @@ function buildBlockKitMessage(monitor: Monitor, change: MonitorChange) {
           },
           {
             type: "mrkdwn",
-            text: `*Detected at:*\n${change.detectedAt.toLocaleString("en-GB", { timeZone: "Europe/Berlin", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })} CET`,
+            text: `*Detected at:*\n${change.detectedAt.toLocaleString("en-GB", { timeZone: "Europe/Berlin", timeZoneName: "short", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}`,
           },
         ],
       },
@@ -129,11 +129,12 @@ export async function deliver(
     if (!data.ok && data.error === "not_in_channel") {
       console.log(`[Slack] Bot not in channel ${channelId}, attempting to join...`);
 
-      let joinPromise = pendingJoins.get(channelId);
+      const joinKey = `${botToken}:${channelId}`;
+      let joinPromise = pendingJoins.get(joinKey);
       if (!joinPromise) {
         joinPromise = joinChannel(channelId, botToken);
-        pendingJoins.set(channelId, joinPromise);
-        const cleanup = () => pendingJoins.delete(channelId);
+        pendingJoins.set(joinKey, joinPromise);
+        const cleanup = () => pendingJoins.delete(joinKey);
         joinPromise.then(cleanup, cleanup);
       }
       const joinResult = await joinPromise;
