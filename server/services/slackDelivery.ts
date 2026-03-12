@@ -38,7 +38,7 @@ function buildBlockKitMessage(monitor: Monitor, change: MonitorChange) {
           },
           {
             type: "mrkdwn",
-            text: `*Detected at:*\n${change.detectedAt.toISOString()}`,
+            text: `*Detected at:*\n${change.detectedAt.toLocaleString("en-GB", { timeZone: "Europe/Berlin", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })} CET`,
           },
         ],
       },
