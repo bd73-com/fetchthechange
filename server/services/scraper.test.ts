@@ -4157,8 +4157,10 @@ describe("checkMonitor outer catch resilience", () => {
     expect(result.changed).toBe(true);
     expect(result.currentValue).toBe("$29.99");
     expect(result.error).toBeNull();
-    // addMonitorChange should have been called on the retry path
+    // No-duplicate guarantee: addMonitorChange and processChangeNotification called exactly once
     expect(mockStorage.addMonitorChange).toHaveBeenCalledWith(1, "$19.99", "$29.99");
+    expect(mockStorage.addMonitorChange).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(processChangeNotification)).toHaveBeenCalledTimes(1);
   });
 
   it("logs extractedValue and previousValue when both save attempts fail", async () => {
@@ -4174,6 +4176,9 @@ describe("checkMonitor outer catch resilience", () => {
     const monitor = makeMonitor({ currentValue: "$39.99" });
     const result = await runWithTimers(monitor);
 
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$49.99");
+    expect(result.changed).toBe(true);
     expect(result.error).toContain("server error prevented saving");
     // Verify enhanced logging includes extracted and previous values
     expect(ErrorLogger.error).toHaveBeenCalledWith(

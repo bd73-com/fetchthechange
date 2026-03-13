@@ -47,13 +47,17 @@ export async function startScheduler() {
   // the scheduler may start before routes finish or the routes call may have
   // failed due to a transient DB error. Use a timeout so a hung DB connection
   // doesn't block scheduler startup indefinitely.
-  await Promise.race([
+  const tableReady = await Promise.race([
     ensureMonitorConditionsTable(),
     new Promise<boolean>(resolve => setTimeout(() => {
       console.warn("[Scheduler] ensureMonitorConditionsTable timed out after 10s — continuing startup");
       resolve(false);
     }, 10000)),
   ]);
+  if (!tableReady) {
+    // Retry in background so table/index creation can complete
+    setTimeout(() => ensureMonitorConditionsTable().catch(() => {}), 30000);
+  }
 
   // One-time cleanup of polluted values from legacy data
   await storage.cleanupPollutedValues();

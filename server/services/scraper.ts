@@ -1292,12 +1292,15 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       }
 
       if (saveFailed) {
+        // Mark for accelerated retry so the scheduler rechecks sooner than the
+        // normal hourly/daily interval (uses the same backoff as Browserless failures).
+        monitorsNeedingRetry.add(monitor.id);
         return {
           changed,
           currentValue: newValue,
           previousValue: oldValue,
           status: "ok" as const,
-          error: "Check succeeded but a server error prevented saving the result. It will be retried automatically."
+          error: "Check succeeded but a server error prevented saving the result. Marked for accelerated retry."
         };
       }
 
