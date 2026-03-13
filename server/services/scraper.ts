@@ -19,7 +19,7 @@ import { eq, sql } from "drizzle-orm";
 export const monitorsNeedingRetry = new Set<number>();
 
 /** Pool of modern User-Agent profiles to rotate per request, reducing fingerprint-based blocking. */
-const UA_PROFILES = [
+const UA_PROFILES: Array<{ userAgent: string; secChUa?: string; secChUaPlatform?: string }> = [
   // Chrome 120 – Windows 10
   {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -68,17 +68,13 @@ const UA_PROFILES = [
     secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
     secChUaPlatform: '"macOS"',
   },
-  // Firefox 134 – Windows 10
+  // Firefox 134 – Windows 10 (no Sec-CH-UA headers — omitted, not empty)
   {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0',
-    secChUa: '', // Firefox does not send Sec-CH-UA
-    secChUaPlatform: '',
   },
-  // Firefox 123 – macOS
+  // Firefox 123 – macOS (no Sec-CH-UA headers — omitted, not empty)
   {
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0',
-    secChUa: '', // Firefox does not send Sec-CH-UA
-    secChUaPlatform: '',
   },
 ];
 
@@ -111,7 +107,7 @@ function browserLikeHeaders(url: string) {
   }
   if (profile.secChUa) {
     headers['Sec-CH-UA'] = profile.secChUa;
-    headers['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
+    if (profile.secChUaPlatform) headers['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
   }
   return headers;
 }
@@ -125,7 +121,7 @@ function stealthContextOptions() {
   };
   if (profile.secChUa) {
     extraHTTPHeaders['Sec-CH-UA'] = profile.secChUa;
-    extraHTTPHeaders['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
+    if (profile.secChUaPlatform) extraHTTPHeaders['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
   }
   return {
     userAgent: profile.userAgent,
@@ -1095,7 +1091,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
               const delay = BASE_RETRY_MS * Math.pow(2, attempt - 1) + Math.floor(Math.random() * JITTER_CAP_MS);
               await new Promise(r => setTimeout(r, delay));
             }
-            const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name, 60000);
+            // First attempt uses default 30s timeout; retries get 60s for slow-loading pages
+            const pageTimeout = attempt > 0 ? 60000 : 30000;
+            const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name, pageTimeout);
             browserlessSuccess = true;
             browserlessCircuitBreaker.recordSuccess();
             const bStatus = result.value ? "ok" : (result.blocked ? "blocked" : "selector_missing");
@@ -1246,6 +1244,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     if (finalStatus === "ok") {
       const changed = newValue !== oldValue;
 
+      // --- Critical DB write: updateMonitor (with single retry) ---
+      // This is the only operation that retries. Post-save operations
+      // (health tracking, change recording, notifications) each have their
+      // own try/catch so a failure in one doesn't cascade to the retry path.
+      let saveFailed = false;
       try {
         await storage.updateMonitor(monitor.id, {
           lastChecked: new Date(),
@@ -1254,75 +1257,21 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           lastError: null,
           consecutiveFailures: 0,
         });
-
-        // Update lastHealthyAt on every successful check
-        try {
-          await storage.updateLastHealthyAt(monitor.id);
-        } catch (healthErr) {
-          console.error(`[Scraper] Failed to update lastHealthyAt for monitor ${monitor.id}:`, healthErr);
-        }
-
-        // Send recovery email if we previously sent a health warning.
-        // NOTE: Health/recovery emails are sent directly (not via the
-        // processChangeNotification → notification queue → delivery log pipeline)
-        // because they are operational alerts, not content-change notifications.
-        // This means they won't appear in delivery_log, don't respect quiet
-        // hours/digest mode, and are email-only (no webhook/Slack).
-        // Re-check healthAlertSentAt from DB to avoid duplicate recovery emails
-        // if two concurrent checks both see a stale in-memory value.
-        if (monitor.healthAlertSentAt !== null) {
-          const freshMonitor = await storage.getMonitor(monitor.id);
-          if (freshMonitor?.healthAlertSentAt !== null) {
-            // Send first, then clear — if the email fails the flag stays set
-            // so the next successful check retries the recovery notification.
-            try {
-              await sendRecoveryEmail(monitor, newValue ?? "");
-              await storage.clearHealthAlert(monitor.id);
-            } catch (recoveryErr) {
-              console.error(`[Scraper] Recovery email failed for monitor ${monitor.id}:`, recoveryErr);
-            }
-          }
-        }
-
-        if (changed) {
-          const change = await storage.addMonitorChange(monitor.id, oldValue, newValue);
-          await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
-          const existingChanges = await storage.getMonitorChanges(monitor.id);
-          const isFirstChange = existingChanges.length <= 1;
-          try {
-            await processChangeNotification(monitor, change, isFirstChange);
-          } catch (notificationError) {
-            console.error(`[Scraper] Notification failed for monitor ${monitor.id}, change still recorded:`, notificationError);
-          }
-        }
       } catch (dbError) {
-        // The scrape succeeded but persisting the result failed.
         // Retry once after a short delay for transient DB errors.
         try {
           await new Promise(r => setTimeout(r, 1000));
           await storage.updateMonitor(monitor.id, {
             lastChecked: new Date(),
             currentValue: newValue,
-            lastStatus: "ok",
+            lastStatus: finalStatus,
             lastError: null,
             consecutiveFailures: 0,
           });
-          if (changed) {
-            const change = await storage.addMonitorChange(monitor.id, oldValue, newValue);
-            await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
-            const existingChanges = await storage.getMonitorChanges(monitor.id);
-            const isFirstChange = existingChanges.length <= 1;
-            try {
-              await processChangeNotification(monitor, change, isFirstChange);
-            } catch (notificationError) {
-              console.error(`[Scraper] Notification failed for monitor ${monitor.id} (retry), change still recorded:`, notificationError);
-            }
-          }
-          // Retry succeeded — continue normally
         } catch (retryError) {
           // Both attempts failed — log with full context
           const dbErrMsg = dbError instanceof Error ? dbError.message : String(dbError);
-          const retryErrMsg = retryError instanceof Error ? (retryError as Error).message : String(retryError);
+          const retryErrMsg = retryError instanceof Error ? retryError.message : String(retryError);
           await ErrorLogger.error(
             "scraper",
             `"${monitor.name}" check succeeded but failed to save result`,
@@ -1338,13 +1287,64 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             },
           ).catch(() => {});
 
-          return {
-            changed,
-            currentValue: newValue,
-            previousValue: oldValue,
-            status: "ok" as const,
-            error: "Check succeeded but a server error prevented saving the result. It will be retried automatically."
-          };
+          saveFailed = true;
+        }
+      }
+
+      if (saveFailed) {
+        return {
+          changed,
+          currentValue: newValue,
+          previousValue: oldValue,
+          status: "ok" as const,
+          error: "Check succeeded but a server error prevented saving the result. It will be retried automatically."
+        };
+      }
+
+      // --- Post-save operations (each isolated, no retry cascade) ---
+
+      // Update lastHealthyAt on every successful check
+      try {
+        await storage.updateLastHealthyAt(monitor.id);
+      } catch (healthErr) {
+        console.error(`[Scraper] Failed to update lastHealthyAt for monitor ${monitor.id}:`, healthErr);
+      }
+
+      // Send recovery email if we previously sent a health warning.
+      // NOTE: Health/recovery emails are sent directly (not via the
+      // processChangeNotification → notification queue → delivery log pipeline)
+      // because they are operational alerts, not content-change notifications.
+      // This means they won't appear in delivery_log, don't respect quiet
+      // hours/digest mode, and are email-only (no webhook/Slack).
+      // Re-check healthAlertSentAt from DB to avoid duplicate recovery emails
+      // if two concurrent checks both see a stale in-memory value.
+      if (monitor.healthAlertSentAt !== null) {
+        try {
+          const freshMonitor = await storage.getMonitor(monitor.id);
+          if (freshMonitor?.healthAlertSentAt !== null) {
+            // Send first, then clear — if the email fails the flag stays set
+            // so the next successful check retries the recovery notification.
+            await sendRecoveryEmail(monitor, newValue ?? "");
+            await storage.clearHealthAlert(monitor.id);
+          }
+        } catch (recoveryErr) {
+          console.error(`[Scraper] Recovery email failed for monitor ${monitor.id}:`, recoveryErr);
+        }
+      }
+
+      if (changed) {
+        try {
+          const change = await storage.addMonitorChange(monitor.id, oldValue, newValue);
+          await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
+          const existingChanges = await storage.getMonitorChanges(monitor.id);
+          const isFirstChange = existingChanges.length <= 1;
+          try {
+            await processChangeNotification(monitor, change, isFirstChange);
+          } catch (notificationError) {
+            console.error(`[Scraper] Notification failed for monitor ${monitor.id}, change still recorded:`, notificationError);
+          }
+        } catch (changeErr) {
+          console.error(`[Scraper] Failed to record change for monitor ${monitor.id}:`, changeErr);
         }
       }
 

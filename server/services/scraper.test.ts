@@ -4102,23 +4102,28 @@ describe("checkMonitor outer catch resilience", () => {
     expect(result.error).toContain("server error prevented saving");
   });
 
-  it("returns save-failure error when addMonitorChange throws in changed-value path", async () => {
+  it("logs error but returns success when addMonitorChange throws (change recording isolated)", async () => {
     const html = `<html><body><span class="price">$29.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
 
-    // updateMonitor succeeds but addMonitorChange throws on both attempts
-    mockStorage.updateMonitor.mockResolvedValueOnce({});
-    mockStorage.addMonitorChange.mockRejectedValueOnce(new Error("duplicate key violates unique constraint"));
+    // updateMonitor succeeds but addMonitorChange throws
     mockStorage.updateMonitor.mockResolvedValueOnce({});
     mockStorage.addMonitorChange.mockRejectedValueOnce(new Error("duplicate key violates unique constraint"));
 
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const monitor = makeMonitor({ currentValue: "$19.99" });
     const result = await runWithTimers(monitor);
 
+    // updateMonitor succeeded, so save is OK — addMonitorChange failure is isolated
     expect(result.status).toBe("ok");
     expect(result.changed).toBe(true);
     expect(result.currentValue).toBe("$29.99");
-    expect(result.error).toContain("server error prevented saving");
+    expect(result.error).toBeNull();
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to record change for monitor"),
+      expect.any(Error),
+    );
+    consoleSpy.mockRestore();
   });
 
   it("recovers when first DB save fails but retry succeeds (unchanged value)", async () => {
