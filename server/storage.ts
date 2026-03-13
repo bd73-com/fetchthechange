@@ -224,7 +224,10 @@ export class DatabaseStorage implements IStorage {
 
   async incrementQueueEntryAttempts(id: number): Promise<number> {
     const [row] = await db.update(notificationQueue)
-      .set({ attempts: sql`${notificationQueue.attempts} + 1` })
+      .set({
+        attempts: sql`${notificationQueue.attempts} + 1`,
+        scheduledFor: sql`NOW() + (POWER(2, ${notificationQueue.attempts}) || ' minutes')::interval`,
+      })
       .where(eq(notificationQueue.id, id))
       .returning({ attempts: notificationQueue.attempts });
     return row?.attempts ?? 0;

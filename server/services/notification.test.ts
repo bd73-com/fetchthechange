@@ -1525,3 +1525,45 @@ describe("outer catch sets failure state on result", () => {
     expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
   });
 });
+
+describe("delivery-log write failure does not convert successful sends to failures", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("marks entry delivered even when addDeliveryLog throws after successful email send", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "email", enabled: true, config: {}, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockSendNotificationEmail.mockResolvedValueOnce({ success: true });
+    mockAddDeliveryLog.mockRejectedValueOnce(new Error("DB write failed"));
+
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(1);
+    expect(mockIncrementQueueEntryAttempts).not.toHaveBeenCalled();
+  });
+
+  it("marks entry delivered even when addDeliveryLog throws after successful webhook send", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://hooks.example.com", secret: "whsec_test" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockWebhookDeliver.mockResolvedValueOnce({ success: true, statusCode: 200 });
+    mockAddDeliveryLog.mockRejectedValueOnce(new Error("DB write failed"));
+
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(1);
+    expect(mockIncrementQueueEntryAttempts).not.toHaveBeenCalled();
+  });
+});

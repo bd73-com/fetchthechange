@@ -283,12 +283,12 @@ async function deliverToChannels(
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Set failure state so hasCompleteDeliveryFailure counts this channel as attempted-and-failed
-      if (ch.channel === "email") {
+      // Only set failure if no result was recorded yet (avoids delivery-log write errors overwriting a successful send)
+      if (ch.channel === "email" && !result.email) {
         result.email = { success: false, error: msg };
-      } else if (ch.channel === "webhook") {
+      } else if (ch.channel === "webhook" && !result.webhook) {
         result.webhook = { success: false, error: msg };
-      } else if (ch.channel === "slack") {
+      } else if (ch.channel === "slack" && !result.slack) {
         result.slack = { success: false, error: msg };
       }
       await ErrorLogger.error("email", `Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err : null, { monitorId: monitor.id, channel: ch.channel });
@@ -403,11 +403,12 @@ async function deliverDigestToChannels(
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (ch.channel === "email") {
+      // Only set failure if no result was recorded yet (avoids delivery-log write errors overwriting a successful send)
+      if (ch.channel === "email" && !result.email) {
         result.email = { success: false, error: msg };
-      } else if (ch.channel === "webhook") {
+      } else if (ch.channel === "webhook" && !result.webhook) {
         result.webhook = { success: false, error: msg };
-      } else if (ch.channel === "slack") {
+      } else if (ch.channel === "slack" && !result.slack) {
         result.slack = { success: false, error: msg };
       }
       await ErrorLogger.error("email", `Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err : null, { monitorId: monitor.id, channel: ch.channel });
