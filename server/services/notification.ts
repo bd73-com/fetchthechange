@@ -151,6 +151,13 @@ export interface ChannelDeliveryResult {
   slack?: { success: boolean; error?: string };
 }
 
+function hasDeliveryFailure(result: ChannelDeliveryResult): boolean {
+  if (result.email?.success === false) return true;
+  if (result.webhook && !result.webhook.success) return true;
+  if (result.slack && !result.slack.success) return true;
+  return false;
+}
+
 async function deliverToChannels(
   monitor: Monitor,
   change: MonitorChange,
@@ -476,6 +483,13 @@ export async function processDigestBatch(
   const changeIds = entries.map((e) => e.changeId);
   const changes = await storage.getMonitorChangesByIds(changeIds);
 
+  if (changes.length < entries.length) {
+    const foundIds = new Set(changes.map((c) => c.id));
+    const orphanedEntries = entries.filter((e) => !foundIds.has(e.changeId));
+    await ErrorLogger.warning("scheduler", `Digest batch for monitor ${monitor.id}: ${orphanedEntries.length} queue entries reference deleted changes`, { monitorId: monitor.id, orphanedChangeIds: orphanedEntries.map((e) => e.changeId) });
+    await storage.markQueueEntriesDelivered(orphanedEntries.map((e) => e.id));
+  }
+
   if (changes.length === 0) {
     return null;
   }
@@ -483,8 +497,10 @@ export async function processDigestBatch(
   const emailOverride = prefs.notificationEmail || undefined;
   const result = await deliverDigestToChannels(monitor, changes, emailOverride);
 
-  if (result.email?.success !== false) {
-    await storage.markQueueEntriesDelivered(entries.map((e) => e.id));
+  if (!hasDeliveryFailure(result)) {
+    const foundIds = new Set(changes.map((c) => c.id));
+    const deliveredEntries = entries.filter((e) => foundIds.has(e.changeId));
+    await storage.markQueueEntriesDelivered(deliveredEntries.map((e) => e.id));
   }
 
   return result.email ?? null;
@@ -527,12 +543,13 @@ export async function processQueuedNotifications(): Promise<void> {
       for (const entry of entries) {
         const change = changesById.get(entry.changeId);
         if (!change) {
+          await ErrorLogger.warning("scheduler", `Queued notification for monitor ${monitorId}: change ${entry.changeId} not found, marking entry ${entry.id} as delivered`, { monitorId, changeId: entry.changeId, notificationQueueId: entry.id });
           await storage.markQueueEntryDelivered(entry.id);
           continue;
         }
 
         const result = await deliverToChannels(monitor, change, emailOverride);
-        if (result.email?.success !== false) {
+        if (!hasDeliveryFailure(result)) {
           await storage.markQueueEntryDelivered(entry.id);
         }
       }
