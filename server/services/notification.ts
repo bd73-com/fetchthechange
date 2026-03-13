@@ -151,11 +151,13 @@ export interface ChannelDeliveryResult {
   slack?: { success: boolean; error?: string };
 }
 
-function hasDeliveryFailure(result: ChannelDeliveryResult): boolean {
-  if (result.email?.success === false) return true;
-  if (result.webhook && !result.webhook.success) return true;
-  if (result.slack && !result.slack.success) return true;
-  return false;
+function hasCompleteDeliveryFailure(result: ChannelDeliveryResult): boolean {
+  const attempted: boolean[] = [];
+  if (result.email !== undefined && result.email !== null) attempted.push(result.email.success);
+  if (result.webhook) attempted.push(result.webhook.success);
+  if (result.slack) attempted.push(result.slack.success);
+  // If no channels were attempted or every attempted channel failed, it's a complete failure
+  return attempted.length === 0 || attempted.every((s) => !s);
 }
 
 async function deliverToChannels(
@@ -493,9 +495,9 @@ export async function processDigestBatch(
   const changeIds = entries.map((e) => e.changeId);
   const changes = await storage.getMonitorChangesByIds(changeIds);
 
-  if (changes.length < entries.length) {
-    const foundIds = new Set(changes.map((c) => c.id));
-    const orphanedEntries = entries.filter((e) => !foundIds.has(e.changeId));
+  const foundIds = new Set(changes.map((c) => c.id));
+  const orphanedEntries = entries.filter((e) => !foundIds.has(e.changeId));
+  if (orphanedEntries.length > 0) {
     await ErrorLogger.warning("scheduler", `Digest batch for monitor ${monitor.id}: ${orphanedEntries.length} queue entries reference deleted changes`, { monitorId: monitor.id, orphanedChangeIds: orphanedEntries.map((e) => e.changeId) });
     await storage.markQueueEntriesDelivered(orphanedEntries.map((e) => e.id));
   }
@@ -507,7 +509,7 @@ export async function processDigestBatch(
   const emailOverride = prefs.notificationEmail || undefined;
   const result = await deliverDigestToChannels(monitor, changes, emailOverride);
 
-  if (!hasDeliveryFailure(result)) {
+  if (!hasCompleteDeliveryFailure(result)) {
     const foundIds = new Set(changes.map((c) => c.id));
     const deliveredEntries = entries.filter((e) => foundIds.has(e.changeId));
     await storage.markQueueEntriesDelivered(deliveredEntries.map((e) => e.id));
@@ -559,7 +561,7 @@ export async function processQueuedNotifications(): Promise<void> {
         }
 
         const result = await deliverToChannels(monitor, change, emailOverride);
-        if (!hasDeliveryFailure(result)) {
+        if (!hasCompleteDeliveryFailure(result)) {
           await storage.markQueueEntryDelivered(entry.id);
         }
       }

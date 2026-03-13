@@ -1280,6 +1280,24 @@ describe("delivery failure checks all channels", () => {
     await processQueuedNotifications();
     expect(mockMarkQueueEntryDelivered).not.toHaveBeenCalled();
   });
+
+  it("processQueuedNotifications marks delivered when webhook fails but email succeeds (partial failure)", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "email", enabled: true, config: {}, createdAt: new Date(), updatedAt: new Date() },
+      { id: 2, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://hooks.example.com", secret: "whsec_test" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockWebhookDeliver.mockResolvedValue({ success: false, error: "timeout" });
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours" as const, scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    // Should mark as delivered because email succeeded (webhook failure logged separately)
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(1);
+  });
 });
 
 describe("orphaned queue entry handling", () => {
