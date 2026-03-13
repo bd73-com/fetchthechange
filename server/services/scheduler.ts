@@ -59,8 +59,12 @@ export async function startScheduler() {
     setTimeout(() => ensureMonitorConditionsTable().catch(() => {}), 30000);
   }
 
-  // One-time cleanup of polluted values from legacy data
-  await storage.cleanupPollutedValues();
+  // One-time cleanup of polluted values from legacy data (non-fatal — must not block cron registration)
+  try {
+    await storage.cleanupPollutedValues();
+  } catch (error) {
+    console.error("[Scheduler] cleanupPollutedValues failed (non-fatal):", error instanceof Error ? error.message : error);
+  }
 
   // Wire circuit breaker recovery: immediately retry pending monitors when Browserless comes back
   browserlessCircuitBreaker.onClose(() => {
@@ -205,8 +209,7 @@ export async function startScheduler() {
             continue;
           }
 
-          const allChanges = await storage.getMonitorChanges(monitor.id);
-          const change = allChanges.find((c) => c.id === entry.changeId);
+          const change = await storage.getMonitorChangeById(entry.changeId);
           if (!change) {
             await storage.updateDeliveryLog(entry.id, { status: "failed" });
             continue;
