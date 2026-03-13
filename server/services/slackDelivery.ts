@@ -138,10 +138,36 @@ async function joinChannel(
     body: JSON.stringify({ channel: channelId }),
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) {
+  // Handle rate limiting consistently with postMessage
+  const isHttp429 = response.status === 429;
+  if (!response.ok && !isHttp429) {
     return { ok: false, error: `slack_http_${response.status}` };
   }
-  return response.json() as Promise<{ ok: boolean; error?: string }>;
+  const data = isHttp429
+    ? { ok: false as const, error: "ratelimited" }
+    : await response.json() as { ok: boolean; error?: string };
+
+  if (!data.ok && (isHttp429 || data.error === "ratelimited")) {
+    const retryAfter = Number(response.headers.get("Retry-After")) || 1;
+    const delay = Math.max(0, Math.min(retryAfter, 5)) * 1000;
+    console.log(`[Slack] Join rate limited, retrying after ${delay}ms`);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    const retryResponse = await fetch("https://slack.com/api/conversations.join", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${botToken}`,
+      },
+      body: JSON.stringify({ channel: channelId }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!retryResponse.ok) {
+      return { ok: false, error: `slack_http_${retryResponse.status}` };
+    }
+    return await retryResponse.json() as { ok: boolean; error?: string };
+  }
+
+  return data;
 }
 
 export async function deliver(

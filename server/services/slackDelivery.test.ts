@@ -550,6 +550,81 @@ describe("slackDelivery", () => {
     });
   });
 
+  describe("joinChannel rate limit retry", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function mockHeaders(retryAfter?: string) {
+      return { get: (key: string) => key === "Retry-After" ? (retryAfter ?? null) : null };
+    }
+
+    it("retries conversations.join on 429 and succeeds", async () => {
+      mockFetch
+        // First postMessage → not_in_channel
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        // First join → 429 rate limited
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          headers: mockHeaders("2"),
+        })
+        // Retry join → success
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: true }),
+        })
+        // Retry postMessage → success
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, ts: "after-join-retry" }),
+        });
+
+      const promise = deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+      await vi.advanceTimersByTimeAsync(2000);
+      const result = await promise;
+      expect(result.success).toBe(true);
+      expect(result.slackTs).toBe("after-join-retry");
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+      // Verify the join calls targeted conversations.join
+      expect(mockFetch.mock.calls[1][0]).toBe("https://slack.com/api/conversations.join");
+      expect(mockFetch.mock.calls[2][0]).toBe("https://slack.com/api/conversations.join");
+    });
+
+    it("returns failure when join retry also fails", async () => {
+      mockFetch
+        // First postMessage → not_in_channel
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: false, error: "not_in_channel" }),
+        })
+        // First join → JSON-level ratelimited
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ ok: false, error: "ratelimited" }),
+          headers: mockHeaders("1"),
+        })
+        // Retry join → HTTP 503
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+        });
+
+      const promise = deliver(makeMonitor(), makeChange(), "C0123", "xoxb-token");
+      await vi.advanceTimersByTimeAsync(1000);
+      const result = await promise;
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("slack_http_503");
+    });
+  });
+
   describe("deliver edge cases", () => {
     it("handles null oldValue and newValue", async () => {
       mockFetch.mockResolvedValue({
