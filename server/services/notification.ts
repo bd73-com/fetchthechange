@@ -151,6 +151,10 @@ export interface ChannelDeliveryResult {
   slack?: { success: boolean; error?: string };
 }
 
+/**
+ * Returns true if delivery completely failed (no channels attempted or all attempted channels failed).
+ * Channels that were configured but skipped (e.g., missing config) are not counted as attempted.
+ */
 function hasCompleteDeliveryFailure(result: ChannelDeliveryResult): boolean {
   const attempted: boolean[] = [];
   if (result.email !== undefined && result.email !== null) attempted.push(result.email.success);
@@ -510,7 +514,6 @@ export async function processDigestBatch(
   const result = await deliverDigestToChannels(monitor, changes, emailOverride);
 
   if (!hasCompleteDeliveryFailure(result)) {
-    const foundIds = new Set(changes.map((c) => c.id));
     const deliveredEntries = entries.filter((e) => foundIds.has(e.changeId));
     await storage.markQueueEntriesDelivered(deliveredEntries.map((e) => e.id));
   }
