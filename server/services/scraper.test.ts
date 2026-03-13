@@ -4089,7 +4089,8 @@ describe("checkMonitor outer catch resilience", () => {
     const html = `<html><body><span class="price">$19.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
 
-    // Make storage.updateMonitor throw to simulate DB failure after successful extraction
+    // Make storage.updateMonitor throw on both initial attempt and retry
+    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("connection terminated"));
     mockStorage.updateMonitor.mockRejectedValueOnce(new Error("connection terminated"));
 
     const monitor = makeMonitor({ currentValue: "$19.99" });
@@ -4105,7 +4106,9 @@ describe("checkMonitor outer catch resilience", () => {
     const html = `<html><body><span class="price">$29.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
 
-    // updateMonitor succeeds but addMonitorChange throws
+    // updateMonitor succeeds but addMonitorChange throws on both attempts
+    mockStorage.updateMonitor.mockResolvedValueOnce({});
+    mockStorage.addMonitorChange.mockRejectedValueOnce(new Error("duplicate key violates unique constraint"));
     mockStorage.updateMonitor.mockResolvedValueOnce({});
     mockStorage.addMonitorChange.mockRejectedValueOnce(new Error("duplicate key violates unique constraint"));
 
