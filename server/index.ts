@@ -256,14 +256,20 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   // Graceful shutdown: close server, drain browser pool, close DB pool
   const { browserPool } = await import("./services/browserPool");
   const { pool: dbPool } = await import("./db");
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log("Shutting down gracefully...");
+    // Force exit after 10s if graceful shutdown stalls
+    const forceExit = setTimeout(() => process.exit(1), 10_000);
+    forceExit.unref();
     // Stop accepting new connections
     httpServer.close();
     // Drain warm browsers
-    await browserPool.drain().catch(() => {});
+    await browserPool.drain().catch((err) => console.error("Failed to drain browser pool:", err));
     // Close DB connection pool
-    await dbPool.end().catch(() => {});
+    await dbPool.end().catch((err) => console.error("Failed to close DB pool:", err));
     process.exit(0);
   };
   process.on('SIGTERM', shutdown);
