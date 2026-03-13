@@ -4089,7 +4089,8 @@ describe("checkMonitor outer catch resilience", () => {
     const html = `<html><body><span class="price">$19.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
 
-    // Make storage.updateMonitor throw to simulate DB failure after successful extraction
+    // Make storage.updateMonitor throw on both initial attempt and retry
+    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("connection terminated"));
     mockStorage.updateMonitor.mockRejectedValueOnce(new Error("connection terminated"));
 
     const monitor = makeMonitor({ currentValue: "$19.99" });
@@ -4101,7 +4102,7 @@ describe("checkMonitor outer catch resilience", () => {
     expect(result.error).toContain("server error prevented saving");
   });
 
-  it("returns save-failure error when addMonitorChange throws in changed-value path", async () => {
+  it("logs error but returns success when addMonitorChange throws (change recording isolated)", async () => {
     const html = `<html><body><span class="price">$29.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
 
@@ -4109,13 +4110,90 @@ describe("checkMonitor outer catch resilience", () => {
     mockStorage.updateMonitor.mockResolvedValueOnce({});
     mockStorage.addMonitorChange.mockRejectedValueOnce(new Error("duplicate key violates unique constraint"));
 
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const monitor = makeMonitor({ currentValue: "$19.99" });
     const result = await runWithTimers(monitor);
 
+    // updateMonitor succeeded, so save is OK — addMonitorChange failure is isolated
     expect(result.status).toBe("ok");
     expect(result.changed).toBe(true);
     expect(result.currentValue).toBe("$29.99");
+    expect(result.error).toBeNull();
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to record change for monitor"),
+      expect.any(Error),
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it("recovers when first DB save fails but retry succeeds (unchanged value)", async () => {
+    const html = `<html><body><span class="price">$19.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    // First updateMonitor call fails, retry succeeds (default mock returns {})
+    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("connection reset"));
+
+    const monitor = makeMonitor({ currentValue: "$19.99" });
+    const result = await runWithTimers(monitor);
+
+    // Retry succeeded — should return success with no error
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$19.99");
+    expect(result.error).toBeNull();
+  });
+
+  it("recovers when first DB save fails but retry succeeds (changed value)", async () => {
+    const html = `<html><body><span class="price">$29.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    // First updateMonitor call fails, retry succeeds
+    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("connection reset"));
+
+    const monitor = makeMonitor({ currentValue: "$19.99" });
+    const result = await runWithTimers(monitor);
+
+    // Retry succeeded — change should be recorded with no error
+    expect(result.status).toBe("ok");
+    expect(result.changed).toBe(true);
+    expect(result.currentValue).toBe("$29.99");
+    expect(result.error).toBeNull();
+    // No-duplicate guarantee: addMonitorChange and processChangeNotification called exactly once
+    expect(mockStorage.addMonitorChange).toHaveBeenCalledWith(1, "$19.99", "$29.99");
+    expect(mockStorage.addMonitorChange).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(processChangeNotification)).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs extractedValue and previousValue when both save attempts fail", async () => {
+    const html = `<html><body><span class="price">$49.99</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    // Both attempts fail
+    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("conn reset"));
+    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("conn reset again"));
+
+    const { ErrorLogger } = await import("./logger");
+
+    const monitor = makeMonitor({ currentValue: "$39.99" });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("ok");
+    expect(result.currentValue).toBe("$49.99");
+    expect(result.changed).toBe(true);
     expect(result.error).toContain("server error prevented saving");
+    // Verify enhanced logging includes extracted and previous values
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scraper",
+      expect.stringContaining("check succeeded but failed to save result"),
+      expect.any(Error),
+      expect.objectContaining({
+        monitorId: 1,
+        extractedValue: "$49.99",
+        previousValue: "$39.99",
+        changed: true,
+        dbError: "conn reset",
+        retryError: "conn reset again",
+      }),
+    );
   });
 
   it("returns result even when ErrorLogger.error rejects in outer catch", async () => {

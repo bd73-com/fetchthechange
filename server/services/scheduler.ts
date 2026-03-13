@@ -6,6 +6,7 @@ import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery
 import { ErrorLogger } from "./logger";
 import { notificationTablesExist } from "./notificationReady";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
+import { ensureMonitorConditionsTable } from "./ensureTables";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -41,6 +42,22 @@ async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]): P
 
 export async function startScheduler() {
   console.log("Starting scheduler...");
+
+  // Ensure monitor_conditions table exists — routes.ts calls this too, but
+  // the scheduler may start before routes finish or the routes call may have
+  // failed due to a transient DB error. Use a timeout so a hung DB connection
+  // doesn't block scheduler startup indefinitely.
+  const tableReady = await Promise.race([
+    ensureMonitorConditionsTable(),
+    new Promise<boolean>(resolve => setTimeout(() => {
+      console.warn("[Scheduler] ensureMonitorConditionsTable timed out after 10s — continuing startup");
+      resolve(false);
+    }, 10000)),
+  ]);
+  if (!tableReady) {
+    // Retry in background so table/index creation can complete
+    setTimeout(() => ensureMonitorConditionsTable().catch(() => {}), 30000);
+  }
 
   // One-time cleanup of polluted values from legacy data
   await storage.cleanupPollutedValues();

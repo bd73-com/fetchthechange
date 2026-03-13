@@ -77,6 +77,14 @@ vi.mock("./browserlessCircuitBreaker", () => ({
   },
 }));
 
+const { mockEnsureMonitorConditionsTable } = vi.hoisted(() => ({
+  mockEnsureMonitorConditionsTable: vi.fn().mockResolvedValue(true),
+}));
+
+vi.mock("./ensureTables", () => ({
+  ensureMonitorConditionsTable: (...args: any[]) => mockEnsureMonitorConditionsTable(...args),
+}));
+
 vi.mock("node-cron", () => ({
   default: {
     schedule: vi.fn((expression: string, callback: () => Promise<void>) => {
@@ -140,6 +148,30 @@ describe("startScheduler", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("calls ensureMonitorConditionsTable on start", async () => {
+    await startScheduler();
+    expect(mockEnsureMonitorConditionsTable).toHaveBeenCalledOnce();
+  });
+
+  it("continues startup when ensureMonitorConditionsTable times out", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockEnsureMonitorConditionsTable.mockImplementation(
+      () => new Promise(() => {}) // never resolves
+    );
+
+    const startPromise = startScheduler();
+    // Advance past the 10s timeout and the 30s background retry
+    await vi.advanceTimersByTimeAsync(31000);
+    await startPromise;
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("ensureMonitorConditionsTable timed out")
+    );
+    warnSpy.mockRestore();
+    // Restore default mock so subsequent tests aren't affected
+    mockEnsureMonitorConditionsTable.mockResolvedValue(true);
   });
 
   it("calls cleanupPollutedValues on start", async () => {

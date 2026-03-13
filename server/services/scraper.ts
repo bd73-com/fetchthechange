@@ -19,21 +19,62 @@ import { eq, sql } from "drizzle-orm";
 export const monitorsNeedingRetry = new Set<number>();
 
 /** Pool of modern User-Agent profiles to rotate per request, reducing fingerprint-based blocking. */
-const UA_PROFILES = [
+const UA_PROFILES: Array<{ userAgent: string; secChUa?: string; secChUaPlatform?: string }> = [
+  // Chrome 120 – Windows 10
+  {
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    secChUa: '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    secChUaPlatform: '"Windows"',
+  },
+  // Chrome 121 – macOS
+  {
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    secChUa: '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+    secChUaPlatform: '"macOS"',
+  },
+  // Chrome 122 – Windows 11
+  {
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    secChUaPlatform: '"Windows"',
+  },
+  // Chrome 123 – macOS
+  {
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    secChUa: '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
+    secChUaPlatform: '"macOS"',
+  },
+  // Chrome 124 – Windows 10
+  {
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    secChUaPlatform: '"Windows"',
+  },
+  // Chrome 124 – macOS
+  {
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    secChUaPlatform: '"macOS"',
+  },
+  // Chrome 131 – Windows 10 (legacy entry)
   {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
     secChUaPlatform: '"Windows"',
   },
+  // Chrome 131 – macOS (legacy entry)
   {
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
     secChUaPlatform: '"macOS"',
   },
+  // Firefox 134 – Windows 10 (no Sec-CH-UA headers — omitted, not empty)
   {
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0',
-    secChUa: '', // Firefox does not send Sec-CH-UA
-    secChUaPlatform: '',
+  },
+  // Firefox 123 – macOS (no Sec-CH-UA headers — omitted, not empty)
+  {
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0',
   },
 ];
 
@@ -66,7 +107,7 @@ function browserLikeHeaders(url: string) {
   }
   if (profile.secChUa) {
     headers['Sec-CH-UA'] = profile.secChUa;
-    headers['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
+    if (profile.secChUaPlatform) headers['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
   }
   return headers;
 }
@@ -80,7 +121,7 @@ function stealthContextOptions() {
   };
   if (profile.secChUa) {
     extraHTTPHeaders['Sec-CH-UA'] = profile.secChUa;
-    extraHTTPHeaders['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
+    if (profile.secChUaPlatform) extraHTTPHeaders['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
   }
   return {
     userAgent: profile.userAgent,
@@ -116,6 +157,7 @@ export { BrowserPool, browserPool } from "./browserPool";
 async function withBrowserlessPage<T>(
   url: string,
   callback: (page: any, consentDismissed: boolean) => Promise<T>,
+  options?: { pageTimeoutMs?: number },
 ): Promise<T> {
   const token = process.env.BROWSERLESS_TOKEN;
   if (!token) throw new Error("BROWSERLESS_TOKEN not configured");
@@ -167,9 +209,10 @@ async function withBrowserlessPage<T>(
     });
     const page = await context.newPage();
 
+    const pageTimeout = options?.pageTimeoutMs ?? 30000;
     await page.addInitScript(stealthInitScript);
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: pageTimeout });
+    await page.waitForLoadState("networkidle", { timeout: Math.min(pageTimeout, 15000) }).catch(() => {});
 
     const consentDismissed = await tryDismissConsent(page);
     if (consentDismissed) {
@@ -194,8 +237,8 @@ async function withBrowserlessPage<T>(
 
 /** Stealth init script injected into browser pages before navigation to evade bot detection. */
 function stealthInitScript() {
-  // 1. Hide webdriver flag
-  Object.defineProperty(navigator, 'webdriver', { get: () => false });
+  // 1. Hide webdriver flag — headless Chrome sets this to true; real browsers have it undefined
+  Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 
   // 2. navigator.plugins — realistic Chrome plugin array
   const pluginData = [
@@ -242,6 +285,46 @@ function stealthInitScript() {
         ? Promise.resolve({ state: 'prompt', onchange: null } as PermissionStatus)
         : originalQuery(params);
   } catch (_) { /* permissions API may be unavailable */ }
+
+  // 7. navigator.connection — spoof realistic NetworkInformation object
+  // Headless Chrome often lacks this or returns unrealistic values
+  try {
+    if (!(navigator as any).connection) {
+      Object.defineProperty(navigator, 'connection', {
+        get: () => ({
+          effectiveType: '4g',
+          rtt: 50,
+          downlink: 10,
+          saveData: false,
+          onchange: null,
+        }),
+      });
+    }
+  } catch (_) { /* may be read-only in some contexts */ }
+
+  // 8. Remove cdc_ prefixed properties injected by Chrome DevTools Protocol
+  // These are a dead giveaway that the browser is being automated
+  try {
+    for (const key of Object.keys(window)) {
+      if (key.startsWith('cdc_')) {
+        delete (window as any)[key];
+      }
+    }
+    // Also clean up document-level cdc_ properties
+    for (const key of Object.keys(document)) {
+      if (key.startsWith('cdc_')) {
+        delete (document as any)[key];
+      }
+    }
+  } catch (_) { /* best-effort cleanup */ }
+
+  // 9. Notification.permission — override to 'default' instead of 'denied'
+  // Real browsers return 'default' until the user grants or denies; headless returns 'denied'
+  try {
+    Object.defineProperty(Notification, 'permission', {
+      get: () => 'default',
+    });
+  } catch (_) { /* Notification API may be unavailable */ }
 }
 
 interface SelectorSuggestion {
@@ -740,7 +823,7 @@ export function classifyBrowserlessError(errMsg: string): string {
 /**
  * Retries extraction using Browserless.
  */
-export async function extractWithBrowserless(url: string, selector: string, monitorId?: number, monitorName?: string): Promise<{
+export async function extractWithBrowserless(url: string, selector: string, monitorId?: number, monitorName?: string, pageTimeoutMs?: number): Promise<{
   value: string | null,
   urlAfter: string,
   title: string,
@@ -771,7 +854,7 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
       const effectiveSelector = isClassName ? `.${trimmedSelector}` : trimmedSelector;
 
-      await page.waitForSelector(effectiveSelector, { timeout: 5000 }).catch(() => {});
+      await page.waitForSelector(effectiveSelector, { timeout: 10000 }).catch(() => {});
       const count = await page.locator(effectiveSelector).count();
 
       let value: string | null = null;
@@ -803,7 +886,7 @@ export async function extractWithBrowserless(url: string, selector: string, moni
         blocked: block.blocked,
         reason: block.reason
       };
-    });
+    }, { pageTimeoutMs });
   } catch (error) {
     const label = monitorName ? `"${monitorName}" — browser` : "Browser";
     const classified = classifyBrowserlessError(error instanceof Error ? error.message : "Unknown error");
@@ -1008,7 +1091,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
               const delay = BASE_RETRY_MS * Math.pow(2, attempt - 1) + Math.floor(Math.random() * JITTER_CAP_MS);
               await new Promise(r => setTimeout(r, delay));
             }
-            const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name);
+            // First attempt uses default 30s timeout; retries get 60s for slow-loading pages
+            const pageTimeout = attempt > 0 ? 60000 : 30000;
+            const result = await extractWithBrowserless(monitor.url, monitor.selector, monitor.id, monitor.name, pageTimeout);
             browserlessSuccess = true;
             browserlessCircuitBreaker.recordSuccess();
             const bStatus = result.value ? "ok" : (result.blocked ? "blocked" : "selector_missing");
@@ -1159,6 +1244,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     if (finalStatus === "ok") {
       const changed = newValue !== oldValue;
 
+      // --- Critical DB write: updateMonitor (with single retry) ---
+      // This is the only operation that retries. Post-save operations
+      // (health tracking, change recording, notifications) each have their
+      // own try/catch so a failure in one doesn't cascade to the retry path.
+      let saveFailed = false;
       try {
         await storage.updateMonitor(monitor.id, {
           lastChecked: new Date(),
@@ -1167,37 +1257,86 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           lastError: null,
           consecutiveFailures: 0,
         });
-
-        // Update lastHealthyAt on every successful check
+      } catch (dbError) {
+        // Retry once after a short delay for transient DB errors.
         try {
-          await storage.updateLastHealthyAt(monitor.id);
-        } catch (healthErr) {
-          console.error(`[Scraper] Failed to update lastHealthyAt for monitor ${monitor.id}:`, healthErr);
-        }
+          await new Promise(r => setTimeout(r, 1000));
+          await storage.updateMonitor(monitor.id, {
+            lastChecked: new Date(),
+            currentValue: newValue,
+            lastStatus: finalStatus,
+            lastError: null,
+            consecutiveFailures: 0,
+          });
+        } catch (retryError) {
+          // Both attempts failed — log with full context
+          const dbErrMsg = dbError instanceof Error ? dbError.message : String(dbError);
+          const retryErrMsg = retryError instanceof Error ? retryError.message : String(retryError);
+          await ErrorLogger.error(
+            "scraper",
+            `"${monitor.name}" check succeeded but failed to save result`,
+            dbError instanceof Error ? dbError : null,
+            {
+              monitorId: monitor.id,
+              monitorName: monitor.name,
+              extractedValue: newValue?.substring(0, 200) ?? null,
+              previousValue: oldValue?.substring(0, 200) ?? null,
+              changed,
+              dbError: dbErrMsg,
+              retryError: retryErrMsg,
+            },
+          ).catch(() => {});
 
-        // Send recovery email if we previously sent a health warning.
-        // NOTE: Health/recovery emails are sent directly (not via the
-        // processChangeNotification → notification queue → delivery log pipeline)
-        // because they are operational alerts, not content-change notifications.
-        // This means they won't appear in delivery_log, don't respect quiet
-        // hours/digest mode, and are email-only (no webhook/Slack).
-        // Re-check healthAlertSentAt from DB to avoid duplicate recovery emails
-        // if two concurrent checks both see a stale in-memory value.
-        if (monitor.healthAlertSentAt !== null) {
+          saveFailed = true;
+        }
+      }
+
+      if (saveFailed) {
+        // Mark for accelerated retry so the scheduler rechecks sooner than the
+        // normal hourly/daily interval (uses the same backoff as Browserless failures).
+        monitorsNeedingRetry.add(monitor.id);
+        return {
+          changed,
+          currentValue: newValue,
+          previousValue: oldValue,
+          status: "ok" as const,
+          error: "Check succeeded but a server error prevented saving the result. Marked for accelerated retry."
+        };
+      }
+
+      // --- Post-save operations (each isolated, no retry cascade) ---
+
+      // Update lastHealthyAt on every successful check
+      try {
+        await storage.updateLastHealthyAt(monitor.id);
+      } catch (healthErr) {
+        console.error(`[Scraper] Failed to update lastHealthyAt for monitor ${monitor.id}:`, healthErr);
+      }
+
+      // Send recovery email if we previously sent a health warning.
+      // NOTE: Health/recovery emails are sent directly (not via the
+      // processChangeNotification → notification queue → delivery log pipeline)
+      // because they are operational alerts, not content-change notifications.
+      // This means they won't appear in delivery_log, don't respect quiet
+      // hours/digest mode, and are email-only (no webhook/Slack).
+      // Re-check healthAlertSentAt from DB to avoid duplicate recovery emails
+      // if two concurrent checks both see a stale in-memory value.
+      if (monitor.healthAlertSentAt !== null) {
+        try {
           const freshMonitor = await storage.getMonitor(monitor.id);
           if (freshMonitor?.healthAlertSentAt !== null) {
             // Send first, then clear — if the email fails the flag stays set
             // so the next successful check retries the recovery notification.
-            try {
-              await sendRecoveryEmail(monitor, newValue ?? "");
-              await storage.clearHealthAlert(monitor.id);
-            } catch (recoveryErr) {
-              console.error(`[Scraper] Recovery email failed for monitor ${monitor.id}:`, recoveryErr);
-            }
+            await sendRecoveryEmail(monitor, newValue ?? "");
+            await storage.clearHealthAlert(monitor.id);
           }
+        } catch (recoveryErr) {
+          console.error(`[Scraper] Recovery email failed for monitor ${monitor.id}:`, recoveryErr);
         }
+      }
 
-        if (changed) {
+      if (changed) {
+        try {
           const change = await storage.addMonitorChange(monitor.id, oldValue, newValue);
           await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
           const existingChanges = await storage.getMonitorChanges(monitor.id);
@@ -1207,19 +1346,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           } catch (notificationError) {
             console.error(`[Scraper] Notification failed for monitor ${monitor.id}, change still recorded:`, notificationError);
           }
+        } catch (changeErr) {
+          console.error(`[Scraper] Failed to record change for monitor ${monitor.id}:`, changeErr);
         }
-      } catch (dbError) {
-        // The scrape succeeded but persisting the result failed.
-        // Log specifically so the user isn't confused by "Failed to fetch page".
-        await ErrorLogger.error("scraper", `"${monitor.name}" check succeeded but failed to save result`, dbError instanceof Error ? dbError : null, { monitorId: monitor.id, monitorName: monitor.name }).catch(() => {});
-
-        return {
-          changed,
-          currentValue: newValue,
-          previousValue: oldValue,
-          status: "ok" as const,
-          error: "Check succeeded but a server error prevented saving the result. It will be retried automatically."
-        };
       }
 
       return {
