@@ -249,4 +249,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   const { browserPool } = await import("./services/browserPool");
   process.on('SIGTERM', async () => { await browserPool.drain(); process.exit(0); });
   process.on('SIGINT', async () => { await browserPool.drain(); process.exit(0); });
-})();
+})().catch((err) => {
+  console.error("FATAL: server failed to start", err);
+  process.exit(1);
+});

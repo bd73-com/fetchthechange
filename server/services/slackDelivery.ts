@@ -90,10 +90,39 @@ async function postMessage(
     }),
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) {
+  // Handle rate limiting: HTTP 429 or JSON-level ratelimited error
+  const isHttp429 = response.status === 429;
+  if (!response.ok && !isHttp429) {
     return { ok: false, error: `slack_http_${response.status}` };
   }
-  return response.json() as Promise<{ ok: boolean; error?: string; ts?: string }>;
+  const data = isHttp429
+    ? { ok: false as const, error: "ratelimited" }
+    : await response.json() as { ok: boolean; error?: string; ts?: string };
+
+  if (!data.ok && (isHttp429 || data.error === "ratelimited")) {
+    const retryAfter = Number(response.headers.get("Retry-After")) || 1;
+    const delay = Math.max(0, Math.min(retryAfter, 5)) * 1000;
+    console.log(`[Slack] Rate limited, retrying after ${delay}ms`);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    const retryResponse = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${botToken}`,
+      },
+      body: JSON.stringify({
+        channel: channelId,
+        ...message,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!retryResponse.ok) {
+      return { ok: false, error: `slack_http_${retryResponse.status}` };
+    }
+    return await retryResponse.json() as { ok: boolean; error?: string; ts?: string };
+  }
+
+  return data;
 }
 
 async function joinChannel(
@@ -109,10 +138,36 @@ async function joinChannel(
     body: JSON.stringify({ channel: channelId }),
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) {
+  // Handle rate limiting consistently with postMessage
+  const isHttp429 = response.status === 429;
+  if (!response.ok && !isHttp429) {
     return { ok: false, error: `slack_http_${response.status}` };
   }
-  return response.json() as Promise<{ ok: boolean; error?: string }>;
+  const data = isHttp429
+    ? { ok: false as const, error: "ratelimited" }
+    : await response.json() as { ok: boolean; error?: string };
+
+  if (!data.ok && (isHttp429 || data.error === "ratelimited")) {
+    const retryAfter = Number(response.headers.get("Retry-After")) || 1;
+    const delay = Math.max(0, Math.min(retryAfter, 5)) * 1000;
+    console.log(`[Slack] Join rate limited, retrying after ${delay}ms`);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    const retryResponse = await fetch("https://slack.com/api/conversations.join", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${botToken}`,
+      },
+      body: JSON.stringify({ channel: channelId }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!retryResponse.ok) {
+      return { ok: false, error: `slack_http_${retryResponse.status}` };
+    }
+    return await retryResponse.json() as { ok: boolean; error?: string };
+  }
+
+  return data;
 }
 
 export async function deliver(
@@ -163,29 +218,65 @@ export async function deliver(
 }
 
 export async function listChannels(botToken: string): Promise<SlackChannel[]> {
-  const response = await fetch(
-    "https://slack.com/api/conversations.list?types=public_channel,private_channel&exclude_archived=true&limit=1000",
-    {
-      headers: {
-        Authorization: `Bearer ${botToken}`,
-      },
-      signal: AbortSignal.timeout(10_000),
+  const allChannels: SlackChannel[] = [];
+  let cursor: string | undefined;
+  // Safety limit to avoid infinite loops
+  const maxPages = 10;
+
+  for (let page = 0; page < maxPages; page++) {
+    const params = new URLSearchParams({
+      types: "public_channel,private_channel",
+      exclude_archived: "true",
+      limit: "1000",
+    });
+    if (cursor) {
+      params.set("cursor", cursor);
     }
-  );
 
-  if (!response.ok) {
-    throw new Error(`Slack API error: slack_http_${response.status}`);
+    const response = await fetch(
+      `https://slack.com/api/conversations.list?${params}`,
+      {
+        headers: {
+          Authorization: `Bearer ${botToken}`,
+        },
+        signal: AbortSignal.timeout(10_000),
+      }
+    );
+
+    // Rate-limited: throw so callers don't cache a truncated list
+    if (response.status === 429) {
+      throw new Error("Slack API error: ratelimited");
+    }
+
+    if (!response.ok) {
+      throw new Error(`Slack API error: slack_http_${response.status}`);
+    }
+
+    const data = await response.json() as {
+      ok: boolean;
+      error?: string;
+      channels?: Array<{ id: string; name: string }>;
+      response_metadata?: { next_cursor?: string };
+    };
+
+    if (!data.ok) {
+      throw new Error(`Slack API error: ${data.error}`);
+    }
+
+    for (const c of data.channels || []) {
+      allChannels.push({ id: c.id, name: c.name });
+    }
+
+    cursor = data.response_metadata?.next_cursor;
+    if (!cursor) {
+      break;
+    }
   }
 
-  const data = await response.json() as {
-    ok: boolean;
-    error?: string;
-    channels?: Array<{ id: string; name: string }>;
-  };
-
-  if (!data.ok) {
-    throw new Error(`Slack API error: ${data.error}`);
+  // If we hit maxPages but cursor still has more, throw to avoid caching truncated data
+  if (cursor) {
+    throw new Error(`Slack API error: pagination_truncated_after_${maxPages}_pages`);
   }
 
-  return (data.channels || []).map((c) => ({ id: c.id, name: c.name }));
+  return allChannels;
 }

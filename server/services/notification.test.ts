@@ -4,6 +4,7 @@ const mockGetNotificationPreferences = vi.fn().mockResolvedValue(undefined);
 const mockQueueNotification = vi.fn().mockResolvedValue({ id: 1 });
 const mockGetPendingDigestEntries = vi.fn().mockResolvedValue([]);
 const mockGetMonitorChanges = vi.fn().mockResolvedValue([]);
+const mockGetMonitorChangesByIds = vi.fn().mockResolvedValue([]);
 const mockMarkQueueEntriesDelivered = vi.fn().mockResolvedValue(undefined);
 const mockGetReadyQueueEntries = vi.fn().mockResolvedValue([]);
 const mockMarkQueueEntryDelivered = vi.fn().mockResolvedValue(undefined);
@@ -21,6 +22,7 @@ vi.mock("../storage", () => ({
     queueNotification: (...args: any[]) => mockQueueNotification(...args),
     getPendingDigestEntries: (...args: any[]) => mockGetPendingDigestEntries(...args),
     getMonitorChanges: (...args: any[]) => mockGetMonitorChanges(...args),
+    getMonitorChangesByIds: (...args: any[]) => mockGetMonitorChangesByIds(...args),
     markQueueEntriesDelivered: (...args: any[]) => mockMarkQueueEntriesDelivered(...args),
     getReadyQueueEntries: (...args: any[]) => mockGetReadyQueueEntries(...args),
     markQueueEntryDelivered: (...args: any[]) => mockMarkQueueEntryDelivered(...args),
@@ -398,14 +400,14 @@ describe("processDigestBatch", () => {
       makeChange({ id: 10, oldValue: "$10", newValue: "$15" }),
       makeChange({ id: 11, oldValue: "$15", newValue: "$20" }),
     ];
-    mockGetMonitorChanges.mockResolvedValueOnce(changes);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce(changes);
 
     const monitor = makeMonitor();
     const prefs = makePrefs({ digestMode: true });
 
     const result = await processDigestBatch(monitor, prefs);
     expect(result).toEqual({ success: true });
-    expect(mockGetMonitorChanges).toHaveBeenCalledTimes(1);
+    expect(mockGetMonitorChangesByIds).toHaveBeenCalledWith([10, 11]);
     expect(mockSendDigestEmail).toHaveBeenCalledWith(
       monitor,
       expect.arrayContaining([
@@ -422,7 +424,7 @@ describe("processDigestBatch", () => {
       { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
     ];
     mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
-    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
 
     const monitor = makeMonitor();
     const prefs = makePrefs({ digestMode: true, notificationEmail: "custom@test.com" });
@@ -487,7 +489,7 @@ describe("processQueuedNotifications", () => {
     mockGetStaleQueueEntries.mockResolvedValueOnce([]);
     mockGetMonitor.mockResolvedValueOnce(makeMonitor());
     mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
-    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
     mockSendNotificationEmail.mockResolvedValueOnce({ success: true });
 
     await processQueuedNotifications();
@@ -622,8 +624,8 @@ describe("processDigestBatch edge cases", () => {
       { id: 1, monitorId: 1, changeId: 999, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
     ];
     mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
-    // Return changes that don't include changeId 999
-    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 1 })]);
+    // Return empty — the queried IDs don't exist
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([]);
 
     const monitor = makeMonitor();
     const prefs = makePrefs({ digestMode: true });
@@ -638,7 +640,7 @@ describe("processDigestBatch edge cases", () => {
       { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
     ];
     mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
-    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
     mockSendDigestEmail.mockResolvedValueOnce({ success: false, error: "Rate limited" });
 
     const monitor = makeMonitor();
@@ -675,8 +677,8 @@ describe("processQueuedNotifications edge cases", () => {
     mockGetStaleQueueEntries.mockResolvedValueOnce([]);
     mockGetMonitor.mockResolvedValueOnce(makeMonitor());
     mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
-    // Return changes that don't include changeId 999
-    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 1 })]);
+    // Return empty — the queried ID doesn't exist
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([]);
 
     await processQueuedNotifications();
     expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(3);
@@ -689,7 +691,7 @@ describe("processQueuedNotifications edge cases", () => {
     mockGetStaleQueueEntries.mockResolvedValueOnce([]);
     mockGetMonitor.mockResolvedValueOnce(makeMonitor());
     mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
-    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
     mockSendNotificationEmail.mockResolvedValueOnce({ success: false, error: "Rate limit" });
 
     await processQueuedNotifications();
@@ -705,7 +707,7 @@ describe("processQueuedNotifications edge cases", () => {
     mockGetNotificationPreferences.mockResolvedValueOnce(
       makePrefs({ notificationEmail: "override@test.com" })
     );
-    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
     mockSendNotificationEmail.mockResolvedValueOnce({ success: true });
 
     await processQueuedNotifications();
@@ -736,15 +738,14 @@ describe("processQueuedNotifications edge cases", () => {
     mockGetStaleQueueEntries.mockResolvedValueOnce([]);
     mockGetMonitor.mockResolvedValueOnce(makeMonitor());
     mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
-    // After N+1 fix, getMonitorChanges is called once per monitor
-    mockGetMonitorChanges.mockResolvedValueOnce([
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([
       makeChange({ id: 10, oldValue: "$10", newValue: "$15" }),
       makeChange({ id: 11, oldValue: "$15", newValue: "$20" }),
     ]);
     mockSendNotificationEmail.mockResolvedValue({ success: true });
 
     await processQueuedNotifications();
-    expect(mockGetMonitorChanges).toHaveBeenCalledTimes(1);
+    expect(mockGetMonitorChangesByIds).toHaveBeenCalledWith([10, 11]);
     expect(mockSendNotificationEmail).toHaveBeenCalledTimes(2);
     expect(mockMarkQueueEntryDelivered).toHaveBeenCalledTimes(2);
     expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(1);
@@ -1162,7 +1163,7 @@ describe("multi-channel digest delivery", () => {
       makeChange({ id: 10, oldValue: "$10", newValue: "$15" }),
       makeChange({ id: 11, oldValue: "$15", newValue: "$20" }),
     ];
-    mockGetMonitorChanges.mockResolvedValueOnce(changes);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce(changes);
 
     const monitor = makeMonitor();
     const prefs = makePrefs({ digestMode: true });
@@ -1188,7 +1189,7 @@ describe("multi-channel digest delivery", () => {
       { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
     ];
     mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
-    mockGetMonitorChanges.mockResolvedValueOnce([makeChange({ id: 10 })]);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
 
     const monitor = makeMonitor();
     const prefs = makePrefs({ digestMode: true });
