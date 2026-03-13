@@ -399,7 +399,7 @@ describe("slackDelivery", () => {
       expect(secondUrl).toContain("cursor=cursor_page2");
     });
 
-    it("stops at maxPages (10) to avoid infinite loops", async () => {
+    it("throws when maxPages (10) reached with cursor still present", async () => {
       // Every page returns a non-empty cursor
       mockFetch.mockResolvedValue({
         ok: true,
@@ -410,9 +410,17 @@ describe("slackDelivery", () => {
         }),
       });
 
-      const channels = await listChannels("xoxb-token");
-      expect(channels).toHaveLength(10); // 1 channel per page * 10 pages
+      await expect(listChannels("xoxb-token")).rejects.toThrow("pagination_truncated_after_10_pages");
       expect(mockFetch).toHaveBeenCalledTimes(10);
+    });
+
+    it("throws on 429 rate limit during channel listing", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+      });
+
+      await expect(listChannels("xoxb-token")).rejects.toThrow("Slack API error: ratelimited");
     });
 
     it("stops when next_cursor is undefined (no response_metadata)", async () => {

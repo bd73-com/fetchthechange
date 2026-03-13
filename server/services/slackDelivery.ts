@@ -217,10 +217,9 @@ export async function listChannels(botToken: string): Promise<SlackChannel[]> {
       }
     );
 
-    // Handle rate limiting: return channels collected so far
+    // Rate-limited: throw so callers don't cache a truncated list
     if (response.status === 429) {
-      console.warn(`[Slack] Rate limited during channel listing (page ${page + 1}), returning ${allChannels.length} channels collected so far`);
-      break;
+      throw new Error("Slack API error: ratelimited");
     }
 
     if (!response.ok) {
@@ -246,6 +245,11 @@ export async function listChannels(botToken: string): Promise<SlackChannel[]> {
     if (!cursor) {
       break;
     }
+  }
+
+  // If we hit maxPages but cursor still has more, throw to avoid caching truncated data
+  if (cursor) {
+    throw new Error(`Slack API error: pagination_truncated_after_${maxPages}_pages`);
   }
 
   return allChannels;
