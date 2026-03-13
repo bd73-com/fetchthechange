@@ -92,7 +92,12 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     }
   }
 
-  await initStripe();
+  // Start Stripe initialization in the background so the server can bind
+  // to port 5000 immediately.  Webhook requests arriving before init
+  // finishes will fail signature verification, but Stripe retries them.
+  initStripe().catch((err) => {
+    console.error("Stripe background init failed:", err);
+  });
 
   // Stripe webhook route MUST be before express.json()
   app.post(

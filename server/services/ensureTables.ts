@@ -139,6 +139,21 @@ export async function ensureMonitorConditionsTable(): Promise<boolean> {
 }
 
 /**
+ * Ensures notification_queue has `attempts` and `permanently_failed` columns
+ * (added in PR #158).  Without this, all notification cron queries crash
+ * when the schema references columns the database doesn't have yet.
+ */
+export async function ensureNotificationQueueColumns(): Promise<void> {
+  try {
+    await db.execute(sql`ALTER TABLE notification_queue ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE notification_queue ADD COLUMN IF NOT EXISTS permanently_failed BOOLEAN NOT NULL DEFAULT false`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS notification_queue_permanently_failed_idx ON notification_queue(permanently_failed)`);
+  } catch (e) {
+    console.error("Could not ensure notification_queue columns:", e);
+  }
+}
+
+/**
  * Ensures tags and monitor_tags tables exist (added in PR #86).
  * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
  */

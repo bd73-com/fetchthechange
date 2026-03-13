@@ -113,7 +113,7 @@ vi.mock("./middleware/rateLimiter", () => ({
 }));
 
 vi.mock("./services/scheduler", () => ({
-  startScheduler: vi.fn(),
+  startScheduler: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ---------------------------------------------------------------------------
