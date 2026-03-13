@@ -249,14 +249,25 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   // Start Server
   const port = 5000;
-  httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
+  httpServer.listen({ port, host: "0.0.0.0" }, () => {
     console.log(`serving on port ${port}`);
   });
 
-  // Graceful shutdown: drain warm browser pool
+  // Graceful shutdown: close server, drain browser pool, close DB pool
   const { browserPool } = await import("./services/browserPool");
-  process.on('SIGTERM', async () => { await browserPool.drain(); process.exit(0); });
-  process.on('SIGINT', async () => { await browserPool.drain(); process.exit(0); });
+  const { pool: dbPool } = await import("./db");
+  const shutdown = async () => {
+    console.log("Shutting down gracefully...");
+    // Stop accepting new connections
+    httpServer.close();
+    // Drain warm browsers
+    await browserPool.drain().catch(() => {});
+    // Close DB connection pool
+    await dbPool.end().catch(() => {});
+    process.exit(0);
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 })().catch((err) => {
   console.error("FATAL: server failed to start", err);
   process.exit(1);
