@@ -179,6 +179,23 @@ describe("startScheduler", () => {
     expect(mockCleanupPollutedValues).toHaveBeenCalledOnce();
   });
 
+  it("continues startup and registers cron jobs when cleanupPollutedValues throws", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockCleanupPollutedValues.mockRejectedValueOnce(new Error("DB connection lost"));
+
+    await startScheduler();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("cleanupPollutedValues failed"),
+      "DB connection lost"
+    );
+    // Cron jobs should still be registered despite the failure
+    expect(hasCron("* * * * *")).toBe(true);
+    expect(hasCron("*/1 * * * *")).toBe(true);
+    expect(hasCron("0 3 * * *")).toBe(true);
+    errorSpy.mockRestore();
+  });
+
   it("registers all cron schedules (every-minute, notification queue, and daily cleanup)", async () => {
     await startScheduler();
     expect(hasCron("* * * * *")).toBe(true);
