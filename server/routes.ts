@@ -124,6 +124,7 @@ export async function registerRoutes(
       }
     }
     console.error("[CRITICAL] Scheduler failed to start after all retries — monitoring is disabled");
+    await ErrorLogger.error("scheduler", "Scheduler failed to start after all retries — monitoring is disabled", null, { maxRetries });
   })();
 
   // Debug Browserless Endpoint (admin-only, SSRF-validated)

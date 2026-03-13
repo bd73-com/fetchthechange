@@ -612,9 +612,12 @@ export async function processQueuedNotifications(): Promise<void> {
   // Mark stale entries (older than 48 hours) as permanently failed so they stop being re-processed
   const staleThreshold = new Date(now.getTime() - 48 * 60 * 60 * 1000);
   const staleEntries = await storage.getStaleQueueEntries(staleThreshold);
-  for (const entry of staleEntries) {
-    await storage.markQueueEntryPermanentlyFailed(entry.id);
-    await ErrorLogger.warning("scheduler", `Queued notification ${entry.id} for monitor ${entry.monitorId} is older than 48 hours — marked permanently failed`, { notificationQueueId: entry.id, monitorId: entry.monitorId });
+  if (staleEntries.length > 0) {
+    for (const entry of staleEntries) {
+      await storage.markQueueEntryPermanentlyFailed(entry.id);
+    }
+    const monitorIds = Array.from(new Set(staleEntries.map(e => e.monitorId)));
+    await ErrorLogger.warning("scheduler", `Marked ${staleEntries.length} stale notification queue entries as permanently failed (older than 48 hours)`, { count: staleEntries.length, monitorIds, entryIds: staleEntries.map(e => e.id) });
   }
 }
 

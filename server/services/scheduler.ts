@@ -63,7 +63,7 @@ export async function startScheduler() {
   try {
     await storage.cleanupPollutedValues();
   } catch (error) {
-    console.error("[Scheduler] cleanupPollutedValues failed (non-fatal):", error instanceof Error ? error.message : error);
+    await ErrorLogger.warning("scheduler", "cleanupPollutedValues failed (non-fatal)", { errorMessage: error instanceof Error ? error.message : String(error) });
   }
 
   // Wire circuit breaker recovery: immediately retry pending monitors when Browserless comes back
