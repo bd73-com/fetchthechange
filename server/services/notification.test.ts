@@ -1198,3 +1198,177 @@ describe("multi-channel digest delivery", () => {
     expect(mockSlackDeliver).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("delivery failure checks all channels", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
+    mockGetStaleQueueEntries.mockResolvedValue([]);
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+    mockSendDigestEmail.mockResolvedValue({ success: true });
+    mockWebhookDeliver.mockResolvedValue({ success: true, statusCode: 200 });
+    mockSlackDeliver.mockResolvedValue({ success: true, slackTs: "123" });
+    mockDecryptToken.mockReturnValue("xoxb-decrypted-token");
+    mockGetSlackConnection.mockResolvedValue(undefined);
+  });
+
+  it("processDigestBatch does not mark delivered when webhook fails", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://hooks.example.com", secret: "whsec_test" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockWebhookDeliver.mockResolvedValue({ success: false, error: "timeout" });
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processDigestBatch(makeMonitor(), makePrefs({ digestMode: true }));
+    expect(mockMarkQueueEntriesDelivered).not.toHaveBeenCalled();
+  });
+
+  it("processDigestBatch does not mark delivered when slack fails", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "slack", enabled: true, config: { channelId: "C0123" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockGetSlackConnection.mockResolvedValue({
+      id: 1, userId: "user1", teamId: "T001", teamName: "Test", botToken: "encrypted",
+      scope: "chat:write", createdAt: new Date(), updatedAt: new Date(),
+    });
+    mockSlackDeliver.mockResolvedValue({ success: false, error: "channel_not_found" });
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processDigestBatch(makeMonitor(), makePrefs({ digestMode: true }));
+    expect(mockMarkQueueEntriesDelivered).not.toHaveBeenCalled();
+  });
+
+  it("processQueuedNotifications does not mark delivered when webhook fails", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://hooks.example.com", secret: "whsec_test" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockWebhookDeliver.mockResolvedValue({ success: false, error: "timeout" });
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours" as const, scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    expect(mockMarkQueueEntryDelivered).not.toHaveBeenCalled();
+  });
+
+  it("processQueuedNotifications does not mark delivered when slack fails", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "slack", enabled: true, config: { channelId: "C0123" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockGetSlackConnection.mockResolvedValue({
+      id: 1, userId: "user1", teamId: "T001", teamName: "Test", botToken: "encrypted",
+      scope: "chat:write", createdAt: new Date(), updatedAt: new Date(),
+    });
+    mockSlackDeliver.mockResolvedValue({ success: false, error: "not_in_channel" });
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours" as const, scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    expect(mockMarkQueueEntryDelivered).not.toHaveBeenCalled();
+  });
+
+  it("processQueuedNotifications marks delivered when webhook fails but email succeeds (partial failure)", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "email", enabled: true, config: {}, createdAt: new Date(), updatedAt: new Date() },
+      { id: 2, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://hooks.example.com", secret: "whsec_test" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockWebhookDeliver.mockResolvedValue({ success: false, error: "timeout" });
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours" as const, scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    // Should mark as delivered because email succeeded (webhook failure logged separately)
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("orphaned queue entry handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
+    mockGetMonitorChannels.mockResolvedValue([]);
+    mockGetStaleQueueEntries.mockResolvedValue([]);
+    mockSendDigestEmail.mockResolvedValue({ success: true });
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+  });
+
+  it("processDigestBatch logs warning and marks orphaned entries as delivered", async () => {
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+      { id: 2, monitorId: 1, changeId: 11, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+      { id: 3, monitorId: 1, changeId: 12, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    // Only change 10 exists; 11 and 12 are orphaned
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    const monitor = makeMonitor();
+    const prefs = makePrefs({ digestMode: true });
+
+    await processDigestBatch(monitor, prefs);
+
+    // Should log warning about 2 orphaned entries
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("2 queue entries reference deleted changes"),
+      expect.objectContaining({ monitorId: 1, orphanedChangeIds: [11, 12] })
+    );
+    // Orphaned entries should be marked delivered
+    expect(mockMarkQueueEntriesDelivered).toHaveBeenCalledWith([2, 3]);
+    // The valid entry should also be marked delivered (in a separate call after successful delivery)
+    expect(mockMarkQueueEntriesDelivered).toHaveBeenCalledWith([1]);
+  });
+
+  it("processDigestBatch only marks valid entries as delivered on success (not orphaned ones again)", async () => {
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+      { id: 2, monitorId: 1, changeId: 999, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processDigestBatch(makeMonitor(), makePrefs({ digestMode: true }));
+
+    // First call: orphaned entries
+    expect(mockMarkQueueEntriesDelivered).toHaveBeenCalledWith([2]);
+    // Second call: only valid entries
+    expect(mockMarkQueueEntriesDelivered).toHaveBeenCalledWith([1]);
+    expect(mockMarkQueueEntriesDelivered).toHaveBeenCalledTimes(2);
+  });
+
+  it("processQueuedNotifications logs warning for orphaned entries", async () => {
+    const entry = { id: 3, monitorId: 1, changeId: 999, reason: "quiet_hours" as const, scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([]);
+
+    await processQueuedNotifications();
+
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("change 999 not found"),
+      expect.objectContaining({ monitorId: 1, changeId: 999, notificationQueueId: 3 })
+    );
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(3);
+  });
+});

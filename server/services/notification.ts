@@ -151,6 +151,19 @@ export interface ChannelDeliveryResult {
   slack?: { success: boolean; error?: string };
 }
 
+/**
+ * Returns true if delivery completely failed (no channels attempted or all attempted channels failed).
+ * Channels that were configured but skipped (e.g., missing config) are not counted as attempted.
+ */
+function hasCompleteDeliveryFailure(result: ChannelDeliveryResult): boolean {
+  const attempted: boolean[] = [];
+  if (result.email !== undefined && result.email !== null) attempted.push(result.email.success);
+  if (result.webhook) attempted.push(result.webhook.success);
+  if (result.slack) attempted.push(result.slack.success);
+  // If no channels were attempted or every attempted channel failed, it's a complete failure
+  return attempted.length === 0 || attempted.every((s) => !s);
+}
+
 async function deliverToChannels(
   monitor: Monitor,
   change: MonitorChange,
@@ -310,6 +323,7 @@ async function deliverDigestToChannels(
           for (const change of changes) {
             const webhookResult = await deliverWebhook(monitor, change, config);
             if (!webhookResult.success) {
+              result.webhook = { success: false, error: webhookResult.error };
               await storage.addDeliveryLog({
                 monitorId: monitor.id,
                 changeId: change.id,
@@ -319,6 +333,9 @@ async function deliverDigestToChannels(
                 response: { error: webhookResult.error },
               });
             } else {
+              if (!result.webhook || result.webhook.success) {
+                result.webhook = { success: true };
+              }
               await storage.addDeliveryLog({
                 monitorId: monitor.id,
                 changeId: change.id,
@@ -341,6 +358,11 @@ async function deliverDigestToChannels(
             const botToken = decryptToken(connection.botToken);
             for (const change of changes) {
               const slackResult = await deliverSlack(monitor, change, slackConfig.channelId, botToken);
+              if (!slackResult.success) {
+                result.slack = { success: false, error: slackResult.error };
+              } else if (!result.slack || result.slack.success) {
+                result.slack = { success: true };
+              }
               await storage.addDeliveryLog({
                 monitorId: monitor.id,
                 changeId: change.id,
@@ -352,6 +374,7 @@ async function deliverDigestToChannels(
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
+            result.slack = { success: false, error: msg };
             console.error(`[Notification] Slack token decryption failed (monitorId=${monitor.id})`);
             for (const change of changes) {
               await storage.addDeliveryLog({
@@ -476,6 +499,13 @@ export async function processDigestBatch(
   const changeIds = entries.map((e) => e.changeId);
   const changes = await storage.getMonitorChangesByIds(changeIds);
 
+  const foundIds = new Set(changes.map((c) => c.id));
+  const orphanedEntries = entries.filter((e) => !foundIds.has(e.changeId));
+  if (orphanedEntries.length > 0) {
+    await ErrorLogger.warning("scheduler", `Digest batch for monitor ${monitor.id}: ${orphanedEntries.length} queue entries reference deleted changes`, { monitorId: monitor.id, orphanedChangeIds: orphanedEntries.map((e) => e.changeId) });
+    await storage.markQueueEntriesDelivered(orphanedEntries.map((e) => e.id));
+  }
+
   if (changes.length === 0) {
     return null;
   }
@@ -483,8 +513,9 @@ export async function processDigestBatch(
   const emailOverride = prefs.notificationEmail || undefined;
   const result = await deliverDigestToChannels(monitor, changes, emailOverride);
 
-  if (result.email?.success !== false) {
-    await storage.markQueueEntriesDelivered(entries.map((e) => e.id));
+  if (!hasCompleteDeliveryFailure(result)) {
+    const deliveredEntries = entries.filter((e) => foundIds.has(e.changeId));
+    await storage.markQueueEntriesDelivered(deliveredEntries.map((e) => e.id));
   }
 
   return result.email ?? null;
@@ -527,12 +558,13 @@ export async function processQueuedNotifications(): Promise<void> {
       for (const entry of entries) {
         const change = changesById.get(entry.changeId);
         if (!change) {
+          await ErrorLogger.warning("scheduler", `Queued notification for monitor ${monitorId}: change ${entry.changeId} not found, marking entry ${entry.id} as delivered`, { monitorId, changeId: entry.changeId, notificationQueueId: entry.id });
           await storage.markQueueEntryDelivered(entry.id);
           continue;
         }
 
         const result = await deliverToChannels(monitor, change, emailOverride);
-        if (result.email?.success !== false) {
+        if (!hasCompleteDeliveryFailure(result)) {
           await storage.markQueueEntryDelivered(entry.id);
         }
       }

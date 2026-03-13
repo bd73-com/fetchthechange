@@ -193,7 +193,8 @@ export class DatabaseStorage implements IStorage {
         eq(notificationQueue.reason, "digest"),
         eq(notificationQueue.delivered, false)
       ))
-      .orderBy(notificationQueue.createdAt);
+      .orderBy(notificationQueue.createdAt)
+      .limit(500);
   }
 
   async getReadyQueueEntries(before: Date): Promise<NotificationQueueEntry[]> {
@@ -202,7 +203,8 @@ export class DatabaseStorage implements IStorage {
         eq(notificationQueue.delivered, false),
         lte(notificationQueue.scheduledFor, before)
       ))
-      .orderBy(notificationQueue.scheduledFor);
+      .orderBy(notificationQueue.scheduledFor)
+      .limit(500);
   }
 
   async markQueueEntryDelivered(id: number): Promise<void> {
