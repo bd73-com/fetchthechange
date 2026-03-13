@@ -172,9 +172,10 @@ describe("ensureNotificationQueueColumns", () => {
     mockExecute.mockReset();
   });
 
-  it("executes 2 ALTER TABLE + 1 CREATE INDEX without throwing", async () => {
+  it("executes 2 ALTER TABLE + 1 CREATE INDEX and returns true", async () => {
     mockExecute.mockResolvedValue([]);
-    await ensureNotificationQueueColumns();
+    const result = await ensureNotificationQueueColumns();
+    expect(result).toBe(true);
     expect(mockExecute).toHaveBeenCalledTimes(3);
   });
 
@@ -189,9 +190,9 @@ describe("ensureNotificationQueueColumns", () => {
     expect(statements.some((s: string) => s.includes("notification_queue_permanently_failed_idx"))).toBe(true);
   });
 
-  it("catches errors and does not throw", async () => {
+  it("catches errors and returns false", async () => {
     mockExecute.mockRejectedValue(new Error("connection refused"));
-    await expect(ensureNotificationQueueColumns()).resolves.toBeUndefined();
+    await expect(ensureNotificationQueueColumns()).resolves.toBe(false);
   });
 
   it("logs error when ALTER TABLE fails", async () => {

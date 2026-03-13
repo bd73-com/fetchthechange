@@ -173,7 +173,7 @@ vi.mock("./services/ensureTables", () => ({
   ensureErrorLogColumns: vi.fn().mockResolvedValue(undefined),
   ensureApiKeysTable: vi.fn().mockResolvedValue(undefined),
   ensureChannelTables: vi.fn().mockResolvedValue(undefined),
-  ensureNotificationQueueColumns: vi.fn().mockResolvedValue(undefined),
+  ensureNotificationQueueColumns: vi.fn().mockResolvedValue(true),
   ensureTagTables: vi.fn().mockResolvedValue(undefined),
   ensureMonitorHealthColumns: vi.fn().mockResolvedValue(undefined),
   ensureMonitorConditionsTable: vi.fn().mockResolvedValue(true),

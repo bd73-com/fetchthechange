@@ -67,7 +67,10 @@ export async function registerRoutes(
   await ensureErrorLogColumns();
   const apiKeysReady = await ensureApiKeysTable();
   await ensureChannelTables();
-  await ensureNotificationQueueColumns();
+  const notificationQueueReady = await ensureNotificationQueueColumns();
+  if (!notificationQueueReady) {
+    console.error("CRITICAL: notification_queue columns missing — notification cron queries will fail");
+  }
   await ensureTagTables();
   // Per-route 503 guard (not conditional registration like apiKeysReady)
   // because condition routes are inline — 503 gives clients a clear retry signal.
