@@ -133,7 +133,8 @@ export class DatabaseStorage implements IStorage {
     if (changeIds.length === 0) return [];
     return await db.select()
       .from(monitorChanges)
-      .where(inArray(monitorChanges.id, changeIds));
+      .where(inArray(monitorChanges.id, changeIds))
+      .orderBy(desc(monitorChanges.detectedAt));
   }
 
   async addMonitorChange(monitorId: number, oldValue: string | null, newValue: string | null): Promise<MonitorChange> {

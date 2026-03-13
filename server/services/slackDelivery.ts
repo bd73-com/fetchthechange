@@ -90,15 +90,18 @@ async function postMessage(
     }),
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) {
+  // Handle rate limiting: HTTP 429 or JSON-level ratelimited error
+  const isHttp429 = response.status === 429;
+  if (!response.ok && !isHttp429) {
     return { ok: false, error: `slack_http_${response.status}` };
   }
-  const data = await response.json() as { ok: boolean; error?: string; ts?: string };
+  const data = isHttp429
+    ? { ok: false as const, error: "ratelimited" }
+    : await response.json() as { ok: boolean; error?: string; ts?: string };
 
-  // Handle rate limiting: retry once after the Retry-After delay (up to 5s)
-  if (!data.ok && data.error === "ratelimited") {
-    const retryAfter = Number(response.headers.get("Retry-After") || "1");
-    const delay = Math.min(retryAfter, 5) * 1000;
+  if (!data.ok && (isHttp429 || data.error === "ratelimited")) {
+    const retryAfter = Number(response.headers.get("Retry-After")) || 1;
+    const delay = Math.max(0, Math.min(retryAfter, 5)) * 1000;
     console.log(`[Slack] Rate limited, retrying after ${delay}ms`);
     await new Promise((resolve) => setTimeout(resolve, delay));
     const retryResponse = await fetch("https://slack.com/api/chat.postMessage", {
@@ -116,7 +119,7 @@ async function postMessage(
     if (!retryResponse.ok) {
       return { ok: false, error: `slack_http_${retryResponse.status}` };
     }
-    return retryResponse.json() as Promise<{ ok: boolean; error?: string; ts?: string }>;
+    return await retryResponse.json() as { ok: boolean; error?: string; ts?: string };
   }
 
   return data;
@@ -213,6 +216,12 @@ export async function listChannels(botToken: string): Promise<SlackChannel[]> {
         signal: AbortSignal.timeout(10_000),
       }
     );
+
+    // Handle rate limiting: return channels collected so far
+    if (response.status === 429) {
+      console.warn(`[Slack] Rate limited during channel listing (page ${page + 1}), returning ${allChannels.length} channels collected so far`);
+      break;
+    }
 
     if (!response.ok) {
       throw new Error(`Slack API error: slack_http_${response.status}`);
