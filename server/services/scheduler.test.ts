@@ -77,6 +77,14 @@ vi.mock("./browserlessCircuitBreaker", () => ({
   },
 }));
 
+const { mockEnsureMonitorConditionsTable } = vi.hoisted(() => ({
+  mockEnsureMonitorConditionsTable: vi.fn().mockResolvedValue(true),
+}));
+
+vi.mock("./ensureTables", () => ({
+  ensureMonitorConditionsTable: (...args: any[]) => mockEnsureMonitorConditionsTable(...args),
+}));
+
 vi.mock("node-cron", () => ({
   default: {
     schedule: vi.fn((expression: string, callback: () => Promise<void>) => {
@@ -140,6 +148,11 @@ describe("startScheduler", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("calls ensureMonitorConditionsTable on start", async () => {
+    await startScheduler();
+    expect(mockEnsureMonitorConditionsTable).toHaveBeenCalledOnce();
   });
 
   it("calls cleanupPollutedValues on start", async () => {
