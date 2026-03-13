@@ -539,8 +539,7 @@ export async function processDigestBatch(
   } else {
     // Increment attempt count for all entries in the batch and check for permanent failure
     for (const entry of entries) {
-      await storage.incrementQueueEntryAttempts(entry.id);
-      const newAttempts = (entry.attempts ?? 0) + 1;
+      const newAttempts = await storage.incrementQueueEntryAttempts(entry.id);
       if (newAttempts >= MAX_QUEUE_ATTEMPTS) {
         await storage.markQueueEntryPermanentlyFailed(entry.id);
         await ErrorLogger.warning("scheduler", `Digest queue entry ${entry.id} for monitor ${monitor.id} permanently failed after ${newAttempts} attempts`, { monitorId: monitor.id, notificationQueueId: entry.id, attempts: newAttempts });
@@ -597,8 +596,7 @@ export async function processQueuedNotifications(): Promise<void> {
         if (!hasCompleteDeliveryFailure(result)) {
           await storage.markQueueEntryDelivered(entry.id);
         } else {
-          await storage.incrementQueueEntryAttempts(entry.id);
-          const newAttempts = (entry.attempts ?? 0) + 1;
+          const newAttempts = await storage.incrementQueueEntryAttempts(entry.id);
           if (newAttempts >= MAX_QUEUE_ATTEMPTS) {
             await storage.markQueueEntryPermanentlyFailed(entry.id);
             await ErrorLogger.warning("scheduler", `Notification queue entry ${entry.id} for monitor ${monitorId} permanently failed after ${newAttempts} attempts`, { monitorId, notificationQueueId: entry.id, attempts: newAttempts });

@@ -222,10 +222,12 @@ export class DatabaseStorage implements IStorage {
       .where(inArray(notificationQueue.id, ids));
   }
 
-  async incrementQueueEntryAttempts(id: number): Promise<void> {
-    await db.update(notificationQueue)
+  async incrementQueueEntryAttempts(id: number): Promise<number> {
+    const [row] = await db.update(notificationQueue)
       .set({ attempts: sql`${notificationQueue.attempts} + 1` })
-      .where(eq(notificationQueue.id, id));
+      .where(eq(notificationQueue.id, id))
+      .returning({ attempts: notificationQueue.attempts });
+    return row?.attempts ?? 0;
   }
 
   async markQueueEntryPermanentlyFailed(id: number): Promise<void> {
@@ -234,10 +236,20 @@ export class DatabaseStorage implements IStorage {
       .where(eq(notificationQueue.id, id));
   }
 
+  async cleanupPermanentlyFailedQueueEntries(olderThan: Date): Promise<number> {
+    const result = await db.delete(notificationQueue)
+      .where(and(
+        eq(notificationQueue.permanentlyFailed, true),
+        lte(notificationQueue.createdAt, olderThan)
+      ));
+    return (result as any).rowCount ?? 0;
+  }
+
   async getStaleQueueEntries(olderThan: Date): Promise<NotificationQueueEntry[]> {
     return await db.select().from(notificationQueue)
       .where(and(
         eq(notificationQueue.delivered, false),
+        eq(notificationQueue.permanentlyFailed, false),
         lte(notificationQueue.createdAt, olderThan)
       ));
   }

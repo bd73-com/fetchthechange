@@ -262,5 +262,21 @@ export async function startScheduler() {
         table: "delivery_log",
       });
     }
+
+    // Notification queue cleanup: prune permanently failed entries older than 7 days
+    try {
+      const deleted = await storage.cleanupPermanentlyFailedQueueEntries(
+        new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      );
+      if (deleted > 0) {
+        console.log(`[Cleanup] Pruned ${deleted} permanently failed notification_queue rows older than 7 days`);
+      }
+    } catch (error) {
+      await ErrorLogger.error("scheduler", "notification_queue cleanup failed", error instanceof Error ? error : null, {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        retentionDays: 7,
+        table: "notification_queue",
+      });
+    }
   });
 }

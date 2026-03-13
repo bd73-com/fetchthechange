@@ -238,6 +238,7 @@ export const notificationQueue = pgTable("notification_queue", {
   monitorIdx: index("notification_queue_monitor_idx").on(table.monitorId),
   scheduledIdx: index("notification_queue_scheduled_idx").on(table.scheduledFor),
   deliveredIdx: index("notification_queue_delivered_idx").on(table.delivered),
+  permanentlyFailedIdx: index("notification_queue_permanently_failed_idx").on(table.permanentlyFailed),
 }));
 
 export const notificationPreferencesRelations = relations(notificationPreferences, ({ one }) => ({
