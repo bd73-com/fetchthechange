@@ -10,7 +10,7 @@ vi.mock("../db", () => ({
   },
 }));
 
-import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable } from "./ensureTables";
+import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns } from "./ensureTables";
 
 describe("ensureMonitorHealthColumns", () => {
   beforeEach(() => {
@@ -161,6 +161,46 @@ describe("ensureMonitorConditionsTable", () => {
     await ensureMonitorConditionsTable();
     expect(errorSpy).toHaveBeenCalledWith(
       "Could not ensure monitor_conditions table:",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
+});
+
+describe("ensureNotificationQueueColumns", () => {
+  beforeEach(() => {
+    mockExecute.mockReset();
+  });
+
+  it("executes 2 ALTER TABLE + 1 CREATE INDEX and returns true", async () => {
+    mockExecute.mockResolvedValue([]);
+    const result = await ensureNotificationQueueColumns();
+    expect(result).toBe(true);
+    expect(mockExecute).toHaveBeenCalledTimes(3);
+  });
+
+  it("emits correct DDL for attempts, permanently_failed, and index", async () => {
+    mockExecute.mockResolvedValue([]);
+    await ensureNotificationQueueColumns();
+    const statements = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(statements.some((s: string) => s.includes("attempts") && s.includes("INTEGER"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("permanently_failed") && s.includes("BOOLEAN"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("notification_queue_permanently_failed_idx"))).toBe(true);
+  });
+
+  it("catches errors and returns false", async () => {
+    mockExecute.mockRejectedValue(new Error("connection refused"));
+    await expect(ensureNotificationQueueColumns()).resolves.toBe(false);
+  });
+
+  it("logs error when ALTER TABLE fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockExecute.mockRejectedValue(new Error("connection refused"));
+    await ensureNotificationQueueColumns();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Could not ensure notification_queue columns:",
       expect.any(Error),
     );
     errorSpy.mockRestore();
