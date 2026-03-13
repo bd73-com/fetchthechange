@@ -7,6 +7,9 @@ import { decryptToken } from "../utils/encryption";
 import { ErrorLogger } from "./logger";
 import { evaluateConditions } from "./conditions";
 
+/** Maximum number of delivery attempts before a queue entry is marked permanently failed. */
+const MAX_QUEUE_ATTEMPTS = 5;
+
 export function isInQuietHours(prefs: NotificationPreference, now: Date): boolean {
   if (!prefs.quietHoursStart || !prefs.quietHoursEnd || !prefs.timezone) {
     return false;
@@ -279,6 +282,15 @@ async function deliverToChannels(
         }
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Only set failure if no result was recorded yet (avoids delivery-log write errors overwriting a successful send)
+      if (ch.channel === "email" && !result.email) {
+        result.email = { success: false, error: msg };
+      } else if (ch.channel === "webhook" && !result.webhook) {
+        result.webhook = { success: false, error: msg };
+      } else if (ch.channel === "slack" && !result.slack) {
+        result.slack = { success: false, error: msg };
+      }
       await ErrorLogger.error("email", `Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err : null, { monitorId: monitor.id, channel: ch.channel });
     }
   });
@@ -390,6 +402,15 @@ async function deliverDigestToChannels(
         }
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Only set failure if no result was recorded yet (avoids delivery-log write errors overwriting a successful send)
+      if (ch.channel === "email" && !result.email) {
+        result.email = { success: false, error: msg };
+      } else if (ch.channel === "webhook" && !result.webhook) {
+        result.webhook = { success: false, error: msg };
+      } else if (ch.channel === "slack" && !result.slack) {
+        result.slack = { success: false, error: msg };
+      }
       await ErrorLogger.error("email", `Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err : null, { monitorId: monitor.id, channel: ch.channel });
     }
   });
@@ -516,6 +537,15 @@ export async function processDigestBatch(
   if (!hasCompleteDeliveryFailure(result)) {
     const deliveredEntries = entries.filter((e) => foundIds.has(e.changeId));
     await storage.markQueueEntriesDelivered(deliveredEntries.map((e) => e.id));
+  } else {
+    // Increment attempt count for all entries in the batch and check for permanent failure
+    for (const entry of entries) {
+      const newAttempts = await storage.incrementQueueEntryAttempts(entry.id);
+      if (newAttempts >= MAX_QUEUE_ATTEMPTS) {
+        await storage.markQueueEntryPermanentlyFailed(entry.id);
+        await ErrorLogger.warning("scheduler", `Digest queue entry ${entry.id} for monitor ${monitor.id} permanently failed after ${newAttempts} attempts`, { monitorId: monitor.id, notificationQueueId: entry.id, attempts: newAttempts });
+      }
+    }
   }
 
   return result.email ?? null;
@@ -566,6 +596,12 @@ export async function processQueuedNotifications(): Promise<void> {
         const result = await deliverToChannels(monitor, change, emailOverride);
         if (!hasCompleteDeliveryFailure(result)) {
           await storage.markQueueEntryDelivered(entry.id);
+        } else {
+          const newAttempts = await storage.incrementQueueEntryAttempts(entry.id);
+          if (newAttempts >= MAX_QUEUE_ATTEMPTS) {
+            await storage.markQueueEntryPermanentlyFailed(entry.id);
+            await ErrorLogger.warning("scheduler", `Notification queue entry ${entry.id} for monitor ${monitorId} permanently failed after ${newAttempts} attempts`, { monitorId, notificationQueueId: entry.id, attempts: newAttempts });
+          }
         }
       }
     } catch (error) {

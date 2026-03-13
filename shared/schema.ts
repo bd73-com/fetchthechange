@@ -231,11 +231,14 @@ export const notificationQueue = pgTable("notification_queue", {
   scheduledFor: timestamp("scheduled_for").notNull(),
   delivered: boolean("delivered").default(false).notNull(),
   deliveredAt: timestamp("delivered_at"),
+  attempts: integer("attempts").default(0).notNull(),
+  permanentlyFailed: boolean("permanently_failed").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
   monitorIdx: index("notification_queue_monitor_idx").on(table.monitorId),
   scheduledIdx: index("notification_queue_scheduled_idx").on(table.scheduledFor),
   deliveredIdx: index("notification_queue_delivered_idx").on(table.delivered),
+  permanentlyFailedIdx: index("notification_queue_permanently_failed_idx").on(table.permanentlyFailed),
 }));
 
 export const notificationPreferencesRelations = relations(notificationPreferences, ({ one }) => ({

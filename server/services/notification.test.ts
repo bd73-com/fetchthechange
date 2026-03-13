@@ -15,6 +15,8 @@ const mockGetMonitorChannels = vi.fn().mockResolvedValue([]);
 const mockAddDeliveryLog = vi.fn().mockResolvedValue({ id: 1 });
 const mockGetSlackConnection = vi.fn().mockResolvedValue(undefined);
 const mockGetMonitorConditions = vi.fn().mockResolvedValue([]);
+const mockIncrementQueueEntryAttempts = vi.fn().mockResolvedValue(1);
+const mockMarkQueueEntryPermanentlyFailed = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../storage", () => ({
   storage: {
@@ -33,6 +35,8 @@ vi.mock("../storage", () => ({
     addDeliveryLog: (...args: any[]) => mockAddDeliveryLog(...args),
     getSlackConnection: (...args: any[]) => mockGetSlackConnection(...args),
     getMonitorConditions: (...args: any[]) => mockGetMonitorConditions(...args),
+    incrementQueueEntryAttempts: (...args: any[]) => mockIncrementQueueEntryAttempts(...args),
+    markQueueEntryPermanentlyFailed: (...args: any[]) => mockMarkQueueEntryPermanentlyFailed(...args),
   },
 }));
 
@@ -1370,5 +1374,196 @@ describe("orphaned queue entry handling", () => {
       expect.objectContaining({ monitorId: 1, changeId: 999, notificationQueueId: 3 })
     );
     expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(3);
+  });
+});
+
+describe("max-retry limit on failed queue entries", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
+    mockGetMonitorChannels.mockResolvedValue([]);
+    mockGetStaleQueueEntries.mockResolvedValue([]);
+    mockSendNotificationEmail.mockResolvedValue({ success: false, error: "Rate limited" });
+    mockSendDigestEmail.mockResolvedValue({ success: false, error: "Rate limited" });
+  });
+
+  it("processQueuedNotifications increments attempts on delivery failure", async () => {
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
+    expect(mockMarkQueueEntryPermanentlyFailed).not.toHaveBeenCalled();
+  });
+
+  it("processQueuedNotifications marks permanently failed after max attempts", async () => {
+    mockIncrementQueueEntryAttempts.mockResolvedValueOnce(5);
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 4, permanentlyFailed: false };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
+    expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(1);
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("permanently failed after 5 attempts"),
+      expect.objectContaining({ monitorId: 1, notificationQueueId: 1, attempts: 5 })
+    );
+  });
+
+  it("processQueuedNotifications does not increment attempts on successful delivery", async () => {
+    mockSendNotificationEmail.mockResolvedValueOnce({ success: true });
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 2, permanentlyFailed: false };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    expect(mockIncrementQueueEntryAttempts).not.toHaveBeenCalled();
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(1);
+  });
+
+  it("processDigestBatch increments attempts for all entries on complete failure", async () => {
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false },
+      { id: 2, monitorId: 1, changeId: 11, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 }), makeChange({ id: 11 })]);
+
+    await processDigestBatch(makeMonitor(), makePrefs({ digestMode: true }));
+    expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
+    expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(2);
+    expect(mockMarkQueueEntryPermanentlyFailed).not.toHaveBeenCalled();
+  });
+
+  it("processDigestBatch marks entries permanently failed after max attempts", async () => {
+    mockIncrementQueueEntryAttempts.mockResolvedValueOnce(5);
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 4, permanentlyFailed: false },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processDigestBatch(makeMonitor(), makePrefs({ digestMode: true }));
+    expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
+    expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(1);
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("permanently failed after 5 attempts"),
+      expect.objectContaining({ monitorId: 1, notificationQueueId: 1, attempts: 5 })
+    );
+  });
+});
+
+describe("outer catch sets failure state on result", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
+    mockGetStaleQueueEntries.mockResolvedValue([]);
+  });
+
+  it("deliverToChannels sets webhook failure when outer catch fires", async () => {
+    // Make the webhook case throw an unexpected error by providing config that triggers new URL() to throw
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://hooks.example.com", secret: "whsec_test" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockWebhookDeliver.mockRejectedValue(new Error("unexpected boom"));
+
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    // Should NOT mark as delivered because the outer catch set failure state
+    expect(mockMarkQueueEntryDelivered).not.toHaveBeenCalled();
+    expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
+  });
+
+  it("deliverToChannels sets email failure when outer catch fires", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "email", enabled: true, config: {}, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockSendNotificationEmail.mockRejectedValue(new Error("email service crash"));
+
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    expect(mockMarkQueueEntryDelivered).not.toHaveBeenCalled();
+    expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
+  });
+
+  it("deliverDigestToChannels sets failure when outer catch fires", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://hooks.example.com", secret: "whsec_test" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockWebhookDeliver.mockRejectedValue(new Error("unexpected boom"));
+
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processDigestBatch(makeMonitor(), makePrefs({ digestMode: true }));
+    expect(mockMarkQueueEntriesDelivered).not.toHaveBeenCalled();
+    expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("delivery-log write failure does not convert successful sends to failures", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("marks entry delivered even when addDeliveryLog throws after successful email send", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "email", enabled: true, config: {}, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockSendNotificationEmail.mockResolvedValueOnce({ success: true });
+    mockAddDeliveryLog.mockRejectedValueOnce(new Error("DB write failed"));
+
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(1);
+    expect(mockIncrementQueueEntryAttempts).not.toHaveBeenCalled();
+  });
+
+  it("marks entry delivered even when addDeliveryLog throws after successful webhook send", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://hooks.example.com", secret: "whsec_test" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockWebhookDeliver.mockResolvedValueOnce({ success: true, statusCode: 200 });
+    mockAddDeliveryLog.mockRejectedValueOnce(new Error("DB write failed"));
+
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetMonitor.mockResolvedValueOnce(makeMonitor());
+    mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processQueuedNotifications();
+    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(1);
+    expect(mockIncrementQueueEntryAttempts).not.toHaveBeenCalled();
   });
 });

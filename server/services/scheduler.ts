@@ -131,20 +131,27 @@ export async function startScheduler() {
   if (!hasNotificationTables) {
     console.warn("[Scheduler] Notification tables (notification_preferences, notification_queue) do not exist yet — skipping notification cron. Run `npm run schema:push` to create them.");
   } else {
+    let notificationCronRunning = false;
     cron.schedule("*/1 * * * *", async () => {
+      if (notificationCronRunning) return;
+      notificationCronRunning = true;
       try {
-        await processQueuedNotifications();
-      } catch (error) {
-        await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null, {
-          errorMessage: error instanceof Error ? error.message : String(error),
-        });
-      }
-      try {
-        await processDigestCron();
-      } catch (error) {
-        await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null, {
-          errorMessage: error instanceof Error ? error.message : String(error),
-        });
+        try {
+          await processQueuedNotifications();
+        } catch (error) {
+          await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null, {
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+        }
+        try {
+          await processDigestCron();
+        } catch (error) {
+          await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null, {
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } finally {
+        notificationCronRunning = false;
       }
     });
 
@@ -253,6 +260,22 @@ export async function startScheduler() {
         errorMessage: error instanceof Error ? error.message : String(error),
         retentionDays: 30,
         table: "delivery_log",
+      });
+    }
+
+    // Notification queue cleanup: prune permanently failed entries older than 7 days
+    try {
+      const deleted = await storage.cleanupPermanentlyFailedQueueEntries(
+        new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      );
+      if (deleted > 0) {
+        console.log(`[Cleanup] Pruned ${deleted} permanently failed notification_queue rows older than 7 days`);
+      }
+    } catch (error) {
+      await ErrorLogger.error("scheduler", "notification_queue cleanup failed", error instanceof Error ? error : null, {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        retentionDays: 7,
+        table: "notification_queue",
       });
     }
   });
