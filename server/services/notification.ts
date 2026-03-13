@@ -317,6 +317,7 @@ async function deliverDigestToChannels(
           for (const change of changes) {
             const webhookResult = await deliverWebhook(monitor, change, config);
             if (!webhookResult.success) {
+              result.webhook = { success: false, error: webhookResult.error };
               await storage.addDeliveryLog({
                 monitorId: monitor.id,
                 changeId: change.id,
@@ -326,6 +327,9 @@ async function deliverDigestToChannels(
                 response: { error: webhookResult.error },
               });
             } else {
+              if (!result.webhook || result.webhook.success) {
+                result.webhook = { success: true };
+              }
               await storage.addDeliveryLog({
                 monitorId: monitor.id,
                 changeId: change.id,
@@ -348,6 +352,11 @@ async function deliverDigestToChannels(
             const botToken = decryptToken(connection.botToken);
             for (const change of changes) {
               const slackResult = await deliverSlack(monitor, change, slackConfig.channelId, botToken);
+              if (!slackResult.success) {
+                result.slack = { success: false, error: slackResult.error };
+              } else if (!result.slack || result.slack.success) {
+                result.slack = { success: true };
+              }
               await storage.addDeliveryLog({
                 monitorId: monitor.id,
                 changeId: change.id,
@@ -359,6 +368,7 @@ async function deliverDigestToChannels(
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
+            result.slack = { success: false, error: msg };
             console.error(`[Notification] Slack token decryption failed (monitorId=${monitor.id})`);
             for (const change of changes) {
               await storage.addDeliveryLog({
