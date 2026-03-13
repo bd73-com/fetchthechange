@@ -15,6 +15,8 @@ const mockGetMonitorChannels = vi.fn().mockResolvedValue([]);
 const mockAddDeliveryLog = vi.fn().mockResolvedValue({ id: 1 });
 const mockGetSlackConnection = vi.fn().mockResolvedValue(undefined);
 const mockGetMonitorConditions = vi.fn().mockResolvedValue([]);
+const mockIncrementQueueEntryAttempts = vi.fn().mockResolvedValue(undefined);
+const mockMarkQueueEntryPermanentlyFailed = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../storage", () => ({
   storage: {
@@ -33,6 +35,8 @@ vi.mock("../storage", () => ({
     addDeliveryLog: (...args: any[]) => mockAddDeliveryLog(...args),
     getSlackConnection: (...args: any[]) => mockGetSlackConnection(...args),
     getMonitorConditions: (...args: any[]) => mockGetMonitorConditions(...args),
+    incrementQueueEntryAttempts: (...args: any[]) => mockIncrementQueueEntryAttempts(...args),
+    markQueueEntryPermanentlyFailed: (...args: any[]) => mockMarkQueueEntryPermanentlyFailed(...args),
   },
 }));
 

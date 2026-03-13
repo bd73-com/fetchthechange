@@ -131,20 +131,27 @@ export async function startScheduler() {
   if (!hasNotificationTables) {
     console.warn("[Scheduler] Notification tables (notification_preferences, notification_queue) do not exist yet — skipping notification cron. Run `npm run schema:push` to create them.");
   } else {
+    let notificationCronRunning = false;
     cron.schedule("*/1 * * * *", async () => {
+      if (notificationCronRunning) return;
+      notificationCronRunning = true;
       try {
-        await processQueuedNotifications();
-      } catch (error) {
-        await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null, {
-          errorMessage: error instanceof Error ? error.message : String(error),
-        });
-      }
-      try {
-        await processDigestCron();
-      } catch (error) {
-        await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null, {
-          errorMessage: error instanceof Error ? error.message : String(error),
-        });
+        try {
+          await processQueuedNotifications();
+        } catch (error) {
+          await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null, {
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+        }
+        try {
+          await processDigestCron();
+        } catch (error) {
+          await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null, {
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } finally {
+        notificationCronRunning = false;
       }
     });
 
