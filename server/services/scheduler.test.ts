@@ -95,7 +95,7 @@ vi.mock("node-cron", () => ({
   },
 }));
 
-import { startScheduler, retryBackoff } from "./scheduler";
+import { startScheduler, retryBackoff, _resetSchedulerStarted } from "./scheduler";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
 import { _resetCache } from "./notificationReady";
@@ -142,6 +142,7 @@ describe("startScheduler", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetSchedulerStarted();
     _resetCache();
     // Clear captured cron callbacks
     Object.keys(cronCallbacks).forEach((k) => delete (cronCallbacks as any)[k]);
@@ -373,6 +374,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetSchedulerStarted();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });
@@ -477,6 +479,7 @@ describe("accelerated retry for Browserless infra failures", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetSchedulerStarted();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
     retryBackoff.clear();
@@ -600,6 +603,7 @@ describe("daily metrics cleanup", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetSchedulerStarted();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });
@@ -677,6 +681,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetSchedulerStarted();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });

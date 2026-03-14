@@ -1,7 +1,7 @@
 import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, apiKeys, tags, monitorTags, monitorConditions, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection, type ApiKey, type Tag, type MonitorCondition } from "@shared/schema";
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
-import { eq, desc, and, or, isNull, lte, lt, gte, sql, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, or, isNull, lte, lt, gte, sql, inArray } from "drizzle-orm";
 import { notificationTablesExist } from "./services/notificationReady";
 
 export interface IStorage {
@@ -271,6 +271,7 @@ export class DatabaseStorage implements IStorage {
         eq(notificationQueue.permanentlyFailed, false),
         lte(notificationQueue.createdAt, olderThan)
       ))
+      .orderBy(asc(notificationQueue.createdAt), asc(notificationQueue.id))
       .limit(limit);
   }
 

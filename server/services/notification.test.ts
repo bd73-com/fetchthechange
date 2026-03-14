@@ -747,6 +747,7 @@ describe("processQueuedNotifications edge cases", () => {
     expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(7);
     expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(8);
     // Only one summary warning, not one per entry
+    expect(ErrorLogger.warning).toHaveBeenCalledTimes(1);
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
       expect.stringContaining("2 stale notification queue entries"),

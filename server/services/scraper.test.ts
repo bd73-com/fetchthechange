@@ -1175,6 +1175,7 @@ describe("checkMonitor", () => {
     const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: true });
     await runWithTimers(monitor);
 
+    expect(mockStorage.countMonitorChanges).toHaveBeenCalledWith(1);
     expect(mockProcessNotification).toHaveBeenCalledWith(
       monitor,
       expect.objectContaining({ monitorId: 1 }),

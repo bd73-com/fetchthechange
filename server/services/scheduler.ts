@@ -14,6 +14,12 @@ const MAX_CONCURRENT_CHECKS = 10;
 const BASE_RETRY_MS = 2 * 60 * 1000; // 2 minutes
 const MAX_RETRY_MS = 15 * 60 * 1000; // 15 minutes
 let activeChecks = 0;
+let schedulerStarted = false;
+
+/** @internal Test-only reset for the idempotency guard */
+export function _resetSchedulerStarted() {
+  schedulerStarted = false;
+}
 
 /** Per-monitor backoff tracker for accelerated retries. */
 export const retryBackoff = new Map<number, { attempts: number }>();
@@ -41,6 +47,10 @@ async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]): P
 }
 
 export async function startScheduler() {
+  if (schedulerStarted) {
+    console.log("Scheduler already started, skipping duplicate registration");
+    return;
+  }
   console.log("Starting scheduler...");
 
   // Ensure monitor_conditions table exists — routes.ts calls this too, but
@@ -299,4 +309,6 @@ export async function startScheduler() {
       });
     }
   });
+
+  schedulerStarted = true;
 }
