@@ -276,7 +276,9 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       }, 3_000).unref();
       // Hard cutoff: force-close all connections at 9s (just before global 10s force-exit)
       setTimeout(() => {
-        httpServer.closeAllConnections();
+        if (typeof httpServer.closeAllConnections === "function") {
+          httpServer.closeAllConnections();
+        }
       }, 9_000).unref();
     });
     // Drain warm browsers
