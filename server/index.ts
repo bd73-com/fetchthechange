@@ -268,19 +268,32 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     console.log("Closing HTTP server...");
     await new Promise<void>((resolve) => {
       httpServer.close(() => resolve());
-      // Force-close keep-alive connections after 3s so we don't wait forever
+      // Close idle keep-alive connections after 3s (preserves active requests)
+      setTimeout(() => {
+        if (typeof httpServer.closeIdleConnections === "function") {
+          httpServer.closeIdleConnections();
+        }
+      }, 3_000).unref();
+      // Hard cutoff: force-close all connections at 9s (just before global 10s force-exit)
       setTimeout(() => {
         httpServer.closeAllConnections();
-      }, 3_000).unref();
+      }, 9_000).unref();
     });
     // Drain warm browsers
+    let cleanupFailed = false;
     console.log("Draining browser pool...");
-    await browserPool.drain().catch((err) => console.error("Failed to drain browser pool:", err));
+    await browserPool.drain().catch((err) => {
+      cleanupFailed = true;
+      console.error("Failed to drain browser pool:", err);
+    });
     // Close DB connection pool
     console.log("Closing DB pool...");
-    await dbPool.end().catch((err) => console.error("Failed to close DB pool:", err));
+    await dbPool.end().catch((err) => {
+      cleanupFailed = true;
+      console.error("Failed to close DB pool:", err);
+    });
     console.log("Shutdown complete.");
-    process.exit(0);
+    process.exit(cleanupFailed ? 1 : 0);
   };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
