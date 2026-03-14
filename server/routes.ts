@@ -109,10 +109,27 @@ export async function registerRoutes(
 
   registerAuthRoutes(app);
 
-  // Start Scheduler (fire-and-forget, but catch rejections to avoid crashing)
-  startScheduler().catch((err) => {
-    console.error("Scheduler startup failed:", err);
-  });
+  // Start Scheduler with retry on failure
+  (async () => {
+    const maxRetries = 5;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await startScheduler();
+        console.log("Scheduler started successfully");
+        return;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[CRITICAL] Scheduler startup failed (attempt ${attempt}/${maxRetries}): ${msg}`);
+        if (attempt < maxRetries) {
+          const delayMs = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+          console.log(`[Scheduler] Retrying in ${delayMs / 1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+    console.error("[CRITICAL] Scheduler failed to start after all retries — monitoring is disabled");
+    await ErrorLogger.error("scheduler", "Scheduler failed to start after all retries — monitoring is disabled", null, { maxRetries });
+  })();
 
   // Debug Browserless Endpoint (admin-only, SSRF-validated)
   app.post("/api/debug/browserless", isAuthenticated, async (req: any, res) => {

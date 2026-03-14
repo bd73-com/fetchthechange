@@ -720,16 +720,38 @@ describe("processQueuedNotifications edge cases", () => {
     );
   });
 
-  it("warns about stale queue entries older than 48 hours", async () => {
+  it("marks stale queue entries as permanently failed and logs single summary warning", async () => {
     mockGetReadyQueueEntries.mockResolvedValueOnce([]);
     const staleEntry = { id: 7, monitorId: 3, changeId: 5, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
     mockGetStaleQueueEntries.mockResolvedValueOnce([staleEntry]);
 
     await processQueuedNotifications();
+    expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(7);
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      expect.stringContaining("older than 48 hours"),
-      expect.objectContaining({ notificationQueueId: 7, monitorId: 3 })
+      expect.stringContaining("1 stale notification queue entries"),
+      expect.objectContaining({ count: 1, monitorIds: [3], entryIds: [7] })
+    );
+  });
+
+  it("marks multiple stale entries as permanently failed with single summary log", async () => {
+    mockGetReadyQueueEntries.mockResolvedValueOnce([]);
+    const staleEntries = [
+      { id: 7, monitorId: 3, changeId: 5, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+      { id: 8, monitorId: 4, changeId: 6, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
+    ];
+    mockGetStaleQueueEntries.mockResolvedValueOnce(staleEntries);
+
+    await processQueuedNotifications();
+    expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledTimes(2);
+    expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(7);
+    expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(8);
+    // Only one summary warning, not one per entry
+    expect(ErrorLogger.warning).toHaveBeenCalledTimes(1);
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("2 stale notification queue entries"),
+      expect.objectContaining({ count: 2, monitorIds: expect.arrayContaining([3, 4]) })
     );
   });
 

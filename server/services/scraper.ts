@@ -1339,8 +1339,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         try {
           const change = await storage.addMonitorChange(monitor.id, oldValue, newValue);
           await storage.updateMonitor(monitor.id, { lastChanged: new Date() });
-          const existingChanges = await storage.getMonitorChanges(monitor.id);
-          const isFirstChange = existingChanges.length <= 1;
+          const changeCount = await storage.countMonitorChanges(monitor.id);
+          const isFirstChange = changeCount <= 1;
           try {
             await processChangeNotification(monitor, change, isFirstChange);
           } catch (notificationError) {

@@ -1,7 +1,7 @@
 import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, apiKeys, tags, monitorTags, monitorConditions, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection, type ApiKey, type Tag, type MonitorCondition } from "@shared/schema";
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
-import { eq, desc, and, or, isNull, lte, lt, gte, sql, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, or, isNull, lte, lt, gte, sql, inArray } from "drizzle-orm";
 import { notificationTablesExist } from "./services/notificationReady";
 
 export interface IStorage {
@@ -19,6 +19,8 @@ export interface IStorage {
   updateLastHealthyAt(monitorId: number): Promise<void>;
 
   getMonitorChanges(monitorId: number): Promise<MonitorChange[]>;
+  getMonitorChangeById(changeId: number): Promise<MonitorChange | undefined>;
+  countMonitorChanges(monitorId: number): Promise<number>;
   getMonitorChangesByIds(changeIds: number[]): Promise<MonitorChange[]>;
   addMonitorChange(monitorId: number, oldValue: string | null, newValue: string | null): Promise<MonitorChange>;
 
@@ -127,6 +129,20 @@ export class DatabaseStorage implements IStorage {
       .from(monitorChanges)
       .where(eq(monitorChanges.monitorId, monitorId))
       .orderBy(desc(monitorChanges.detectedAt));
+  }
+
+  async getMonitorChangeById(changeId: number): Promise<MonitorChange | undefined> {
+    const [change] = await db.select()
+      .from(monitorChanges)
+      .where(eq(monitorChanges.id, changeId));
+    return change;
+  }
+
+  async countMonitorChanges(monitorId: number): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` })
+      .from(monitorChanges)
+      .where(eq(monitorChanges.monitorId, monitorId));
+    return Number(result[0]?.count ?? 0);
   }
 
   async getMonitorChangesByIds(changeIds: number[]): Promise<MonitorChange[]> {
@@ -248,13 +264,15 @@ export class DatabaseStorage implements IStorage {
     return (result as any).rowCount ?? 0;
   }
 
-  async getStaleQueueEntries(olderThan: Date): Promise<NotificationQueueEntry[]> {
+  async getStaleQueueEntries(olderThan: Date, limit = 100): Promise<NotificationQueueEntry[]> {
     return await db.select().from(notificationQueue)
       .where(and(
         eq(notificationQueue.delivered, false),
         eq(notificationQueue.permanentlyFailed, false),
         lte(notificationQueue.createdAt, olderThan)
-      ));
+      ))
+      .orderBy(asc(notificationQueue.createdAt), asc(notificationQueue.id))
+      .limit(limit);
   }
 
   async getAllDigestMonitorPreferences(): Promise<NotificationPreference[]> {

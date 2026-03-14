@@ -49,6 +49,7 @@ vi.mock("./webhookDelivery", () => ({
 vi.mock("./logger", () => ({
   ErrorLogger: {
     error: vi.fn().mockResolvedValue(undefined),
+    warning: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -94,7 +95,7 @@ vi.mock("node-cron", () => ({
   },
 }));
 
-import { startScheduler, retryBackoff } from "./scheduler";
+import { startScheduler, retryBackoff, _resetSchedulerStarted } from "./scheduler";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
 import { _resetCache } from "./notificationReady";
@@ -141,6 +142,7 @@ describe("startScheduler", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetSchedulerStarted();
     _resetCache();
     // Clear captured cron callbacks
     Object.keys(cronCallbacks).forEach((k) => delete (cronCallbacks as any)[k]);
@@ -177,6 +179,22 @@ describe("startScheduler", () => {
   it("calls cleanupPollutedValues on start", async () => {
     await startScheduler();
     expect(mockCleanupPollutedValues).toHaveBeenCalledOnce();
+  });
+
+  it("continues startup and registers cron jobs when cleanupPollutedValues throws", async () => {
+    mockCleanupPollutedValues.mockRejectedValueOnce(new Error("DB connection lost"));
+
+    await startScheduler();
+
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scheduler",
+      "cleanupPollutedValues failed (non-fatal)",
+      expect.objectContaining({ errorMessage: "DB connection lost" })
+    );
+    // Cron jobs should still be registered despite the failure
+    expect(hasCron("* * * * *")).toBe(true);
+    expect(hasCron("*/1 * * * *")).toBe(true);
+    expect(hasCron("0 3 * * *")).toBe(true);
   });
 
   it("registers all cron schedules (every-minute, notification queue, and daily cleanup)", async () => {
@@ -356,6 +374,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetSchedulerStarted();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });
@@ -460,6 +479,7 @@ describe("accelerated retry for Browserless infra failures", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetSchedulerStarted();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
     retryBackoff.clear();
@@ -583,6 +603,7 @@ describe("daily metrics cleanup", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetSchedulerStarted();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });
@@ -660,6 +681,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    _resetSchedulerStarted();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
   });

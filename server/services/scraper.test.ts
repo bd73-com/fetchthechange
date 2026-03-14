@@ -7,6 +7,8 @@ vi.mock("../storage", () => ({
     addMonitorChange: vi.fn().mockResolvedValue({ id: 1, monitorId: 1, oldValue: null, newValue: null, detectedAt: new Date() }),
     getMonitor: vi.fn().mockResolvedValue(null),
     getMonitorChanges: vi.fn().mockResolvedValue([]),
+    getMonitorChangeById: vi.fn().mockResolvedValue(undefined),
+    countMonitorChanges: vi.fn().mockResolvedValue(0),
     getUser: vi.fn().mockResolvedValue({ id: "user1", tier: "free" }),
     updateLastHealthyAt: vi.fn().mockResolvedValue(undefined),
     clearHealthAlert: vi.fn().mockResolvedValue(undefined),
@@ -1063,6 +1065,7 @@ describe("checkMonitor", () => {
     updateMonitor: ReturnType<typeof vi.fn>;
     addMonitorChange: ReturnType<typeof vi.fn>;
     getMonitorChanges: ReturnType<typeof vi.fn>;
+    countMonitorChanges: ReturnType<typeof vi.fn>;
     getUser: ReturnType<typeof vi.fn>;
   };
   const mockProcessNotification = processChangeNotification as ReturnType<typeof vi.fn>;
@@ -1167,14 +1170,12 @@ describe("checkMonitor", () => {
     );
 
     // Simulate existing changes so isFirstChange is false
-    mockStorage.getMonitorChanges.mockResolvedValueOnce([
-      { id: 1, monitorId: 1, oldValue: null, newValue: "$19.99", detectedAt: new Date() },
-      { id: 2, monitorId: 1, oldValue: "$19.99", newValue: "$29.99", detectedAt: new Date() },
-    ]);
+    mockStorage.countMonitorChanges.mockResolvedValueOnce(2);
 
     const monitor = makeMonitor({ currentValue: "$19.99", emailEnabled: true });
     await runWithTimers(monitor);
 
+    expect(mockStorage.countMonitorChanges).toHaveBeenCalledWith(1);
     expect(mockProcessNotification).toHaveBeenCalledWith(
       monitor,
       expect.objectContaining({ monitorId: 1 }),
@@ -4043,6 +4044,7 @@ describe("checkMonitor outer catch resilience", () => {
     updateMonitor: ReturnType<typeof vi.fn>;
     addMonitorChange: ReturnType<typeof vi.fn>;
     getMonitorChanges: ReturnType<typeof vi.fn>;
+    countMonitorChanges: ReturnType<typeof vi.fn>;
     getUser: ReturnType<typeof vi.fn>;
   };
 
@@ -4312,6 +4314,7 @@ describe("checkMonitor HTTP status handling", () => {
     updateMonitor: ReturnType<typeof vi.fn>;
     addMonitorChange: ReturnType<typeof vi.fn>;
     getMonitorChanges: ReturnType<typeof vi.fn>;
+    countMonitorChanges: ReturnType<typeof vi.fn>;
     getUser: ReturnType<typeof vi.fn>;
   };
 
@@ -4846,6 +4849,7 @@ describe("withBrowserlessPage resource blocking", () => {
     updateMonitor: ReturnType<typeof vi.fn>;
     addMonitorChange: ReturnType<typeof vi.fn>;
     getMonitorChanges: ReturnType<typeof vi.fn>;
+    countMonitorChanges: ReturnType<typeof vi.fn>;
     getUser: ReturnType<typeof vi.fn>;
   };
   const mockDb = db as unknown as {
@@ -5035,6 +5039,7 @@ describe("Browserless attribute fallback extraction", () => {
     updateMonitor: ReturnType<typeof vi.fn>;
     addMonitorChange: ReturnType<typeof vi.fn>;
     getMonitorChanges: ReturnType<typeof vi.fn>;
+    countMonitorChanges: ReturnType<typeof vi.fn>;
     getUser: ReturnType<typeof vi.fn>;
   };
   const mockDb = db as unknown as {
@@ -5137,6 +5142,7 @@ describe("Cloudflare challenge wait in extractWithBrowserless", () => {
     updateMonitor: ReturnType<typeof vi.fn>;
     addMonitorChange: ReturnType<typeof vi.fn>;
     getMonitorChanges: ReturnType<typeof vi.fn>;
+    countMonitorChanges: ReturnType<typeof vi.fn>;
     getUser: ReturnType<typeof vi.fn>;
   };
   const mockDb = db as unknown as {
