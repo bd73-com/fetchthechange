@@ -247,13 +247,37 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     serveStatic(app);
   }
 
-  // Start Server
+  // Start Server — kill any stale process on the port first (Replit restarts
+  // can leave zombies when the previous process didn't exit cleanly).
   const port = 5000;
+  const { execSync } = await import("child_process");
+  try {
+    const pid = execSync(`lsof -ti tcp:${port}`, { encoding: "utf8" }).trim();
+    if (pid) {
+      console.warn(`Killing stale process on port ${port} (PID ${pid})`);
+      process.kill(Number(pid), "SIGKILL");
+      // Brief pause to let the OS reclaim the port
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  } catch {
+    // No process on port — expected happy path
+  }
+
   httpServer.listen({ port, host: "0.0.0.0" }, () => {
     console.log(`serving on port ${port}`);
   });
 
-  // Graceful shutdown: close server, drain browser pool, close DB pool
+  // If bind still fails (race / permissions), exit immediately so Replit can retry
+  httpServer.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`FATAL: port ${port} still in use after cleanup — exiting`);
+      process.exit(1);
+    }
+    throw err;
+  });
+
+  // Graceful shutdown: stop cron, close server, drain browser pool, close DB pool
+  const cron = (await import("node-cron")).default;
   const { browserPool } = await import("./services/browserPool");
   const { pool: dbPool } = await import("./db");
   let shuttingDown = false;
@@ -264,6 +288,12 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     // Force exit after 10s if graceful shutdown stalls
     const forceExit = setTimeout(() => process.exit(1), 10_000);
     forceExit.unref();
+    // Stop all cron jobs first so they don't fire during cleanup
+    console.log("Stopping cron jobs...");
+    const tasks = cron.getTasks();
+    tasks.forEach((task) => {
+      task.stop();
+    });
     // Stop accepting new connections and wait for in-flight requests to finish
     console.log("Closing HTTP server...");
     await new Promise<void>((resolve) => {
