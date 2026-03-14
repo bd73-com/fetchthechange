@@ -99,7 +99,7 @@ export class BrowserPool {
     const reusable = _reusable ?? this.reusableSet.has(browser);
     this.reusableSet.delete(browser);
     this.inUse.delete(browser);
-    if (!reusable) return; // ephemeral — caller closes it
+    if (!reusable || this.draining) return; // ephemeral or shutting down — caller closes it
     if (this.entries.length < POOL_MAX) {
       this.entries.push({ browser, lastUsed: Date.now() });
     } else {

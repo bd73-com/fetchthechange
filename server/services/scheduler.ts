@@ -16,6 +16,7 @@ const MAX_RETRY_MS = 15 * 60 * 1000; // 15 minutes
 let activeChecks = 0;
 let schedulerStarted = false;
 const cronTasks: ReturnType<typeof cron.schedule>[] = [];
+const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
 
 /** @internal Test-only reset for the idempotency guard */
 export function _resetSchedulerStarted() {
@@ -84,7 +85,7 @@ export async function startScheduler() {
       const pendingMonitors = allMonitors.filter(m => pendingIds.includes(m.id));
       for (const monitor of pendingMonitors) {
         const jitterMs = Math.floor(Math.random() * 5000);
-        setTimeout(() => runCheckWithLimit(monitor), jitterMs);
+        pendingTimeouts.push(setTimeout(() => runCheckWithLimit(monitor), jitterMs));
       }
       // Reset backoff for all retried monitors
       for (const id of pendingIds) {
@@ -135,13 +136,14 @@ export async function startScheduler() {
 
           if (shouldCheck) {
             const jitterMs = Math.floor(Math.random() * 30000);
-            setTimeout(() => {
+            const handle = setTimeout(() => {
               void runCheckWithLimit(monitor).then((started) => {
                 if (!started || !monitorsNeedingRetry.has(monitor.id)) return;
                 const b = retryBackoff.get(monitor.id) ?? { attempts: 0 };
                 retryBackoff.set(monitor.id, { attempts: b.attempts + 1 });
               });
             }, jitterMs);
+            pendingTimeouts.push(handle);
           }
         } catch (monitorError) {
           // Isolate per-monitor failures so one bad monitor can't crash the iteration
@@ -195,6 +197,8 @@ export async function startScheduler() {
 
         // Cumulative backoff windows from creation: attempt 1 → 5s, attempt 2 → 35s, attempt 3 → 155s
         // These are cumulative so that elapsed time from creation correctly gates each retry.
+        // Note: attempt starts at 1 (schema default), so attempt=0 never occurs. The fallback
+        // value (155000) handles any unexpected attempt values defensively.
         const cumulativeBackoffMs: Record<number, number> = { 1: 5000, 2: 35000, 3: 155000 };
 
         for (const entry of pendingRetries) {
@@ -315,11 +319,16 @@ export async function startScheduler() {
   schedulerStarted = true;
 }
 
-/** Stop all cron tasks registered by the scheduler. Call before closing the DB pool. */
+/** Stop all cron tasks and pending timers registered by the scheduler. Call before closing the DB pool. */
 export function stopScheduler(): void {
   for (const task of cronTasks) {
     task.stop();
   }
   cronTasks.length = 0;
+  for (const handle of pendingTimeouts) {
+    clearTimeout(handle);
+  }
+  pendingTimeouts.length = 0;
+  retryBackoff.clear();
   schedulerStarted = false;
 }
