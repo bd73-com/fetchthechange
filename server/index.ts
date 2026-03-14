@@ -249,14 +249,56 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   // Start Server
   const port = 5000;
-  httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
+  httpServer.listen({ port, host: "0.0.0.0" }, () => {
     console.log(`serving on port ${port}`);
   });
 
-  // Graceful shutdown: drain warm browser pool
+  // Graceful shutdown: close server, drain browser pool, close DB pool
   const { browserPool } = await import("./services/browserPool");
-  process.on('SIGTERM', async () => { await browserPool.drain(); process.exit(0); });
-  process.on('SIGINT', async () => { await browserPool.drain(); process.exit(0); });
+  const { pool: dbPool } = await import("./db");
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log("Shutting down gracefully...");
+    // Force exit after 10s if graceful shutdown stalls
+    const forceExit = setTimeout(() => process.exit(1), 10_000);
+    forceExit.unref();
+    // Stop accepting new connections and wait for in-flight requests to finish
+    console.log("Closing HTTP server...");
+    await new Promise<void>((resolve) => {
+      httpServer.close(() => resolve());
+      // Close idle keep-alive connections after 3s (preserves active requests)
+      setTimeout(() => {
+        if (typeof httpServer.closeIdleConnections === "function") {
+          httpServer.closeIdleConnections();
+        }
+      }, 3_000).unref();
+      // Hard cutoff: force-close all connections at 9s (just before global 10s force-exit)
+      setTimeout(() => {
+        if (typeof httpServer.closeAllConnections === "function") {
+          httpServer.closeAllConnections();
+        }
+      }, 9_000).unref();
+    });
+    // Drain warm browsers
+    let cleanupFailed = false;
+    console.log("Draining browser pool...");
+    await browserPool.drain().catch((err) => {
+      cleanupFailed = true;
+      console.error("Failed to drain browser pool:", err);
+    });
+    // Close DB connection pool
+    console.log("Closing DB pool...");
+    await dbPool.end().catch((err) => {
+      cleanupFailed = true;
+      console.error("Failed to close DB pool:", err);
+    });
+    console.log("Shutdown complete.");
+    process.exit(cleanupFailed ? 1 : 0);
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 })().catch((err) => {
   console.error("FATAL: server failed to start", err);
   process.exit(1);
