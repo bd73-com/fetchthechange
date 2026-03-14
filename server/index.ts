@@ -250,17 +250,11 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   // Start Server — kill any stale process on the port first (Replit restarts
   // can leave zombies when the previous process didn't exit cleanly).
   const port = 5000;
-  const { execSync } = await import("child_process");
-  try {
-    const pid = execSync(`lsof -ti tcp:${port}`, { encoding: "utf8" }).trim();
-    if (pid) {
-      console.warn(`Killing stale process on port ${port} (PID ${pid})`);
-      process.kill(Number(pid), "SIGKILL");
-      // Brief pause to let the OS reclaim the port
-      await new Promise((r) => setTimeout(r, 500));
-    }
-  } catch {
-    // No process on port — expected happy path
+  const { killStalePortProcess } = await import("./utils/portCleanup");
+  const killedPid = killStalePortProcess(port);
+  if (killedPid) {
+    // Brief pause to let the OS reclaim the port
+    await new Promise((r) => setTimeout(r, 500));
   }
 
   httpServer.listen({ port, host: "0.0.0.0" }, () => {
