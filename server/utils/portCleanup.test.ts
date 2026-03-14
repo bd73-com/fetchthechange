@@ -88,4 +88,31 @@ describe("killStalePortProcess", () => {
       encoding: "utf8",
     });
   });
+
+  it("returns null for invalid port values without calling lsof", () => {
+    const callsBefore = mockExecSync.mock.calls.length;
+    expect(killStalePortProcess(-1)).toBeNull();
+    expect(killStalePortProcess(0)).toBeNull();
+    expect(killStalePortProcess(70000)).toBeNull();
+    expect(killStalePortProcess(3.14)).toBeNull();
+    expect(mockExecSync.mock.calls.length).toBe(callsBefore);
+  });
+
+  it("continues killing remaining PIDs when one throws ESRCH", () => {
+    mockExecSync.mockReturnValue("12345\n67890\n" as any);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid) => {
+      if (pid === 12345) {
+        const err = new Error("No such process") as any;
+        err.code = "ESRCH";
+        throw err;
+      }
+      return true;
+    });
+
+    const result = killStalePortProcess(5000);
+
+    // First PID threw ESRCH so wasn't counted as killed; second succeeded
+    expect(result).toBe(67890);
+    expect(killSpy).toHaveBeenCalledTimes(2);
+  });
 });

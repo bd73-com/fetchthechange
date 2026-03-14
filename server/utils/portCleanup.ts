@@ -2,9 +2,10 @@ import { execSync } from "child_process";
 
 /**
  * Kill any stale process listening on the given TCP port.
- * Returns the PID that was killed, or null if no process was found.
+ * Returns the first PID that was killed, or null if no process was found.
  */
 export function killStalePortProcess(port: number): number | null {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
   try {
     const output = execSync(`lsof -ti tcp:${port}`, { encoding: "utf8" }).trim();
     if (!output) return null;
@@ -17,13 +18,25 @@ export function killStalePortProcess(port: number): number | null {
     for (const pid of pids) {
       // Never kill our own process
       if (pid === process.pid) continue;
-      console.warn(`Killing stale process on port ${port} (PID ${pid})`);
-      process.kill(pid, "SIGKILL");
-      if (firstKilled === null) firstKilled = pid;
+      try {
+        console.warn(`Killing stale process on port ${port} (PID ${pid})`);
+        process.kill(pid, "SIGKILL");
+        if (firstKilled === null) firstKilled = pid;
+      } catch (killErr: any) {
+        // ESRCH = process already exited between lsof and kill — safe to ignore
+        if (killErr?.code !== "ESRCH") {
+          console.warn(`Failed to kill PID ${pid}:`, killErr?.message);
+        }
+      }
     }
     return firstKilled;
-  } catch {
-    // lsof exits non-zero when no process is found — expected happy path
+  } catch (err: any) {
+    // lsof exits non-zero when no process is found — expected happy path.
+    // Log unexpected errors (e.g., missing lsof binary) so they're not silent.
+    const msg = err?.message ?? "";
+    if (!msg.includes("lsof") && !msg.includes("ENOENT") && err?.status !== 1) {
+      console.warn("Port cleanup failed:", msg);
+    }
     return null;
   }
 }

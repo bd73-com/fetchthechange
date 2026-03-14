@@ -257,17 +257,17 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  httpServer.listen({ port, host: "0.0.0.0" }, () => {
-    console.log(`serving on port ${port}`);
-  });
-
-  // If bind still fails (race / permissions), exit immediately so Replit can retry
+  // Register error handler BEFORE listen() so EADDRINUSE is always caught
   httpServer.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
       console.error(`FATAL: port ${port} still in use after cleanup — exiting`);
       process.exit(1);
     }
     throw err;
+  });
+
+  httpServer.listen({ port, host: "0.0.0.0" }, () => {
+    console.log(`serving on port ${port}`);
   });
 
   // Graceful shutdown: stop cron, close server, drain browser pool, close DB pool
