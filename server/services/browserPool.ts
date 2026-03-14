@@ -32,6 +32,8 @@ export class BrowserPool {
   private reusableSet = new WeakSet<PoolableBrowser>();
   /** Tracks browsers currently checked out via acquire(). */
   private inUse = new Set<PoolableBrowser>();
+  /** Set to true once drain() begins — prevents new acquisitions. */
+  private draining = false;
 
   /**
    * Acquire a browser from the pool or create a new one via connectFn.
@@ -39,6 +41,9 @@ export class BrowserPool {
    * to reclaim or close it.
    */
   async acquire(connectFn: () => Promise<PoolableBrowser>): Promise<{ browser: PoolableBrowser; reusable: boolean }> {
+    if (this.draining) {
+      throw new Error("BrowserPool is draining — cannot acquire new browsers");
+    }
     const now = Date.now();
     // Evict expired entries and close their CDP sessions
     const expired = this.entries.filter(e => now - e.lastUsed >= POOL_IDLE_EXPIRY_MS);
@@ -103,8 +108,9 @@ export class BrowserPool {
     }
   }
 
-  /** Close and remove all pooled and in-use browsers. */
+  /** Close and remove all pooled and in-use browsers. Resets the pool for reuse. */
   async drain(): Promise<void> {
+    this.draining = true;
     const toClose = this.entries.splice(0);
     const inUseBrowsers = Array.from(this.inUse);
     this.inUse.clear();
@@ -112,6 +118,7 @@ export class BrowserPool {
       ...toClose.map(e => e.browser.close()),
       ...inUseBrowsers.map(b => b.close()),
     ]);
+    this.draining = false;
   }
 }
 
