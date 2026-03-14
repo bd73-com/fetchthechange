@@ -220,7 +220,7 @@ export async function startScheduler() {
           }
 
           const change = await storage.getMonitorChangeById(entry.changeId);
-          if (!change) {
+          if (!change || change.monitorId !== monitor.id) {
             await storage.updateDeliveryLog(entry.id, { status: "failed" });
             continue;
           }
