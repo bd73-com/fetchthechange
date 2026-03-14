@@ -30,6 +30,8 @@ export class BrowserPool {
   private pendingAcquires = 0;
   /** Tracks which browsers were acquired as reusable (caller doesn't need to remember). */
   private reusableSet = new WeakSet<PoolableBrowser>();
+  /** Tracks browsers currently checked out via acquire(). */
+  private inUse = new Set<PoolableBrowser>();
 
   /**
    * Acquire a browser from the pool or create a new one via connectFn.
@@ -57,6 +59,7 @@ export class BrowserPool {
         }
         this.entries.splice(i, 1); // remove from pool while in use
         this.reusableSet.add(entry.browser);
+        this.inUse.add(entry.browser);
         return { browser: entry.browser, reusable: true };
       } catch {
         this.entries.splice(i, 1);
@@ -74,6 +77,7 @@ export class BrowserPool {
       const browser = await connectFn();
       const reusable = this.entries.length + this.pendingAcquires <= POOL_MAX;
       if (reusable) this.reusableSet.add(browser);
+      this.inUse.add(browser);
       return { browser, reusable };
     } finally {
       this.pendingAcquires--;
@@ -89,6 +93,7 @@ export class BrowserPool {
     // Support both old (explicit boolean) and new (auto-tracked) call styles.
     const reusable = _reusable ?? this.reusableSet.has(browser);
     this.reusableSet.delete(browser);
+    this.inUse.delete(browser);
     if (!reusable) return; // ephemeral — caller closes it
     if (this.entries.length < POOL_MAX) {
       this.entries.push({ browser, lastUsed: Date.now() });
@@ -98,10 +103,15 @@ export class BrowserPool {
     }
   }
 
-  /** Close and remove all pooled browsers. */
+  /** Close and remove all pooled and in-use browsers. */
   async drain(): Promise<void> {
     const toClose = this.entries.splice(0);
-    await Promise.allSettled(toClose.map(e => e.browser.close()));
+    const inUseBrowsers = Array.from(this.inUse);
+    this.inUse.clear();
+    await Promise.allSettled([
+      ...toClose.map(e => e.browser.close()),
+      ...inUseBrowsers.map(b => b.close()),
+    ]);
   }
 }
 

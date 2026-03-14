@@ -255,6 +255,8 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   // Graceful shutdown: close server, drain browser pool, close DB pool
   const { browserPool } = await import("./services/browserPool");
+  const { stopScheduler } = await import("./services/scheduler");
+  const { stopRouteTimers } = await import("./routes");
   const { pool: dbPool } = await import("./db");
   let shuttingDown = false;
   const shutdown = async () => {
@@ -281,6 +283,10 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         }
       }, 9_000).unref();
     });
+    // Stop cron jobs and intervals before closing DB pool
+    console.log("Stopping scheduler and timers...");
+    stopScheduler();
+    stopRouteTimers();
     // Drain warm browsers
     let cleanupFailed = false;
     console.log("Draining browser pool...");

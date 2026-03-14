@@ -15,6 +15,7 @@ const BASE_RETRY_MS = 2 * 60 * 1000; // 2 minutes
 const MAX_RETRY_MS = 15 * 60 * 1000; // 15 minutes
 let activeChecks = 0;
 let schedulerStarted = false;
+const cronTasks: ReturnType<typeof cron.schedule>[] = [];
 
 /** @internal Test-only reset for the idempotency guard */
 export function _resetSchedulerStarted() {
@@ -96,7 +97,7 @@ export async function startScheduler() {
   // This is a simple implementation. For production, maybe use a proper queue.
   // We'll filter monitors based on their 'frequency' and 'lastChecked'.
 
-  cron.schedule("* * * * *", async () => {
+  cronTasks.push(cron.schedule("* * * * *", async () => {
     try {
       const monitors = await storage.getAllActiveMonitors();
 
@@ -154,7 +155,7 @@ export async function startScheduler() {
         phase: "fetching active monitors",
       });
     }
-  });
+  }));
 
   // Process queued notifications (quiet hours + digest delivery) every minute,
   // but only if the notification tables have been migrated
@@ -163,7 +164,7 @@ export async function startScheduler() {
     console.warn("[Scheduler] Notification tables (notification_preferences, notification_queue) do not exist yet — skipping notification cron. Run `npm run schema:push` to create them.");
   } else {
     let notificationCronRunning = false;
-    cron.schedule("*/1 * * * *", async () => {
+    cronTasks.push(cron.schedule("*/1 * * * *", async () => {
       if (notificationCronRunning) return;
       notificationCronRunning = true;
       try {
@@ -184,20 +185,21 @@ export async function startScheduler() {
       } finally {
         notificationCronRunning = false;
       }
-    });
+    }));
 
     // Webhook retry cron: every minute, process pending webhook deliveries
-    cron.schedule("*/1 * * * *", async () => {
+    cronTasks.push(cron.schedule("*/1 * * * *", async () => {
       try {
         const pendingRetries = await storage.getPendingWebhookRetries();
         const now = Date.now();
 
-        // Backoff windows: attempt 1 → 5s, attempt 2 → 30s, attempt 3 → 120s
-        const backoffMs: Record<number, number> = { 1: 5000, 2: 30000, 3: 120000 };
+        // Cumulative backoff windows from creation: attempt 1 → 5s, attempt 2 → 35s, attempt 3 → 155s
+        // These are cumulative so that elapsed time from creation correctly gates each retry.
+        const cumulativeBackoffMs: Record<number, number> = { 1: 5000, 2: 35000, 3: 155000 };
 
         for (const entry of pendingRetries) {
           const elapsed = now - new Date(entry.createdAt).getTime();
-          const requiredWait = backoffMs[entry.attempt] || 120000;
+          const requiredWait = cumulativeBackoffMs[entry.attempt] || 155000;
           if (elapsed < requiredWait) continue;
 
           const monitor = await storage.getMonitor(entry.monitorId);
@@ -257,11 +259,11 @@ export async function startScheduler() {
           errorMessage: error instanceof Error ? error.message : String(error),
         });
       }
-    });
+    }));
   }
 
   // Daily cleanup: prune monitor_metrics older than 90 days to prevent unbounded growth
-  cron.schedule("0 3 * * *", async () => {
+  cronTasks.push(cron.schedule("0 3 * * *", async () => {
     try {
       const result = await db.execute(
         sql`DELETE FROM monitor_metrics WHERE checked_at < NOW() - INTERVAL '90 days'`
@@ -308,7 +310,16 @@ export async function startScheduler() {
         table: "notification_queue",
       });
     }
-  });
+  }));
 
   schedulerStarted = true;
+}
+
+/** Stop all cron tasks registered by the scheduler. Call before closing the DB pool. */
+export function stopScheduler(): void {
+  for (const task of cronTasks) {
+    task.stop();
+  }
+  cronTasks.length = 0;
+  schedulerStarted = false;
 }
