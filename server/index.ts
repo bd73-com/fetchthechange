@@ -288,6 +288,9 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     tasks.forEach((task) => {
       task.stop();
     });
+    // Wait for in-flight monitor checks to finish (up to 5s)
+    const { waitForActiveChecks } = await import("./services/scheduler");
+    await waitForActiveChecks(5000);
     // Stop accepting new connections and wait for in-flight requests to finish
     console.log("Closing HTTP server...");
     await new Promise<void>((resolve) => {

@@ -31,12 +31,10 @@ export function killStalePortProcess(port: number): number | null {
     }
     return firstKilled;
   } catch (err: any) {
-    // lsof exits non-zero when no process is found — expected happy path.
-    // Log unexpected errors (e.g., missing lsof binary) so they're not silent.
-    const msg = err?.message ?? "";
-    if (!msg.includes("lsof") && !msg.includes("ENOENT") && err?.status !== 1) {
-      console.warn("Port cleanup failed:", msg);
-    }
+    // lsof exits with status 1 when no process is found — expected happy path
+    if (err?.status === 1) return null;
+    // Log unexpected errors (missing lsof binary, permission issues, etc.)
+    console.warn("Port cleanup failed:", err?.message ?? err);
     return null;
   }
 }
