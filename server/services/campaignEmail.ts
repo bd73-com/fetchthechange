@@ -431,43 +431,39 @@ async function sendCampaignBatch(
 async function finalizeCampaign(campaignId: number, status: string): Promise<void> {
   // Mark remaining pending recipients when cancelling or partially sending
   if (status === "cancelled" || status === "partially_sent") {
-    // Count pending recipients before updating them
-    const pendingResult = await db.execute(sql`
-      SELECT COUNT(*)::int AS "pendingCount"
-      FROM campaign_recipients
-      WHERE campaign_id = ${campaignId} AND status = 'pending'
-    `);
-    const pendingCount = Number((pendingResult.rows[0] as any)?.pendingCount ?? 0);
+    await db.transaction(async (tx) => {
+      // Atomically mark pending recipients as failed and count how many were updated
+      const failedResult = await tx.execute(sql`
+        UPDATE campaign_recipients
+        SET status = 'failed',
+            failed_at = NOW(),
+            failure_reason = ${status === "cancelled" ? "Campaign cancelled" : "Campaign cap reached"}
+        WHERE campaign_id = ${campaignId} AND status = 'pending'
+        RETURNING id
+      `);
+      const failedCount = failedResult.rows.length;
 
-    await db
-      .update(campaignRecipients)
-      .set({
-        status: "failed",
-        failedAt: new Date(),
-        failureReason: status === "cancelled" ? "Campaign cancelled" : "Campaign cap reached",
-      })
-      .where(
-        and(
-          eq(campaignRecipients.campaignId, campaignId),
-          eq(campaignRecipients.status, "pending")
-        )
-      );
-
-    if (pendingCount > 0) {
-      await db
+      // Single campaign update: status + completedAt + failedCount in one statement
+      await tx
         .update(campaigns)
-        .set({ failedCount: sql`${campaigns.failedCount} + ${pendingCount}` })
+        .set({
+          status,
+          completedAt: new Date(),
+          ...(failedCount > 0
+            ? { failedCount: sql`${campaigns.failedCount} + ${failedCount}` }
+            : {}),
+        })
         .where(eq(campaigns.id, campaignId));
-    }
+    });
+  } else {
+    await db
+      .update(campaigns)
+      .set({
+        status,
+        completedAt: new Date(),
+      })
+      .where(eq(campaigns.id, campaignId));
   }
-
-  await db
-    .update(campaigns)
-    .set({
-      status,
-      completedAt: new Date(),
-    })
-    .where(eq(campaigns.id, campaignId));
 
   console.log(`[Campaign] Campaign ${campaignId} finalized as '${status}'`);
 }
@@ -481,53 +477,46 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
     control.cancelled = true;
   }
 
-  // Count current state
+  // Count sent recipients
   const sentResult = await db.execute(sql`
     SELECT
-      COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened', 'clicked')) as "sentCount",
-      COUNT(*) FILTER (WHERE status = 'pending') as "pendingCount"
+      COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened', 'clicked'))::int as "sentCount"
     FROM campaign_recipients
     WHERE campaign_id = ${campaignId}
   `);
-
-  const row = sentResult.rows[0] as any;
-  const sentSoFar = Number(row?.sentCount ?? 0);
-  const pendingCount = Number(row?.pendingCount ?? 0);
+  const sentSoFar = Number((sentResult.rows[0] as any)?.sentCount ?? 0);
 
   // Mark remaining pending as cancelled (use failed status with reason)
   if (!control) {
-    // If not actively sending, update directly
-    await db
-      .update(campaignRecipients)
-      .set({
-        status: "failed",
-        failedAt: new Date(),
-        failureReason: "Campaign cancelled",
-      })
-      .where(
-        and(
-          eq(campaignRecipients.campaignId, campaignId),
-          eq(campaignRecipients.status, "pending")
-        )
-      );
+    const pendingCount = await db.transaction(async (tx) => {
+      // Atomically mark pending recipients as failed and count affected rows
+      const failedResult = await tx.execute(sql`
+        UPDATE campaign_recipients
+        SET status = 'failed',
+            failed_at = NOW(),
+            failure_reason = 'Campaign cancelled'
+        WHERE campaign_id = ${campaignId} AND status = 'pending'
+        RETURNING id
+      `);
+      const count = failedResult.rows.length;
 
-    // Update failed_count with the pending count we already queried above
-    if (pendingCount > 0) {
-      await db
+      // Single campaign update with accurate failedCount
+      await tx
         .update(campaigns)
         .set({
           status: "cancelled",
           completedAt: new Date(),
-          failedCount: sql`${campaigns.failedCount} + ${pendingCount}`,
+          ...(count > 0
+            ? { failedCount: sql`${campaigns.failedCount} + ${count}` }
+            : {}),
         })
         .where(eq(campaigns.id, campaignId));
-    } else {
-      await db
-        .update(campaigns)
-        .set({ status: "cancelled", completedAt: new Date() })
-        .where(eq(campaigns.id, campaignId));
-    }
+
+      return count;
+    });
+
+    return { sentSoFar, cancelled: pendingCount };
   }
 
-  return { sentSoFar, cancelled: pendingCount };
+  return { sentSoFar, cancelled: 0 };
 }
