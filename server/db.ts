@@ -15,5 +15,16 @@ export const pool = new Pool({
   // Cap pool size to reduce ephemeral port usage (Replit's port scanner
   // detects outbound connections and tries to assign external ports).
   max: 5,
+  // Fail fast instead of blocking indefinitely when all connections are busy.
+  connectionTimeoutMillis: 5_000,
+  // Release idle connections promptly to free ephemeral ports sooner.
+  idleTimeoutMillis: 30_000,
 });
+
+// Log unexpected pool-level errors (connection drops, auth failures) that pg
+// would otherwise silently discard.
+pool.on("error", (err) => {
+  console.error("[DB Pool] Unexpected error on idle client:", err.message);
+});
+
 export const db = drizzle(pool, { schema });
