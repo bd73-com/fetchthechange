@@ -5401,27 +5401,22 @@ describe("BrowserPool", () => {
     const pool = new BrowserPool();
     const browser1 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
     const browser2 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
-    const browser3 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
     const connectFn = vi.fn()
       .mockResolvedValueOnce(browser1)
-      .mockResolvedValueOnce(browser2)
-      .mockResolvedValueOnce(browser3);
+      .mockResolvedValueOnce(browser2);
 
-    // Acquire all three concurrently (all get pooled: true since pool is empty at acquire time)
+    // Acquire both (pool is empty at acquire time)
     const first = await pool.acquire(connectFn);
     const second = await pool.acquire(connectFn);
-    const third = await pool.acquire(connectFn);
 
-    // Release all three — pool cap is 2, so third should be closed
+    // Release both — pool cap is 1, so second should be closed
     pool.release(first.browser, first.reusable);
     pool.release(second.browser, second.reusable);
-    pool.release(third.browser, third.reusable);
 
-    // Third browser should have been closed since pool was full
-    expect(browser3.close).toHaveBeenCalled();
-    // First two should NOT have been closed (they're in the pool)
+    // Second browser should have been closed since pool was full
+    expect(browser2.close).toHaveBeenCalled();
+    // First should NOT have been closed (it's in the pool)
     expect(browser1.close).not.toHaveBeenCalled();
-    expect(browser2.close).not.toHaveBeenCalled();
 
     await pool.drain();
   });
@@ -5534,42 +5529,34 @@ describe("BrowserPool edge cases", () => {
     const pool = new BrowserPool();
     let resolveFirst!: (b: any) => void;
     let resolveSecond!: (b: any) => void;
-    let resolveThird!: (b: any) => void;
 
     const browser1 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
     const browser2 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
-    const browser3 = { isConnected: () => true, close: vi.fn().mockResolvedValue(undefined) };
 
     const connectFn = vi.fn()
       .mockReturnValueOnce(new Promise(r => { resolveFirst = r; }))
-      .mockReturnValueOnce(new Promise(r => { resolveSecond = r; }))
-      .mockReturnValueOnce(new Promise(r => { resolveThird = r; }));
+      .mockReturnValueOnce(new Promise(r => { resolveSecond = r; }));
 
-    // Start three concurrent acquires — all increment pendingAcquires to 3
+    // Start two concurrent acquires — both increment pendingAcquires to 2
     const p1 = pool.acquire(connectFn);
     const p2 = pool.acquire(connectFn);
-    const p3 = pool.acquire(connectFn);
 
     // Resolve sequentially. Each acquire checks reusable BEFORE its finally block
     // decrements pendingAcquires. Microtask ordering means each fully completes
     // (try + finally) before the next await resumes.
-    // r1: entries(0) + pending(3) = 3 > 2 → false, then pending decrements to 2
-    // r2: entries(0) + pending(2) = 2 <= 2 → true, then pending decrements to 1
-    // r3: entries(0) + pending(1) = 1 <= 2 → true, then pending decrements to 0
+    // r1: entries(0) + pending(2) = 2 > 1 → false, then pending decrements to 1
+    // r2: entries(0) + pending(1) = 1 <= 1 → true, then pending decrements to 0
     resolveFirst(browser1);
     resolveSecond(browser2);
-    resolveThird(browser3);
 
     const r1 = await p1;
     const r2 = await p2;
-    const r3 = await p3;
 
     expect(r1.reusable).toBe(false);
     expect(r2.reusable).toBe(true);
-    expect(r3.reusable).toBe(true);
 
-    // Without pendingAcquires tracking, all three would have been reusable=true
-    // (since entries.length=0 < POOL_MAX=2 for all). The tracking ensures the
+    // Without pendingAcquires tracking, both would have been reusable=true
+    // (since entries.length=0 < POOL_MAX=1 for both). The tracking ensures the
     // first resolver correctly sees the overcommitted state.
     await pool.drain();
   });

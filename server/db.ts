@@ -14,7 +14,7 @@ export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   // Cap pool size to reduce ephemeral port usage (Replit's port scanner
   // detects outbound connections and tries to assign external ports).
-  max: 5,
+  max: 3,
   // Fail fast instead of blocking indefinitely when all connections are busy.
   connectionTimeoutMillis: 5_000,
   // Release idle connections promptly to free ephemeral ports sooner.

@@ -6,7 +6,7 @@
  *
  * Note: context-level failures (crashed tab, wedged renderer) do NOT
  * invalidate a pooled browser — only full disconnects are detected. This is
- * acceptable at pool size 2 where the worst case is one wasted attempt before
+ * acceptable at pool size 1 where the worst case is one wasted attempt before
  * the browser is replaced.
  */
 
@@ -22,7 +22,7 @@ interface PoolEntry {
   lastUsed: number;
 }
 
-const POOL_MAX = 2;
+const POOL_MAX = 1;
 const POOL_IDLE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
 export class BrowserPool {

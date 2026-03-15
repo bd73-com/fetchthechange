@@ -388,9 +388,9 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     vi.useRealTimers();
   });
 
-  it("drops checks when MAX_CONCURRENT_CHECKS (4) is reached", async () => {
-    // Create 6 monitors that all need checking
-    const monitors = Array.from({ length: 6 }, (_, i) =>
+  it("drops checks when MAX_CONCURRENT_CHECKS (2) is reached", async () => {
+    // Create 4 monitors that all need checking
+    const monitors = Array.from({ length: 4 }, (_, i) =>
       makeMonitor({ id: i + 1, name: `Monitor ${i + 1}`, lastChecked: null })
     );
     mockGetAllActiveMonitors.mockResolvedValueOnce(monitors);
@@ -407,19 +407,19 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     // Advance past all jitter timers (max 30s)
     await vi.advanceTimersByTimeAsync(31000);
 
-    // At most MAX_CONCURRENT_CHECKS (4) should have started
-    expect(mockCheckMonitor.mock.calls.length).toBeLessThanOrEqual(4);
+    // At most MAX_CONCURRENT_CHECKS (2) should have started
+    expect(mockCheckMonitor.mock.calls.length).toBeLessThanOrEqual(2);
 
     // Clean up: resolve all pending
     resolvers.forEach((r) => r());
   });
 
   it("decrements active count after check completes, allowing new checks", async () => {
-    // First iteration: 4 monitors fill the limit
-    const monitors4 = Array.from({ length: 4 }, (_, i) =>
+    // First iteration: 2 monitors fill the limit
+    const monitors2 = Array.from({ length: 2 }, (_, i) =>
       makeMonitor({ id: i + 1, name: `Monitor ${i + 1}`, lastChecked: null })
     );
-    mockGetAllActiveMonitors.mockResolvedValueOnce(monitors4);
+    mockGetAllActiveMonitors.mockResolvedValueOnce(monitors2);
 
     let resolvers: Array<() => void> = [];
     mockCheckMonitor.mockImplementation(
@@ -430,8 +430,8 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     await runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(31000);
 
-    // All 4 should have started
-    expect(mockCheckMonitor.mock.calls.length).toBe(4);
+    // All 2 should have started
+    expect(mockCheckMonitor.mock.calls.length).toBe(2);
 
     // Complete all checks
     resolvers.forEach((r) => r());

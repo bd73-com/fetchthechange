@@ -1,5 +1,5 @@
-import { Resend } from "resend";
 import { format } from "date-fns";
+import { getResendClient } from "./resendClient";
 import { type Monitor, type MonitorChange } from "@shared/schema";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { type UserTier } from "@shared/models/auth";
@@ -49,7 +49,7 @@ function safeHref(url: string | null | undefined): string {
 }
 
 interface EmailInfra {
-  resend: InstanceType<typeof Resend>;
+  resend: ReturnType<typeof getResendClient> & {};
   fromAddress: string;
 }
 
@@ -68,13 +68,14 @@ async function prepareEmailInfra(
     return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
   }
 
-  if (!process.env.RESEND_API_KEY) {
+  const resend = getResendClient();
+  if (!resend) {
     console.log(`[MOCK EMAIL] ${mockLabel} for monitor ${monitorId}`);
     return { success: false, error: "RESEND_API_KEY not configured" };
   }
 
   return {
-    resend: new Resend(process.env.RESEND_API_KEY),
+    resend,
     fromAddress: process.env.RESEND_FROM || "onboarding@resend.dev",
   };
 }

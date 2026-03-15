@@ -1269,15 +1269,14 @@ export async function registerRoutes(
         general: "General",
       };
 
-      if (!process.env.RESEND_API_KEY) {
+      const { getResendClient } = await import("./services/resendClient");
+      const resend = getResendClient();
+      if (!resend) {
         console.error(`[Support] RESEND_API_KEY not set. Cannot send email.`);
         console.log(`[Support] From: ${input.email}, Category: ${input.category}, Subject: ${input.subject}`);
         console.log(`[Support] Message: ${input.message}`);
         return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly." });
       }
-
-      const { Resend } = await import("resend");
-      const resend = new Resend(process.env.RESEND_API_KEY);
       const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
       const supportEmail = process.env.SUPPORT_EMAIL;
       if (!supportEmail) {

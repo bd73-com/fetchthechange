@@ -129,8 +129,9 @@ export class BrowserlessUsageTracker {
     }
 
     try {
-      const { Resend } = await import("resend");
-      const resend = new Resend(apiKey);
+      const { getResendClient } = await import("./resendClient");
+      const resend = getResendClient();
+      if (!resend) return;
 
       const ownerEmail = process.env.ADMIN_ALERT_EMAIL || from;
 
