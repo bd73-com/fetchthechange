@@ -113,6 +113,27 @@ describe("BrowserPool", () => {
       const result = await pool.acquire(connectFn);
       expect(result.browser).toBe(browser);
     });
+
+    it("closes browser from slow connectFn that resolves after drain starts", async () => {
+      // Simulate a connectFn that is in-flight when drain() begins
+      const slowBrowser = makeBrowser();
+      let resolveConnect: (b: PoolableBrowser) => void;
+      const slowConnectFn = vi.fn().mockReturnValue(
+        new Promise<PoolableBrowser>((r) => { resolveConnect = r; })
+      );
+
+      const acquirePromise = pool.acquire(slowConnectFn);
+
+      // Start drain while connectFn is still pending
+      const drainPromise = pool.drain();
+
+      // Now resolve the slow connect — pool should close the browser and reject
+      resolveConnect!(slowBrowser);
+      await expect(acquirePromise).rejects.toThrow("draining");
+      expect(slowBrowser.close).toHaveBeenCalledOnce();
+
+      await drainPromise;
+    });
   });
 
   describe("inUse tracking", () => {

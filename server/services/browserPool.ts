@@ -80,6 +80,11 @@ export class BrowserPool {
     this.pendingAcquires++;
     try {
       const browser = await connectFn();
+      // Re-check after await: drain() may have started while connectFn was in flight
+      if (this.draining) {
+        await Promise.resolve(browser.close()).catch(() => {});
+        throw new Error("BrowserPool is draining — cannot acquire new browsers");
+      }
       const reusable = this.entries.length + this.pendingAcquires <= POOL_MAX;
       if (reusable) this.reusableSet.add(browser);
       this.inUse.add(browser);
@@ -111,6 +116,10 @@ export class BrowserPool {
   /** Close and remove all pooled and in-use browsers. Resets the pool for reuse. */
   async drain(): Promise<void> {
     this.draining = true;
+    // Wait for any in-flight connectFn() calls to resolve so their browsers get closed
+    while (this.pendingAcquires > 0) {
+      await new Promise<void>(resolve => setTimeout(resolve, 10));
+    }
     const toClose = this.entries.splice(0);
     const inUseBrowsers = Array.from(this.inUse);
     this.inUse.clear();

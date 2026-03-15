@@ -16,7 +16,17 @@ const MAX_RETRY_MS = 15 * 60 * 1000; // 15 minutes
 let activeChecks = 0;
 let schedulerStarted = false;
 const cronTasks: ReturnType<typeof cron.schedule>[] = [];
-const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
+const pendingTimeouts = new Set<ReturnType<typeof setTimeout>>();
+
+/** Schedule a callback with automatic cleanup from pendingTimeouts when it fires. */
+function trackTimeout(callback: () => void, delayMs: number): ReturnType<typeof setTimeout> {
+  const handle = setTimeout(() => {
+    pendingTimeouts.delete(handle);
+    callback();
+  }, delayMs);
+  pendingTimeouts.add(handle);
+  return handle;
+}
 
 /** @internal Test-only reset for the idempotency guard */
 export function _resetSchedulerStarted() {
@@ -61,14 +71,16 @@ export async function startScheduler() {
   // doesn't block scheduler startup indefinitely.
   const tableReady = await Promise.race([
     ensureMonitorConditionsTable(),
-    new Promise<boolean>(resolve => setTimeout(() => {
-      console.warn("[Scheduler] ensureMonitorConditionsTable timed out after 10s — continuing startup");
-      resolve(false);
-    }, 10000)),
+    new Promise<boolean>(resolve => {
+      trackTimeout(() => {
+        console.warn("[Scheduler] ensureMonitorConditionsTable timed out after 10s — continuing startup");
+        resolve(false);
+      }, 10000);
+    }),
   ]);
   if (!tableReady) {
     // Retry in background so table/index creation can complete
-    setTimeout(() => ensureMonitorConditionsTable().catch(() => {}), 30000);
+    trackTimeout(() => { ensureMonitorConditionsTable().catch(() => {}); }, 30000);
   }
 
   // One-time cleanup of polluted values from legacy data (non-fatal — must not block cron registration)
@@ -85,7 +97,7 @@ export async function startScheduler() {
       const pendingMonitors = allMonitors.filter(m => pendingIds.includes(m.id));
       for (const monitor of pendingMonitors) {
         const jitterMs = Math.floor(Math.random() * 5000);
-        pendingTimeouts.push(setTimeout(() => runCheckWithLimit(monitor), jitterMs));
+        trackTimeout(() => { void runCheckWithLimit(monitor); }, jitterMs);
       }
       // Reset backoff for all retried monitors
       for (const id of pendingIds) {
@@ -136,14 +148,13 @@ export async function startScheduler() {
 
           if (shouldCheck) {
             const jitterMs = Math.floor(Math.random() * 30000);
-            const handle = setTimeout(() => {
+            trackTimeout(() => {
               void runCheckWithLimit(monitor).then((started) => {
                 if (!started || !monitorsNeedingRetry.has(monitor.id)) return;
                 const b = retryBackoff.get(monitor.id) ?? { attempts: 0 };
                 retryBackoff.set(monitor.id, { attempts: b.attempts + 1 });
               });
             }, jitterMs);
-            pendingTimeouts.push(handle);
           }
         } catch (monitorError) {
           // Isolate per-monitor failures so one bad monitor can't crash the iteration
@@ -325,10 +336,8 @@ export function stopScheduler(): void {
     task.stop();
   }
   cronTasks.length = 0;
-  for (const handle of pendingTimeouts) {
-    clearTimeout(handle);
-  }
-  pendingTimeouts.length = 0;
+  pendingTimeouts.forEach((handle) => { clearTimeout(handle); });
+  pendingTimeouts.clear();
   retryBackoff.clear();
   schedulerStarted = false;
 }

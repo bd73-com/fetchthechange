@@ -381,7 +381,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     vi.clearAllMocks();
     _resetSchedulerStarted();
     _resetCache();
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
 
   afterEach(() => {
@@ -486,7 +486,7 @@ describe("accelerated retry for Browserless infra failures", () => {
     vi.clearAllMocks();
     _resetSchedulerStarted();
     _resetCache();
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
     retryBackoff.clear();
   });
 
@@ -610,7 +610,7 @@ describe("daily metrics cleanup", () => {
     vi.clearAllMocks();
     _resetSchedulerStarted();
     _resetCache();
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
 
   afterEach(() => {
@@ -688,7 +688,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     vi.clearAllMocks();
     _resetSchedulerStarted();
     _resetCache();
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
 
   afterEach(() => {
@@ -807,7 +807,7 @@ describe("stopScheduler", () => {
     vi.clearAllMocks();
     _resetSchedulerStarted();
     _resetCache();
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
 
   afterEach(() => {
@@ -848,7 +848,7 @@ describe("webhook retry cumulative backoff", () => {
     vi.clearAllMocks();
     _resetSchedulerStarted();
     _resetCache();
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
 
   afterEach(() => {
