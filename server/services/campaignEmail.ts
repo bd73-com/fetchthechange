@@ -431,6 +431,14 @@ async function sendCampaignBatch(
 async function finalizeCampaign(campaignId: number, status: string): Promise<void> {
   // Mark remaining pending recipients when cancelling or partially sending
   if (status === "cancelled" || status === "partially_sent") {
+    // Count pending recipients before updating them
+    const pendingResult = await db.execute(sql`
+      SELECT COUNT(*)::int AS "pendingCount"
+      FROM campaign_recipients
+      WHERE campaign_id = ${campaignId} AND status = 'pending'
+    `);
+    const pendingCount = Number((pendingResult.rows[0] as any)?.pendingCount ?? 0);
+
     await db
       .update(campaignRecipients)
       .set({
@@ -444,6 +452,13 @@ async function finalizeCampaign(campaignId: number, status: string): Promise<voi
           eq(campaignRecipients.status, "pending")
         )
       );
+
+    if (pendingCount > 0) {
+      await db
+        .update(campaigns)
+        .set({ failedCount: sql`${campaigns.failedCount} + ${pendingCount}` })
+        .where(eq(campaigns.id, campaignId));
+    }
   }
 
   await db
@@ -496,10 +511,22 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
         )
       );
 
-    await db
-      .update(campaigns)
-      .set({ status: "cancelled", completedAt: new Date() })
-      .where(eq(campaigns.id, campaignId));
+    // Update failed_count with the pending count we already queried above
+    if (pendingCount > 0) {
+      await db
+        .update(campaigns)
+        .set({
+          status: "cancelled",
+          completedAt: new Date(),
+          failedCount: sql`${campaigns.failedCount} + ${pendingCount}`,
+        })
+        .where(eq(campaigns.id, campaignId));
+    } else {
+      await db
+        .update(campaigns)
+        .set({ status: "cancelled", completedAt: new Date() })
+        .where(eq(campaigns.id, campaignId));
+    }
   }
 
   return { sentSoFar, cancelled: pendingCount };

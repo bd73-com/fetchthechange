@@ -220,7 +220,7 @@ export default function BlogUseCases() {
           <div className="bg-secondary/50 rounded-lg p-6 mt-10 border border-border">
             <h3 className="text-xl font-display font-bold mb-3">Monitor What Matters to You</h3>
             <p className="text-muted-foreground mb-4">
-              FetchTheChange tracks specific elements on any webpage — prices, stock status, regulatory text, job postings, or anything else. Start with 5 free monitors.
+              FetchTheChange tracks specific elements on any webpage — prices, stock status, regulatory text, job postings, or anything else. Start with 3 free monitors.
             </p>
             <Button asChild data-testid="button-cta-get-started">
               <a href="/api/login">

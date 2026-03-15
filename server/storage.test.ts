@@ -293,6 +293,15 @@ describe("DatabaseStorage", () => {
         where: vi.fn().mockRejectedValue(fkError),
       }));
 
+      // Transaction mock must execute the callback so the error propagates
+      mockTransaction.mockImplementation(async (cb: any) => {
+        const txChain: any = {
+          where: vi.fn().mockRejectedValue(fkError),
+        };
+        const tx = { delete: vi.fn().mockReturnValue(txChain) };
+        await cb(tx);
+      });
+
       await expect(storage.cleanupPollutedValues()).rejects.toThrow("foreign key violation");
     });
   });
