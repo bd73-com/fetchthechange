@@ -18,7 +18,7 @@ export interface IStorage {
   clearHealthAlert(monitorId: number): Promise<void>;
   updateLastHealthyAt(monitorId: number): Promise<void>;
 
-  getMonitorChanges(monitorId: number): Promise<MonitorChange[]>;
+  getMonitorChanges(monitorId: number, limit?: number): Promise<MonitorChange[]>;
   getMonitorChangeById(changeId: number): Promise<MonitorChange | undefined>;
   countMonitorChanges(monitorId: number): Promise<number>;
   getMonitorChangesByIds(changeIds: number[]): Promise<MonitorChange[]>;
@@ -91,25 +91,29 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteMonitor(id: number): Promise<void> {
-    if (await notificationTablesExist()) {
-      await db.delete(notificationQueue).where(eq(notificationQueue.monitorId, id));
-      await db.delete(notificationPreferences).where(eq(notificationPreferences.monitorId, id));
-    }
-    // Delete channel-related rows independently — in partially-migrated DBs
-    // one table may exist without the others, and delivery_log.changeId has a FK
-    // to monitorChanges without CASCADE, so we must clean it up if the table exists.
-    for (const [table, col] of [[deliveryLog, deliveryLog.monitorId], [notificationChannels, notificationChannels.monitorId]] as const) {
-      try {
-        await db.delete(table).where(eq(col, id));
-      } catch (err: any) {
-        if (!err?.message?.includes("relation")) throw err;
+    await db.transaction(async (tx) => {
+      if (await notificationTablesExist()) {
+        await tx.delete(notificationQueue).where(eq(notificationQueue.monitorId, id));
+        await tx.delete(notificationPreferences).where(eq(notificationPreferences.monitorId, id));
       }
-    }
-    await db.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
-    await db.delete(monitorMetrics).where(eq(monitorMetrics.monitorId, id));
-    await db.delete(browserlessUsage).where(eq(browserlessUsage.monitorId, id));
-    await db.delete(resendUsage).where(eq(resendUsage.monitorId, id));
-    await db.delete(monitors).where(eq(monitors.id, id));
+      // Delete channel-related rows independently — in partially-migrated DBs
+      // one table may exist without the others, and delivery_log.changeId has a FK
+      // to monitorChanges without CASCADE, so we must clean it up if the table exists.
+      for (const [table, col] of [[deliveryLog, deliveryLog.monitorId], [notificationChannels, notificationChannels.monitorId]] as const) {
+        try {
+          await tx.delete(table).where(eq(col, id));
+        } catch (err: any) {
+          if (err?.code !== "42P01") throw err;
+        }
+      }
+      await tx.delete(monitorConditions).where(eq(monitorConditions.monitorId, id));
+      await tx.delete(monitorTags).where(eq(monitorTags.monitorId, id));
+      await tx.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
+      await tx.delete(monitorMetrics).where(eq(monitorMetrics.monitorId, id));
+      await tx.delete(browserlessUsage).where(eq(browserlessUsage.monitorId, id));
+      await tx.delete(resendUsage).where(eq(resendUsage.monitorId, id));
+      await tx.delete(monitors).where(eq(monitors.id, id));
+    });
   }
 
   async setHealthAlertSent(monitorId: number): Promise<void> {
@@ -124,11 +128,12 @@ export class DatabaseStorage implements IStorage {
     await db.update(monitors).set({ lastHealthyAt: new Date() }).where(eq(monitors.id, monitorId));
   }
 
-  async getMonitorChanges(monitorId: number): Promise<MonitorChange[]> {
+  async getMonitorChanges(monitorId: number, limit = 200): Promise<MonitorChange[]> {
     return await db.select()
       .from(monitorChanges)
       .where(eq(monitorChanges.monitorId, monitorId))
-      .orderBy(desc(monitorChanges.detectedAt));
+      .orderBy(desc(monitorChanges.detectedAt))
+      .limit(limit);
   }
 
   async getMonitorChangeById(changeId: number): Promise<MonitorChange | undefined> {
@@ -309,7 +314,7 @@ export class DatabaseStorage implements IStorage {
         try {
           await db.delete(table).where(eq(col, h.id));
         } catch (err: any) {
-          if (!err?.message?.includes("relation")) throw err;
+          if (err?.code !== "42P01") throw err;
         }
       }
       await db.delete(monitorChanges).where(eq(monitorChanges.id, h.id));
