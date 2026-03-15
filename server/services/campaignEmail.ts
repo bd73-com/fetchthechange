@@ -450,7 +450,7 @@ async function finalizeCampaign(campaignId: number, status: string): Promise<voi
           status,
           completedAt: new Date(),
           ...(failedCount > 0
-            ? { failedCount: sql`${campaigns.failedCount} + ${failedCount}` }
+            ? { failedCount: sql`COALESCE(${campaigns.failedCount}, 0) + ${failedCount}` }
             : {}),
         })
         .where(eq(campaigns.id, campaignId));
@@ -477,18 +477,21 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
     control.cancelled = true;
   }
 
-  // Count sent recipients
+  // Count current state
   const sentResult = await db.execute(sql`
     SELECT
-      COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened', 'clicked'))::int as "sentCount"
+      COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened', 'clicked'))::int as "sentCount",
+      COUNT(*) FILTER (WHERE status = 'pending')::int as "pendingCount"
     FROM campaign_recipients
     WHERE campaign_id = ${campaignId}
   `);
-  const sentSoFar = Number((sentResult.rows[0] as any)?.sentCount ?? 0);
+  const row = sentResult.rows[0] as any;
+  const sentSoFar = Number(row?.sentCount ?? 0);
+  const pendingCount = Number(row?.pendingCount ?? 0);
 
   // Mark remaining pending as cancelled (use failed status with reason)
   if (!control) {
-    const pendingCount = await db.transaction(async (tx) => {
+    await db.transaction(async (tx) => {
       // Atomically mark pending recipients as failed and count affected rows
       const failedResult = await tx.execute(sql`
         UPDATE campaign_recipients
@@ -498,7 +501,7 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
         WHERE campaign_id = ${campaignId} AND status = 'pending'
         RETURNING id
       `);
-      const count = failedResult.rows.length;
+      const failedCount = failedResult.rows.length;
 
       // Single campaign update with accurate failedCount
       await tx
@@ -506,17 +509,13 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
         .set({
           status: "cancelled",
           completedAt: new Date(),
-          ...(count > 0
-            ? { failedCount: sql`${campaigns.failedCount} + ${count}` }
+          ...(failedCount > 0
+            ? { failedCount: sql`COALESCE(${campaigns.failedCount}, 0) + ${failedCount}` }
             : {}),
         })
         .where(eq(campaigns.id, campaignId));
-
-      return count;
     });
-
-    return { sentSoFar, cancelled: pendingCount };
   }
 
-  return { sentSoFar, cancelled: 0 };
+  return { sentSoFar, cancelled: pendingCount };
 }

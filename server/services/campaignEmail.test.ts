@@ -373,9 +373,9 @@ describe("cancelCampaign", () => {
   });
 
   it("returns sent and cancelled counts", async () => {
-    // db.execute: sent count query
+    // db.execute: count query returns sentCount and pendingCount
     mockDbExecute.mockResolvedValueOnce({
-      rows: [{ sentCount: 25 }],
+      rows: [{ sentCount: 25, pendingCount: 75 }],
     });
     // tx.execute inside transaction: UPDATE...RETURNING for pending recipients
     setupTransactionMock([
@@ -390,7 +390,7 @@ describe("cancelCampaign", () => {
 
   it("handles zero pending recipients", async () => {
     mockDbExecute.mockResolvedValueOnce({
-      rows: [{ sentCount: 50 }],
+      rows: [{ sentCount: 50, pendingCount: 0 }],
     });
     setupTransactionMock([{ rows: [] }]);
 
@@ -402,7 +402,7 @@ describe("cancelCampaign", () => {
 
   it("includes failedCount in campaign update when pendingCount > 0", async () => {
     mockDbExecute.mockResolvedValueOnce({
-      rows: [{ sentCount: 10 }],
+      rows: [{ sentCount: 10, pendingCount: 40 }],
     });
     const txSetCalls = setupTransactionMock([
       { rows: Array.from({ length: 40 }, (_, i) => ({ id: i + 1 })) },
@@ -418,7 +418,7 @@ describe("cancelCampaign", () => {
 
   it("does not include failedCount when pendingCount is 0", async () => {
     mockDbExecute.mockResolvedValueOnce({
-      rows: [{ sentCount: 50 }],
+      rows: [{ sentCount: 50, pendingCount: 0 }],
     });
     const txSetCalls = setupTransactionMock([{ rows: [] }]);
 
