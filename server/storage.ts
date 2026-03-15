@@ -133,7 +133,7 @@ export class DatabaseStorage implements IStorage {
       .from(monitorChanges)
       .where(eq(monitorChanges.monitorId, monitorId))
       .orderBy(desc(monitorChanges.detectedAt))
-      .limit(limit);
+      .limit(Math.max(1, Math.min(limit, 200)));
   }
 
   async getMonitorChangeById(changeId: number): Promise<MonitorChange | undefined> {
