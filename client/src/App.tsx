@@ -17,6 +17,7 @@ import BlogComparison from "@/pages/BlogComparison";
 import BlogPriceMonitoring from "@/pages/BlogPriceMonitoring";
 import BlogSelectorBreakage from "@/pages/BlogSelectorBreakage";
 import BlogUseCases from "@/pages/BlogUseCases";
+import BlogNoCode from "@/pages/BlogNoCode";
 import Pricing from "@/pages/Pricing";
 import Support from "@/pages/Support";
 import DocsWebhooks from "@/pages/DocsWebhooks";
@@ -81,6 +82,7 @@ function Router() {
       <Route path="/blog/monitor-competitor-prices-without-getting-blocked" component={BlogPriceMonitoring} />
       <Route path="/blog/css-selectors-keep-breaking-why-and-how-to-fix" component={BlogSelectorBreakage} />
       <Route path="/blog/website-change-monitoring-use-cases-beyond-price-tracking" component={BlogUseCases} />
+      <Route path="/blog/monitor-website-changes-without-writing-code" component={BlogNoCode} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/support" component={Support} />
       <Route path="/changelog" component={Changelog} />
