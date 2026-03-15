@@ -15,7 +15,7 @@ export default function BlogNoCode() {
   const jsonLd = useMemo(() => ({
     "@context": "https://schema.org",
     "@type": "BlogPosting",
-    headline: "How to Monitor Website Changes Without Writing Code (Step-by-Step)",
+    headline: "How to Monitor Website Changes Without Writing Code",
     description: "You don't need to be a developer to track changes on a website. Learn how to monitor any webpage — prices, availability, text, job postings — using a point-and-click browser extension. No coding required.",
     author: { "@type": "Person", name: AUTHOR },
     publisher: { "@type": "Organization", name: "FetchTheChange" },
@@ -160,6 +160,7 @@ export default function BlogNoCode() {
           </p>
 
           <h3 className="text-xl font-display font-semibold mt-6 mb-3">"How many pages can I monitor for free?"</h3>
+          {/* Pricing: sourced from TIER_LIMITS in shared/models/auth.ts and Pricing.tsx. Update if tiers change. */}
           <p>
             FetchTheChange's free plan includes 3 website monitors with one check per day and email notifications. You also get the Fix Selector tool and full change history — the same features paid users have, just with fewer monitors. If you need more monitors or faster check intervals, paid plans start at $9 per month for up to 100 monitors with hourly checks, Slack integration, and webhook delivery.
           </p>
