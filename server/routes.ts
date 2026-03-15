@@ -1892,7 +1892,7 @@ export async function registerRoutes(
         .orderBy(desc(campaignsTable.createdAt))
         .limit(10);
 
-      const stats = result.rows[0] as any;
+      const stats = (result.rows[0] ?? {}) as any;
       res.json({
         totalCampaigns: Number(stats?.totalCampaigns ?? 0),
         totalSent: Number(stats?.totalSent ?? 0),
