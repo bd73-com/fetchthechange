@@ -91,14 +91,19 @@ vi.mock("node-cron", () => ({
     schedule: vi.fn((expression: string, callback: () => Promise<void>) => {
       if (!cronCallbacks[expression]) cronCallbacks[expression] = [];
       cronCallbacks[expression].push(callback);
+      return { stop: vi.fn() };
     }),
   },
 }));
 
-import { startScheduler, retryBackoff, _resetSchedulerStarted } from "./scheduler";
+import { startScheduler, stopScheduler, retryBackoff, _resetSchedulerStarted } from "./scheduler";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
 import { _resetCache } from "./notificationReady";
+import cron from "node-cron";
+import { storage } from "../storage";
+
+const mockStorage = vi.mocked(storage);
 import type { Monitor } from "@shared/schema";
 
 // Helper: call all callbacks registered for a cron expression
@@ -376,7 +381,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     vi.clearAllMocks();
     _resetSchedulerStarted();
     _resetCache();
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
 
   afterEach(() => {
@@ -481,7 +486,7 @@ describe("accelerated retry for Browserless infra failures", () => {
     vi.clearAllMocks();
     _resetSchedulerStarted();
     _resetCache();
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
     retryBackoff.clear();
   });
 
@@ -605,7 +610,7 @@ describe("daily metrics cleanup", () => {
     vi.clearAllMocks();
     _resetSchedulerStarted();
     _resetCache();
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
 
   afterEach(() => {
@@ -683,7 +688,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     vi.clearAllMocks();
     _resetSchedulerStarted();
     _resetCache();
-    Object.keys(cronCallbacks).forEach((k) => delete cronCallbacks[k]);
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
 
   afterEach(() => {
@@ -793,5 +798,111 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
         errorMessage: "Digest error",
       })
     );
+  });
+});
+
+describe("stopScheduler", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    _resetSchedulerStarted();
+    _resetCache();
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("calls stop() on all registered cron tasks", async () => {
+    await startScheduler();
+    const mockedSchedule = vi.mocked(cron.schedule);
+    const stopFns = mockedSchedule.mock.results.map((r) => r.value.stop);
+
+    stopScheduler();
+
+    for (const stop of stopFns) {
+      expect(stop).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("resets schedulerStarted so startScheduler can be called again", async () => {
+    await startScheduler();
+    stopScheduler();
+    // Should not throw "already started" — should register new cron jobs
+    const mockedSchedule = vi.mocked(cron.schedule);
+    const callsBefore = mockedSchedule.mock.calls.length;
+    await startScheduler();
+    expect(mockedSchedule.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
+
+  it("is safe to call when no scheduler has been started", () => {
+    expect(() => stopScheduler()).not.toThrow();
+  });
+});
+
+describe("webhook retry cumulative backoff", () => {
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    _resetSchedulerStarted();
+    _resetCache();
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("skips retry when cumulative backoff has not elapsed", async () => {
+    const now = Date.now();
+    // Entry created 10 seconds ago, attempt 2 → cumulative threshold is 35s
+    mockStorage.getPendingWebhookRetries.mockResolvedValueOnce([
+      {
+        id: 1,
+        monitorId: 1,
+        changeId: 1,
+        channel: "webhook",
+        status: "pending",
+        attempt: 2,
+        response: null,
+        deliveredAt: null,
+        createdAt: new Date(now - 10_000), // 10s ago — less than 35s threshold
+      },
+    ]);
+
+    await startScheduler();
+    // Run all */1 cron callbacks (notification + webhook retry)
+    await runCron("*/1 * * * *");
+
+    // Should NOT have attempted to fetch the monitor (entry was skipped)
+    expect(mockStorage.getMonitor).not.toHaveBeenCalled();
+  });
+
+  it("processes retry when cumulative backoff has elapsed", async () => {
+    const now = Date.now();
+    // Entry created 40 seconds ago, attempt 2 → cumulative threshold is 35s → should proceed
+    mockStorage.getPendingWebhookRetries.mockResolvedValueOnce([
+      {
+        id: 1,
+        monitorId: 1,
+        changeId: 1,
+        channel: "webhook",
+        status: "pending",
+        attempt: 2,
+        response: null,
+        deliveredAt: null,
+        createdAt: new Date(now - 40_000), // 40s ago — exceeds 35s threshold
+      },
+    ]);
+    // Monitor not found → marks as failed (simplest path to verify it ran)
+    mockStorage.getMonitor.mockResolvedValueOnce(undefined);
+
+    await startScheduler();
+    await runCron("*/1 * * * *");
+
+    expect(mockStorage.getMonitor).toHaveBeenCalledWith(1);
+    expect(mockStorage.updateDeliveryLog).toHaveBeenCalledWith(1, { status: "failed" });
   });
 });

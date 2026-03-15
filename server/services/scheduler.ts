@@ -15,6 +15,18 @@ const BASE_RETRY_MS = 2 * 60 * 1000; // 2 minutes
 const MAX_RETRY_MS = 15 * 60 * 1000; // 15 minutes
 let activeChecks = 0;
 let schedulerStarted = false;
+const cronTasks: ReturnType<typeof cron.schedule>[] = [];
+const pendingTimeouts = new Set<ReturnType<typeof setTimeout>>();
+
+/** Schedule a callback with automatic cleanup from pendingTimeouts when it fires. */
+function trackTimeout(callback: () => void, delayMs: number): ReturnType<typeof setTimeout> {
+  const handle = setTimeout(() => {
+    pendingTimeouts.delete(handle);
+    callback();
+  }, delayMs);
+  pendingTimeouts.add(handle);
+  return handle;
+}
 
 /** @internal Test-only reset for the idempotency guard */
 export function _resetSchedulerStarted() {
@@ -59,14 +71,16 @@ export async function startScheduler() {
   // doesn't block scheduler startup indefinitely.
   const tableReady = await Promise.race([
     ensureMonitorConditionsTable(),
-    new Promise<boolean>(resolve => setTimeout(() => {
-      console.warn("[Scheduler] ensureMonitorConditionsTable timed out after 10s — continuing startup");
-      resolve(false);
-    }, 10000)),
+    new Promise<boolean>(resolve => {
+      trackTimeout(() => {
+        console.warn("[Scheduler] ensureMonitorConditionsTable timed out after 10s — continuing startup");
+        resolve(false);
+      }, 10000);
+    }),
   ]);
   if (!tableReady) {
     // Retry in background so table/index creation can complete
-    setTimeout(() => ensureMonitorConditionsTable().catch(() => {}), 30000);
+    trackTimeout(() => { ensureMonitorConditionsTable().catch(() => {}); }, 30000);
   }
 
   // One-time cleanup of polluted values from legacy data (non-fatal — must not block cron registration)
@@ -83,7 +97,7 @@ export async function startScheduler() {
       const pendingMonitors = allMonitors.filter(m => pendingIds.includes(m.id));
       for (const monitor of pendingMonitors) {
         const jitterMs = Math.floor(Math.random() * 5000);
-        setTimeout(() => runCheckWithLimit(monitor), jitterMs);
+        trackTimeout(() => { void runCheckWithLimit(monitor); }, jitterMs);
       }
       // Reset backoff for all retried monitors
       for (const id of pendingIds) {
@@ -96,7 +110,7 @@ export async function startScheduler() {
   // This is a simple implementation. For production, maybe use a proper queue.
   // We'll filter monitors based on their 'frequency' and 'lastChecked'.
 
-  cron.schedule("* * * * *", async () => {
+  cronTasks.push(cron.schedule("* * * * *", async () => {
     try {
       const monitors = await storage.getAllActiveMonitors();
 
@@ -134,7 +148,7 @@ export async function startScheduler() {
 
           if (shouldCheck) {
             const jitterMs = Math.floor(Math.random() * 30000);
-            setTimeout(() => {
+            trackTimeout(() => {
               void runCheckWithLimit(monitor).then((started) => {
                 if (!started || !monitorsNeedingRetry.has(monitor.id)) return;
                 const b = retryBackoff.get(monitor.id) ?? { attempts: 0 };
@@ -154,7 +168,7 @@ export async function startScheduler() {
         phase: "fetching active monitors",
       });
     }
-  });
+  }));
 
   // Process queued notifications (quiet hours + digest delivery) every minute,
   // but only if the notification tables have been migrated
@@ -163,7 +177,7 @@ export async function startScheduler() {
     console.warn("[Scheduler] Notification tables (notification_preferences, notification_queue) do not exist yet — skipping notification cron. Run `npm run schema:push` to create them.");
   } else {
     let notificationCronRunning = false;
-    cron.schedule("*/1 * * * *", async () => {
+    cronTasks.push(cron.schedule("*/1 * * * *", async () => {
       if (notificationCronRunning) return;
       notificationCronRunning = true;
       try {
@@ -184,20 +198,23 @@ export async function startScheduler() {
       } finally {
         notificationCronRunning = false;
       }
-    });
+    }));
 
     // Webhook retry cron: every minute, process pending webhook deliveries
-    cron.schedule("*/1 * * * *", async () => {
+    cronTasks.push(cron.schedule("*/1 * * * *", async () => {
       try {
         const pendingRetries = await storage.getPendingWebhookRetries();
         const now = Date.now();
 
-        // Backoff windows: attempt 1 → 5s, attempt 2 → 30s, attempt 3 → 120s
-        const backoffMs: Record<number, number> = { 1: 5000, 2: 30000, 3: 120000 };
+        // Cumulative backoff windows from creation: attempt 1 → 5s, attempt 2 → 35s, attempt 3 → 155s
+        // These are cumulative so that elapsed time from creation correctly gates each retry.
+        // Note: attempt starts at 1 (schema default), so attempt=0 never occurs. The fallback
+        // value (155000) handles any unexpected attempt values defensively.
+        const cumulativeBackoffMs: Record<number, number> = { 1: 5000, 2: 35000, 3: 155000 };
 
         for (const entry of pendingRetries) {
           const elapsed = now - new Date(entry.createdAt).getTime();
-          const requiredWait = backoffMs[entry.attempt] || 120000;
+          const requiredWait = cumulativeBackoffMs[entry.attempt] || 155000;
           if (elapsed < requiredWait) continue;
 
           const monitor = await storage.getMonitor(entry.monitorId);
@@ -257,11 +274,11 @@ export async function startScheduler() {
           errorMessage: error instanceof Error ? error.message : String(error),
         });
       }
-    });
+    }));
   }
 
   // Daily cleanup: prune monitor_metrics older than 90 days to prevent unbounded growth
-  cron.schedule("0 3 * * *", async () => {
+  cronTasks.push(cron.schedule("0 3 * * *", async () => {
     try {
       const result = await db.execute(
         sql`DELETE FROM monitor_metrics WHERE checked_at < NOW() - INTERVAL '90 days'`
@@ -308,7 +325,19 @@ export async function startScheduler() {
         table: "notification_queue",
       });
     }
-  });
+  }));
 
   schedulerStarted = true;
+}
+
+/** Stop all cron tasks and pending timers registered by the scheduler. Call before closing the DB pool. */
+export function stopScheduler(): void {
+  for (const task of cronTasks) {
+    task.stop();
+  }
+  cronTasks.length = 0;
+  pendingTimeouts.forEach((handle) => { clearTimeout(handle); });
+  pendingTimeouts.clear();
+  retryBackoff.clear();
+  schedulerStarted = false;
 }

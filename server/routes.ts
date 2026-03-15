@@ -52,6 +52,14 @@ async function checkMonitor(monitor: any) {
 
 let softDeleteCleanupInterval: ReturnType<typeof setInterval> | null = null;
 
+/** Clear the soft-delete cleanup interval. Call during graceful shutdown. */
+export function stopRouteTimers(): void {
+  if (softDeleteCleanupInterval) {
+    clearInterval(softDeleteCleanupInterval);
+    softDeleteCleanupInterval = null;
+  }
+}
+
 // ------------------------------------------------------------------
 // 3. ROUTE REGISTRATION
 // ------------------------------------------------------------------

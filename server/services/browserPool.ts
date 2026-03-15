@@ -30,6 +30,10 @@ export class BrowserPool {
   private pendingAcquires = 0;
   /** Tracks which browsers were acquired as reusable (caller doesn't need to remember). */
   private reusableSet = new WeakSet<PoolableBrowser>();
+  /** Tracks browsers currently checked out via acquire(). */
+  private inUse = new Set<PoolableBrowser>();
+  /** Set to true once drain() begins — prevents new acquisitions. */
+  private draining = false;
 
   /**
    * Acquire a browser from the pool or create a new one via connectFn.
@@ -37,6 +41,9 @@ export class BrowserPool {
    * to reclaim or close it.
    */
   async acquire(connectFn: () => Promise<PoolableBrowser>): Promise<{ browser: PoolableBrowser; reusable: boolean }> {
+    if (this.draining) {
+      throw new Error("BrowserPool is draining — cannot acquire new browsers");
+    }
     const now = Date.now();
     // Evict expired entries and close their CDP sessions
     const expired = this.entries.filter(e => now - e.lastUsed >= POOL_IDLE_EXPIRY_MS);
@@ -57,6 +64,7 @@ export class BrowserPool {
         }
         this.entries.splice(i, 1); // remove from pool while in use
         this.reusableSet.add(entry.browser);
+        this.inUse.add(entry.browser);
         return { browser: entry.browser, reusable: true };
       } catch {
         this.entries.splice(i, 1);
@@ -72,8 +80,14 @@ export class BrowserPool {
     this.pendingAcquires++;
     try {
       const browser = await connectFn();
+      // Re-check after await: drain() may have started while connectFn was in flight
+      if (this.draining) {
+        await Promise.resolve(browser.close()).catch(() => {});
+        throw new Error("BrowserPool is draining — cannot acquire new browsers");
+      }
       const reusable = this.entries.length + this.pendingAcquires <= POOL_MAX;
       if (reusable) this.reusableSet.add(browser);
+      this.inUse.add(browser);
       return { browser, reusable };
     } finally {
       this.pendingAcquires--;
@@ -89,7 +103,8 @@ export class BrowserPool {
     // Support both old (explicit boolean) and new (auto-tracked) call styles.
     const reusable = _reusable ?? this.reusableSet.has(browser);
     this.reusableSet.delete(browser);
-    if (!reusable) return; // ephemeral — caller closes it
+    this.inUse.delete(browser);
+    if (!reusable || this.draining) return; // ephemeral or shutting down — caller closes it
     if (this.entries.length < POOL_MAX) {
       this.entries.push({ browser, lastUsed: Date.now() });
     } else {
@@ -98,10 +113,21 @@ export class BrowserPool {
     }
   }
 
-  /** Close and remove all pooled browsers. */
+  /** Close and remove all pooled and in-use browsers. Resets the pool for reuse. */
   async drain(): Promise<void> {
+    this.draining = true;
+    // Wait for any in-flight connectFn() calls to resolve so their browsers get closed
+    while (this.pendingAcquires > 0) {
+      await new Promise<void>(resolve => setTimeout(resolve, 10));
+    }
     const toClose = this.entries.splice(0);
-    await Promise.allSettled(toClose.map(e => e.browser.close()));
+    const inUseBrowsers = Array.from(this.inUse);
+    this.inUse.clear();
+    await Promise.allSettled([
+      ...toClose.map(e => e.browser.close()),
+      ...inUseBrowsers.map(b => b.close()),
+    ]);
+    this.draining = false;
   }
 }
 
