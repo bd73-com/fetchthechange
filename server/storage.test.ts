@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { monitors, monitorChanges, monitorConditions, monitorTags, monitorMetrics, browserlessUsage, resendUsage } from "@shared/schema";
 
 // ── Drizzle mocks ─────────────────────────────────────────────────────────────
 // vi.hoisted ensures these are available when the vi.mock factories run.
@@ -97,6 +98,9 @@ describe("DatabaseStorage", () => {
       // monitorConditions, monitorTags, monitorChanges, monitorMetrics,
       // browserlessUsage, resendUsage, monitors
       expect(deletedTables.length).toBeGreaterThanOrEqual(11);
+      expect(deletedTables).toEqual(
+        expect.arrayContaining([monitorConditions, monitorTags, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, monitors]),
+      );
     });
 
     it("catches 42P01 (undefined_table) errors for optional tables", async () => {
@@ -195,6 +199,21 @@ describe("DatabaseStorage", () => {
     it("clamps limit to 1 when a negative value is passed", async () => {
       await storage.getMonitorChanges(1, -5);
       expect(mockChain.limit).toHaveBeenCalledWith(1);
+    });
+
+    it("falls back to 200 when NaN is passed", async () => {
+      await storage.getMonitorChanges(1, NaN);
+      expect(mockChain.limit).toHaveBeenCalledWith(200);
+    });
+
+    it("falls back to 200 when Infinity is passed", async () => {
+      await storage.getMonitorChanges(1, Infinity);
+      expect(mockChain.limit).toHaveBeenCalledWith(200);
+    });
+
+    it("truncates float values", async () => {
+      await storage.getMonitorChanges(1, 50.9);
+      expect(mockChain.limit).toHaveBeenCalledWith(50);
     });
 
     it("orders results by detectedAt descending", async () => {

@@ -129,11 +129,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getMonitorChanges(monitorId: number, limit = 200): Promise<MonitorChange[]> {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(Math.trunc(limit), 200)) : 200;
     return await db.select()
       .from(monitorChanges)
       .where(eq(monitorChanges.monitorId, monitorId))
       .orderBy(desc(monitorChanges.detectedAt))
-      .limit(Math.max(1, Math.min(limit, 200)));
+      .limit(safeLimit);
   }
 
   async getMonitorChangeById(changeId: number): Promise<MonitorChange | undefined> {
