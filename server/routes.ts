@@ -1,4 +1,5 @@
 import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPageBlockReason, discoverSelectors, validateCssSelector, extractValueFromHtml } from "./services/scraper";
+import { getResendClient } from "./services/resendClient";
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -1269,7 +1270,6 @@ export async function registerRoutes(
         general: "General",
       };
 
-      const { getResendClient } = await import("./services/resendClient");
       const resend = getResendClient();
       if (!resend) {
         console.error(`[Support] RESEND_API_KEY not set. Cannot send email.`);

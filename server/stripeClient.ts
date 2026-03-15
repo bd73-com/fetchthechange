@@ -73,6 +73,7 @@ export async function getStripeSync() {
       poolConfig: {
         connectionString: process.env.DATABASE_URL!,
         max: 1,
+        connectionTimeoutMillis: 5_000,
         idleTimeoutMillis: 30_000,
       },
       stripeSecretKey: secretKey,

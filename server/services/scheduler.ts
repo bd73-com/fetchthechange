@@ -10,7 +10,9 @@ import { ensureMonitorConditionsTable } from "./ensureTables";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
-// Keep below DB pool max (3) to leave headroom for cron jobs and API requests.
+// Keep below DB pool max (3, see db.ts) to leave headroom for cron jobs and
+// API requests. Browser POOL_MAX is 1 (browserPool.ts), so the second
+// concurrent check creates an ephemeral browser connection if needed.
 const MAX_CONCURRENT_CHECKS = 2;
 const BASE_RETRY_MS = 2 * 60 * 1000; // 2 minutes
 const MAX_RETRY_MS = 15 * 60 * 1000; // 15 minutes

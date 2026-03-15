@@ -1,5 +1,6 @@
 import { format } from "date-fns";
 import { db } from "../db";
+import { getResendClient } from "./resendClient";
 import { browserlessUsage, errorLogs } from "@shared/schema";
 import { BROWSERLESS_CAPS, users, type UserTier } from "@shared/models/auth";
 import { sql, eq, and, gte, count, desc } from "drizzle-orm";
@@ -121,17 +122,18 @@ export class BrowserlessUsageTracker {
   }
 
   private static async sendThresholdEmail(threshold: string, usage: number, cap: number): Promise<void> {
-    const apiKey = process.env.RESEND_API_KEY;
     const from = process.env.RESEND_FROM;
-    if (!apiKey || !from) {
+    if (!from) {
       console.log(`[BrowserlessTracker] ${threshold} threshold reached (${usage}/${cap}) — no email configured`);
       return;
     }
 
     try {
-      const { getResendClient } = await import("./resendClient");
       const resend = getResendClient();
-      if (!resend) return;
+      if (!resend) {
+        console.log(`[BrowserlessTracker] ${threshold} threshold reached (${usage}/${cap}) — no email configured`);
+        return;
+      }
 
       const ownerEmail = process.env.ADMIN_ALERT_EMAIL || from;
 
