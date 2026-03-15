@@ -120,6 +120,56 @@ describe("BlogUseCases page integrity", () => {
   });
 });
 
+describe("BlogNoCode page integrity", () => {
+  const noCodeSource = fs.readFileSync(
+    path.join(PAGES_DIR, "BlogNoCode.tsx"),
+    "utf-8",
+  );
+
+  it("has matching BLOG_PATH and route in App.tsx", () => {
+    const match = noCodeSource.match(/BLOG_PATH\s*=\s*"([^"]+)"/);
+    expect(match).not.toBeNull();
+    const blogPath = match![1];
+    expect(routes).toContain(blogPath);
+  });
+
+  it("has a valid PUBLISH_DATE", () => {
+    const match = noCodeSource.match(/PUBLISH_DATE\s*=\s*"([^"]+)"/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("contains required Schema.org BlogPosting properties", () => {
+    expect(noCodeSource).toContain('"@type": "BlogPosting"');
+    expect(noCodeSource).toContain("datePublished");
+    expect(noCodeSource).toContain("publisher");
+    expect(noCodeSource).toContain("author");
+  });
+
+  it("internal links point to existing blog routes", () => {
+    const hrefMatches = [
+      ...noCodeSource.matchAll(/href="(\/blog\/[^"]+)"/g),
+    ];
+    const linkedPaths = hrefMatches.map((m) => m[1]);
+    expect(linkedPaths.length).toBeGreaterThanOrEqual(3);
+    for (const href of linkedPaths) {
+      expect(routes).toContain(href);
+    }
+  });
+
+  it("CTA button links to /api/login", () => {
+    expect(noCodeSource).toContain('href="/api/login"');
+  });
+
+  it("has correct SEO title with brand suffix", () => {
+    expect(noCodeSource).toContain("| FetchTheChange");
+  });
+
+  it("Badge shows 'Getting Started' category", () => {
+    expect(noCodeSource).toContain(">Getting Started<");
+  });
+});
+
 describe("each blog post has a corresponding page file", () => {
   for (const slug of slugs) {
     it(`page file exists for slug "${slug}"`, () => {

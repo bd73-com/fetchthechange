@@ -7,6 +7,13 @@ import PublicNav from "@/components/PublicNav";
 
 const blogPosts = [
   {
+    slug: "monitor-website-changes-without-writing-code",
+    title: "How to Monitor Website Changes Without Writing Code",
+    description: "You don't need to be a developer to track changes on a website. A step-by-step guide to monitoring any webpage using a point-and-click browser extension — no coding required.",
+    category: "Getting Started",
+    date: "2026-03-15",
+  },
+  {
     slug: "website-change-monitoring-use-cases-beyond-price-tracking",
     title: "5 Real-World Use Cases for Website Change Monitoring (Beyond Price Tracking)",
     description: "Website change monitoring isn't just for tracking prices. Five practical use cases — from regulatory compliance to job postings — with concrete selector strategies for each.",
