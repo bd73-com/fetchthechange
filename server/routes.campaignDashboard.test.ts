@@ -178,7 +178,8 @@ async function ensureRoutes() {
   process.env.APP_OWNER_ID = "owner-123";
   const { registerRoutes } = await import("./routes");
   const app = makeMockApp();
-  await registerRoutes(app as any, app as any);
+  const mockHttpServer = {} as any;
+  await registerRoutes(mockHttpServer, app as any);
   routesRegistered = true;
 }
 
@@ -301,6 +302,20 @@ describe("GET /api/admin/campaigns/dashboard", () => {
   it("defaults to zero when stats row is undefined", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockDbExecute.mockResolvedValue({ rows: [undefined] });
+    mockLimitFn.mockResolvedValue([]);
+
+    const req = { user: { claims: { sub: "owner-123" } } };
+    const res = await callHandler("get", ENDPOINT, req);
+
+    expect(res._status).toBe(200);
+    expect(res._json.totalCampaigns).toBe(0);
+    expect(res._json.avgOpenRate).toBe(0);
+    expect(res._json.avgClickRate).toBe(0);
+  });
+
+  it("defaults to zero when rows array is empty", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockDbExecute.mockResolvedValue({ rows: [] });
     mockLimitFn.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "owner-123" } } };
