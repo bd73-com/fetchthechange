@@ -1880,14 +1880,8 @@ export async function registerRoutes(
           COALESCE(SUM(sent_count), 0)::int AS "totalSent",
           COALESCE(SUM(opened_count), 0)::int AS "totalOpened",
           COALESCE(SUM(clicked_count), 0)::int AS "totalClicked",
-          CASE WHEN COALESCE(SUM(sent_count), 0) > 0
-            THEN ROUND(COALESCE(SUM(opened_count), 0)::numeric / SUM(sent_count) * 100, 1)
-            ELSE 0
-          END AS "avgOpenRate",
-          CASE WHEN COALESCE(SUM(sent_count), 0) > 0
-            THEN ROUND(COALESCE(SUM(clicked_count), 0)::numeric / SUM(sent_count) * 100, 1)
-            ELSE 0
-          END AS "avgClickRate"
+          ROUND(COALESCE(AVG(CASE WHEN sent_count > 0 THEN opened_count::numeric / sent_count * 100 END), 0), 1) AS "avgOpenRate",
+          ROUND(COALESCE(AVG(CASE WHEN sent_count > 0 THEN clicked_count::numeric / sent_count * 100 END), 0), 1) AS "avgClickRate"
         FROM campaigns
         WHERE status != 'draft'
       `);
