@@ -28,6 +28,24 @@ function trackTimeout(callback: () => void, delayMs: number): ReturnType<typeof 
   return handle;
 }
 
+/**
+ * Wait until all in-flight monitor checks complete, or until timeout.
+ * Used during graceful shutdown to avoid closing the DB pool while checks are running.
+ */
+export function waitForActiveChecks(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const check = () => {
+      if (activeChecks === 0 || Date.now() - start > timeoutMs) {
+        resolve();
+      } else {
+        setTimeout(check, 100);
+      }
+    };
+    check();
+  });
+}
+
 /** @internal Test-only reset for the idempotency guard */
 export function _resetSchedulerStarted() {
   schedulerStarted = false;
