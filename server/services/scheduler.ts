@@ -10,7 +10,8 @@ import { ensureMonitorConditionsTable } from "./ensureTables";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
-const MAX_CONCURRENT_CHECKS = 10;
+// Keep below DB pool max (5) to leave headroom for cron jobs and API requests.
+const MAX_CONCURRENT_CHECKS = 4;
 const BASE_RETRY_MS = 2 * 60 * 1000; // 2 minutes
 const MAX_RETRY_MS = 15 * 60 * 1000; // 15 minutes
 let activeChecks = 0;
