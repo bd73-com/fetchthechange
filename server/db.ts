@@ -10,5 +10,10 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // Cap pool size to reduce ephemeral port usage (Replit's port scanner
+  // detects outbound connections and tries to assign external ports).
+  max: 5,
+});
 export const db = drizzle(pool, { schema });
