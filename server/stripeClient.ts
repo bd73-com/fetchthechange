@@ -98,7 +98,9 @@ export async function getStripeSync() {
       }),
     ]).then((result) => {
       clearTimeout(timer);
-      stripeSync = result;
+      if (!stripeSyncShuttingDown) {
+        stripeSync = result;
+      }
       return result;
     }).catch((err) => {
       clearTimeout(timer);
@@ -113,15 +115,15 @@ export async function getStripeSync() {
 /** Close the StripeSync database pool if it was initialized. */
 export async function closeStripeSync(): Promise<void> {
   stripeSyncShuttingDown = true;
+  let pendingResult: any = null;
   if (stripeSyncPending) {
-    try { await stripeSyncPending; } catch { /* initialization may have failed */ }
+    try { pendingResult = await stripeSyncPending; } catch { /* initialization may have failed */ }
   }
   stripeSyncPending = null;
-  if (stripeSync) {
-    try {
-      await stripeSync.postgresClient?.pool?.end();
-    } finally {
-      stripeSync = null;
-    }
+  // Close either the cached singleton or the just-resolved pending result
+  const instanceToClose = stripeSync ?? pendingResult;
+  stripeSync = null;
+  if (instanceToClose) {
+    await instanceToClose.postgresClient?.pool?.end();
   }
 }
