@@ -1,5 +1,79 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+describe("getStripeSync concurrency", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    process.env.STRIPE_SECRET_KEY = "sk_test_abc123";
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_abc123";
+    process.env.DATABASE_URL = "postgres://localhost/test";
+  });
+
+  it("returns the same instance when called concurrently", async () => {
+    let constructCount = 0;
+    vi.doMock("stripe-replit-sync", () => ({
+      StripeSync: class {
+        id = ++constructCount;
+        postgresClient = { pool: { end: vi.fn().mockResolvedValue(undefined) } };
+      },
+    }));
+
+    const { getStripeSync } = await import("./stripeClient");
+
+    const [a, b, c] = await Promise.all([
+      getStripeSync(),
+      getStripeSync(),
+      getStripeSync(),
+    ]);
+
+    expect(constructCount).toBe(1);
+    expect(a).toBe(b);
+    expect(b).toBe(c);
+  });
+
+  it("resets pending promise on initialization error so retries work", async () => {
+    let callCount = 0;
+    vi.doMock("stripe-replit-sync", () => ({
+      StripeSync: class {
+        constructor() {
+          callCount++;
+          if (callCount === 1) {
+            throw new Error("init failed");
+          }
+        }
+        postgresClient = { pool: { end: vi.fn().mockResolvedValue(undefined) } };
+      },
+    }));
+
+    const { getStripeSync } = await import("./stripeClient");
+
+    // First call fails
+    await expect(getStripeSync()).rejects.toThrow("init failed");
+
+    // Second call should retry (not return the cached rejection)
+    const instance = await getStripeSync();
+    expect(instance).toBeDefined();
+    expect(callCount).toBe(2);
+  });
+
+  it("returns cached instance on subsequent calls after initialization", async () => {
+    let constructCount = 0;
+    vi.doMock("stripe-replit-sync", () => ({
+      StripeSync: class {
+        id = ++constructCount;
+        postgresClient = { pool: { end: vi.fn().mockResolvedValue(undefined) } };
+      },
+    }));
+
+    const { getStripeSync } = await import("./stripeClient");
+
+    const first = await getStripeSync();
+    const second = await getStripeSync();
+
+    expect(constructCount).toBe(1);
+    expect(first).toBe(second);
+  });
+});
+
 describe("closeStripeSync", () => {
   beforeEach(() => {
     vi.resetModules();
