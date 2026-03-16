@@ -392,7 +392,8 @@ export class DatabaseStorage implements IStorage {
         eq(deliveryLog.status, "pending"),
         lt(deliveryLog.attempt, 3)
       ))
-      .orderBy(deliveryLog.createdAt);
+      .orderBy(deliveryLog.createdAt)
+      .limit(100);
   }
 
   async cleanupOldDeliveryLogs(olderThan: Date): Promise<number> {
