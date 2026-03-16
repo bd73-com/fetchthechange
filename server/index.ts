@@ -100,16 +100,6 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     }
   }
 
-  // Start Stripe initialization in the background so the server can bind
-  // to port 5000 immediately.  Webhook requests arriving before init
-  // finishes will fail signature verification, but Stripe retries them.
-  if (!process.env.STRIPE_WEBHOOK_SECRET) {
-    console.warn("STRIPE_WEBHOOK_SECRET not set — webhooks will fail until managed webhook setup completes");
-  }
-  initStripe().catch((err) => {
-    console.error("Stripe background init failed:", err);
-  });
-
   // Stripe webhook route MUST be before express.json()
   app.post(
     '/api/stripe/webhook',
@@ -236,8 +226,20 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     next();
   });
 
-  // Register API Routes
+  // Register API Routes (runs ensure* migrations that need DB connections)
   await registerRoutes(httpServer, app);
+
+  // Start Stripe initialization in the background AFTER registerRoutes()
+  // completes — the ensure* migrations release their DB connections first,
+  // preventing pool exhaustion that causes connection timeouts.
+  // Webhook requests arriving before init finishes will fail signature
+  // verification, but Stripe retries them.
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    console.warn("STRIPE_WEBHOOK_SECRET not set — webhooks will fail until managed webhook setup completes");
+  }
+  initStripe().catch((err) => {
+    console.error("Stripe background init failed:", err);
+  });
 
   // Error Handler
   app.use((err: any, _req: any, res: any, next: any) => {
