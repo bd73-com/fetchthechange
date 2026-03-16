@@ -19,6 +19,32 @@ let schedulerStarted = false;
 const cronTasks: ReturnType<typeof cron.schedule>[] = [];
 const pendingTimeouts = new Set<ReturnType<typeof setTimeout>>();
 
+/** Transient DB errors that are safe to retry (connection drops, pool exhaustion). */
+function isTransientDbError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return msg.includes("connection terminated")
+    || msg.includes("connection timeout")
+    || msg.includes("connection refused")
+    || msg.includes("econnreset")
+    || msg.includes("econnrefused")
+    || msg.includes("cannot acquire")
+    || msg.includes("timeout expired");
+}
+
+/** Retry a DB operation once after a 1 s delay on transient connection errors. */
+async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (isTransientDbError(err)) {
+      await new Promise((r) => setTimeout(r, 1000));
+      return fn();
+    }
+    throw err;
+  }
+}
+
 /** Schedule a callback with automatic cleanup from pendingTimeouts when it fires. */
 function trackTimeout(callback: () => void, delayMs: number): ReturnType<typeof setTimeout> {
   const handle = setTimeout(() => {
@@ -129,9 +155,12 @@ export async function startScheduler() {
   // This is a simple implementation. For production, maybe use a proper queue.
   // We'll filter monitors based on their 'frequency' and 'lastChecked'.
 
+  let mainCronRunning = false;
   cronTasks.push(cron.schedule("* * * * *", async () => {
+    if (mainCronRunning) return;
+    mainCronRunning = true;
     try {
-      const monitors = await storage.getAllActiveMonitors();
+      const monitors = await withDbRetry(() => storage.getAllActiveMonitors());
 
       for (const monitor of monitors) {
         try {
@@ -186,6 +215,8 @@ export async function startScheduler() {
         activeChecks,
         phase: "fetching active monitors",
       });
+    } finally {
+      mainCronRunning = false;
     }
   }));
 
@@ -220,9 +251,12 @@ export async function startScheduler() {
     }));
 
     // Webhook retry cron: every minute, process pending webhook deliveries
+    let webhookCronRunning = false;
     cronTasks.push(cron.schedule("*/1 * * * *", async () => {
+      if (webhookCronRunning) return;
+      webhookCronRunning = true;
       try {
-        const pendingRetries = await storage.getPendingWebhookRetries();
+        const pendingRetries = await withDbRetry(() => storage.getPendingWebhookRetries());
         const now = Date.now();
 
         // Cumulative backoff windows from creation: attempt 1 → 5s, attempt 2 → 35s, attempt 3 → 155s
@@ -292,6 +326,8 @@ export async function startScheduler() {
         await ErrorLogger.error("scheduler", "Webhook retry processing failed", error instanceof Error ? error : null, {
           errorMessage: error instanceof Error ? error.message : String(error),
         });
+      } finally {
+        webhookCronRunning = false;
       }
     }));
   }
