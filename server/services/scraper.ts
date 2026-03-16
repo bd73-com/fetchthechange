@@ -961,14 +961,13 @@ export async function extractWithBrowserless(url: string, selector: string, moni
 }
 
 async function fetchWithCurl(url: string, monitorId?: number, monitorName?: string): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
     const response = await ssrfSafeFetch(url, {
       headers: browserLikeHeaders(url),
       signal: controller.signal,
     });
-    clearTimeout(timeout);
     if (!response.ok) {
       throw new Error(classifyHttpStatus(response.status).message);
     }
@@ -977,6 +976,8 @@ async function fetchWithCurl(url: string, monitorId?: number, monitorName?: stri
     const label = monitorName ? `"${monitorName}" — page` : "Page";
     await ErrorLogger.error("scraper", `${label} fetch with curl failed — the site returned an error or is blocking the request. Verify the URL is correct and the site is accessible.`, error instanceof Error ? error : null, { url, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
     throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

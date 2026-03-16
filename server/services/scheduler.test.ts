@@ -97,7 +97,7 @@ vi.mock("node-cron", () => ({
   },
 }));
 
-import { startScheduler, stopScheduler, retryBackoff, _resetSchedulerStarted } from "./scheduler";
+import { startScheduler, stopScheduler, retryBackoff, _resetSchedulerStarted, _resetActiveChecks } from "./scheduler";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { ErrorLogger } from "./logger";
 import { _resetCache } from "./notificationReady";
@@ -848,6 +848,7 @@ describe("withDbRetry and re-entrancy guards", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     _resetSchedulerStarted();
+    _resetActiveChecks();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
@@ -867,7 +868,10 @@ describe("withDbRetry and re-entrancy guards", () => {
     const cronPromise = runCron("* * * * *");
     await vi.advanceTimersByTimeAsync(2000);
     await cronPromise;
+    // Advance past the jitter window (0-30s) to fire the trackTimeout
     await vi.advanceTimersByTimeAsync(31000);
+    // Flush microtask queue for the detached (void) runCheckWithLimit promise
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
 
     // Should have called getAllActiveMonitors twice (first fail, then retry)
     expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
@@ -886,6 +890,7 @@ describe("withDbRetry and re-entrancy guards", () => {
     await vi.advanceTimersByTimeAsync(2000);
     await cronPromise;
     await vi.advanceTimersByTimeAsync(31000);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
 
     expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
     expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);
