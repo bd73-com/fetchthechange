@@ -454,7 +454,7 @@ describe("cancelCampaign", () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 10, pendingCount: 40 }],
     });
-    setupTransactionMock([
+    const txCalls = setupTransactionMock([
       { rows: [{ status: "sending" }] },
       { rows: Array.from({ length: 40 }, (_, i) => ({ id: i + 1 })) },
       { rows: [] },
@@ -463,13 +463,21 @@ describe("cancelCampaign", () => {
     await cancelCampaign(99);
 
     expect(mockTransaction).toHaveBeenCalled();
+    // 3 tx.execute calls: SELECT FOR UPDATE, UPDATE recipients, UPDATE campaigns
+    expect(txCalls).toHaveLength(3);
+    // The campaign UPDATE SQL values should include a nested sql object with failed_count
+    const campaignUpdate = txCalls[2];
+    const nestedSql = campaignUpdate.values.find(
+      (v: any) => v?.strings && v.strings.some((s: string) => s.includes("failed_count"))
+    );
+    expect(nestedSql).toBeDefined();
   });
 
   it("does not include failedCount when pendingCount is 0", async () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 50, pendingCount: 0 }],
     });
-    setupTransactionMock([
+    const txCalls = setupTransactionMock([
       { rows: [{ status: "sending" }] },
       { rows: [] },
       { rows: [] },
@@ -478,6 +486,14 @@ describe("cancelCampaign", () => {
     await cancelCampaign(99);
 
     expect(mockTransaction).toHaveBeenCalled();
+    // 3 tx.execute calls: SELECT FOR UPDATE, UPDATE recipients, UPDATE campaigns
+    expect(txCalls).toHaveLength(3);
+    // The campaign UPDATE SQL values should NOT include a nested sql object with failed_count
+    const campaignUpdate = txCalls[2];
+    const nestedSql = campaignUpdate.values.find(
+      (v: any) => v?.strings && v.strings.some((s: string) => s.includes("failed_count"))
+    );
+    expect(nestedSql).toBeUndefined();
   });
 });
 

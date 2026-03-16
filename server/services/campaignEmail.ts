@@ -5,6 +5,7 @@ import { users, campaigns, campaignRecipients, monitors } from "@shared/schema";
 import { ResendUsageTracker } from "./resendTracker";
 import { ErrorLogger } from "./logger";
 import { eq, and, inArray, gte, lte, sql, count, SQL } from "drizzle-orm";
+import { getAppUrl } from "../utils/appUrl";
 
 export interface CampaignFilters {
   tier?: string[];
@@ -34,8 +35,6 @@ function escapeHtml(str: string | null | undefined): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
-
-import { getAppUrl } from "../utils/appUrl";
 
 /**
  * Build a SQL query to resolve recipients matching the given filters,
