@@ -1,7 +1,7 @@
 /**
  * Warm Browser Pool — reuses CDP connections across Browserless checks.
  *
- * Holds up to POOL_MAX idle browsers with a 5-minute expiry. Browsers are
+ * Holds up to POOL_MAX idle browsers with a 90-second expiry. Browsers are
  * validated via isConnected() on acquire and evicted if stale or disconnected.
  *
  * Note: context-level failures (crashed tab, wedged renderer) do NOT
