@@ -491,6 +491,7 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
   // Only proceed if the campaign is not already in a terminal state
   if (!control) {
     let skipped = false;
+    let actualCancelled = 0;
     await db.transaction(async (tx) => {
       // Lock the campaign row and check terminal status atomically
       const statusResult = await tx.execute(sql`
@@ -515,6 +516,7 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
         RETURNING id
       `);
       const failedCount = failedResult.rows.length;
+      actualCancelled = failedCount;
 
       // Single campaign update with accurate failedCount — guard against terminal status
       await tx.execute(sql`
@@ -530,6 +532,8 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
     if (skipped) {
       return { sentSoFar, cancelled: 0 };
     }
+
+    return { sentSoFar, cancelled: actualCancelled };
   }
 
   return { sentSoFar, cancelled: pendingCount };

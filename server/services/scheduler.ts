@@ -310,12 +310,12 @@ export async function startScheduler() {
           const nextAttempt = entry.attempt + 1;
 
           if (result.success) {
-            await storage.updateDeliveryLog(entry.id, {
+            await withDbRetry(() => storage.updateDeliveryLog(entry.id, {
               status: "success",
               attempt: nextAttempt,
               deliveredAt: new Date(),
               response: { statusCode: result.statusCode } as Record<string, unknown>,
-            });
+            }));
           } else if (nextAttempt >= 3) {
             const urlDomain = new URL(config.url).hostname;
             await storage.updateDeliveryLog(entry.id, {
