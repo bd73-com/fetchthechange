@@ -349,22 +349,22 @@ describe("previewRecipients", () => {
 
 describe("cancelCampaign", () => {
   function setupTransactionMock(txExecuteResults: any[]) {
-    const txSetCalls: any[] = [];
+    const txExecuteCalls: any[] = [];
     let txExecuteCallNum = 0;
     mockTransaction.mockImplementation(async (cb: any) => {
-      const txSet = vi.fn().mockImplementation((data: any) => {
-        txSetCalls.push(data);
-        return { where: vi.fn().mockResolvedValue(undefined) };
-      });
       const tx = {
-        execute: vi.fn().mockImplementation(() => {
-          return Promise.resolve(txExecuteResults[txExecuteCallNum++]);
+        execute: vi.fn().mockImplementation((query: any) => {
+          txExecuteCalls.push(query);
+          const result = txExecuteResults[txExecuteCallNum++];
+          return Promise.resolve(result ?? { rows: [] });
         }),
-        update: () => ({ set: txSet }),
+        update: () => ({
+          set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+        }),
       };
       return await cb(tx);
     });
-    return txSetCalls;
+    return txExecuteCalls;
   }
 
   beforeEach(() => {
@@ -373,13 +373,14 @@ describe("cancelCampaign", () => {
   });
 
   it("returns sent and cancelled counts", async () => {
-    // db.execute: count query returns sentCount and pendingCount
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 25, pendingCount: 75 }],
     });
-    // tx.execute inside transaction: UPDATE...RETURNING for pending recipients
+    // tx.execute: 1) SELECT FOR UPDATE (non-terminal), 2) UPDATE recipients, 3) UPDATE campaigns
     setupTransactionMock([
+      { rows: [{ status: "sending" }] },
       { rows: Array.from({ length: 75 }, (_, i) => ({ id: i + 1 })) },
+      { rows: [] },
     ]);
 
     const result = await cancelCampaign(99);
@@ -392,7 +393,12 @@ describe("cancelCampaign", () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 50, pendingCount: 0 }],
     });
-    setupTransactionMock([{ rows: [] }]);
+    // tx.execute: 1) SELECT FOR UPDATE (non-terminal), 2) UPDATE recipients (0 rows), 3) UPDATE campaigns
+    setupTransactionMock([
+      { rows: [{ status: "sending" }] },
+      { rows: [] },
+      { rows: [] },
+    ]);
 
     const result = await cancelCampaign(99);
 
@@ -400,33 +406,94 @@ describe("cancelCampaign", () => {
     expect(result.cancelled).toBe(0);
   });
 
+  it("returns early when campaign is already in terminal status (sent)", async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 50, pendingCount: 0 }],
+    });
+    // tx.execute: SELECT FOR UPDATE returns terminal status — transaction exits early
+    setupTransactionMock([
+      { rows: [{ status: "sent" }] },
+    ]);
+
+    const result = await cancelCampaign(99);
+
+    expect(result.sentSoFar).toBe(50);
+    expect(result.cancelled).toBe(0);
+    expect(mockTransaction).toHaveBeenCalled();
+  });
+
+  it("returns early when campaign is already cancelled", async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 30, pendingCount: 0 }],
+    });
+    setupTransactionMock([
+      { rows: [{ status: "cancelled" }] },
+    ]);
+
+    const result = await cancelCampaign(99);
+
+    expect(result.sentSoFar).toBe(30);
+    expect(result.cancelled).toBe(0);
+  });
+
+  it("returns early when campaign is already partially_sent", async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 20, pendingCount: 0 }],
+    });
+    setupTransactionMock([
+      { rows: [{ status: "partially_sent" }] },
+    ]);
+
+    const result = await cancelCampaign(99);
+
+    expect(result.sentSoFar).toBe(20);
+    expect(result.cancelled).toBe(0);
+  });
+
   it("includes failedCount in campaign update when pendingCount > 0", async () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 10, pendingCount: 40 }],
     });
-    const txSetCalls = setupTransactionMock([
+    const txCalls = setupTransactionMock([
+      { rows: [{ status: "sending" }] },
       { rows: Array.from({ length: 40 }, (_, i) => ({ id: i + 1 })) },
+      { rows: [] },
     ]);
 
     await cancelCampaign(99);
 
-    const campaignUpdate = txSetCalls.find((c) => c.failedCount !== undefined);
-    expect(campaignUpdate).toBeDefined();
-    expect(campaignUpdate.status).toBe("cancelled");
-    expect(campaignUpdate.failedCount).toBeDefined();
+    expect(mockTransaction).toHaveBeenCalled();
+    // 3 tx.execute calls: SELECT FOR UPDATE, UPDATE recipients, UPDATE campaigns
+    expect(txCalls).toHaveLength(3);
+    // The campaign UPDATE SQL values should include a nested sql object with failed_count
+    const campaignUpdate = txCalls[2];
+    const nestedSql = campaignUpdate.values.find(
+      (v: any) => v?.strings && v.strings.some((s: string) => s.includes("failed_count"))
+    );
+    expect(nestedSql).toBeDefined();
   });
 
   it("does not include failedCount when pendingCount is 0", async () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 50, pendingCount: 0 }],
     });
-    const txSetCalls = setupTransactionMock([{ rows: [] }]);
+    const txCalls = setupTransactionMock([
+      { rows: [{ status: "sending" }] },
+      { rows: [] },
+      { rows: [] },
+    ]);
 
     await cancelCampaign(99);
 
-    const campaignUpdate = txSetCalls.find((c) => c.status === "cancelled");
-    expect(campaignUpdate).toBeDefined();
-    expect(campaignUpdate.failedCount).toBeUndefined();
+    expect(mockTransaction).toHaveBeenCalled();
+    // 3 tx.execute calls: SELECT FOR UPDATE, UPDATE recipients, UPDATE campaigns
+    expect(txCalls).toHaveLength(3);
+    // The campaign UPDATE SQL values should NOT include a nested sql object with failed_count
+    const campaignUpdate = txCalls[2];
+    const nestedSql = campaignUpdate.values.find(
+      (v: any) => v?.strings && v.strings.some((s: string) => s.includes("failed_count"))
+    );
+    expect(nestedSql).toBeUndefined();
   });
 });
 

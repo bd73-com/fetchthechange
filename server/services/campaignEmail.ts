@@ -5,6 +5,7 @@ import { users, campaigns, campaignRecipients, monitors } from "@shared/schema";
 import { ResendUsageTracker } from "./resendTracker";
 import { ErrorLogger } from "./logger";
 import { eq, and, inArray, gte, lte, sql, count, SQL } from "drizzle-orm";
+import { getAppUrl } from "../utils/appUrl";
 
 export interface CampaignFilters {
   tier?: string[];
@@ -33,11 +34,6 @@ function escapeHtml(str: string | null | undefined): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-function getAppUrl(): string {
-  const domains = process.env.REPLIT_DOMAINS?.split(",")[0];
-  return domains ? `https://${domains}` : "https://fetch-the-change.replit.app";
 }
 
 /**
@@ -332,6 +328,8 @@ export async function triggerCampaignSend(campaignId: number): Promise<{ totalRe
   activeSends.set(campaignId, sendControl);
   sendCampaignBatch(campaignId, campaign, sendControl).catch(async (err) => {
     await ErrorLogger.error("email", `Campaign ${campaignId} batch send error`, err instanceof Error ? err : null, { campaignId });
+    await finalizeCampaign(campaignId, "partially_sent");
+    activeSends.delete(campaignId);
   });
 
   return { totalRecipients: recipients.length };
@@ -444,25 +442,25 @@ async function finalizeCampaign(campaignId: number, status: string): Promise<voi
       const failedCount = failedResult.rows.length;
 
       // Single campaign update: status + completedAt + failedCount in one statement
-      await tx
-        .update(campaigns)
-        .set({
-          status,
-          completedAt: new Date(),
-          ...(failedCount > 0
-            ? { failedCount: sql`COALESCE(${campaigns.failedCount}, 0) + ${failedCount}` }
-            : {}),
-        })
-        .where(eq(campaigns.id, campaignId));
+      // Guard against overwriting a terminal status (e.g., already finalized by batch loop)
+      await tx.execute(sql`
+        UPDATE campaigns
+        SET status = ${status},
+            completed_at = NOW()
+            ${failedCount > 0 ? sql`, failed_count = COALESCE(failed_count, 0) + ${failedCount}` : sql``}
+        WHERE id = ${campaignId}
+          AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+      `);
     });
   } else {
-    await db
-      .update(campaigns)
-      .set({
-        status,
-        completedAt: new Date(),
-      })
-      .where(eq(campaigns.id, campaignId));
+    // Guard against overwriting a terminal status
+    await db.execute(sql`
+      UPDATE campaigns
+      SET status = ${status},
+          completed_at = NOW()
+      WHERE id = ${campaignId}
+        AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+    `);
   }
 
   console.log(`[Campaign] Campaign ${campaignId} finalized as '${status}'`);
@@ -490,8 +488,23 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
   const pendingCount = Number(row?.pendingCount ?? 0);
 
   // Mark remaining pending as cancelled (use failed status with reason)
+  // Only proceed if the campaign is not already in a terminal state
   if (!control) {
+    let skipped = false;
     await db.transaction(async (tx) => {
+      // Lock the campaign row and check terminal status atomically
+      const statusResult = await tx.execute(sql`
+        SELECT status FROM campaigns
+        WHERE id = ${campaignId}
+        FOR UPDATE
+      `);
+      const currentStatus = (statusResult.rows[0] as any)?.status;
+      const terminalStatuses = ["sent", "cancelled", "partially_sent"];
+      if (!currentStatus || terminalStatuses.includes(currentStatus)) {
+        skipped = true;
+        return;
+      }
+
       // Atomically mark pending recipients as failed and count affected rows
       const failedResult = await tx.execute(sql`
         UPDATE campaign_recipients
@@ -503,18 +516,20 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
       `);
       const failedCount = failedResult.rows.length;
 
-      // Single campaign update with accurate failedCount
-      await tx
-        .update(campaigns)
-        .set({
-          status: "cancelled",
-          completedAt: new Date(),
-          ...(failedCount > 0
-            ? { failedCount: sql`COALESCE(${campaigns.failedCount}, 0) + ${failedCount}` }
-            : {}),
-        })
-        .where(eq(campaigns.id, campaignId));
+      // Single campaign update with accurate failedCount — guard against terminal status
+      await tx.execute(sql`
+        UPDATE campaigns
+        SET status = 'cancelled',
+            completed_at = NOW()
+            ${failedCount > 0 ? sql`, failed_count = COALESCE(failed_count, 0) + ${failedCount}` : sql``}
+        WHERE id = ${campaignId}
+          AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+      `);
     });
+
+    if (skipped) {
+      return { sentSoFar, cancelled: 0 };
+    }
   }
 
   return { sentSoFar, cancelled: pendingCount };

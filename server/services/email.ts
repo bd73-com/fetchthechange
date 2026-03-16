@@ -7,6 +7,7 @@ import { ErrorLogger } from "./logger";
 import { ResendUsageTracker } from "./resendTracker";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { getAppUrl } from "../utils/appUrl";
 
 export interface EmailResult {
   success: boolean;
@@ -103,7 +104,7 @@ async function canSendEmail(monitor: Monitor): Promise<{ allowed: boolean; reaso
 
   const count = Number(recentChanges.rows[0]?.count ?? 0);
 
-  if (count >= 1) {
+  if (count > 1) {
     return {
       allowed: false,
       reason: "Free tier: max 1 email per 24 hours per monitor. Upgrade to Pro for unlimited notifications."
@@ -162,7 +163,7 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
         <p><strong>Old Value:</strong></p>
         <pre>${escapeHtml(oldValue)}</pre>
         <hr/>
-        <p><a href="https://fetch-the-change.replit.app">View Dashboard</a></p>
+        <p><a href="${safeHref(getAppUrl())}">View Dashboard</a></p>
         <br/>
         <p>We hope you enjoy our service!<br/>FetchTheChange Team</p>
       `
@@ -218,7 +219,7 @@ FetchTheChange Team`,
         <p><strong>URL:</strong> <a href="${safeHref(monitor.url)}">${escapeHtml(monitor.url)}</a></p>
         <p><strong>Last error:</strong> ${escapeHtml(lastError)}</p>
         <hr/>
-        <p>To resume monitoring, visit your <a href="https://fetch-the-change.replit.app">dashboard</a> and re-enable the monitor after verifying the URL and selector are correct.</p>
+        <p>To resume monitoring, visit your <a href="${safeHref(getAppUrl())}">dashboard</a> and re-enable the monitor after verifying the URL and selector are correct.</p>
         <br/>
         <p>FetchTheChange Team</p>
       `
@@ -277,7 +278,7 @@ export async function sendHealthWarningEmail(
       return { success: false, error: "User has no email address" };
     }
 
-    const dashboardUrl = "https://fetch-the-change.replit.app";
+    const dashboardUrl = getAppUrl();
 
     const response = await resend.emails.send({
       from: fromAddress,
@@ -372,7 +373,7 @@ export async function sendRecoveryEmail(
       return { success: false, error: "User has no email address" };
     }
 
-    const dashboardUrl = "https://fetch-the-change.replit.app";
+    const dashboardUrl = getAppUrl();
 
     const response = await resend.emails.send({
       from: fromAddress,
@@ -486,7 +487,7 @@ FetchTheChange Team`,
           <tbody>${changesHtmlList}</tbody>
         </table>
         <hr/>
-        <p><a href="https://fetch-the-change.replit.app">View Dashboard</a></p>
+        <p><a href="${safeHref(getAppUrl())}">View Dashboard</a></p>
         <br/>
         <p>FetchTheChange Team</p>
       `
