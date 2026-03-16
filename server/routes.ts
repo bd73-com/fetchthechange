@@ -34,7 +34,7 @@ import { listChannels as listSlackChannels } from "./services/slackDelivery";
 import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encryption";
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns } from "./services/ensureTables";
 
 
@@ -720,7 +720,7 @@ export async function registerRoutes(
   const revealSecretRateLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
     max: 5,
-    keyGenerator: (req: any) => req.user?.claims?.sub || req.ip,
+    keyGenerator: (req: any) => req.user?.claims?.sub || ipKeyGenerator(req.ip || "0.0.0.0"),
     message: { message: "Too many secret reveal requests. Try again later." },
   });
   app.post(api.monitors.channels.revealSecret.path, isAuthenticated, revealSecretRateLimiter, async (req: any, res) => {
