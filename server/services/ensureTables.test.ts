@@ -115,8 +115,17 @@ describe("ensureChannelTables", () => {
   it("executes all CREATE TABLE and CREATE INDEX statements without throwing", async () => {
     mockExecute.mockResolvedValue([]);
     await ensureChannelTables();
-    // 3 CREATE TABLE + 1 CREATE INDEX + 1 CREATE UNIQUE INDEX + 1 CREATE INDEX = 6
-    expect(mockExecute).toHaveBeenCalledTimes(6);
+    // 3 CREATE TABLE + 1 CREATE INDEX + 1 CREATE UNIQUE INDEX + 2 CREATE INDEX = 7
+    expect(mockExecute).toHaveBeenCalledTimes(7);
+  });
+
+  it("emits CREATE INDEX for delivery_log_channel_status_attempt_idx", async () => {
+    mockExecute.mockResolvedValue([]);
+    await ensureChannelTables();
+    const statements = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(statements.some((s: string) => s.includes("delivery_log_channel_status_attempt_idx"))).toBe(true);
   });
 
   it("catches errors and does not throw", async () => {
