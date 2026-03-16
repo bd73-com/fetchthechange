@@ -110,7 +110,7 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
         const [updated] = await tx
           .update(campaignRecipients)
           .set({ status: "opened", openedAt: now, deliveredAt: fresh?.delivered_at ?? now })
-          .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.openedAt)))
+          .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.openedAt), isNull(campaignRecipients.failedAt)))
           .returning({ id: campaignRecipients.id });
 
         if (updated) {
@@ -145,7 +145,7 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
             openedAt: fresh?.opened_at ?? now,
             deliveredAt: fresh?.delivered_at ?? now,
           })
-          .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.clickedAt)))
+          .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.clickedAt), isNull(campaignRecipients.failedAt)))
           .returning({ id: campaignRecipients.id });
 
         if (updated) {

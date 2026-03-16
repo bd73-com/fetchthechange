@@ -519,8 +519,9 @@ describe("handleResendWebhookEvent", () => {
       const whereArg = mockTxWhere.mock.calls[0][0];
       expect(whereArg.op).toBe("and");
       const nullConditions = whereArg.conditions.filter((c: any) => c.op === "isNull");
-      expect(nullConditions).toHaveLength(1);
-      expect(nullConditions[0].field).toBe("openedAt");
+      expect(nullConditions).toHaveLength(2);
+      expect(nullConditions.some((c: any) => c.field === "openedAt")).toBe(true);
+      expect(nullConditions.some((c: any) => c.field === "failedAt")).toBe(true);
     });
 
     it("clicked: uses isNull(clickedAt) in WHERE clause", async () => {
@@ -536,8 +537,9 @@ describe("handleResendWebhookEvent", () => {
       const whereArg = mockTxWhere.mock.calls[0][0];
       expect(whereArg.op).toBe("and");
       const nullConditions = whereArg.conditions.filter((c: any) => c.op === "isNull");
-      expect(nullConditions).toHaveLength(1);
-      expect(nullConditions[0].field).toBe("clickedAt");
+      expect(nullConditions).toHaveLength(2);
+      expect(nullConditions.some((c: any) => c.field === "clickedAt")).toBe(true);
+      expect(nullConditions.some((c: any) => c.field === "failedAt")).toBe(true);
     });
 
     it("bounced: uses isNull(failedAt) in WHERE clause", async () => {
@@ -602,6 +604,8 @@ describe("handleResendWebhookEvent", () => {
         const forUpdateEvents = ["email.opened", "email.clicked"];
         const expectedCalls = forUpdateEvents.includes(eventType) ? 2 : 0;
         expect(mockTxExecute).toHaveBeenCalledTimes(expectedCalls);
+        // Every event type must call .returning() exactly once for the atomic guard
+        expect(mockTxReturning).toHaveBeenCalledTimes(1);
       }
     });
   });
