@@ -140,4 +140,31 @@ describe("closeStripeSync", () => {
     // After shutdown, getStripeSync should throw
     await expect(getStripeSync()).rejects.toThrow("shutting down");
   });
+
+  it("awaits in-flight pending promise before closing pool", async () => {
+    const mockPoolEnd = vi.fn().mockResolvedValue(undefined);
+    let resolveInit: () => void;
+    const initBarrier = new Promise<void>((r) => { resolveInit = r; });
+
+    vi.doMock("stripe-replit-sync", () => ({
+      StripeSync: class {
+        postgresClient = { pool: { end: mockPoolEnd } };
+      },
+    }));
+
+    const { getStripeSync, closeStripeSync } = await import("./stripeClient");
+
+    // Start initialization but don't await it — simulate in-flight state
+    const initPromise = getStripeSync();
+
+    // Close while init is in-flight; should await the pending promise
+    await closeStripeSync();
+
+    // The pool from the initialized instance should have been closed
+    expect(mockPoolEnd).toHaveBeenCalledOnce();
+
+    // initPromise should still resolve (it was already in-flight)
+    const instance = await initPromise;
+    expect(instance).toBeDefined();
+  });
 });

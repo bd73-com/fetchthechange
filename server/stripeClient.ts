@@ -100,6 +100,9 @@ export async function getStripeSync() {
 /** Close the StripeSync database pool if it was initialized. */
 export async function closeStripeSync(): Promise<void> {
   stripeSyncShuttingDown = true;
+  if (stripeSyncPending) {
+    try { await stripeSyncPending; } catch { /* initialization may have failed */ }
+  }
   stripeSyncPending = null;
   if (stripeSync) {
     await stripeSync.postgresClient?.pool?.end();
