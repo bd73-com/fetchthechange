@@ -143,8 +143,6 @@ describe("closeStripeSync", () => {
 
   it("awaits in-flight pending promise before closing pool", async () => {
     const mockPoolEnd = vi.fn().mockResolvedValue(undefined);
-    let resolveInit: () => void;
-    const initBarrier = new Promise<void>((r) => { resolveInit = r; });
 
     vi.doMock("stripe-replit-sync", () => ({
       StripeSync: class {
