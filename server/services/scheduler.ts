@@ -87,6 +87,7 @@ export function waitForActiveChecks(timeoutMs: number): Promise<void> {
 /** @internal Test-only reset for the idempotency guard */
 export function _resetSchedulerStarted() {
   schedulerStarted = false;
+  activeChecks = 0;
 }
 
 /** @internal Test-only reset for the active checks counter */
@@ -267,6 +268,9 @@ export async function startScheduler() {
     }));
 
     // Webhook retry cron: every minute, process pending webhook deliveries
+    // Cap per-tick deliveries to limit ephemeral port usage while still draining
+    // backlogs within a few minutes after a server restart.
+    const MAX_WEBHOOK_RETRIES_PER_TICK = 10;
     let webhookCronRunning = false;
     cronTasks.push(cron.schedule("*/1 * * * *", async () => {
       if (webhookCronRunning) return;
@@ -281,7 +285,10 @@ export async function startScheduler() {
         // value (155000) handles any unexpected attempt values defensively.
         const cumulativeBackoffMs: Record<number, number> = { 1: 5000, 2: 35000, 3: 155000 };
 
+        let delivered = 0;
         for (const entry of pendingRetries) {
+          if (delivered >= MAX_WEBHOOK_RETRIES_PER_TICK) break;
+
           const elapsed = now - new Date(entry.createdAt).getTime();
           const requiredWait = cumulativeBackoffMs[entry.attempt] || 155000;
           if (elapsed < requiredWait) continue;
@@ -312,6 +319,7 @@ export async function startScheduler() {
           }
 
           const result = await deliverWebhook(monitor, change, config);
+          delivered++;
           const nextAttempt = entry.attempt + 1;
 
           if (result.success) {

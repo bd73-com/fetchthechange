@@ -10,6 +10,7 @@ const {
   mockDbExecute,
   cronCallbacks,
   mockMonitorsNeedingRetry,
+  mockDeliverWebhook,
 } = vi.hoisted(() => ({
   mockCheckMonitor: vi.fn().mockResolvedValue({ changed: false, status: "ok" }),
   mockGetAllActiveMonitors: vi.fn().mockResolvedValue([]),
@@ -17,6 +18,7 @@ const {
   mockDbExecute: vi.fn().mockResolvedValue({ rowCount: 0 }),
   cronCallbacks: {} as Record<string, Array<() => Promise<void>>>,
   mockMonitorsNeedingRetry: new Set<number>(),
+  mockDeliverWebhook: vi.fn().mockResolvedValue({ success: true, statusCode: 200 }),
 }));
 
 vi.mock("../storage", () => ({
@@ -44,7 +46,7 @@ vi.mock("./notification", () => ({
 }));
 
 vi.mock("./webhookDelivery", () => ({
-  deliver: vi.fn().mockResolvedValue({ success: true, statusCode: 200 }),
+  deliver: (...args: any[]) => mockDeliverWebhook(...args),
 }));
 
 vi.mock("./logger", () => ({
@@ -103,7 +105,6 @@ import { ErrorLogger } from "./logger";
 import { _resetCache } from "./notificationReady";
 import cron from "node-cron";
 import { storage } from "../storage";
-import { deliver as deliverWebhook } from "./webhookDelivery";
 
 const mockStorage = vi.mocked(storage);
 import type { Monitor } from "@shared/schema";
@@ -1060,6 +1061,40 @@ describe("webhook retry cumulative backoff", () => {
     vi.useRealTimers();
   });
 
+  it("caps webhook retries at MAX_WEBHOOK_RETRIES_PER_TICK (10)", async () => {
+    const now = Date.now();
+    // Create 15 entries all past their backoff windows (attempt 1, 10s elapsed > 5s threshold)
+    const entries = Array.from({ length: 15 }, (_, i) => ({
+      id: i + 1,
+      monitorId: i + 1,
+      changeId: i + 1,
+      channel: "webhook" as const,
+      status: "pending" as const,
+      attempt: 1,
+      response: null,
+      deliveredAt: null,
+      createdAt: new Date(now - 10_000),
+    }));
+    mockStorage.getPendingWebhookRetries.mockResolvedValueOnce(entries);
+
+    // All monitors exist with webhook channels configured
+    const monitor = makeMonitor();
+    mockStorage.getMonitor.mockResolvedValue(monitor);
+    mockStorage.getMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "webhook", enabled: true, config: { url: "https://example.com/hook", secret: "whsec_test" }, createdAt: new Date() },
+    ] as any);
+    mockStorage.getMonitorChangeById.mockResolvedValue({
+      id: 1, monitorId: 1, oldValue: "a", newValue: "b", detectedAt: new Date(), screenshot: null,
+    } as any);
+    await startScheduler();
+    await runCron("*/1 * * * *");
+
+    // Only 10 should have been delivered (MAX_WEBHOOK_RETRIES_PER_TICK = 10)
+    expect(mockDeliverWebhook).toHaveBeenCalledTimes(10);
+    // Only 10 success updates
+    expect(mockStorage.updateDeliveryLog).toHaveBeenCalledTimes(10);
+  });
+
   it("skips retry when cumulative backoff has not elapsed", async () => {
     const now = Date.now();
     // Entry created 10 seconds ago, attempt 2 → cumulative threshold is 35s
@@ -1113,8 +1148,6 @@ describe("webhook retry cumulative backoff", () => {
 
   it("retries updateDeliveryLog with withDbRetry after successful webhook delivery", async () => {
     const now = Date.now();
-    const mockDeliver = vi.mocked(deliverWebhook);
-
     mockStorage.getPendingWebhookRetries.mockResolvedValueOnce([
       {
         id: 1,
@@ -1134,7 +1167,7 @@ describe("webhook retry cumulative backoff", () => {
       { channel: "webhook", enabled: true, config: { url: "https://hook.example.com/cb", secret: "s3cret" } },
     ]);
     mockStorage.getMonitorChangeById.mockResolvedValueOnce({ id: 10, monitorId: 1 });
-    mockDeliver.mockResolvedValueOnce({ success: true, statusCode: 200 });
+    mockDeliverWebhook.mockResolvedValueOnce({ success: true, statusCode: 200 });
 
     // First call to updateDeliveryLog fails with transient error, second succeeds
     mockStorage.updateDeliveryLog

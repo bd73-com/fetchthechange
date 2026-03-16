@@ -13,10 +13,13 @@ if (typeof global.Blob === 'undefined') {
   global.Blob = Blob;
 }
 
-// 3. CONFIGURE ENVIRONMENT
+// 3. CONFIGURE GLOBAL FETCH CONNECTION POOL (must run before any fetch() call)
+import "./utils/globalAgent";
+
+// 4. CONFIGURE ENVIRONMENT
 process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
-// 4. LOAD APP DYNAMICALLY (To prevent hoisting crashes)
+// 5. LOAD APP DYNAMICALLY (To prevent hoisting crashes)
 (async () => {
   const express = (await import("express")).default;
   const { createServer } = await import("http");
@@ -326,6 +329,13 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     await dbPool.end().catch((err) => {
       cleanupFailed = true;
       console.error("Failed to close DB pool:", err);
+    });
+    // Close global fetch connection pool last — in-flight webhook deliveries
+    // (from a cron tick that started before shutdown) may still need sockets.
+    const { agent: globalAgent } = await import("./utils/globalAgent");
+    await globalAgent.close().catch((err: unknown) => {
+      cleanupFailed = true;
+      console.error("Failed to close global agent:", err);
     });
     console.log("Shutdown complete.");
     process.exit(cleanupFailed ? 1 : 0);
