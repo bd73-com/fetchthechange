@@ -2226,11 +2226,12 @@ export async function registerRoutes(
       if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
 
       const id = Number(req.params.id);
+      if (isNaN(id) || id <= 0) return res.status(400).json({ message: "Invalid campaign ID" });
       const result = await campaignEmailService.reconcileCampaignCounters(id);
       res.json({ success: true, ...result });
     } catch (error: any) {
       console.error("Error reconciling campaign counters:", error);
-      res.status(400).json({ message: error.message || "Failed to reconcile counters" });
+      res.status(500).json({ message: "Failed to reconcile counters" });
     }
   });
 

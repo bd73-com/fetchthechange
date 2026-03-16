@@ -77,6 +77,7 @@ import {
   sendTestCampaignEmail,
   triggerCampaignSend,
   cancelCampaign,
+  reconcileCampaignCounters,
 } from "./campaignEmail";
 
 describe("sendTestCampaignEmail", () => {
@@ -557,5 +558,138 @@ describe("triggerCampaignSend", () => {
     mockDbExecute.mockResolvedValueOnce({ rows: [] });
 
     await expect(triggerCampaignSend(1)).rejects.toThrow("No recipients match the campaign filters");
+  });
+
+  it("uses atomic UPDATE with status=draft guard inside transaction", async () => {
+    const draftCampaign = {
+      id: 1, name: "Test", subject: "Test", htmlBody: "<p>Test</p>",
+      textBody: null, status: "draft", filters: {},
+    };
+    mockDbLimit.mockResolvedValueOnce([draftCampaign]);
+    // resolveRecipients returns one user
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ id: "u1", email: "u1@test.com", firstName: "A", tier: "free", unsubscribeToken: "tok1", recipientEmail: "u1@test.com", monitorCount: 0 }],
+    });
+
+    let txInsertCalled = false;
+    const mockTxUpdate = vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ ...draftCampaign, status: "sending" }]),
+        }),
+      }),
+    });
+    const mockTxInsert = vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation(() => { txInsertCalled = true; return Promise.resolve(); }),
+    });
+
+    // First call is the triggerCampaignSend transaction
+    mockTransaction.mockImplementationOnce(async (cb: any) => {
+      const tx = { update: mockTxUpdate, insert: mockTxInsert };
+      return await cb(tx);
+    });
+    // Subsequent transaction calls from async sendCampaignBatch/finalizeCampaign
+    mockTransaction.mockImplementation(async (cb: any) => {
+      const tx = {
+        execute: vi.fn().mockResolvedValue({ rows: [] }),
+        update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }) }),
+      };
+      return await cb(tx);
+    });
+    // Mock db.execute for sendCampaignBatch (pending recipients query returns empty = done)
+    mockDbExecute.mockResolvedValue({ rows: [] });
+
+    const result = await triggerCampaignSend(1);
+    // Wait for the async batch sending to settle
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(result.totalRecipients).toBe(1);
+    expect(mockTransaction).toHaveBeenCalled();
+    expect(mockTxUpdate).toHaveBeenCalled();
+    expect(txInsertCalled).toBe(true);
+  });
+
+  it("throws when atomic UPDATE returns no rows (race condition)", async () => {
+    const draftCampaign = {
+      id: 1, name: "Test", subject: "Test", htmlBody: "<p>Test</p>",
+      textBody: null, status: "draft", filters: {},
+    };
+    mockDbLimit.mockResolvedValueOnce([draftCampaign]);
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ id: "u1", email: "u1@test.com", firstName: "A", tier: "free", unsubscribeToken: "tok1", recipientEmail: "u1@test.com", monitorCount: 0 }],
+    });
+
+    // Simulate concurrent caller already claimed the campaign
+    mockTransaction.mockImplementation(async (cb: any) => {
+      const tx = {
+        update: vi.fn().mockReturnValue({
+          set: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([]), // no rows = already claimed
+            }),
+          }),
+        }),
+        insert: vi.fn(),
+      };
+      return await cb(tx);
+    });
+
+    await expect(triggerCampaignSend(1)).rejects.toThrow("Campaign must be in draft status to send");
+  });
+});
+
+describe("reconcileCampaignCounters", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbFrom.mockReturnValue({ where: mockDbWhere });
+    mockDbWhere.mockReturnValue({ limit: mockDbLimit });
+    mockDbSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+  });
+
+  it("throws when campaign is not found", async () => {
+    mockDbLimit.mockResolvedValueOnce([]);
+
+    await expect(reconcileCampaignCounters(999)).rejects.toThrow("Campaign not found");
+  });
+
+  it("recomputes counters from recipient rows and returns before/after", async () => {
+    const campaign = {
+      id: 1, sentCount: 10, failedCount: 2, deliveredCount: 5, openedCount: 3, clickedCount: 1,
+    };
+    mockDbLimit.mockResolvedValueOnce([campaign]);
+    // db.execute returns recomputed counts
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 8, failedCount: 4, deliveredCount: 6, openedCount: 2, clickedCount: 0 }],
+    });
+
+    const result = await reconcileCampaignCounters(1);
+
+    expect(result.before).toEqual({
+      sentCount: 10, failedCount: 2, deliveredCount: 5, openedCount: 3, clickedCount: 1,
+    });
+    expect(result.after).toEqual({
+      sentCount: 8, failedCount: 4, deliveredCount: 6, openedCount: 2, clickedCount: 0,
+    });
+    // Verify db.update was called to persist the new counters
+    expect(mockDbSet).toHaveBeenCalledWith({
+      sentCount: 8, failedCount: 4, deliveredCount: 6, openedCount: 2, clickedCount: 0,
+    });
+  });
+
+  it("handles null values from query by defaulting to 0", async () => {
+    const campaign = {
+      id: 1, sentCount: 5, failedCount: 1, deliveredCount: 3, openedCount: 0, clickedCount: 0,
+    };
+    mockDbLimit.mockResolvedValueOnce([campaign]);
+    // Simulate empty campaign with no recipients
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: null, failedCount: null, deliveredCount: null, openedCount: null, clickedCount: null }],
+    });
+
+    const result = await reconcileCampaignCounters(1);
+
+    expect(result.after).toEqual({
+      sentCount: 0, failedCount: 0, deliveredCount: 0, openedCount: 0, clickedCount: 0,
+    });
   });
 });
