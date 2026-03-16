@@ -51,6 +51,8 @@ export async function getStripeSecretKey() {
   return secretKey;
 }
 
+const STRIPE_SYNC_INIT_TIMEOUT_MS = 15_000;
+
 let stripeSync: any = null;
 let stripeSyncPending: Promise<any> | null = null;
 let stripeSyncShuttingDown = false;
@@ -74,22 +76,32 @@ export async function getStripeSync() {
     return stripeSync;
   }
   if (!stripeSyncPending) {
-    stripeSyncPending = (async () => {
-      const { StripeSync } = await import('stripe-replit-sync');
-      const secretKey = await getStripeSecretKey();
+    let timer: ReturnType<typeof setTimeout>;
+    stripeSyncPending = Promise.race([
+      (async () => {
+        const { StripeSync } = await import('stripe-replit-sync');
+        const secretKey = await getStripeSecretKey();
 
-      stripeSync = new StripeSync({
-        poolConfig: {
-          connectionString: process.env.DATABASE_URL!,
-          max: 1,
-          connectionTimeoutMillis: 5_000,
-          idleTimeoutMillis: 15_000,
-        },
-        stripeSecretKey: secretKey,
-        ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
-      });
-      return stripeSync;
-    })().catch((err) => {
+        stripeSync = new StripeSync({
+          poolConfig: {
+            connectionString: process.env.DATABASE_URL!,
+            max: 1,
+            connectionTimeoutMillis: 5_000,
+            idleTimeoutMillis: 15_000,
+          },
+          stripeSecretKey: secretKey,
+          ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
+        });
+        return stripeSync;
+      })(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('StripeSync initialization timed out')), STRIPE_SYNC_INIT_TIMEOUT_MS);
+      }),
+    ]).then((result) => {
+      clearTimeout(timer);
+      return result;
+    }).catch((err) => {
+      clearTimeout(timer);
       stripeSync = null;
       stripeSyncPending = null;
       throw err;
