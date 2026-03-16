@@ -52,6 +52,7 @@ export async function getStripeSecretKey() {
 }
 
 let stripeSync: any = null;
+let stripeSyncPending: Promise<any> | null = null;
 let stripeSyncShuttingDown = false;
 
 /** Webhook signing secret — set from STRIPE_WEBHOOK_SECRET env or managed webhook creation. */
@@ -69,27 +70,37 @@ export async function getStripeSync() {
   if (stripeSyncShuttingDown) {
     throw new Error('StripeSync is shutting down — cannot acquire new instance');
   }
-  if (!stripeSync) {
-    const { StripeSync } = await import('stripe-replit-sync');
-    const secretKey = await getStripeSecretKey();
+  if (stripeSync) {
+    return stripeSync;
+  }
+  if (!stripeSyncPending) {
+    stripeSyncPending = (async () => {
+      const { StripeSync } = await import('stripe-replit-sync');
+      const secretKey = await getStripeSecretKey();
 
-    stripeSync = new StripeSync({
-      poolConfig: {
-        connectionString: process.env.DATABASE_URL!,
-        max: 1,
-        connectionTimeoutMillis: 5_000,
-        idleTimeoutMillis: 15_000,
-      },
-      stripeSecretKey: secretKey,
-      ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
+      stripeSync = new StripeSync({
+        poolConfig: {
+          connectionString: process.env.DATABASE_URL!,
+          max: 1,
+          connectionTimeoutMillis: 5_000,
+          idleTimeoutMillis: 15_000,
+        },
+        stripeSecretKey: secretKey,
+        ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
+      });
+      return stripeSync;
+    })().catch((err) => {
+      stripeSyncPending = null;
+      throw err;
     });
   }
-  return stripeSync;
+  return stripeSyncPending;
 }
 
 /** Close the StripeSync database pool if it was initialized. */
 export async function closeStripeSync(): Promise<void> {
   stripeSyncShuttingDown = true;
+  stripeSyncPending = null;
   if (stripeSync) {
     await stripeSync.postgresClient?.pool?.end();
     stripeSync = null;
