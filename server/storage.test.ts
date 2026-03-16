@@ -228,6 +228,40 @@ describe("DatabaseStorage", () => {
   });
 
   describe("cleanupPollutedValues — error code check", () => {
+    it("wraps deletes in a db.transaction call per polluted entry", async () => {
+      const pollutedRow = { id: 99, monitorId: 1, oldValue: "Blocked/Unavailable", newValue: "ok" };
+
+      let selectCallNum = 0;
+      mockDbSelect.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            selectCallNum++;
+            return {
+              then: (resolve: any) => {
+                if (selectCallNum === 1) resolve([]);
+                else if (selectCallNum === 2) resolve([pollutedRow]);
+                else resolve([]);
+              },
+            };
+          }),
+        }),
+      });
+
+      mockTransaction.mockImplementation(async (cb: any) => {
+        const txChain: any = {
+          where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
+        };
+        const tx = { delete: vi.fn().mockReturnValue(txChain) };
+        await cb(tx);
+      });
+
+      const result = await storage.cleanupPollutedValues();
+      expect(result).toBe(1);
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      // db.delete should NOT be called directly
+      expect(mockDbDelete).not.toHaveBeenCalled();
+    });
+
     it("catches 42P01 errors when deleting referencing rows for polluted history", async () => {
       const pollutedRow = { id: 99, monitorId: 1, oldValue: "Blocked/Unavailable", newValue: "ok" };
 
@@ -251,16 +285,21 @@ describe("DatabaseStorage", () => {
       const pgError = new Error("relation does not exist") as any;
       pgError.code = "42P01";
 
-      let deleteCallNum = 0;
-      mockDbDelete.mockImplementation(() => {
-        deleteCallNum++;
-        if (deleteCallNum <= 2) {
-          // Optional tables throw 42P01
-          return { where: vi.fn().mockRejectedValue(pgError) };
-        }
-        return {
-          where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
+      mockTransaction.mockImplementation(async (cb: any) => {
+        let deleteCallNum = 0;
+        const tx = {
+          delete: vi.fn().mockImplementation(() => {
+            deleteCallNum++;
+            if (deleteCallNum <= 2) {
+              // Optional tables throw 42P01
+              return { where: vi.fn().mockRejectedValue(pgError) };
+            }
+            return {
+              where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
+            };
+          }),
         };
+        await cb(tx);
       });
 
       const result = await storage.cleanupPollutedValues();
@@ -292,6 +331,15 @@ describe("DatabaseStorage", () => {
       mockDbDelete.mockImplementation(() => ({
         where: vi.fn().mockRejectedValue(fkError),
       }));
+
+      // Transaction mock must execute the callback so the error propagates
+      mockTransaction.mockImplementation(async (cb: any) => {
+        const txChain: any = {
+          where: vi.fn().mockRejectedValue(fkError),
+        };
+        const tx = { delete: vi.fn().mockReturnValue(txChain) };
+        await cb(tx);
+      });
 
       await expect(storage.cleanupPollutedValues()).rejects.toThrow("foreign key violation");
     });

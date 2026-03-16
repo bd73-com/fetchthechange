@@ -9,6 +9,7 @@ const {
   mockDbLimit,
   mockDbSet,
   mockDbValues,
+  mockTransaction,
 } = vi.hoisted(() => ({
   mockSend: vi.fn(),
   mockDbExecute: vi.fn(),
@@ -17,6 +18,7 @@ const {
   mockDbLimit: vi.fn(),
   mockDbSet: vi.fn(),
   mockDbValues: vi.fn(),
+  mockTransaction: vi.fn(),
 }));
 
 vi.mock("resend", () => ({
@@ -31,6 +33,7 @@ vi.mock("../db", () => ({
     select: () => ({ from: mockDbFrom }),
     update: () => ({ set: mockDbSet }),
     insert: () => ({ values: mockDbValues }),
+    transaction: mockTransaction,
   },
 }));
 
@@ -345,15 +348,39 @@ describe("previewRecipients", () => {
 });
 
 describe("cancelCampaign", () => {
+  function setupTransactionMock(txExecuteResults: any[]) {
+    const txSetCalls: any[] = [];
+    let txExecuteCallNum = 0;
+    mockTransaction.mockImplementation(async (cb: any) => {
+      const txSet = vi.fn().mockImplementation((data: any) => {
+        txSetCalls.push(data);
+        return { where: vi.fn().mockResolvedValue(undefined) };
+      });
+      const tx = {
+        execute: vi.fn().mockImplementation(() => {
+          return Promise.resolve(txExecuteResults[txExecuteCallNum++]);
+        }),
+        update: () => ({ set: txSet }),
+      };
+      return await cb(tx);
+    });
+    return txSetCalls;
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
   });
 
   it("returns sent and cancelled counts", async () => {
+    // db.execute: count query returns sentCount and pendingCount
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 25, pendingCount: 75 }],
     });
+    // tx.execute inside transaction: UPDATE...RETURNING for pending recipients
+    setupTransactionMock([
+      { rows: Array.from({ length: 75 }, (_, i) => ({ id: i + 1 })) },
+    ]);
 
     const result = await cancelCampaign(99);
 
@@ -365,11 +392,41 @@ describe("cancelCampaign", () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 50, pendingCount: 0 }],
     });
+    setupTransactionMock([{ rows: [] }]);
 
     const result = await cancelCampaign(99);
 
     expect(result.sentSoFar).toBe(50);
     expect(result.cancelled).toBe(0);
+  });
+
+  it("includes failedCount in campaign update when pendingCount > 0", async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 10, pendingCount: 40 }],
+    });
+    const txSetCalls = setupTransactionMock([
+      { rows: Array.from({ length: 40 }, (_, i) => ({ id: i + 1 })) },
+    ]);
+
+    await cancelCampaign(99);
+
+    const campaignUpdate = txSetCalls.find((c) => c.failedCount !== undefined);
+    expect(campaignUpdate).toBeDefined();
+    expect(campaignUpdate.status).toBe("cancelled");
+    expect(campaignUpdate.failedCount).toBeDefined();
+  });
+
+  it("does not include failedCount when pendingCount is 0", async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 50, pendingCount: 0 }],
+    });
+    const txSetCalls = setupTransactionMock([{ rows: [] }]);
+
+    await cancelCampaign(99);
+
+    const campaignUpdate = txSetCalls.find((c) => c.status === "cancelled");
+    expect(campaignUpdate).toBeDefined();
+    expect(campaignUpdate.failedCount).toBeUndefined();
   });
 });
 

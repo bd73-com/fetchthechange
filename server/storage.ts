@@ -310,15 +310,17 @@ export class DatabaseStorage implements IStorage {
 
     for (const h of pollutedHistory) {
       // Delete referencing rows first to avoid FK constraint violations.
-      // Wrap in try/catch matching deleteMonitor pattern for partially-migrated DBs.
-      for (const [table, col] of [[notificationQueue, notificationQueue.changeId], [deliveryLog, deliveryLog.changeId]] as const) {
-        try {
-          await db.delete(table).where(eq(col, h.id));
-        } catch (err: any) {
-          if (err?.code !== "42P01") throw err;
+      // Wrap in transaction matching deleteMonitor pattern for consistency.
+      await db.transaction(async (tx) => {
+        for (const [table, col] of [[notificationQueue, notificationQueue.changeId], [deliveryLog, deliveryLog.changeId]] as const) {
+          try {
+            await tx.delete(table).where(eq(col, h.id));
+          } catch (err: any) {
+            if (err?.code !== "42P01") throw err;
+          }
         }
-      }
-      await db.delete(monitorChanges).where(eq(monitorChanges.id, h.id));
+        await tx.delete(monitorChanges).where(eq(monitorChanges.id, h.id));
+      });
       cleanedCount++;
       console.log(`[Cleanup] Deleted polluted history entry ${h.id} for monitor ${h.monitorId}`);
     }
