@@ -23,7 +23,7 @@ interface PoolEntry {
 }
 
 const POOL_MAX = 1;
-const POOL_IDLE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+const POOL_IDLE_EXPIRY_MS = 90 * 1000; // 90 seconds — shorter expiry reclaims CDP sockets faster
 
 export class BrowserPool {
   private entries: PoolEntry[] = [];
