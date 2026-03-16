@@ -652,6 +652,14 @@ describe("reconcileCampaignCounters", () => {
     await expect(reconcileCampaignCounters(999)).rejects.toThrow("Campaign not found");
   });
 
+  it("throws when campaign is actively sending", async () => {
+    mockDbLimit.mockResolvedValueOnce([{
+      id: 1, status: "sending", sentCount: 5, failedCount: 0, deliveredCount: 0, openedCount: 0, clickedCount: 0,
+    }]);
+
+    await expect(reconcileCampaignCounters(1)).rejects.toThrow("Cannot reconcile counters while campaign is actively sending");
+  });
+
   it("recomputes counters from recipient rows and returns before/after", async () => {
     const campaign = {
       id: 1, sentCount: 10, failedCount: 2, deliveredCount: 5, openedCount: 3, clickedCount: 1,

@@ -566,6 +566,7 @@ export async function reconcileCampaignCounters(campaignId: number): Promise<{
     .limit(1);
 
   if (!campaign) throw new Error("Campaign not found");
+  if (campaign.status === "sending") throw new Error("Cannot reconcile counters while campaign is actively sending");
 
   const before = {
     sentCount: campaign.sentCount,
