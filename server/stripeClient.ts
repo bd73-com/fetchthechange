@@ -82,7 +82,7 @@ export async function getStripeSync() {
         const { StripeSync } = await import('stripe-replit-sync');
         const secretKey = await getStripeSecretKey();
 
-        stripeSync = new StripeSync({
+        return new StripeSync({
           poolConfig: {
             connectionString: process.env.DATABASE_URL!,
             max: 1,
@@ -92,13 +92,13 @@ export async function getStripeSync() {
           stripeSecretKey: secretKey,
           ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
         });
-        return stripeSync;
       })(),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('StripeSync initialization timed out')), STRIPE_SYNC_INIT_TIMEOUT_MS);
       }),
     ]).then((result) => {
       clearTimeout(timer);
+      stripeSync = result;
       return result;
     }).catch((err) => {
       clearTimeout(timer);
