@@ -162,6 +162,7 @@ describe("startScheduler", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     _resetSchedulerStarted();
+    _resetActiveChecks();
     _resetCache();
     // Clear captured cron callbacks
     Object.keys(cronCallbacks).forEach((k) => delete (cronCallbacks as any)[k]);
@@ -394,6 +395,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     _resetSchedulerStarted();
+    _resetActiveChecks();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
@@ -499,6 +501,7 @@ describe("accelerated retry for Browserless infra failures", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     _resetSchedulerStarted();
+    _resetActiveChecks();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
     retryBackoff.clear();
@@ -623,6 +626,7 @@ describe("daily metrics cleanup", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     _resetSchedulerStarted();
+    _resetActiveChecks();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
@@ -701,6 +705,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     _resetSchedulerStarted();
+    _resetActiveChecks();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
@@ -820,6 +825,7 @@ describe("stopScheduler", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     _resetSchedulerStarted();
+    _resetActiveChecks();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
@@ -1045,6 +1051,7 @@ describe("webhook retry cumulative backoff", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     _resetSchedulerStarted();
+    _resetActiveChecks();
     _resetCache();
     Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
   });
