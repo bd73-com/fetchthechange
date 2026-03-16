@@ -5029,6 +5029,53 @@ describe("withBrowserlessPage resource blocking", () => {
     expect(continueFn).toHaveBeenCalled();
     expect(abortFn).not.toHaveBeenCalled();
   });
+
+  it("allows image and font requests through (not blocked for anti-fingerprint)", async () => {
+    const { browserMock } = createPlaywrightMockWithRouteCapture(
+      '<html><body><span class="price">$10</span></body></html>', 1, "$10");
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const emptyHtml = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    const promise = checkMonitor(monitor);
+    for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(1000);
+    await promise;
+
+    expect(capturedRouteHandler).not.toBeNull();
+
+    // Image requests should pass through (no longer blocked)
+    const abortFn1 = vi.fn();
+    const continueFn1 = vi.fn();
+    await capturedRouteHandler!({
+      request: () => ({
+        resourceType: () => 'image',
+        url: () => 'https://example.com/photo.jpg',
+        isNavigationRequest: () => false,
+      }),
+      abort: abortFn1,
+      continue: continueFn1,
+    });
+    expect(continueFn1).toHaveBeenCalled();
+    expect(abortFn1).not.toHaveBeenCalled();
+
+    // Font requests should pass through (no longer blocked)
+    const abortFn2 = vi.fn();
+    const continueFn2 = vi.fn();
+    await capturedRouteHandler!({
+      request: () => ({
+        resourceType: () => 'font',
+        url: () => 'https://example.com/font.woff2',
+        isNavigationRequest: () => false,
+      }),
+      abort: abortFn2,
+      continue: continueFn2,
+    });
+    expect(continueFn2).toHaveBeenCalled();
+    expect(abortFn2).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -5242,6 +5289,115 @@ describe("Cloudflare challenge wait in extractWithBrowserless", () => {
     expect(contentCallCount).toBeGreaterThanOrEqual(2);
     expect(result.status).toBe("ok");
     expect(result.currentValue).toBe("$25.00");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Human-like delay before selector access
+// ---------------------------------------------------------------------------
+describe("human-like delay before selector access", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getMonitorChanges: ReturnType<typeof vi.fn>;
+    countMonitorChanges: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    process.env.BROWSERLESS_TOKEN = "test-token";
+
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: 1,
+      active: true,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockReturnValue({ where: whereFn });
+    mockDb.update.mockReturnValue({ set: setFn });
+
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "pro" });
+    mockConnectOverCDP.mockRejectedValue(new Error("not configured"));
+
+    const cbMock = browserlessCircuitBreaker as unknown as {
+      isAvailable: ReturnType<typeof vi.fn>;
+      recordSuccess: ReturnType<typeof vi.fn>;
+      recordInfraFailure: ReturnType<typeof vi.fn>;
+      getState: ReturnType<typeof vi.fn>;
+    };
+    cbMock.isAvailable.mockReturnValue(true);
+    cbMock.getState.mockReturnValue("closed");
+
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  it("calls waitForTimeout before waitForSelector in extractWithBrowserless", async () => {
+    const callOrder: string[] = [];
+    const locatorMock = {
+      count: vi.fn().mockResolvedValue(1),
+      first: vi.fn().mockReturnValue({
+        innerText: vi.fn().mockResolvedValue("$50.00"),
+        evaluate: vi.fn().mockResolvedValue(null),
+      }),
+    };
+    const pageMock = {
+      goto: vi.fn().mockResolvedValue(undefined),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      waitForTimeout: vi.fn().mockImplementation((ms: number) => {
+        callOrder.push(`waitForTimeout:${ms}`);
+        return Promise.resolve(undefined);
+      }),
+      waitForSelector: vi.fn().mockImplementation(() => {
+        callOrder.push("waitForSelector");
+        return Promise.resolve(undefined);
+      }),
+      waitForFunction: vi.fn().mockResolvedValue(undefined),
+      content: vi.fn().mockResolvedValue('<html><body><span class="price">$50.00</span></body></html>'),
+      locator: vi.fn().mockReturnValue(locatorMock),
+      url: vi.fn().mockReturnValue("https://example.com"),
+      title: vi.fn().mockResolvedValue("Shop"),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
+    };
+    const contextMock = {
+      route: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(pageMock),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const browserMock = {
+      newContext: vi.fn().mockResolvedValue(contextMock),
+      close: vi.fn().mockResolvedValue(undefined),
+      isConnected: vi.fn().mockReturnValue(true),
+    };
+
+    mockConnectOverCDP.mockResolvedValueOnce(browserMock);
+
+    const result = await extractWithBrowserless("https://example.com", ".price");
+
+    // Verify human-like delay was called before selector wait
+    const delayIdx = callOrder.findIndex(c => c.startsWith("waitForTimeout:"));
+    const selectorIdx = callOrder.indexOf("waitForSelector");
+    expect(delayIdx).toBeGreaterThanOrEqual(0);
+    expect(selectorIdx).toBeGreaterThan(delayIdx);
+
+    // Verify delay is in the expected range (800-2000ms)
+    const delayMs = parseInt(callOrder[delayIdx].split(":")[1]);
+    expect(delayMs).toBeGreaterThanOrEqual(800);
+    expect(delayMs).toBeLessThanOrEqual(2000);
+
+    expect(result.value).toBe("$50.00");
   });
 });
 
