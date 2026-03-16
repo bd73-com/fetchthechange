@@ -82,3 +82,11 @@ export async function getStripeSync() {
   }
   return stripeSync;
 }
+
+/** Close the StripeSync database pool if it was initialized. */
+export async function closeStripeSync(): Promise<void> {
+  if (stripeSync) {
+    await stripeSync.postgresClient.pool.end();
+    stripeSync = null;
+  }
+}
