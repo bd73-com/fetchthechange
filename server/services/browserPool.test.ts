@@ -181,5 +181,20 @@ describe("BrowserPool", () => {
       await pool.drain();
       expect(browser.close).toHaveBeenCalledOnce();
     });
+
+    it("removes non-reusable browser from in-use set on release with explicit false", async () => {
+      const browser = makeBrowser();
+      const connectFn = vi.fn().mockResolvedValue(browser);
+      await pool.acquire(connectFn);
+
+      // Simulate what the scraper fix does: release with explicit false
+      // (treats the browser as non-reusable, but still removes from inUse)
+      pool.release(browser, false);
+
+      // Drain should NOT close the browser from inUse (already removed)
+      // and since it was non-reusable, it wasn't added to pool entries either
+      await pool.drain();
+      expect(browser.close).not.toHaveBeenCalled();
+    });
   });
 });
