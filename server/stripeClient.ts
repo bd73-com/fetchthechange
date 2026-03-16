@@ -74,7 +74,7 @@ export async function getStripeSync() {
         connectionString: process.env.DATABASE_URL!,
         max: 1,
         connectionTimeoutMillis: 5_000,
-        idleTimeoutMillis: 30_000,
+        idleTimeoutMillis: 15_000,
       },
       stripeSecretKey: secretKey,
       ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),

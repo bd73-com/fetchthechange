@@ -136,6 +136,29 @@ describe("BrowserPool", () => {
     });
   });
 
+  describe("idle expiry", () => {
+    it("evicts entries older than POOL_IDLE_EXPIRY_MS on acquire", async () => {
+      const stale = makeBrowser();
+      const fresh = makeBrowser();
+
+      // Acquire and release the first browser so it enters the pool
+      const { browser: b1 } = await pool.acquire(vi.fn().mockResolvedValue(stale));
+      pool.release(b1);
+
+      // Advance time past the 2-minute idle expiry
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(121_000);
+
+      // Next acquire should evict the stale browser and create a fresh one
+      const { browser: b2 } = await pool.acquire(vi.fn().mockResolvedValue(fresh));
+      expect(b2).toBe(fresh);
+      expect(stale.close).toHaveBeenCalledOnce();
+
+      pool.release(b2);
+      vi.useRealTimers();
+    });
+  });
+
   describe("inUse tracking", () => {
     it("tracks acquired browser as in-use", async () => {
       const browser = makeBrowser();

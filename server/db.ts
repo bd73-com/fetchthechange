@@ -17,8 +17,8 @@ export const pool = new Pool({
   max: 3,
   // Fail fast instead of blocking indefinitely when all connections are busy.
   connectionTimeoutMillis: 5_000,
-  // Release idle connections promptly to free ephemeral ports sooner.
-  idleTimeoutMillis: 30_000,
+  // Release idle connections promptly — 15 s balances port reclamation vs connection reuse.
+  idleTimeoutMillis: 15_000,
 });
 
 // Log unexpected pool-level errors (connection drops, auth failures) that pg
