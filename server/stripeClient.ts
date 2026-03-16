@@ -51,8 +51,12 @@ export async function getStripeSecretKey() {
   return secretKey;
 }
 
+const STRIPE_SYNC_INIT_TIMEOUT_MS = 15_000;
+
 let stripeSync: any = null;
+let stripeSyncPending: Promise<any> | null = null;
 let stripeSyncShuttingDown = false;
+let stripeSyncClosing: Promise<void> | null = null;
 
 /** Webhook signing secret — set from STRIPE_WEBHOOK_SECRET env or managed webhook creation. */
 let webhookSecret: string | null = process.env.STRIPE_WEBHOOK_SECRET ?? null;
@@ -69,29 +73,73 @@ export async function getStripeSync() {
   if (stripeSyncShuttingDown) {
     throw new Error('StripeSync is shutting down — cannot acquire new instance');
   }
-  if (!stripeSync) {
-    const { StripeSync } = await import('stripe-replit-sync');
-    const secretKey = await getStripeSecretKey();
-
-    stripeSync = new StripeSync({
-      poolConfig: {
-        connectionString: process.env.DATABASE_URL!,
-        max: 1,
-        connectionTimeoutMillis: 5_000,
-        idleTimeoutMillis: 15_000,
-      },
-      stripeSecretKey: secretKey,
-      ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
-    });
+  if (stripeSync) {
+    return stripeSync;
   }
-  return stripeSync;
+  if (!stripeSyncPending) {
+    let timer: ReturnType<typeof setTimeout>;
+    const initPromise = (async () => {
+      const { StripeSync } = await import('stripe-replit-sync');
+      const secretKey = await getStripeSecretKey();
+
+      return new StripeSync({
+        poolConfig: {
+          connectionString: process.env.DATABASE_URL!,
+          max: 1,
+          connectionTimeoutMillis: 5_000,
+          idleTimeoutMillis: 15_000,
+        },
+        stripeSecretKey: secretKey,
+        ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
+      });
+    })();
+
+    const pending = Promise.race([
+      initPromise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('StripeSync initialization timed out')), STRIPE_SYNC_INIT_TIMEOUT_MS);
+        if (typeof timer === 'object' && 'unref' in timer) timer.unref();
+      }),
+    ]).then((result) => {
+      clearTimeout(timer);
+      if (!stripeSyncShuttingDown) {
+        stripeSync = result;
+      }
+      return result;
+    }).catch((err) => {
+      clearTimeout(timer);
+      stripeSync = null;
+      stripeSyncPending = null;
+      throw err;
+    });
+
+    stripeSyncPending = pending;
+
+    // Clean up a late-resolved instance if the timeout won the race
+    void initPromise.then(async (instance) => {
+      if (stripeSyncPending !== pending && stripeSync !== instance) {
+        await instance.postgresClient?.pool?.end();
+      }
+    }).catch(() => {});
+  }
+  return stripeSyncPending;
 }
 
-/** Close the StripeSync database pool if it was initialized. */
+/** Close the StripeSync database pool if it was initialized. One-way — cannot re-initialize after. */
 export async function closeStripeSync(): Promise<void> {
   stripeSyncShuttingDown = true;
-  if (stripeSync) {
-    await stripeSync.postgresClient?.pool?.end();
+  if (stripeSyncClosing) return stripeSyncClosing;
+  stripeSyncClosing = (async () => {
+    let pendingResult: any = null;
+    if (stripeSyncPending) {
+      try { pendingResult = await stripeSyncPending; } catch { /* initialization may have failed */ }
+    }
+    stripeSyncPending = null;
+    const instanceToClose = stripeSync ?? pendingResult;
     stripeSync = null;
-  }
+    if (instanceToClose) {
+      await instanceToClose.postgresClient?.pool?.end();
+    }
+  })();
+  return stripeSyncClosing;
 }
