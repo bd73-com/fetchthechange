@@ -1,6 +1,6 @@
 import crypto from "crypto";
-import { Resend } from "resend";
 import { db } from "../db";
+import { getResendClient } from "./resendClient";
 import { users, campaigns, campaignRecipients, monitors } from "@shared/schema";
 import { ResendUsageTracker } from "./resendTracker";
 import { ErrorLogger } from "./logger";
@@ -159,12 +159,12 @@ async function sendSingleCampaignEmail(
   userId: string,
   unsubscribeToken: string
 ): Promise<{ success: boolean; resendId?: string; error?: string }> {
-  if (!process.env.RESEND_API_KEY) {
+  const resend = getResendClient();
+  if (!resend) {
     console.log(`[Campaign] RESEND_API_KEY not set. Skipping campaign email send.`);
     return { success: false, error: "RESEND_API_KEY not configured" };
   }
 
-  const resend = new Resend(process.env.RESEND_API_KEY);
   const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
   const appUrl = getAppUrl();
 
@@ -246,11 +246,11 @@ export async function sendTestCampaignEmail(
   campaign: { id: number; subject: string; htmlBody: string; textBody: string | null },
   testEmail: string
 ): Promise<{ success: boolean; resendId?: string; error?: string }> {
-  if (!process.env.RESEND_API_KEY) {
+  const resend = getResendClient();
+  if (!resend) {
     return { success: false, error: "RESEND_API_KEY not configured" };
   }
 
-  const resend = new Resend(process.env.RESEND_API_KEY);
   const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
 
   const htmlWithBanner = `

@@ -1,4 +1,5 @@
 import { checkMonitor as scraperCheckMonitor, extractWithBrowserless, detectPageBlockReason, discoverSelectors, validateCssSelector, extractValueFromHtml } from "./services/scraper";
+import { getResendClient } from "./services/resendClient";
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -1269,22 +1270,20 @@ export async function registerRoutes(
         general: "General",
       };
 
-      if (!process.env.RESEND_API_KEY) {
+      const resend = getResendClient();
+      if (!resend) {
         console.error(`[Support] RESEND_API_KEY not set. Cannot send email.`);
         console.log(`[Support] From: ${input.email}, Category: ${input.category}, Subject: ${input.subject}`);
         console.log(`[Support] Message: ${input.message}`);
-        return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly." });
+        return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly.", code: "EMAIL_NOT_CONFIGURED" });
       }
-
-      const { Resend } = await import("resend");
-      const resend = new Resend(process.env.RESEND_API_KEY);
       const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
       const supportEmail = process.env.SUPPORT_EMAIL;
       if (!supportEmail) {
         console.error(`[Support] SUPPORT_EMAIL not set. Cannot send email.`);
         console.log(`[Support] From: ${input.email}, Category: ${input.category}, Subject: ${input.subject}`);
         console.log(`[Support] Message: ${input.message}`);
-        return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly." });
+        return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly.", code: "EMAIL_NOT_CONFIGURED" });
       }
 
       const escapeHtml = (str: string) =>
