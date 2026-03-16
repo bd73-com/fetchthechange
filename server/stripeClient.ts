@@ -78,22 +78,24 @@ export async function getStripeSync() {
   }
   if (!stripeSyncPending) {
     let timer: ReturnType<typeof setTimeout>;
-    stripeSyncPending = Promise.race([
-      (async () => {
-        const { StripeSync } = await import('stripe-replit-sync');
-        const secretKey = await getStripeSecretKey();
+    const initPromise = (async () => {
+      const { StripeSync } = await import('stripe-replit-sync');
+      const secretKey = await getStripeSecretKey();
 
-        return new StripeSync({
-          poolConfig: {
-            connectionString: process.env.DATABASE_URL!,
-            max: 1,
-            connectionTimeoutMillis: 5_000,
-            idleTimeoutMillis: 15_000,
-          },
-          stripeSecretKey: secretKey,
-          ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
-        });
-      })(),
+      return new StripeSync({
+        poolConfig: {
+          connectionString: process.env.DATABASE_URL!,
+          max: 1,
+          connectionTimeoutMillis: 5_000,
+          idleTimeoutMillis: 15_000,
+        },
+        stripeSecretKey: secretKey,
+        ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
+      });
+    })();
+
+    const pending = Promise.race([
+      initPromise,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('StripeSync initialization timed out')), STRIPE_SYNC_INIT_TIMEOUT_MS);
         if (typeof timer === 'object' && 'unref' in timer) timer.unref();
@@ -110,6 +112,15 @@ export async function getStripeSync() {
       stripeSyncPending = null;
       throw err;
     });
+
+    stripeSyncPending = pending;
+
+    // Clean up a late-resolved instance if the timeout won the race
+    void initPromise.then(async (instance) => {
+      if (stripeSyncPending !== pending && stripeSync !== instance) {
+        await instance.postgresClient?.pool?.end();
+      }
+    }).catch(() => {});
   }
   return stripeSyncPending;
 }
