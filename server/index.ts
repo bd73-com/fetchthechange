@@ -64,25 +64,30 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       const stripeSync = await getStripeSync();
 
       console.log('Setting up managed webhook...');
-      const webhookBaseUrl = `https://${process.env.REPLIT_DOMAINS?.split(',')[0]}`;
-      try {
-        const result = await stripeSync.findOrCreateManagedWebhook(
-          `${webhookBaseUrl}/api/stripe/webhook`
-        );
-        if (result?.secret) {
-          setWebhookSecret(result.secret);
-          console.log(`Webhook configured: ${result.url}`);
-        } else if (result?.url) {
-          console.log(`Webhook found (existing): ${result.url}`);
-        }
-      } catch (webhookError: any) {
-        console.error('ERROR: Could not set up managed webhook:', webhookError.message);
-        if (!getWebhookSecret()) {
-          console.error(
-            'CRITICAL: No webhook secret available. ' +
-            'Set STRIPE_WEBHOOK_SECRET env var or fix managed webhook creation. ' +
-            'Webhook signature verification will reject all events until this is resolved.'
+      const replitDomain = process.env.REPLIT_DOMAINS?.split(',')[0];
+      if (!replitDomain) {
+        console.warn('REPLIT_DOMAINS not set, skipping managed webhook creation');
+      } else {
+        const webhookBaseUrl = `https://${replitDomain}`;
+        try {
+          const result = await stripeSync.findOrCreateManagedWebhook(
+            `${webhookBaseUrl}/api/stripe/webhook`
           );
+          if (result?.secret) {
+            setWebhookSecret(result.secret);
+            console.log(`Webhook configured: ${result.url}`);
+          } else if (result?.url) {
+            console.log(`Webhook found (existing): ${result.url}`);
+          }
+        } catch (webhookError: any) {
+          console.error('ERROR: Could not set up managed webhook:', webhookError.message);
+          if (!getWebhookSecret()) {
+            console.error(
+              'CRITICAL: No webhook secret available. ' +
+              'Set STRIPE_WEBHOOK_SECRET env var or fix managed webhook creation. ' +
+              'Webhook signature verification will reject all events until this is resolved.'
+            );
+          }
         }
       }
 
@@ -126,7 +131,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         res.status(200).json({ received: true });
       } catch (error: any) {
         const msg = error.message || '';
-        if (msg.includes('signature') || msg.includes('webhook') || msg.includes('No signatures found') || msg.includes('timestamp')) {
+        if (msg.includes('signature') || msg.includes('No signatures found') || msg.includes('timestamp')) {
           const { ErrorLogger } = await import('./services/logger');
           await ErrorLogger.error('stripe', 'Webhook signature validation failed', error, {
             ip: req.ip,
@@ -158,7 +163,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         res.status(200).json({ received: true });
       } catch (error: any) {
         const msg = error.message || '';
-        if (msg.includes('signature') || msg.includes('timestamp') || msg.includes('webhook')) {
+        if (msg.includes('signature') || msg.includes('timestamp') || msg.includes('No signatures found')) {
           const { ErrorLogger } = await import('./services/logger');
           await ErrorLogger.error('email', 'Resend webhook signature validation failed', error, {
             ip: req.ip,
