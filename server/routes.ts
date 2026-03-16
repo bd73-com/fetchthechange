@@ -2216,6 +2216,24 @@ export async function registerRoutes(
     }
   });
 
+  // Reconcile campaign counters from recipient rows
+  app.post("/api/admin/campaigns/:id/reconcile", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const id = Number(req.params.id);
+      const result = await campaignEmailService.reconcileCampaignCounters(id);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Error reconciling campaign counters:", error);
+      res.status(400).json({ message: error.message || "Failed to reconcile counters" });
+    }
+  });
+
   // Public unsubscribe endpoint (no auth required)
   // GET shows a confirmation page; POST performs the actual unsubscribe.
   // This prevents link prefetchers / email scanners from triggering unsubscribes.
