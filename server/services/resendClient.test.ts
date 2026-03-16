@@ -30,6 +30,12 @@ describe("getResendClient", () => {
     expect(getResendClient()).toBeNull();
   });
 
+  it("returns null when RESEND_API_KEY is whitespace-only", async () => {
+    process.env.RESEND_API_KEY = "   ";
+    const { getResendClient } = await import("./resendClient");
+    expect(getResendClient()).toBeNull();
+  });
+
   it("returns a Resend instance when RESEND_API_KEY is set", async () => {
     process.env.RESEND_API_KEY = "re_test_123";
     const { getResendClient } = await import("./resendClient");

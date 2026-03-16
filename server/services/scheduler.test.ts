@@ -411,7 +411,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     expect(mockCheckMonitor.mock.calls.length).toBeLessThanOrEqual(2);
 
     // Clean up: resolve all pending
-    resolvers.forEach((r) => r());
+    resolvers.forEach((r) => { r(); });
   });
 
   it("decrements active count after check completes, allowing new checks", async () => {
@@ -434,7 +434,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
     expect(mockCheckMonitor.mock.calls.length).toBe(2);
 
     // Complete all checks
-    resolvers.forEach((r) => r());
+    resolvers.forEach((r) => { r(); });
     await vi.advanceTimersByTimeAsync(10);
 
     // Second iteration: a new monitor should now be able to start
@@ -451,7 +451,7 @@ describe("concurrency limiting (runCheckWithLimit)", () => {
 
     // Should have started since active count is back to 0
     expect(mockCheckMonitor.mock.calls.length).toBe(1);
-    resolvers.forEach((r) => r());
+    resolvers.forEach((r) => { r(); });
   });
 
   it("decrements active count even when checkMonitor throws", async () => {

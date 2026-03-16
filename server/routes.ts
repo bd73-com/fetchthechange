@@ -1275,7 +1275,7 @@ export async function registerRoutes(
         console.error(`[Support] RESEND_API_KEY not set. Cannot send email.`);
         console.log(`[Support] From: ${input.email}, Category: ${input.category}, Subject: ${input.subject}`);
         console.log(`[Support] Message: ${input.message}`);
-        return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly." });
+        return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly.", code: "EMAIL_NOT_CONFIGURED" });
       }
       const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
       const supportEmail = process.env.SUPPORT_EMAIL;
@@ -1283,7 +1283,7 @@ export async function registerRoutes(
         console.error(`[Support] SUPPORT_EMAIL not set. Cannot send email.`);
         console.log(`[Support] From: ${input.email}, Category: ${input.category}, Subject: ${input.subject}`);
         console.log(`[Support] Message: ${input.message}`);
-        return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly." });
+        return res.status(503).json({ message: "Email service is not configured. Please try again later or contact us directly.", code: "EMAIL_NOT_CONFIGURED" });
       }
 
       const escapeHtml = (str: string) =>
