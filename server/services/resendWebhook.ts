@@ -100,7 +100,7 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
 
           await tx.execute(sql`
             UPDATE campaigns SET opened_count = opened_count + 1
-            ${recipient.deliveredAt ? sql`` : sql`, delivered_count = delivered_count + 1`}
+            ${recipient.deliveredAt ? sql.empty() : sql`, delivered_count = delivered_count + 1`}
             WHERE id = ${recipient.campaignId}
           `);
         });
