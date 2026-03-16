@@ -221,9 +221,8 @@ async function withBrowserlessPage<T>(
     // and localStorage — prevents cross-monitor data bleed on pooled browsers.
     if (context?.close) await context.close().catch(() => {});
     if (browser) {
-      if (reusable) {
-        browserPool.release(browser, reusable);
-      } else {
+      browserPool.release(browser, reusable);
+      if (!reusable) {
         await browser.close();
       }
     }

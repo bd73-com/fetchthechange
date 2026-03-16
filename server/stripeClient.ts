@@ -52,6 +52,7 @@ export async function getStripeSecretKey() {
 }
 
 let stripeSync: any = null;
+let stripeSyncShuttingDown = false;
 
 /** Webhook signing secret — set from STRIPE_WEBHOOK_SECRET env or managed webhook creation. */
 let webhookSecret: string | null = process.env.STRIPE_WEBHOOK_SECRET ?? null;
@@ -65,6 +66,9 @@ export function setWebhookSecret(secret: string): void {
 }
 
 export async function getStripeSync() {
+  if (stripeSyncShuttingDown) {
+    throw new Error('StripeSync is shutting down — cannot acquire new instance');
+  }
   if (!stripeSync) {
     const { StripeSync } = await import('stripe-replit-sync');
     const secretKey = await getStripeSecretKey();
@@ -81,4 +85,13 @@ export async function getStripeSync() {
     });
   }
   return stripeSync;
+}
+
+/** Close the StripeSync database pool if it was initialized. */
+export async function closeStripeSync(): Promise<void> {
+  stripeSyncShuttingDown = true;
+  if (stripeSync) {
+    await stripeSync.postgresClient?.pool?.end();
+    stripeSync = null;
+  }
 }

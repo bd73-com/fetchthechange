@@ -98,6 +98,9 @@ export class BrowserPool {
    * Return a browser to the pool, or close it if it was ephemeral or the pool is full.
    * Safe to call for any browser returned by acquire() — the pool tracks reusability
    * internally so callers don't need to thread the boolean through.
+   *
+   * IMPORTANT: When reusable is false, this only removes the browser from the inUse
+   * tracking set — the caller MUST call browser.close() afterwards.
    */
   release(browser: PoolableBrowser, _reusable?: boolean): void {
     // Support both old (explicit boolean) and new (auto-tracked) call styles.

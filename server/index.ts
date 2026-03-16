@@ -324,6 +324,12 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       cleanupFailed = true;
       console.error("Failed to drain browser pool:", err);
     });
+    // Close StripeSync pool (separate pg.Pool from the main one)
+    const { closeStripeSync } = await import("./stripeClient");
+    await closeStripeSync().catch((err) => {
+      cleanupFailed = true;
+      console.error("Failed to close StripeSync pool:", err);
+    });
     // Close DB connection pool
     console.log("Closing DB pool...");
     await dbPool.end().catch((err) => {
