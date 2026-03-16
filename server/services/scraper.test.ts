@@ -4624,7 +4624,7 @@ describe("stealth evasion", () => {
         viewport: { width: 1920, height: 1080 },
         screen: { width: 1920, height: 1080 },
         extraHTTPHeaders: expect.objectContaining({
-          'Sec-CH-UA-Mobile': '?0',
+          'Accept-Language': 'en-US,en;q=0.9',
         }),
       })
     );
@@ -4673,7 +4673,12 @@ describe("stealth evasion", () => {
     // UA is randomly selected from a pool — verify it's present and modern
     expect(headers['User-Agent']).toBeDefined();
     expect(headers['User-Agent']).toMatch(/Chrome\/13[234]|Firefox\/13[45]/);
-    expect(headers['Sec-CH-UA-Mobile']).toBe('?0');
+    // Sec-CH-UA-Mobile is only sent for Chrome profiles, not Firefox
+    if (headers['User-Agent'].includes('Chrome')) {
+      expect(headers['Sec-CH-UA-Mobile']).toBe('?0');
+    } else {
+      expect(headers['Sec-CH-UA-Mobile']).toBeUndefined();
+    }
     // Direct navigation — no Referer, Sec-Fetch-Site: none
     expect(headers['Referer']).toBeUndefined();
     expect(headers['Sec-Fetch-Site']).toBe('none');
@@ -4735,7 +4740,7 @@ describe("stealth evasion", () => {
         viewport: { width: 1920, height: 1080 },
         screen: { width: 1920, height: 1080 },
         extraHTTPHeaders: expect.objectContaining({
-          'Sec-CH-UA-Mobile': '?0',
+          'Accept-Language': 'en-US,en;q=0.9',
         }),
       })
     );

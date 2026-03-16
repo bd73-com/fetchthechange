@@ -84,11 +84,12 @@ function browserLikeHeaders(url: string) {
     'Sec-Fetch-Mode': 'navigate',
     'Sec-Fetch-Site': 'none',
     'Sec-Fetch-User': '?1',
-    'Sec-CH-UA-Mobile': '?0',
   };
   // No Referer on direct navigation — real browsers don't send one
+  // Only send Client Hints headers for Chrome profiles — Firefox never sends them
   if (profile.secChUa) {
     headers['Sec-CH-UA'] = profile.secChUa;
+    headers['Sec-CH-UA-Mobile'] = '?0';
     if (profile.secChUaPlatform) headers['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
   }
   return headers;
@@ -99,10 +100,11 @@ function stealthContextOptions() {
   const profile = pickUaProfile();
   const extraHTTPHeaders: Record<string, string> = {
     'Accept-Language': 'en-US,en;q=0.9',
-    'Sec-CH-UA-Mobile': '?0',
   };
+  // Only send Client Hints headers for Chrome profiles — Firefox never sends them
   if (profile.secChUa) {
     extraHTTPHeaders['Sec-CH-UA'] = profile.secChUa;
+    extraHTTPHeaders['Sec-CH-UA-Mobile'] = '?0';
     if (profile.secChUaPlatform) extraHTTPHeaders['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
   }
   return {
