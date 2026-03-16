@@ -4672,11 +4672,11 @@ describe("stealth evasion", () => {
     const headers = (fetchCall[1] as RequestInit)?.headers as Record<string, string>;
     // UA is randomly selected from a pool — verify it's present and modern
     expect(headers['User-Agent']).toBeDefined();
-    expect(headers['User-Agent']).toMatch(/Chrome\/1[23]\d|Firefox\/1[23]\d/);
+    expect(headers['User-Agent']).toMatch(/Chrome\/13[234]|Firefox\/13[45]/);
     expect(headers['Sec-CH-UA-Mobile']).toBe('?0');
-    // Referer should be set to the target origin with cross-site fetch mode
-    expect(headers['Referer']).toContain('example.com');
-    expect(headers['Sec-Fetch-Site']).toBe('cross-site');
+    // Direct navigation — no Referer, Sec-Fetch-Site: none
+    expect(headers['Referer']).toBeUndefined();
+    expect(headers['Sec-Fetch-Site']).toBe('none');
     // Accept-Encoding should be present
     expect(headers['Accept-Encoding']).toContain('gzip');
   });
@@ -4933,7 +4933,7 @@ describe("withBrowserlessPage resource blocking", () => {
     delete process.env.BROWSERLESS_TOKEN;
   });
 
-  it("blocks image resource types via route handler", async () => {
+  it("blocks media resource types via route handler", async () => {
     const { browserMock } = createPlaywrightMockWithRouteCapture(
       '<html><body><span class="price">$10</span></body></html>', 1, "$10");
     mockConnectOverCDP.mockResolvedValueOnce(browserMock);
@@ -4950,13 +4950,13 @@ describe("withBrowserlessPage resource blocking", () => {
     // Verify route handler was captured
     expect(capturedRouteHandler).not.toBeNull();
 
-    // Simulate an image request
+    // Simulate a media request (video/audio — still blocked)
     const abortFn = vi.fn();
     const continueFn = vi.fn();
     await capturedRouteHandler!({
       request: () => ({
-        resourceType: () => 'image',
-        url: () => 'https://example.com/photo.jpg',
+        resourceType: () => 'media',
+        url: () => 'https://example.com/video.mp4',
         isNavigationRequest: () => false,
       }),
       abort: abortFn,

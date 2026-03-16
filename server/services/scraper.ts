@@ -20,61 +20,49 @@ export const monitorsNeedingRetry = new Set<number>();
 
 /** Pool of modern User-Agent profiles to rotate per request, reducing fingerprint-based blocking. */
 const UA_PROFILES: Array<{ userAgent: string; secChUa?: string; secChUaPlatform?: string }> = [
-  // Chrome 120 – Windows 10
+  // Chrome 133 – Windows 10
   {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    secChUa: '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="133", "Not(A:Brand";v="99", "Google Chrome";v="133"',
     secChUaPlatform: '"Windows"',
   },
-  // Chrome 121 – macOS
+  // Chrome 133 – macOS
   {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    secChUa: '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="133", "Not(A:Brand";v="99", "Google Chrome";v="133"',
     secChUaPlatform: '"macOS"',
   },
-  // Chrome 122 – Windows 11
+  // Chrome 134 – Windows 10
   {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
     secChUaPlatform: '"Windows"',
   },
-  // Chrome 123 – macOS
+  // Chrome 134 – macOS
   {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    secChUa: '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
     secChUaPlatform: '"macOS"',
   },
-  // Chrome 124 – Windows 10
+  // Chrome 132 – Windows 11 (one version back for diversity)
   {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="132", "Not_A Brand";v="24", "Google Chrome";v="132"',
     secChUaPlatform: '"Windows"',
   },
-  // Chrome 124 – macOS
+  // Chrome 132 – macOS
   {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="132", "Not_A Brand";v="24", "Google Chrome";v="132"',
     secChUaPlatform: '"macOS"',
   },
-  // Chrome 131 – Windows 10 (legacy entry)
+  // Firefox 135 – Windows 10 (no Sec-CH-UA headers — omitted, not empty)
   {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
-    secChUaPlatform: '"Windows"',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0',
   },
-  // Chrome 131 – macOS (legacy entry)
+  // Firefox 134 – macOS
   {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
-    secChUaPlatform: '"macOS"',
-  },
-  // Firefox 134 – Windows 10 (no Sec-CH-UA headers — omitted, not empty)
-  {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0',
-  },
-  // Firefox 123 – macOS (no Sec-CH-UA headers — omitted, not empty)
-  {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:134.0) Gecko/20100101 Firefox/134.0',
   },
 ];
 
@@ -85,8 +73,6 @@ function pickUaProfile() {
 /** Returns browser-like headers with a randomly selected UA profile. */
 function browserLikeHeaders(url: string) {
   const profile = pickUaProfile();
-  let origin: string | undefined;
-  try { origin = new URL(url).origin; } catch {}
   const headers: Record<string, string> = {
     'User-Agent': profile.userAgent,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -96,15 +82,11 @@ function browserLikeHeaders(url: string) {
     'Upgrade-Insecure-Requests': '1',
     'Sec-Fetch-Dest': 'document',
     'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
     'Sec-Fetch-User': '?1',
     'Sec-CH-UA-Mobile': '?0',
   };
-  if (origin) {
-    headers['Referer'] = origin + '/';
-    headers['Sec-Fetch-Site'] = 'cross-site';
-  } else {
-    headers['Sec-Fetch-Site'] = 'none';
-  }
+  // No Referer on direct navigation — real browsers don't send one
   if (profile.secChUa) {
     headers['Sec-CH-UA'] = profile.secChUa;
     if (profile.secChUaPlatform) headers['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
@@ -139,7 +121,7 @@ const VALUE_ATTRIBUTES = ['content', 'data-price', 'value', 'data-value'] as con
 const BLOCKED_TRACKING_PATTERN = /google-analytics|googletagmanager|facebook\.net|doubleclick|hotjar|segment\.io|newrelic|datadoghq/i;
 
 /** Resource types to block in Browserless sessions to speed up page load. */
-const BLOCKED_RESOURCE_TYPES = ['image', 'media', 'font'];
+const BLOCKED_RESOURCE_TYPES = ['media'];
 
 /** Base delay for exponential backoff on Browserless retry. */
 export const BASE_RETRY_MS = 2000;
@@ -266,7 +248,34 @@ function stealthInitScript() {
 
   // 4. window.chrome — absent in headless, present in real Chrome
   if (!(window as any).chrome) {
-    (window as any).chrome = { runtime: {}, csi: () => ({}) };
+    (window as any).chrome = {
+      runtime: {
+        connect: function() { return {}; },
+        sendMessage: function() {},
+        id: undefined,
+        onMessage: { addListener: function() {}, removeListener: function() {} },
+        onConnect: { addListener: function() {}, removeListener: function() {} },
+        getManifest: function() { return {}; },
+      },
+      csi: function() { return {}; },
+      loadTimes: function() {
+        return {
+          requestTime: Date.now() / 1000,
+          startLoadTime: Date.now() / 1000,
+          commitLoadTime: Date.now() / 1000,
+          finishDocumentLoadTime: Date.now() / 1000,
+          finishLoadTime: Date.now() / 1000,
+          firstPaintTime: Date.now() / 1000,
+          firstPaintAfterLoadTime: 0,
+          navigationType: 'Other',
+          wasFetchedViaSpdy: false,
+          wasNpnNegotiated: false,
+          npnNegotiatedProtocol: 'unknown',
+          wasAlternateProtocolAvailable: false,
+          connectionInfo: 'h2',
+        };
+      },
+    };
   }
 
   // 5. WebGL — spoof renderer/vendor away from SwiftShader
@@ -325,6 +334,35 @@ function stealthInitScript() {
       get: () => 'default',
     });
   } catch (_) { /* Notification API may be unavailable */ }
+
+  // 10. navigator.mimeTypes — realistic Chrome MIME types
+  try {
+    const mimeData = [
+      { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+      { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+    ];
+    const mimeArray = Object.create(MimeTypeArray.prototype);
+    Object.defineProperty(mimeArray, 'length', { get: () => mimeData.length });
+    mimeData.forEach((m, i) => {
+      const mimeType = Object.create(MimeType.prototype);
+      Object.defineProperty(mimeType, 'type', { get: () => m.type });
+      Object.defineProperty(mimeType, 'suffixes', { get: () => m.suffixes });
+      Object.defineProperty(mimeType, 'description', { get: () => m.description });
+      Object.defineProperty(mimeArray, i, { get: () => mimeType });
+      Object.defineProperty(mimeArray, m.type, { get: () => mimeType });
+    });
+    Object.defineProperty(navigator, 'mimeTypes', { get: () => mimeArray });
+  } catch (_) { /* mimeTypes may be read-only */ }
+
+  // 11. WebGL2 — same spoof as WebGL1 to prevent detection via WebGL2 fallback
+  try {
+    const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
+    WebGL2RenderingContext.prototype.getParameter = function(parameter: number) {
+      if (parameter === 37445) return 'Intel Inc.';
+      if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+      return getParameter2.call(this, parameter);
+    };
+  } catch (_) { /* WebGL2 may be unavailable */ }
 }
 
 interface SelectorSuggestion {
@@ -854,6 +892,8 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
       const effectiveSelector = isClassName ? `.${trimmedSelector}` : trimmedSelector;
 
+      // Small random delay before selector access to mimic human reading behavior
+      await page.waitForTimeout(800 + Math.floor(Math.random() * 1200));
       await page.waitForSelector(effectiveSelector, { timeout: 10000 }).catch(() => {});
       const count = await page.locator(effectiveSelector).count();
 
