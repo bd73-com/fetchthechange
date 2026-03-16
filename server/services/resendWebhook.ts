@@ -75,98 +75,108 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
     case "email.delivered":
       // Only upgrade status if not already opened/clicked
       if (recipient.status === "sent") {
-        await db
-          .update(campaignRecipients)
-          .set({ status: "delivered", deliveredAt: now })
-          .where(eq(campaignRecipients.id, recipient.id));
+        await db.transaction(async (tx) => {
+          await tx
+            .update(campaignRecipients)
+            .set({ status: "delivered", deliveredAt: now })
+            .where(eq(campaignRecipients.id, recipient.id));
 
-        await db.execute(sql`
-          UPDATE campaigns SET delivered_count = delivered_count + 1
-          WHERE id = ${recipient.campaignId}
-        `);
+          await tx.execute(sql`
+            UPDATE campaigns SET delivered_count = delivered_count + 1
+            WHERE id = ${recipient.campaignId}
+          `);
+        });
       }
       break;
 
     case "email.opened":
       // Only count first open
       if (!recipient.openedAt) {
-        await db
-          .update(campaignRecipients)
-          .set({ status: "opened", openedAt: now, deliveredAt: recipient.deliveredAt ?? now })
-          .where(eq(campaignRecipients.id, recipient.id));
+        await db.transaction(async (tx) => {
+          await tx
+            .update(campaignRecipients)
+            .set({ status: "opened", openedAt: now, deliveredAt: recipient.deliveredAt ?? now })
+            .where(eq(campaignRecipients.id, recipient.id));
 
-        await db.execute(sql`
-          UPDATE campaigns SET opened_count = opened_count + 1
-          ${recipient.deliveredAt ? sql`` : sql`, delivered_count = delivered_count + 1`}
-          WHERE id = ${recipient.campaignId}
-        `);
+          await tx.execute(sql`
+            UPDATE campaigns SET opened_count = opened_count + 1
+            ${recipient.deliveredAt ? sql`` : sql`, delivered_count = delivered_count + 1`}
+            WHERE id = ${recipient.campaignId}
+          `);
+        });
       }
       break;
 
     case "email.clicked":
       // Only count first click
       if (!recipient.clickedAt) {
-        await db
-          .update(campaignRecipients)
-          .set({
-            status: "clicked",
-            clickedAt: now,
-            openedAt: recipient.openedAt ?? now,
-            deliveredAt: recipient.deliveredAt ?? now,
-          })
-          .where(eq(campaignRecipients.id, recipient.id));
+        await db.transaction(async (tx) => {
+          await tx
+            .update(campaignRecipients)
+            .set({
+              status: "clicked",
+              clickedAt: now,
+              openedAt: recipient.openedAt ?? now,
+              deliveredAt: recipient.deliveredAt ?? now,
+            })
+            .where(eq(campaignRecipients.id, recipient.id));
 
-        // Build counter updates
-        let counterUpdates = sql`clicked_count = clicked_count + 1`;
-        if (!recipient.openedAt) {
-          counterUpdates = sql`${counterUpdates}, opened_count = opened_count + 1`;
-        }
-        if (!recipient.deliveredAt) {
-          counterUpdates = sql`${counterUpdates}, delivered_count = delivered_count + 1`;
-        }
+          // Build counter updates
+          let counterUpdates = sql`clicked_count = clicked_count + 1`;
+          if (!recipient.openedAt) {
+            counterUpdates = sql`${counterUpdates}, opened_count = opened_count + 1`;
+          }
+          if (!recipient.deliveredAt) {
+            counterUpdates = sql`${counterUpdates}, delivered_count = delivered_count + 1`;
+          }
 
-        await db.execute(sql`
-          UPDATE campaigns SET ${counterUpdates}
-          WHERE id = ${recipient.campaignId}
-        `);
+          await tx.execute(sql`
+            UPDATE campaigns SET ${counterUpdates}
+            WHERE id = ${recipient.campaignId}
+          `);
+        });
       }
       break;
 
     case "email.bounced":
       // Guard against duplicate webhook retries
       if (!recipient.failedAt) {
-        await db
-          .update(campaignRecipients)
-          .set({
-            status: "bounced",
-            failedAt: now,
-            failureReason: "bounced",
-          })
-          .where(eq(campaignRecipients.id, recipient.id));
+        await db.transaction(async (tx) => {
+          await tx
+            .update(campaignRecipients)
+            .set({
+              status: "bounced",
+              failedAt: now,
+              failureReason: "bounced",
+            })
+            .where(eq(campaignRecipients.id, recipient.id));
 
-        await db.execute(sql`
-          UPDATE campaigns SET failed_count = failed_count + 1
-          WHERE id = ${recipient.campaignId}
-        `);
+          await tx.execute(sql`
+            UPDATE campaigns SET failed_count = failed_count + 1
+            WHERE id = ${recipient.campaignId}
+          `);
+        });
       }
       break;
 
     case "email.complained":
       // Guard against duplicate webhook retries
       if (!recipient.failedAt) {
-        await db
-          .update(campaignRecipients)
-          .set({
-            status: "complained",
-            failedAt: now,
-            failureReason: "spam complaint",
-          })
-          .where(eq(campaignRecipients.id, recipient.id));
+        await db.transaction(async (tx) => {
+          await tx
+            .update(campaignRecipients)
+            .set({
+              status: "complained",
+              failedAt: now,
+              failureReason: "spam complaint",
+            })
+            .where(eq(campaignRecipients.id, recipient.id));
 
-        await db.execute(sql`
-          UPDATE campaigns SET failed_count = failed_count + 1
-          WHERE id = ${recipient.campaignId}
-        `);
+          await tx.execute(sql`
+            UPDATE campaigns SET failed_count = failed_count + 1
+            WHERE id = ${recipient.campaignId}
+          `);
+        });
       }
       break;
 
