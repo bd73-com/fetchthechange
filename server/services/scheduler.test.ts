@@ -841,6 +841,185 @@ describe("stopScheduler", () => {
   });
 });
 
+describe("withDbRetry and re-entrancy guards", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    _resetSchedulerStarted();
+    _resetCache();
+    Object.keys(cronCallbacks).forEach((k) => { delete cronCallbacks[k]; });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("retries getAllActiveMonitors once on transient 'connection terminated' error", async () => {
+    const monitor = makeMonitor({ lastChecked: null });
+    mockGetAllActiveMonitors
+      .mockRejectedValueOnce(new Error("Connection terminated due to connection timeout"))
+      .mockResolvedValueOnce([monitor]);
+
+    await startScheduler();
+    // Advance past the 1s retry delay inside withDbRetry
+    const cronPromise = runCron("* * * * *");
+    await vi.advanceTimersByTimeAsync(2000);
+    await cronPromise;
+    await vi.advanceTimersByTimeAsync(31000);
+
+    // Should have called getAllActiveMonitors twice (first fail, then retry)
+    expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
+    // And the monitor check should have been scheduled
+    expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);
+  });
+
+  it("retries getAllActiveMonitors once on 'ECONNRESET' error", async () => {
+    const monitor = makeMonitor({ lastChecked: null });
+    mockGetAllActiveMonitors
+      .mockRejectedValueOnce(new Error("read ECONNRESET"))
+      .mockResolvedValueOnce([monitor]);
+
+    await startScheduler();
+    const cronPromise = runCron("* * * * *");
+    await vi.advanceTimersByTimeAsync(2000);
+    await cronPromise;
+    await vi.advanceTimersByTimeAsync(31000);
+
+    expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
+    expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);
+  });
+
+  it("does NOT retry on non-transient errors (e.g. syntax error)", async () => {
+    mockGetAllActiveMonitors.mockRejectedValueOnce(new Error("relation 'monitors' does not exist"));
+
+    await startScheduler();
+    await runCron("* * * * *");
+
+    expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(1);
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "Scheduler iteration failed",
+      expect.any(Error),
+      expect.objectContaining({ phase: "fetching active monitors" })
+    );
+  });
+
+  it("logs error when retry also fails on transient error", async () => {
+    mockGetAllActiveMonitors
+      .mockRejectedValueOnce(new Error("Connection terminated"))
+      .mockRejectedValueOnce(new Error("Connection terminated again"));
+
+    await startScheduler();
+    const cronPromise = runCron("* * * * *");
+    await vi.advanceTimersByTimeAsync(2000);
+    await cronPromise;
+
+    expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "Scheduler iteration failed",
+      expect.any(Error),
+      expect.objectContaining({ phase: "fetching active monitors" })
+    );
+  });
+
+  it("skips main cron iteration when previous iteration is still running", async () => {
+    let resolveMonitors!: (value: any) => void;
+    mockGetAllActiveMonitors.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveMonitors = resolve; })
+    );
+
+    await startScheduler();
+    // Start first iteration (will block on getAllActiveMonitors)
+    const firstRun = runCron("* * * * *");
+
+    // Try to start second iteration while first is blocked
+    mockGetAllActiveMonitors.mockResolvedValueOnce([]);
+    await runCron("* * * * *");
+
+    // Only one call to getAllActiveMonitors should have been made
+    expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(1);
+
+    // Unblock first iteration
+    resolveMonitors([]);
+    await firstRun;
+  });
+
+  it("resets main cron guard after iteration completes (allows next iteration)", async () => {
+    mockGetAllActiveMonitors
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    await startScheduler();
+    await runCron("* * * * *");
+    // First iteration done, guard should be reset
+
+    await runCron("* * * * *");
+
+    // Both iterations should have called getAllActiveMonitors
+    expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
+  });
+
+  it("resets main cron guard even when iteration fails", async () => {
+    mockGetAllActiveMonitors
+      .mockRejectedValueOnce(new Error("some non-transient DB error that is not retryable"))
+      .mockResolvedValueOnce([]);
+
+    await startScheduler();
+    await runCron("* * * * *");
+    // Guard should be reset after error
+
+    await runCron("* * * * *");
+    expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries getPendingWebhookRetries on transient connection error", async () => {
+    mockStorage.getPendingWebhookRetries
+      .mockRejectedValueOnce(new Error("Connection terminated due to connection timeout"))
+      .mockResolvedValueOnce([]);
+
+    await startScheduler();
+    // Run callbacks individually to control timing — notification cron first
+    const callbacks = cronCallbacks["*/1 * * * *"];
+    // Notification cron (index 0)
+    await callbacks[0]();
+    // Webhook cron (index 1) — will retry after 1s delay
+    const webhookPromise = callbacks[1]();
+    await vi.advanceTimersByTimeAsync(2000);
+    await webhookPromise;
+
+    expect(mockStorage.getPendingWebhookRetries).toHaveBeenCalledTimes(2);
+    // Should NOT have logged an error since retry succeeded
+    expect(ErrorLogger.error).not.toHaveBeenCalledWith(
+      "scheduler",
+      "Webhook retry processing failed",
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  it("skips webhook cron when previous iteration is still running", async () => {
+    let resolveRetries!: (value: any) => void;
+    mockStorage.getPendingWebhookRetries.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveRetries = resolve; })
+    );
+
+    await startScheduler();
+    const callbacks = cronCallbacks["*/1 * * * *"];
+    // Fire webhook cron (index 1) without awaiting — it blocks on getPendingWebhookRetries
+    const firstRun = callbacks[1]();
+
+    // Fire webhook cron again while first is blocked — guard should skip it
+    await callbacks[1]();
+
+    // Only one call to getPendingWebhookRetries (second was skipped by guard)
+    expect(mockStorage.getPendingWebhookRetries).toHaveBeenCalledTimes(1);
+
+    resolveRetries([]);
+    await firstRun;
+  });
+});
+
 describe("webhook retry cumulative backoff", () => {
 
   beforeEach(() => {
