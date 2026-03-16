@@ -37,6 +37,7 @@ describe("killStalePortProcess", () => {
     expect(process.kill).toHaveBeenCalledWith(12345, "SIGKILL");
     expect(mockExecSync).toHaveBeenCalledWith("lsof -ti tcp:5000", {
       encoding: "utf8",
+      timeout: 5000,
     });
   });
 
@@ -159,5 +160,196 @@ describe("killStalePortProcess", () => {
 
     expect(killStalePortProcess(5000)).toBeNull();
     expect(process.kill).not.toHaveBeenCalled();
+  });
+
+  it("extracts PIDs from fuser stderr when stdout is empty", () => {
+    mockExecSync.mockImplementation((cmd: any) => {
+      if (typeof cmd === "string" && cmd.startsWith("lsof")) {
+        const err = new Error("lsof: not found");
+        (err as any).status = 127;
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("fuser")) {
+        // fuser sometimes writes PIDs to stderr and exits non-zero
+        const err = new Error("") as any;
+        err.status = 0;
+        err.stderr = " 11111 22222";
+        throw err;
+      }
+      return "" as any;
+    });
+
+    const result = killStalePortProcess(5000);
+
+    expect(result).toBe(11111);
+    expect(process.kill).toHaveBeenCalledWith(11111, "SIGKILL");
+    expect(process.kill).toHaveBeenCalledWith(22222, "SIGKILL");
+  });
+
+  it("handles fuser returning multiple space-separated PIDs on stdout", () => {
+    mockExecSync.mockImplementation((cmd: any) => {
+      if (typeof cmd === "string" && cmd.startsWith("lsof")) {
+        const err = new Error("lsof: not found");
+        (err as any).status = 127;
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("fuser")) {
+        return " 11111 22222 " as any;
+      }
+      return "" as any;
+    });
+
+    const result = killStalePortProcess(5000);
+
+    expect(result).toBe(11111);
+    expect(process.kill).toHaveBeenCalledWith(11111, "SIGKILL");
+    expect(process.kill).toHaveBeenCalledWith(22222, "SIGKILL");
+    expect(process.kill).toHaveBeenCalledTimes(2);
+  });
+
+  it("extracts multiple PIDs from ss output", () => {
+    mockExecSync.mockImplementation((cmd: any) => {
+      if (typeof cmd === "string" && cmd.startsWith("lsof")) {
+        const err = new Error("lsof: not found");
+        (err as any).status = 127;
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("fuser")) {
+        const err = new Error("fuser: not found");
+        (err as any).status = 127;
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("ss")) {
+        return 'LISTEN 0 128 0.0.0.0:5000 0.0.0.0:* users:(("node",pid=111,fd=18),("node",pid=222,fd=19))\n' as any;
+      }
+      return "" as any;
+    });
+
+    const result = killStalePortProcess(5000);
+
+    expect(result).toBe(111);
+    expect(process.kill).toHaveBeenCalledWith(111, "SIGKILL");
+    expect(process.kill).toHaveBeenCalledWith(222, "SIGKILL");
+    expect(process.kill).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns null when ss shows no matching sockets", () => {
+    mockExecSync.mockImplementation((cmd: any) => {
+      if (typeof cmd === "string" && cmd.startsWith("lsof")) {
+        const err = new Error("lsof: not found");
+        (err as any).status = 127;
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("fuser")) {
+        const err = new Error("fuser: not found");
+        (err as any).status = 127;
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("ss")) {
+        // ss returns header only when no match
+        return "State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process\n" as any;
+      }
+      return "" as any;
+    });
+
+    expect(killStalePortProcess(5000)).toBeNull();
+    expect(process.kill).not.toHaveBeenCalled();
+  });
+
+  it("ignores fuser stderr when exit status is not 0 or 1 (avoids false-positive PIDs)", () => {
+    mockExecSync.mockImplementation((cmd: any) => {
+      if (typeof cmd === "string" && cmd.startsWith("lsof")) {
+        const err = new Error("lsof: not found");
+        (err as any).status = 127;
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("fuser")) {
+        // fuser usage error with numeric text in stderr
+        const err = new Error("fuser: 22 not found") as any;
+        err.status = 2;
+        err.stderr = "fuser: 22 not found";
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("ss")) {
+        return "" as any;
+      }
+      return "" as any;
+    });
+
+    // Should NOT parse "22" from stderr as a PID
+    expect(killStalePortProcess(5000)).toBeNull();
+    expect(process.kill).not.toHaveBeenCalled();
+  });
+
+  it("warns when ss finds listeners but no PIDs (privilege issue)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockExecSync.mockImplementation((cmd: any) => {
+      if (typeof cmd === "string" && cmd.startsWith("lsof")) {
+        const err = new Error("lsof: not found");
+        (err as any).status = 127;
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("fuser")) {
+        const err = new Error("fuser: not found");
+        (err as any).status = 127;
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("ss")) {
+        // Unprivileged ss: shows LISTEN but no users:() section
+        return "LISTEN 0 128 0.0.0.0:5000 0.0.0.0:*\n" as any;
+      }
+      return "" as any;
+    });
+
+    expect(killStalePortProcess(5000)).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("ss found listeners on port 5000 but no PIDs"),
+    );
+  });
+
+  it("falls through to fuser when lsof exits 1 with stderr (broken binary)", () => {
+    mockExecSync.mockImplementation((cmd: any) => {
+      if (typeof cmd === "string" && cmd.startsWith("lsof")) {
+        // Broken lsof: exits 1 but has error on stderr
+        const err = new Error("lsof: error") as any;
+        err.status = 1;
+        err.stderr = "lsof: WARNING: can't stat() fuse.gvfsd-fuse file system";
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("fuser")) {
+        return "44444" as any;
+      }
+      return "" as any;
+    });
+
+    const result = killStalePortProcess(5000);
+    expect(result).toBe(44444);
+    expect(process.kill).toHaveBeenCalledWith(44444, "SIGKILL");
+  });
+
+  it("returns null when fuser confirms no process (exit 1) without trying ss", () => {
+    const commands: string[] = [];
+    mockExecSync.mockImplementation((cmd: any) => {
+      if (typeof cmd === "string") commands.push(cmd);
+      if (typeof cmd === "string" && cmd.startsWith("lsof")) {
+        const err = new Error("lsof: not found");
+        (err as any).status = 127;
+        throw err;
+      }
+      if (typeof cmd === "string" && cmd.startsWith("fuser")) {
+        // fuser exit 1 = no process found (authoritative answer)
+        const err = new Error("");
+        (err as any).status = 1;
+        throw err;
+      }
+      return "" as any;
+    });
+
+    expect(killStalePortProcess(5000)).toBeNull();
+    expect(process.kill).not.toHaveBeenCalled();
+    // Only lsof and fuser tried — ss not needed
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toMatch(/^lsof/);
+    expect(commands[1]).toMatch(/^fuser/);
   });
 });
