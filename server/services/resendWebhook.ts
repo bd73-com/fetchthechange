@@ -74,7 +74,9 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
   switch (event.type) {
     case "email.delivered":
       // Atomically update only if status is still 'sent' — prevents double-counting
-      // when duplicate webhooks race past the initial SELECT
+      // when duplicate webhooks race past the initial SELECT.
+      // Note: if a bounce arrives before delivery (valid email pattern), the status
+      // will already be 'bounced' and this guard correctly skips the delivery update.
       await db.transaction(async (tx) => {
         const [updated] = await tx
           .update(campaignRecipients)
@@ -87,6 +89,8 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
             UPDATE campaigns SET delivered_count = delivered_count + 1
             WHERE id = ${recipient.campaignId}
           `);
+        } else {
+          console.debug(`[ResendWebhook] Duplicate or out-of-order ${event.type} for resendId=${resendId} — skipped`);
         }
       });
       break;
@@ -95,7 +99,9 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
       // Atomically update only if openedAt is still NULL
       await db.transaction(async (tx) => {
         // Lock the row and read fresh state inside the transaction to avoid
-        // stale-read on deliveredAt when deciding which counters to increment
+        // stale-read on deliveredAt when deciding which counters to increment.
+        // Column names (delivered_at) must match the physical schema in shared/schema.ts.
+        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
         const freshRows = await tx.execute(sql`
           SELECT delivered_at FROM campaign_recipients WHERE id = ${recipient.id} FOR UPDATE
         `);
@@ -113,6 +119,8 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
             ${fresh?.delivered_at ? sql.empty() : sql`, delivered_count = delivered_count + 1`}
             WHERE id = ${recipient.campaignId}
           `);
+        } else {
+          console.debug(`[ResendWebhook] Duplicate or out-of-order ${event.type} for resendId=${resendId} — skipped`);
         }
       });
       break;
@@ -121,7 +129,9 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
       // Atomically update only if clickedAt is still NULL
       await db.transaction(async (tx) => {
         // Lock the row and read fresh state inside the transaction to avoid
-        // stale-read on openedAt/deliveredAt when deciding which counters to increment
+        // stale-read on openedAt/deliveredAt when deciding which counters to increment.
+        // Column names (delivered_at, opened_at) must match the physical schema in shared/schema.ts.
+        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
         const freshRows = await tx.execute(sql`
           SELECT delivered_at, opened_at FROM campaign_recipients WHERE id = ${recipient.id} FOR UPDATE
         `);
@@ -152,6 +162,8 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
             UPDATE campaigns SET ${counterUpdates}
             WHERE id = ${recipient.campaignId}
           `);
+        } else {
+          console.debug(`[ResendWebhook] Duplicate or out-of-order ${event.type} for resendId=${resendId} — skipped`);
         }
       });
       break;
@@ -174,6 +186,8 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
             UPDATE campaigns SET failed_count = failed_count + 1
             WHERE id = ${recipient.campaignId}
           `);
+        } else {
+          console.debug(`[ResendWebhook] Duplicate or out-of-order ${event.type} for resendId=${resendId} — skipped`);
         }
       });
       break;
@@ -196,6 +210,8 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
             UPDATE campaigns SET failed_count = failed_count + 1
             WHERE id = ${recipient.campaignId}
           `);
+        } else {
+          console.debug(`[ResendWebhook] Duplicate or out-of-order ${event.type} for resendId=${resendId} — skipped`);
         }
       });
       break;
