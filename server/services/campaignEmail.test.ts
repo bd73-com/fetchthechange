@@ -389,6 +389,24 @@ describe("cancelCampaign", () => {
     expect(result.cancelled).toBe(75);
   });
 
+  it("returns actual transaction cancelled count, not stale pendingCount", async () => {
+    // Simulate race condition: pre-transaction COUNT sees 75 pending,
+    // but batch sender processes 10 between COUNT and UPDATE, so only 65 are cancelled
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 25, pendingCount: 75 }],
+    });
+    setupTransactionMock([
+      { rows: [{ status: "sending" }] },
+      { rows: Array.from({ length: 65 }, (_, i) => ({ id: i + 1 })) }, // only 65 actually pending
+      { rows: [] },
+    ]);
+
+    const result = await cancelCampaign(99);
+
+    expect(result.sentSoFar).toBe(25);
+    expect(result.cancelled).toBe(65); // actual count, not stale 75
+  });
+
   it("handles zero pending recipients", async () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 50, pendingCount: 0 }],
