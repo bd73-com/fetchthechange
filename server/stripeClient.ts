@@ -90,6 +90,7 @@ export async function getStripeSync() {
       });
       return stripeSync;
     })().catch((err) => {
+      stripeSync = null;
       stripeSyncPending = null;
       throw err;
     });
@@ -105,7 +106,10 @@ export async function closeStripeSync(): Promise<void> {
   }
   stripeSyncPending = null;
   if (stripeSync) {
-    await stripeSync.postgresClient?.pool?.end();
-    stripeSync = null;
+    try {
+      await stripeSync.postgresClient?.pool?.end();
+    } finally {
+      stripeSync = null;
+    }
   }
 }
