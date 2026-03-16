@@ -334,6 +334,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     // (from a cron tick that started before shutdown) may still need sockets.
     const { agent: globalAgent } = await import("./utils/globalAgent");
     await globalAgent.close().catch((err: unknown) => {
+      cleanupFailed = true;
       console.error("Failed to close global agent:", err);
     });
     console.log("Shutdown complete.");

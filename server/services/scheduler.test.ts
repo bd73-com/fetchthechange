@@ -32,7 +32,6 @@ vi.mock("../storage", () => ({
     getMonitorChangeById: vi.fn().mockResolvedValue(undefined),
     updateDeliveryLog: vi.fn().mockResolvedValue(undefined),
     cleanupOldDeliveryLogs: vi.fn().mockResolvedValue(0),
-    getMonitorChangeById: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -106,7 +105,6 @@ import { ErrorLogger } from "./logger";
 import { _resetCache } from "./notificationReady";
 import cron from "node-cron";
 import { storage } from "../storage";
-import { deliver as deliverWebhook } from "./webhookDelivery";
 
 const mockStorage = vi.mocked(storage);
 import type { Monitor } from "@shared/schema";
@@ -1126,8 +1124,6 @@ describe("webhook retry cumulative backoff", () => {
 
   it("retries updateDeliveryLog with withDbRetry after successful webhook delivery", async () => {
     const now = Date.now();
-    const mockDeliver = vi.mocked(deliverWebhook);
-
     mockStorage.getPendingWebhookRetries.mockResolvedValueOnce([
       {
         id: 1,
@@ -1147,7 +1143,7 @@ describe("webhook retry cumulative backoff", () => {
       { channel: "webhook", enabled: true, config: { url: "https://hook.example.com/cb", secret: "s3cret" } },
     ]);
     mockStorage.getMonitorChangeById.mockResolvedValueOnce({ id: 10, monitorId: 1 });
-    mockDeliver.mockResolvedValueOnce({ success: true, statusCode: 200 });
+    mockDeliverWebhook.mockResolvedValueOnce({ success: true, statusCode: 200 });
 
     // First call to updateDeliveryLog fails with transient error, second succeeds
     mockStorage.updateDeliveryLog

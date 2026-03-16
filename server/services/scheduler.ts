@@ -87,6 +87,7 @@ export function waitForActiveChecks(timeoutMs: number): Promise<void> {
 /** @internal Test-only reset for the idempotency guard */
 export function _resetSchedulerStarted() {
   schedulerStarted = false;
+  activeChecks = 0;
 }
 
 /** Per-monitor backoff tracker for accelerated retries. */
