@@ -1384,6 +1384,38 @@ describe("checkMonitor", () => {
     expect(result.currentValue).toBe("$8.88");
   });
 
+  it("aborts fetchWithCurl when response body is slow (timeout covers body read)", async () => {
+    const headerError = new Error("Headers overflow");
+    (headerError as any).code = "UND_ERR_HEADERS_OVERFLOW";
+
+    // Mock ssrfSafeFetch directly so we can see fetchWithCurl's abort signal
+    const { ssrfSafeFetch } = await import("../utils/ssrf");
+    const mockSsrf = vi.mocked(ssrfSafeFetch);
+    // First call: initial fetch in checkMonitor triggers UND_ERR_HEADERS_OVERFLOW
+    mockSsrf.mockRejectedValueOnce(headerError);
+    // Second call: fetchWithCurl fallback — headers arrive fast but body hangs until abort
+    mockSsrf.mockImplementationOnce(async (_url, init) => {
+      const signal = init?.signal;
+      const textPromise = new Promise<string>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted", "AbortError"));
+        });
+      });
+      return { ok: true, status: 200, text: () => textPromise } as unknown as Response;
+    });
+
+    const monitor = makeMonitor();
+    const promise = checkMonitor(monitor);
+    // Advance past the 15s fetchWithCurl timeout + 2s retry delay
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    const result = await promise;
+
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("Page took too long to respond");
+  });
+
   it("reports selector_missing without retry when page loaded but selector not found", async () => {
     const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
 

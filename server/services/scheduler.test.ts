@@ -108,6 +108,18 @@ import { deliver as deliverWebhook } from "./webhookDelivery";
 const mockStorage = vi.mocked(storage);
 import type { Monitor } from "@shared/schema";
 
+/**
+ * Flush the microtask queue so detached (void) async calls settle.
+ * Needed because `vi.advanceTimersByTimeAsync` resolves timer callbacks
+ * but does NOT drain microtasks spawned by fire-and-forget promises
+ * (e.g. `void runCheckWithLimit(monitor)`). Each `await` yields one tick;
+ * we yield enough ticks to cover the current async depth of
+ * trackTimeout → runCheckWithLimit → checkMonitor → .then().
+ */
+async function flushPromises(ticks = 4): Promise<void> {
+  for (let i = 0; i < ticks; i++) await Promise.resolve();
+}
+
 // Helper: call all callbacks registered for a cron expression
 async function runCron(expression: string) {
   const callbacks = cronCallbacks[expression];
@@ -871,7 +883,7 @@ describe("withDbRetry and re-entrancy guards", () => {
     // Advance past the jitter window (0-30s) to fire the trackTimeout
     await vi.advanceTimersByTimeAsync(31000);
     // Flush microtask queue for the detached (void) runCheckWithLimit promise
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    await flushPromises();
 
     // Should have called getAllActiveMonitors twice (first fail, then retry)
     expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
@@ -890,7 +902,7 @@ describe("withDbRetry and re-entrancy guards", () => {
     await vi.advanceTimersByTimeAsync(2000);
     await cronPromise;
     await vi.advanceTimersByTimeAsync(31000);
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    await flushPromises();
 
     expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
     expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);

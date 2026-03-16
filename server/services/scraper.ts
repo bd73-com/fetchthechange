@@ -973,9 +973,13 @@ async function fetchWithCurl(url: string, monitorId?: number, monitorName?: stri
     }
     return await response.text();
   } catch (error) {
+    const isAbort = error instanceof DOMException && error.name === "AbortError";
+    const rethrow = isAbort
+      ? new Error("Page took too long to respond (15s timeout)")
+      : error;
     const label = monitorName ? `"${monitorName}" — page` : "Page";
-    await ErrorLogger.error("scraper", `${label} fetch with curl failed — the site returned an error or is blocking the request. Verify the URL is correct and the site is accessible.`, error instanceof Error ? error : null, { url, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
-    throw error;
+    await ErrorLogger.error("scraper", `${label} fetch with curl failed — the site returned an error or is blocking the request. Verify the URL is correct and the site is accessible.`, rethrow instanceof Error ? rethrow : null, { url, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
+    throw rethrow;
   } finally {
     clearTimeout(timeout);
   }
