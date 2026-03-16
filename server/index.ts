@@ -13,10 +13,13 @@ if (typeof global.Blob === 'undefined') {
   global.Blob = Blob;
 }
 
-// 3. CONFIGURE ENVIRONMENT
+// 3. CONFIGURE GLOBAL FETCH CONNECTION POOL (must run before any fetch() call)
+import "./utils/globalAgent";
+
+// 4. CONFIGURE ENVIRONMENT
 process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
-// 4. LOAD APP DYNAMICALLY (To prevent hoisting crashes)
+// 5. LOAD APP DYNAMICALLY (To prevent hoisting crashes)
 (async () => {
   const express = (await import("express")).default;
   const { createServer } = await import("http");
