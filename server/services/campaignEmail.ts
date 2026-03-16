@@ -332,6 +332,8 @@ export async function triggerCampaignSend(campaignId: number): Promise<{ totalRe
   activeSends.set(campaignId, sendControl);
   sendCampaignBatch(campaignId, campaign, sendControl).catch(async (err) => {
     await ErrorLogger.error("email", `Campaign ${campaignId} batch send error`, err instanceof Error ? err : null, { campaignId });
+    await finalizeCampaign(campaignId, "partially_sent");
+    activeSends.delete(campaignId);
   });
 
   return { totalRecipients: recipients.length };
@@ -490,7 +492,19 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
   const pendingCount = Number(row?.pendingCount ?? 0);
 
   // Mark remaining pending as cancelled (use failed status with reason)
+  // Only proceed if the campaign is not already in a terminal state
   if (!control) {
+    const [current] = await db
+      .select({ status: campaigns.status })
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId))
+      .limit(1);
+
+    const terminalStatuses = ["sent", "cancelled", "partially_sent"];
+    if (current && terminalStatuses.includes(current.status)) {
+      return { sentSoFar, cancelled: 0 };
+    }
+
     await db.transaction(async (tx) => {
       // Atomically mark pending recipients as failed and count affected rows
       const failedResult = await tx.execute(sql`
@@ -503,17 +517,15 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
       `);
       const failedCount = failedResult.rows.length;
 
-      // Single campaign update with accurate failedCount
-      await tx
-        .update(campaigns)
-        .set({
-          status: "cancelled",
-          completedAt: new Date(),
-          ...(failedCount > 0
-            ? { failedCount: sql`COALESCE(${campaigns.failedCount}, 0) + ${failedCount}` }
-            : {}),
-        })
-        .where(eq(campaigns.id, campaignId));
+      // Single campaign update with accurate failedCount — guard against terminal status
+      await tx.execute(sql`
+        UPDATE campaigns
+        SET status = 'cancelled',
+            completed_at = NOW()
+            ${failedCount > 0 ? sql`, failed_count = COALESCE(failed_count, 0) + ${failedCount}` : sql``}
+        WHERE id = ${campaignId}
+          AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+      `);
     });
   }
 

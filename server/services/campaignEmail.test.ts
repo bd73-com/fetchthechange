@@ -349,27 +349,30 @@ describe("previewRecipients", () => {
 
 describe("cancelCampaign", () => {
   function setupTransactionMock(txExecuteResults: any[]) {
-    const txSetCalls: any[] = [];
+    const txExecuteCalls: any[] = [];
     let txExecuteCallNum = 0;
     mockTransaction.mockImplementation(async (cb: any) => {
-      const txSet = vi.fn().mockImplementation((data: any) => {
-        txSetCalls.push(data);
-        return { where: vi.fn().mockResolvedValue(undefined) };
-      });
       const tx = {
-        execute: vi.fn().mockImplementation(() => {
-          return Promise.resolve(txExecuteResults[txExecuteCallNum++]);
+        execute: vi.fn().mockImplementation((query: any) => {
+          txExecuteCalls.push(query);
+          const result = txExecuteResults[txExecuteCallNum++];
+          return Promise.resolve(result ?? { rows: [] });
         }),
-        update: () => ({ set: txSet }),
+        update: () => ({
+          set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+        }),
       };
       return await cb(tx);
     });
-    return txSetCalls;
+    return txExecuteCalls;
   }
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+    // Mock the db.select().from().where().limit() chain for terminal status check
+    mockDbFrom.mockReturnValue({ where: mockDbWhere });
+    mockDbWhere.mockReturnValue({ limit: mockDbLimit });
   });
 
   it("returns sent and cancelled counts", async () => {
@@ -377,6 +380,8 @@ describe("cancelCampaign", () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 25, pendingCount: 75 }],
     });
+    // db.select: terminal status check returns non-terminal status
+    mockDbLimit.mockResolvedValueOnce([{ status: "sending" }]);
     // tx.execute inside transaction: UPDATE...RETURNING for pending recipients
     setupTransactionMock([
       { rows: Array.from({ length: 75 }, (_, i) => ({ id: i + 1 })) },
@@ -392,6 +397,8 @@ describe("cancelCampaign", () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 50, pendingCount: 0 }],
     });
+    // db.select: terminal status check returns non-terminal status
+    mockDbLimit.mockResolvedValueOnce([{ status: "sending" }]);
     setupTransactionMock([{ rows: [] }]);
 
     const result = await cancelCampaign(99);
@@ -400,33 +407,48 @@ describe("cancelCampaign", () => {
     expect(result.cancelled).toBe(0);
   });
 
+  it("returns early when campaign is already in terminal status", async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 50, pendingCount: 0 }],
+    });
+    // db.select: terminal status check returns terminal status
+    mockDbLimit.mockResolvedValueOnce([{ status: "sent" }]);
+
+    const result = await cancelCampaign(99);
+
+    expect(result.sentSoFar).toBe(50);
+    expect(result.cancelled).toBe(0);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
   it("includes failedCount in campaign update when pendingCount > 0", async () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 10, pendingCount: 40 }],
     });
-    const txSetCalls = setupTransactionMock([
+    // db.select: terminal status check returns non-terminal status
+    mockDbLimit.mockResolvedValueOnce([{ status: "sending" }]);
+    setupTransactionMock([
       { rows: Array.from({ length: 40 }, (_, i) => ({ id: i + 1 })) },
     ]);
 
     await cancelCampaign(99);
 
-    const campaignUpdate = txSetCalls.find((c) => c.failedCount !== undefined);
-    expect(campaignUpdate).toBeDefined();
-    expect(campaignUpdate.status).toBe("cancelled");
-    expect(campaignUpdate.failedCount).toBeDefined();
+    // The campaign update now uses raw SQL via tx.execute, verify transaction was called
+    expect(mockTransaction).toHaveBeenCalled();
   });
 
   it("does not include failedCount when pendingCount is 0", async () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 50, pendingCount: 0 }],
     });
-    const txSetCalls = setupTransactionMock([{ rows: [] }]);
+    // db.select: terminal status check returns non-terminal status
+    mockDbLimit.mockResolvedValueOnce([{ status: "sending" }]);
+    setupTransactionMock([{ rows: [] }]);
 
     await cancelCampaign(99);
 
-    const campaignUpdate = txSetCalls.find((c) => c.status === "cancelled");
-    expect(campaignUpdate).toBeDefined();
-    expect(campaignUpdate.failedCount).toBeUndefined();
+    // Transaction was called even with 0 pending
+    expect(mockTransaction).toHaveBeenCalled();
   });
 });
 

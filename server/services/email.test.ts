@@ -311,8 +311,8 @@ describe("sendNotificationEmail", () => {
   });
 
   it("returns early when free-tier canSendEmail rate limit is hit", async () => {
-    // Simulate 1 recent change in last 24h for free tier
-    mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 1 }] });
+    // Simulate 2 recent changes in last 24h for free tier (current change + 1 prior)
+    mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 2 }] });
 
     const monitor = makeMonitor();
     const result = await sendNotificationEmail(monitor, "old", "new");
