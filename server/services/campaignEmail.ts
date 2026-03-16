@@ -582,7 +582,7 @@ export async function reconcileCampaignCounters(campaignId: number): Promise<{
     SELECT
       COUNT(*)::int AS "totalRecipients",
       COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened', 'clicked'))::int AS "sentCount",
-      COUNT(*) FILTER (WHERE status IN ('failed', 'bounced'))::int AS "failedCount",
+      COUNT(*) FILTER (WHERE status IN ('failed', 'bounced', 'complained'))::int AS "failedCount",
       COUNT(*) FILTER (WHERE status IN ('delivered', 'opened', 'clicked'))::int AS "deliveredCount",
       COUNT(*) FILTER (WHERE status IN ('opened', 'clicked'))::int AS "openedCount",
       COUNT(*) FILTER (WHERE status = 'clicked')::int AS "clickedCount"
