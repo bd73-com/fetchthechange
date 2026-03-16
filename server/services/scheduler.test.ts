@@ -27,6 +27,7 @@ vi.mock("../storage", () => ({
     getMonitorChannels: vi.fn().mockResolvedValue([]),
     getMonitor: vi.fn().mockResolvedValue(undefined),
     getMonitorChanges: vi.fn().mockResolvedValue([]),
+    getMonitorChangeById: vi.fn().mockResolvedValue(undefined),
     updateDeliveryLog: vi.fn().mockResolvedValue(undefined),
     cleanupOldDeliveryLogs: vi.fn().mockResolvedValue(0),
   },
@@ -102,6 +103,7 @@ import { ErrorLogger } from "./logger";
 import { _resetCache } from "./notificationReady";
 import cron from "node-cron";
 import { storage } from "../storage";
+import { deliver as deliverWebhook } from "./webhookDelivery";
 
 const mockStorage = vi.mocked(storage);
 import type { Monitor } from "@shared/schema";
@@ -1083,5 +1085,49 @@ describe("webhook retry cumulative backoff", () => {
 
     expect(mockStorage.getMonitor).toHaveBeenCalledWith(1);
     expect(mockStorage.updateDeliveryLog).toHaveBeenCalledWith(1, { status: "failed" });
+  });
+
+  it("retries updateDeliveryLog with withDbRetry after successful webhook delivery", async () => {
+    const now = Date.now();
+    const mockDeliver = vi.mocked(deliverWebhook);
+
+    mockStorage.getPendingWebhookRetries.mockResolvedValueOnce([
+      {
+        id: 1,
+        monitorId: 1,
+        changeId: 10,
+        channel: "webhook",
+        status: "pending",
+        attempt: 1,
+        response: null,
+        deliveredAt: null,
+        createdAt: new Date(now - 10_000), // 10s ago — exceeds 5s threshold for attempt 1
+      },
+    ]);
+    const monitor = makeMonitor();
+    mockStorage.getMonitor.mockResolvedValueOnce(monitor);
+    mockStorage.getMonitorChannels.mockResolvedValueOnce([
+      { channel: "webhook", enabled: true, config: { url: "https://hook.example.com/cb", secret: "s3cret" } },
+    ]);
+    mockStorage.getMonitorChangeById.mockResolvedValueOnce({ id: 10, monitorId: 1 });
+    mockDeliver.mockResolvedValueOnce({ success: true, statusCode: 200 });
+
+    // First call to updateDeliveryLog fails with transient error, second succeeds
+    mockStorage.updateDeliveryLog
+      .mockRejectedValueOnce(new Error("Connection terminated unexpectedly"))
+      .mockResolvedValueOnce(undefined);
+
+    await startScheduler();
+    const cronPromise = runCron("*/1 * * * *");
+    // Advance past the 1s withDbRetry delay
+    await vi.advanceTimersByTimeAsync(2000);
+    await cronPromise;
+
+    // updateDeliveryLog should have been called twice (first fail, then retry)
+    expect(mockStorage.updateDeliveryLog).toHaveBeenCalledTimes(2);
+    expect(mockStorage.updateDeliveryLog).toHaveBeenCalledWith(1, expect.objectContaining({
+      status: "success",
+      attempt: 2,
+    }));
   });
 });

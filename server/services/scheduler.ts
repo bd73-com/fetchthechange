@@ -310,26 +310,31 @@ export async function startScheduler() {
           const nextAttempt = entry.attempt + 1;
 
           if (result.success) {
-            await storage.updateDeliveryLog(entry.id, {
-              status: "success",
-              attempt: nextAttempt,
-              deliveredAt: new Date(),
-              response: { statusCode: result.statusCode } as Record<string, unknown>,
-            });
+            try {
+              await withDbRetry(() => storage.updateDeliveryLog(entry.id, {
+                status: "success",
+                attempt: nextAttempt,
+                deliveredAt: new Date(),
+                response: { statusCode: result.statusCode } as Record<string, unknown>,
+              }));
+            } catch (dbErr) {
+              console.error(`[Webhook] Delivered successfully but failed to update delivery log (entryId=${entry.id}, monitorId=${monitor.id}): ${dbErr instanceof Error ? dbErr.message : String(dbErr)}`);
+              throw dbErr;
+            }
           } else if (nextAttempt >= 3) {
             const urlDomain = new URL(config.url).hostname;
-            await storage.updateDeliveryLog(entry.id, {
+            await withDbRetry(() => storage.updateDeliveryLog(entry.id, {
               status: "failed",
               attempt: nextAttempt,
               response: { error: result.error } as Record<string, unknown>,
-            });
+            }));
             console.error(`[Webhook] Delivery failed after all retries (monitorId=${monitor.id}, domain=${urlDomain})`);
           } else {
-            await storage.updateDeliveryLog(entry.id, {
+            await withDbRetry(() => storage.updateDeliveryLog(entry.id, {
               status: "pending",
               attempt: nextAttempt,
               response: { error: result.error } as Record<string, unknown>,
-            });
+            }));
             console.warn(`[Webhook] Delivery failed, scheduling retry (monitorId=${monitor.id}, attempt=${nextAttempt}, error=${result.error})`);
           }
         }
