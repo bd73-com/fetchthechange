@@ -4,6 +4,8 @@ import { db } from "./db";
 import { eq, desc, asc, and, or, isNull, lte, lt, gte, sql, inArray } from "drizzle-orm";
 import { notificationTablesExist } from "./services/notificationReady";
 
+export const PENDING_WEBHOOK_RETRY_QUERY_LIMIT = 500;
+
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getMonitors(userId: string): Promise<Monitor[]>;
@@ -392,7 +394,8 @@ export class DatabaseStorage implements IStorage {
         eq(deliveryLog.status, "pending"),
         lt(deliveryLog.attempt, 3)
       ))
-      .orderBy(deliveryLog.createdAt);
+      .orderBy(deliveryLog.createdAt)
+      .limit(PENDING_WEBHOOK_RETRY_QUERY_LIMIT);
   }
 
   async cleanupOldDeliveryLogs(olderThan: Date): Promise<number> {

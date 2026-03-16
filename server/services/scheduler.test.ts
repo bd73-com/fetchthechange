@@ -22,6 +22,7 @@ const {
 }));
 
 vi.mock("../storage", () => ({
+  PENDING_WEBHOOK_RETRY_QUERY_LIMIT: 500,
   storage: {
     getAllActiveMonitors: mockGetAllActiveMonitors,
     cleanupPollutedValues: mockCleanupPollutedValues,
