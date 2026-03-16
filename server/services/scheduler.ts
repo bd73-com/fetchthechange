@@ -19,9 +19,16 @@ let schedulerStarted = false;
 const cronTasks: ReturnType<typeof cron.schedule>[] = [];
 const pendingTimeouts = new Set<ReturnType<typeof setTimeout>>();
 
-/** Transient DB errors that are safe to retry (connection drops, pool exhaustion). */
+/**
+ * Transient DB errors that are safe to retry (connection drops, pool exhaustion).
+ * Checks both PostgreSQL error codes (stable across driver versions) and message
+ * substrings (fallback for connection-level errors that lack a code).
+ */
 function isTransientDbError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
+  // PostgreSQL error codes: 08xxx = connection exceptions, 57P01 = admin shutdown
+  const code = (err as any).code;
+  if (typeof code === "string" && (/^08/.test(code) || code === "57P01")) return true;
   const msg = err.message.toLowerCase();
   return msg.includes("connection terminated")
     || msg.includes("connection timeout")
@@ -38,7 +45,9 @@ async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
     return await fn();
   } catch (err) {
     if (isTransientDbError(err)) {
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => {
+        trackTimeout(() => r(undefined), 1000);
+      });
       return fn();
     }
     throw err;
