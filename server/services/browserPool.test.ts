@@ -145,9 +145,9 @@ describe("BrowserPool", () => {
       const { browser: b1 } = await pool.acquire(vi.fn().mockResolvedValue(stale));
       pool.release(b1);
 
-      // Advance time past the 90-second idle expiry
+      // Advance time past the 2-minute idle expiry
       vi.useFakeTimers();
-      vi.advanceTimersByTime(91_000);
+      vi.advanceTimersByTime(121_000);
 
       // Next acquire should evict the stale browser and create a fresh one
       const { browser: b2 } = await pool.acquire(vi.fn().mockResolvedValue(fresh));

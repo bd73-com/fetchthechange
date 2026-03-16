@@ -1,7 +1,7 @@
 /**
  * Warm Browser Pool — reuses CDP connections across Browserless checks.
  *
- * Holds up to POOL_MAX idle browsers with a 90-second expiry. Browsers are
+ * Holds up to POOL_MAX idle browsers with a 2-minute expiry. Browsers are
  * validated via isConnected() on acquire and evicted if stale or disconnected.
  *
  * Note: context-level failures (crashed tab, wedged renderer) do NOT
@@ -23,7 +23,7 @@ interface PoolEntry {
 }
 
 const POOL_MAX = 1;
-const POOL_IDLE_EXPIRY_MS = 90 * 1000; // 90 seconds — shorter expiry reclaims CDP sockets faster
+const POOL_IDLE_EXPIRY_MS = 2 * 60 * 1000; // 2 minutes — bridges scheduler intervals while reclaiming ports faster than 5 min
 
 export class BrowserPool {
   private entries: PoolEntry[] = [];

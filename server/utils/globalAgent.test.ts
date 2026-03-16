@@ -26,9 +26,9 @@ describe("globalAgent", () => {
 
     expect(constructorArgs).toHaveLength(1);
     const config = constructorArgs[0];
-    expect(config.keepAliveTimeout).toBe(4_000);
-    expect(config.keepAliveMaxTimeout).toBe(10_000);
-    expect(config.connections).toBe(2);
+    expect(config.keepAliveTimeout).toBe(8_000);
+    expect(config.keepAliveMaxTimeout).toBe(15_000);
+    expect(config.connections).toBe(4);
     expect(config.pipelining).toBe(1);
     expect(config.connect.timeout).toBe(10_000);
   });

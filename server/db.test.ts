@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const poolConstructorArgs: any[] = [];
 const mockPool = {
@@ -23,9 +23,19 @@ vi.mock("drizzle-orm/node-postgres", () => ({
 vi.mock("@shared/schema", () => ({}));
 
 describe("db pool configuration", () => {
+  const originalDbUrl = process.env.DATABASE_URL;
+
   beforeEach(() => {
     poolConstructorArgs.length = 0;
     vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (originalDbUrl === undefined) {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = originalDbUrl;
+    }
   });
 
   it("creates pool with aggressive idle timeout for ephemeral port reclamation", async () => {
@@ -35,7 +45,7 @@ describe("db pool configuration", () => {
     expect(poolConstructorArgs).toHaveLength(1);
     const config = poolConstructorArgs[0];
     expect(config.max).toBe(3);
-    expect(config.idleTimeoutMillis).toBe(10_000);
+    expect(config.idleTimeoutMillis).toBe(15_000);
     expect(config.connectionTimeoutMillis).toBe(5_000);
   });
 
