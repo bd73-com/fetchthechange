@@ -324,6 +324,11 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       cleanupFailed = true;
       console.error("Failed to drain browser pool:", err);
     });
+    // Close global fetch connection pool (releases keep-alive sockets)
+    const { agent: globalAgent } = await import("./utils/globalAgent");
+    await globalAgent.close().catch((err: unknown) => {
+      console.error("Failed to close global agent:", err);
+    });
     // Close DB connection pool
     console.log("Closing DB pool...");
     await dbPool.end().catch((err) => {

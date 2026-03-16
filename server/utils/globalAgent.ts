@@ -12,7 +12,7 @@
 
 import { Agent, setGlobalDispatcher } from "undici";
 
-const agent = new Agent({
+export const agent = new Agent({
   keepAliveTimeout: 30_000,       // reuse idle sockets for 30 s
   keepAliveMaxTimeout: 60_000,    // hard cap on socket reuse
   connections: 6,                 // max connections per origin (covers Slack, Resend, Browserless, webhooks)
