@@ -56,6 +56,7 @@ const STRIPE_SYNC_INIT_TIMEOUT_MS = 15_000;
 let stripeSync: any = null;
 let stripeSyncPending: Promise<any> | null = null;
 let stripeSyncShuttingDown = false;
+let stripeSyncClosing: Promise<void> | null = null;
 
 /** Webhook signing secret — set from STRIPE_WEBHOOK_SECRET env or managed webhook creation. */
 let webhookSecret: string | null = process.env.STRIPE_WEBHOOK_SECRET ?? null;
@@ -95,6 +96,7 @@ export async function getStripeSync() {
       })(),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('StripeSync initialization timed out')), STRIPE_SYNC_INIT_TIMEOUT_MS);
+        if (typeof timer === 'object' && 'unref' in timer) timer.unref();
       }),
     ]).then((result) => {
       clearTimeout(timer);
@@ -112,18 +114,21 @@ export async function getStripeSync() {
   return stripeSyncPending;
 }
 
-/** Close the StripeSync database pool if it was initialized. */
+/** Close the StripeSync database pool if it was initialized. One-way — cannot re-initialize after. */
 export async function closeStripeSync(): Promise<void> {
   stripeSyncShuttingDown = true;
-  let pendingResult: any = null;
-  if (stripeSyncPending) {
-    try { pendingResult = await stripeSyncPending; } catch { /* initialization may have failed */ }
-  }
-  stripeSyncPending = null;
-  // Close either the cached singleton or the just-resolved pending result
-  const instanceToClose = stripeSync ?? pendingResult;
-  stripeSync = null;
-  if (instanceToClose) {
-    await instanceToClose.postgresClient?.pool?.end();
-  }
+  if (stripeSyncClosing) return stripeSyncClosing;
+  stripeSyncClosing = (async () => {
+    let pendingResult: any = null;
+    if (stripeSyncPending) {
+      try { pendingResult = await stripeSyncPending; } catch { /* initialization may have failed */ }
+    }
+    stripeSyncPending = null;
+    const instanceToClose = stripeSync ?? pendingResult;
+    stripeSync = null;
+    if (instanceToClose) {
+      await instanceToClose.postgresClient?.pool?.end();
+    }
+  })();
+  return stripeSyncClosing;
 }
