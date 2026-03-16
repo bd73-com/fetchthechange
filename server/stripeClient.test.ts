@@ -14,7 +14,6 @@ describe("closeStripeSync", () => {
       postgresClient: { pool: { end: mockPoolEnd } },
     };
 
-    // Mock stripe-replit-sync with a proper class constructor
     vi.doMock("stripe-replit-sync", () => ({
       StripeSync: class {
         postgresClient = mockStripeSync.postgresClient;
@@ -23,10 +22,8 @@ describe("closeStripeSync", () => {
 
     const { getStripeSync, closeStripeSync } = await import("./stripeClient");
 
-    // Initialize the singleton
     await getStripeSync();
 
-    // Close it
     await closeStripeSync();
     expect(mockPoolEnd).toHaveBeenCalledOnce();
 
@@ -37,7 +34,36 @@ describe("closeStripeSync", () => {
 
   it("is a no-op when stripeSync was never initialized", async () => {
     const { closeStripeSync } = await import("./stripeClient");
-    // Should not throw
     await expect(closeStripeSync()).resolves.toBeUndefined();
+  });
+
+  it("propagates error when pool.end() rejects", async () => {
+    const mockPoolEnd = vi.fn().mockRejectedValue(new Error("pool close failed"));
+
+    vi.doMock("stripe-replit-sync", () => ({
+      StripeSync: class {
+        postgresClient = { pool: { end: mockPoolEnd } };
+      },
+    }));
+
+    const { getStripeSync, closeStripeSync } = await import("./stripeClient");
+    await getStripeSync();
+
+    await expect(closeStripeSync()).rejects.toThrow("pool close failed");
+  });
+
+  it("prevents getStripeSync() from resurrecting singleton after shutdown", async () => {
+    vi.doMock("stripe-replit-sync", () => ({
+      StripeSync: class {
+        postgresClient = { pool: { end: vi.fn().mockResolvedValue(undefined) } };
+      },
+    }));
+
+    const { getStripeSync, closeStripeSync } = await import("./stripeClient");
+    await getStripeSync();
+    await closeStripeSync();
+
+    // After shutdown, getStripeSync should throw
+    await expect(getStripeSync()).rejects.toThrow("shutting down");
   });
 });
