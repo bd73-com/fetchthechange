@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { insertMonitorSchema, monitorMetrics, monitors, campaigns, campaignRecipients, insertCampaignSchema } from "./schema";
+import { insertMonitorSchema, monitorMetrics, monitors, campaigns, campaignRecipients, insertCampaignSchema, deliveryLog } from "./schema";
 import { users } from "./models/auth";
 import { TIER_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS, PAUSE_THRESHOLDS } from "./models/auth";
 import { api } from "./routes";
+import { getTableConfig } from "drizzle-orm/pg-core";
 
 describe("insertMonitorSchema", () => {
   const validInput = {
@@ -532,5 +533,40 @@ describe("insertCampaignSchema", () => {
       scheduledAt: date,
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("deliveryLog table indexes", () => {
+  const config = getTableConfig(deliveryLog);
+  const indexMap = new Map(
+    config.indexes.map((idx) => [
+      idx.config.name,
+      idx.config.columns.map((c: { name: string }) => c.name),
+    ])
+  );
+
+  it("has composite index on (monitor_id, created_at)", () => {
+    expect(indexMap.get("delivery_log_monitor_created_idx")).toEqual([
+      "monitor_id",
+      "created_at",
+    ]);
+  });
+
+  it("has composite index on (channel, status, attempt, created_at) for webhook retries", () => {
+    expect(indexMap.get("delivery_log_channel_status_attempt_idx")).toEqual([
+      "channel",
+      "status",
+      "attempt",
+      "created_at",
+    ]);
+  });
+
+  it("has all expected columns", () => {
+    const columns = Object.keys(deliveryLog);
+    expect(columns).toContain("channel");
+    expect(columns).toContain("status");
+    expect(columns).toContain("attempt");
+    expect(columns).toContain("deliveredAt");
+    expect(columns).toContain("response");
   });
 });

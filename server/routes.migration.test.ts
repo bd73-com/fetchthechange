@@ -167,15 +167,15 @@ describe("error_logs dedup column migration at startup", () => {
     const app = makeMockApp();
     await registerRoutes(app as any, app as any);
 
-    // db.execute should have been called 23 times:
+    // db.execute should have been called 24 times:
     // 2 for the ALTER TABLE monitors statements (health_alert_sent_at, last_healthy_at)
     // 3 for the ALTER TABLE error_logs statements (first_occurrence, occurrence_count, deleted_at)
     // 2 for the api_keys table creation (CREATE TABLE + CREATE INDEX)
-    // 6 for notification channel tables (3 CREATE TABLE + 2 indexes + 1 unique index)
+    // 7 for notification channel tables (3 CREATE TABLE + 3 indexes + 1 unique index)
     // 3 for notification_queue columns (2 ALTER TABLE + 1 CREATE INDEX)
     // 5 for tag tables (2 CREATE TABLE + 2 indexes + 1 unique index)
     // 2 for monitor_conditions table (1 CREATE TABLE + 1 CREATE INDEX)
-    expect(mockDbExecute).toHaveBeenCalledTimes(23);
+    expect(mockDbExecute).toHaveBeenCalledTimes(24);
 
     // Verify specific DDL statements were issued (drizzle sql`` produces SQL objects)
     const callStrings = mockDbExecute.mock.calls.map((c: any[]) => {

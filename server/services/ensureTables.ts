@@ -79,6 +79,7 @@ export async function ensureChannelTables(): Promise<void> {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS delivery_log_monitor_created_idx ON delivery_log(monitor_id, created_at)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS delivery_log_channel_status_attempt_idx ON delivery_log(channel, status, attempt, created_at)`);
 
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS slack_connections (
