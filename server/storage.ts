@@ -393,7 +393,7 @@ export class DatabaseStorage implements IStorage {
         lt(deliveryLog.attempt, 3)
       ))
       .orderBy(deliveryLog.createdAt)
-      .limit(100);
+      .limit(500);
   }
 
   async cleanupOldDeliveryLogs(olderThan: Date): Promise<number> {

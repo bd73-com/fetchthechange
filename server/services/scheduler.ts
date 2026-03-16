@@ -277,6 +277,9 @@ export async function startScheduler() {
       webhookCronRunning = true;
       try {
         const pendingRetries = await withDbRetry(() => storage.getPendingWebhookRetries());
+        if (pendingRetries.length >= 500) {
+          console.warn(`[Webhook] Storage query limit reached (${pendingRetries.length} rows) — additional pending retries may be queued beyond this batch`);
+        }
         const now = Date.now();
 
         // Cumulative backoff windows from creation: attempt 1 → 5s, attempt 2 → 35s, attempt 3 → 155s
