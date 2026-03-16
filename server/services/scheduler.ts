@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { storage } from "../storage";
+import { storage, PENDING_WEBHOOK_RETRY_QUERY_LIMIT } from "../storage";
 import { checkMonitor, monitorsNeedingRetry } from "./scraper";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery";
@@ -271,14 +271,20 @@ export async function startScheduler() {
     // Cap per-tick deliveries to limit ephemeral port usage while still draining
     // backlogs within a few minutes after a server restart.
     const MAX_WEBHOOK_RETRIES_PER_TICK = 10;
+    const WEBHOOK_BACKLOG_WARN_INTERVAL_MS = 15 * 60 * 1000;
+    let lastWebhookBacklogWarnAt = 0;
     let webhookCronRunning = false;
     cronTasks.push(cron.schedule("*/1 * * * *", async () => {
       if (webhookCronRunning) return;
       webhookCronRunning = true;
       try {
         const pendingRetries = await withDbRetry(() => storage.getPendingWebhookRetries());
-        if (pendingRetries.length >= 500) {
-          console.warn(`[Webhook] Storage query limit reached (${pendingRetries.length} rows) — additional pending retries may be queued beyond this batch`);
+        if (pendingRetries.length >= PENDING_WEBHOOK_RETRY_QUERY_LIMIT) {
+          const nowMs = Date.now();
+          if (nowMs - lastWebhookBacklogWarnAt >= WEBHOOK_BACKLOG_WARN_INTERVAL_MS) {
+            lastWebhookBacklogWarnAt = nowMs;
+            console.warn(`[Webhook] Storage query limit reached (${pendingRetries.length}/${PENDING_WEBHOOK_RETRY_QUERY_LIMIT}) — additional pending retries may be queued beyond this batch`);
+          }
         }
         const now = Date.now();
 
