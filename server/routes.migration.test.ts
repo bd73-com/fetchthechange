@@ -187,6 +187,7 @@ describe("error_logs dedup column migration at startup", () => {
     expect(callStrings.some((s: string) => s.includes("api_keys_user_revoked_idx"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("notification_channels"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("delivery_log"))).toBe(true);
+    expect(callStrings.some((s: string) => s.includes("delivery_log_channel_status_attempt_idx"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("slack_connections"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("CREATE TABLE IF NOT EXISTS tags"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("monitor_tags"))).toBe(true);

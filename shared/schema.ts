@@ -299,7 +299,7 @@ export const deliveryLog = pgTable("delivery_log", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
   monitorCreatedIdx: index("delivery_log_monitor_created_idx").on(table.monitorId, table.createdAt),
-  channelStatusAttemptIdx: index("delivery_log_channel_status_attempt_idx").on(table.channel, table.status, table.attempt, table.createdAt),
+  channelStatusAttemptIdx: index("delivery_log_channel_status_attempt_idx").on(table.channel, table.status, table.createdAt, table.attempt),
 }));
 
 export const deliveryLogRelations = relations(deliveryLog, ({ one }) => ({

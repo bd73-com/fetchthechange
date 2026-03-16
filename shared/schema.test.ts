@@ -552,12 +552,12 @@ describe("deliveryLog table indexes", () => {
     ]);
   });
 
-  it("has composite index on (channel, status, attempt, created_at) for webhook retries", () => {
+  it("has composite index on (channel, status, created_at, attempt) for webhook retries", () => {
     expect(indexMap.get("delivery_log_channel_status_attempt_idx")).toEqual([
       "channel",
       "status",
-      "attempt",
       "created_at",
+      "attempt",
     ]);
   });
 
