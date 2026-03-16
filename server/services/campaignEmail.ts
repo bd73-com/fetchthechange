@@ -569,6 +569,7 @@ export async function reconcileCampaignCounters(campaignId: number): Promise<{
   if (campaign.status === "sending") throw new Error("Cannot reconcile counters while campaign is actively sending");
 
   const before = {
+    totalRecipients: campaign.totalRecipients,
     sentCount: campaign.sentCount,
     failedCount: campaign.failedCount,
     deliveredCount: campaign.deliveredCount,
@@ -579,6 +580,7 @@ export async function reconcileCampaignCounters(campaignId: number): Promise<{
   // Compute actual counts from recipient rows
   const result = await db.execute(sql`
     SELECT
+      COUNT(*)::int AS "totalRecipients",
       COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened', 'clicked'))::int AS "sentCount",
       COUNT(*) FILTER (WHERE status IN ('failed', 'bounced'))::int AS "failedCount",
       COUNT(*) FILTER (WHERE status IN ('delivered', 'opened', 'clicked'))::int AS "deliveredCount",
@@ -590,6 +592,7 @@ export async function reconcileCampaignCounters(campaignId: number): Promise<{
 
   const row = result.rows[0] as any;
   const after = {
+    totalRecipients: Number(row?.totalRecipients ?? 0),
     sentCount: Number(row?.sentCount ?? 0),
     failedCount: Number(row?.failedCount ?? 0),
     deliveredCount: Number(row?.deliveredCount ?? 0),

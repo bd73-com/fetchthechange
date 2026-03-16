@@ -662,42 +662,42 @@ describe("reconcileCampaignCounters", () => {
 
   it("recomputes counters from recipient rows and returns before/after", async () => {
     const campaign = {
-      id: 1, sentCount: 10, failedCount: 2, deliveredCount: 5, openedCount: 3, clickedCount: 1,
+      id: 1, totalRecipients: 12, sentCount: 10, failedCount: 2, deliveredCount: 5, openedCount: 3, clickedCount: 1,
     };
     mockDbLimit.mockResolvedValueOnce([campaign]);
     // db.execute returns recomputed counts
     mockDbExecute.mockResolvedValueOnce({
-      rows: [{ sentCount: 8, failedCount: 4, deliveredCount: 6, openedCount: 2, clickedCount: 0 }],
+      rows: [{ totalRecipients: 12, sentCount: 8, failedCount: 4, deliveredCount: 6, openedCount: 2, clickedCount: 0 }],
     });
 
     const result = await reconcileCampaignCounters(1);
 
     expect(result.before).toEqual({
-      sentCount: 10, failedCount: 2, deliveredCount: 5, openedCount: 3, clickedCount: 1,
+      totalRecipients: 12, sentCount: 10, failedCount: 2, deliveredCount: 5, openedCount: 3, clickedCount: 1,
     });
     expect(result.after).toEqual({
-      sentCount: 8, failedCount: 4, deliveredCount: 6, openedCount: 2, clickedCount: 0,
+      totalRecipients: 12, sentCount: 8, failedCount: 4, deliveredCount: 6, openedCount: 2, clickedCount: 0,
     });
     // Verify db.update was called to persist the new counters
     expect(mockDbSet).toHaveBeenCalledWith({
-      sentCount: 8, failedCount: 4, deliveredCount: 6, openedCount: 2, clickedCount: 0,
+      totalRecipients: 12, sentCount: 8, failedCount: 4, deliveredCount: 6, openedCount: 2, clickedCount: 0,
     });
   });
 
   it("handles null values from query by defaulting to 0", async () => {
     const campaign = {
-      id: 1, sentCount: 5, failedCount: 1, deliveredCount: 3, openedCount: 0, clickedCount: 0,
+      id: 1, totalRecipients: 5, sentCount: 5, failedCount: 1, deliveredCount: 3, openedCount: 0, clickedCount: 0,
     };
     mockDbLimit.mockResolvedValueOnce([campaign]);
     // Simulate empty campaign with no recipients
     mockDbExecute.mockResolvedValueOnce({
-      rows: [{ sentCount: null, failedCount: null, deliveredCount: null, openedCount: null, clickedCount: null }],
+      rows: [{ totalRecipients: null, sentCount: null, failedCount: null, deliveredCount: null, openedCount: null, clickedCount: null }],
     });
 
     const result = await reconcileCampaignCounters(1);
 
     expect(result.after).toEqual({
-      sentCount: 0, failedCount: 0, deliveredCount: 0, openedCount: 0, clickedCount: 0,
+      totalRecipients: 0, sentCount: 0, failedCount: 0, deliveredCount: 0, openedCount: 0, clickedCount: 0,
     });
   });
 });
