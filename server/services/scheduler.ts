@@ -89,6 +89,11 @@ export function _resetSchedulerStarted() {
   schedulerStarted = false;
 }
 
+/** @internal Test-only reset for the active checks counter */
+export function _resetActiveChecks() {
+  activeChecks = 0;
+}
+
 /** Per-monitor backoff tracker for accelerated retries. */
 export const retryBackoff = new Map<number, { attempts: number }>();
 
