@@ -3,6 +3,6 @@
  * Falls back to the legacy Replit domain when REPLIT_DOMAINS is unset.
  */
 export function getAppUrl(): string {
-  const domains = process.env.REPLIT_DOMAINS?.split(",")[0];
+  const domains = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
   return domains ? `https://${domains}` : "https://fetch-the-change.replit.app";
 }

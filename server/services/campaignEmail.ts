@@ -442,25 +442,25 @@ async function finalizeCampaign(campaignId: number, status: string): Promise<voi
       const failedCount = failedResult.rows.length;
 
       // Single campaign update: status + completedAt + failedCount in one statement
-      await tx
-        .update(campaigns)
-        .set({
-          status,
-          completedAt: new Date(),
-          ...(failedCount > 0
-            ? { failedCount: sql`COALESCE(${campaigns.failedCount}, 0) + ${failedCount}` }
-            : {}),
-        })
-        .where(eq(campaigns.id, campaignId));
+      // Guard against overwriting a terminal status (e.g., already finalized by batch loop)
+      await tx.execute(sql`
+        UPDATE campaigns
+        SET status = ${status},
+            completed_at = NOW()
+            ${failedCount > 0 ? sql`, failed_count = COALESCE(failed_count, 0) + ${failedCount}` : sql``}
+        WHERE id = ${campaignId}
+          AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+      `);
     });
   } else {
-    await db
-      .update(campaigns)
-      .set({
-        status,
-        completedAt: new Date(),
-      })
-      .where(eq(campaigns.id, campaignId));
+    // Guard against overwriting a terminal status
+    await db.execute(sql`
+      UPDATE campaigns
+      SET status = ${status},
+          completed_at = NOW()
+      WHERE id = ${campaignId}
+        AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+    `);
   }
 
   console.log(`[Campaign] Campaign ${campaignId} finalized as '${status}'`);
@@ -500,7 +500,7 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
       `);
       const currentStatus = (statusResult.rows[0] as any)?.status;
       const terminalStatuses = ["sent", "cancelled", "partially_sent"];
-      if (currentStatus && terminalStatuses.includes(currentStatus)) {
+      if (!currentStatus || terminalStatuses.includes(currentStatus)) {
         skipped = true;
         return;
       }
