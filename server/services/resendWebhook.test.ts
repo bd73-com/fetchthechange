@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Use vi.hoisted() so mocks are available when vi.mock() factories run
-const { mockFrom, mockWhere, mockLimit, mockSet, mockExecute, mockTransaction, mockTxSet, mockTxExecute } = vi.hoisted(() => ({
+const { mockFrom, mockWhere, mockLimit, mockSet, mockExecute, mockTransaction, mockTxSet, mockTxExecute, mockTxWhere, mockTxReturning } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockWhere: vi.fn(),
   mockLimit: vi.fn(),
@@ -10,6 +10,8 @@ const { mockFrom, mockWhere, mockLimit, mockSet, mockExecute, mockTransaction, m
   mockTransaction: vi.fn(),
   mockTxSet: vi.fn(),
   mockTxExecute: vi.fn(),
+  mockTxWhere: vi.fn(),
+  mockTxReturning: vi.fn(),
 }));
 
 vi.mock("../db", () => ({
@@ -28,7 +30,7 @@ vi.mock("../db", () => ({
 }));
 
 vi.mock("@shared/schema", () => ({
-  campaignRecipients: { resendId: "resendId", id: "id" },
+  campaignRecipients: { resendId: "resendId", id: "id", status: "status", openedAt: "openedAt", clickedAt: "clickedAt", failedAt: "failedAt" },
   campaigns: {},
 }));
 
@@ -36,7 +38,9 @@ vi.mock("drizzle-orm", () => {
   const sqlTag = (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values });
   sqlTag.empty = () => ({ strings: [], values: [] });
   return {
-    eq: (a: any, b: any) => ({ field: a, value: b }),
+    eq: (a: any, b: any) => ({ op: "eq", field: a, value: b }),
+    and: (...conditions: any[]) => ({ op: "and", conditions }),
+    isNull: (field: any) => ({ op: "isNull", field }),
     sql: sqlTag,
   };
 });
@@ -139,7 +143,10 @@ describe("handleResendWebhookEvent", () => {
     mockFrom.mockReturnValue({ where: mockWhere });
     mockWhere.mockReturnValue({ limit: mockLimit });
     mockSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
-    mockTxSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+    // Chain: tx.update().set().where().returning()
+    mockTxSet.mockReturnValue({ where: mockTxWhere });
+    mockTxWhere.mockReturnValue({ returning: mockTxReturning });
+    mockTxReturning.mockResolvedValue([]);
     mockExecute.mockResolvedValue({ rows: [] });
     mockTxExecute.mockResolvedValue({ rows: [] });
   });
@@ -162,50 +169,47 @@ describe("handleResendWebhookEvent", () => {
 
     // Should query but not update
     expect(mockExecute).not.toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 
   describe("email.delivered", () => {
-    it("updates recipient status to delivered when status is 'sent'", async () => {
+    it("updates recipient status to delivered and increments counter when guard matches", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      const whereFn = vi.fn().mockResolvedValue(undefined);
-      mockTxSet.mockReturnValueOnce({ where: whereFn });
+      // Simulate the atomic UPDATE matching (status was still 'sent')
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.delivered"));
 
       expect(mockTxSet).toHaveBeenCalledWith(
         expect.objectContaining({ status: "delivered" })
       );
+      // WHERE should include both id and status guard
+      expect(mockTxWhere).toHaveBeenCalledWith(
+        expect.objectContaining({ op: "and" })
+      );
       expect(mockTxExecute).toHaveBeenCalled(); // counter update
     });
 
-    it("does NOT update when recipient is already opened", async () => {
+    it("does NOT increment counter when atomic UPDATE matches zero rows (already processed)", async () => {
       const recipient = makeRecipient({ status: "opened", openedAt: new Date() });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // Simulate the atomic UPDATE matching zero rows (status was no longer 'sent')
+      mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.delivered"));
 
-      // set() should NOT be called since status != "sent"
-      expect(mockTxSet).not.toHaveBeenCalled();
+      // Transaction still runs, but counter should NOT be incremented
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
       expect(mockTxExecute).not.toHaveBeenCalled();
-    });
-
-    it("does NOT update when recipient is already clicked", async () => {
-      const recipient = makeRecipient({ status: "clicked", clickedAt: new Date() });
-      mockLimit.mockResolvedValueOnce([recipient]);
-
-      await handleResendWebhookEvent(makeEvent("email.delivered"));
-
-      expect(mockTxSet).not.toHaveBeenCalled();
     });
   });
 
   describe("email.opened", () => {
-    it("updates recipient to opened on first open", async () => {
+    it("updates recipient to opened and increments counter on first open", async () => {
       const recipient = makeRecipient({ status: "delivered", deliveredAt: new Date(), openedAt: null });
       mockLimit.mockResolvedValueOnce([recipient]);
-      const whereFn = vi.fn().mockResolvedValue(undefined);
-      mockTxSet.mockReturnValueOnce({ where: whereFn });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.opened"));
 
@@ -215,20 +219,21 @@ describe("handleResendWebhookEvent", () => {
       expect(mockTxExecute).toHaveBeenCalled();
     });
 
-    it("does NOT update on duplicate open event", async () => {
+    it("does NOT increment counter on duplicate open event", async () => {
       const recipient = makeRecipient({ status: "opened", openedAt: new Date() });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.opened"));
 
-      expect(mockTxSet).not.toHaveBeenCalled();
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockTxExecute).not.toHaveBeenCalled();
     });
 
     it("also increments delivered_count if not previously delivered", async () => {
       const recipient = makeRecipient({ status: "sent", deliveredAt: null, openedAt: null });
       mockLimit.mockResolvedValueOnce([recipient]);
-      const whereFn = vi.fn().mockResolvedValue(undefined);
-      mockTxSet.mockReturnValueOnce({ where: whereFn });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.opened"));
 
@@ -238,7 +243,7 @@ describe("handleResendWebhookEvent", () => {
   });
 
   describe("email.clicked", () => {
-    it("updates recipient to clicked on first click", async () => {
+    it("updates recipient to clicked and increments counter on first click", async () => {
       const recipient = makeRecipient({
         status: "opened",
         deliveredAt: new Date(),
@@ -246,8 +251,7 @@ describe("handleResendWebhookEvent", () => {
         clickedAt: null,
       });
       mockLimit.mockResolvedValueOnce([recipient]);
-      const whereFn = vi.fn().mockResolvedValue(undefined);
-      mockTxSet.mockReturnValueOnce({ where: whereFn });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.clicked"));
 
@@ -257,13 +261,15 @@ describe("handleResendWebhookEvent", () => {
       expect(mockTxExecute).toHaveBeenCalled();
     });
 
-    it("does NOT update on duplicate click event", async () => {
+    it("does NOT increment counter on duplicate click event", async () => {
       const recipient = makeRecipient({ clickedAt: new Date() });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.clicked"));
 
-      expect(mockTxSet).not.toHaveBeenCalled();
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockTxExecute).not.toHaveBeenCalled();
     });
 
     it("also sets openedAt and deliveredAt if not previously set", async () => {
@@ -274,8 +280,7 @@ describe("handleResendWebhookEvent", () => {
         clickedAt: null,
       });
       mockLimit.mockResolvedValueOnce([recipient]);
-      const whereFn = vi.fn().mockResolvedValue(undefined);
-      mockTxSet.mockReturnValueOnce({ where: whereFn });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.clicked"));
 
@@ -287,11 +292,10 @@ describe("handleResendWebhookEvent", () => {
   });
 
   describe("email.bounced", () => {
-    it("marks recipient as bounced with failure reason", async () => {
+    it("marks recipient as bounced with failure reason and increments counter", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      const whereFn = vi.fn().mockResolvedValue(undefined);
-      mockTxSet.mockReturnValueOnce({ where: whereFn });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.bounced"));
 
@@ -307,20 +311,20 @@ describe("handleResendWebhookEvent", () => {
     it("does NOT double-count on duplicate bounce webhook", async () => {
       const recipient = makeRecipient({ status: "bounced", failedAt: new Date(), failureReason: "bounced" });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.bounced"));
 
-      expect(mockTxSet).not.toHaveBeenCalled();
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
       expect(mockTxExecute).not.toHaveBeenCalled();
     });
   });
 
   describe("email.complained", () => {
-    it("marks recipient as complained with spam complaint reason", async () => {
+    it("marks recipient as complained with spam complaint reason and increments counter", async () => {
       const recipient = makeRecipient({ status: "delivered" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      const whereFn = vi.fn().mockResolvedValue(undefined);
-      mockTxSet.mockReturnValueOnce({ where: whereFn });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.complained"));
 
@@ -336,10 +340,11 @@ describe("handleResendWebhookEvent", () => {
     it("does NOT double-count on duplicate complaint webhook", async () => {
       const recipient = makeRecipient({ status: "complained", failedAt: new Date(), failureReason: "spam complaint" });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.complained"));
 
-      expect(mockTxSet).not.toHaveBeenCalled();
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
       expect(mockTxExecute).not.toHaveBeenCalled();
     });
   });
@@ -348,7 +353,7 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for delivered events", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxSet.mockReturnValueOnce({ where: vi.fn().mockResolvedValue(undefined) });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.delivered"));
 
@@ -363,7 +368,7 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for opened events", async () => {
       const recipient = makeRecipient({ status: "delivered", deliveredAt: new Date(), openedAt: null });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxSet.mockReturnValueOnce({ where: vi.fn().mockResolvedValue(undefined) });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.opened"));
 
@@ -375,7 +380,7 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for clicked events", async () => {
       const recipient = makeRecipient({ status: "opened", deliveredAt: new Date(), openedAt: new Date(), clickedAt: null });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxSet.mockReturnValueOnce({ where: vi.fn().mockResolvedValue(undefined) });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.clicked"));
 
@@ -387,7 +392,7 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for bounced events", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxSet.mockReturnValueOnce({ where: vi.fn().mockResolvedValue(undefined) });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.bounced"));
 
@@ -399,7 +404,7 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for complained events", async () => {
       const recipient = makeRecipient({ status: "delivered" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxSet.mockReturnValueOnce({ where: vi.fn().mockResolvedValue(undefined) });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.complained"));
 
@@ -418,13 +423,16 @@ describe("handleResendWebhookEvent", () => {
       ).rejects.toThrow("connection lost");
     });
 
-    it("does not call transaction when guard condition skips processing", async () => {
+    it("still runs transaction even when guard would have skipped (guard is now atomic)", async () => {
       const recipient = makeRecipient({ status: "opened", openedAt: new Date() });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.opened"));
 
-      expect(mockTransaction).not.toHaveBeenCalled();
+      // Transaction runs, but the atomic WHERE prevents double-counting
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockTxExecute).not.toHaveBeenCalled();
     });
   });
 
