@@ -4660,7 +4660,9 @@ describe("stealth evasion", () => {
     expect(gotoIdx).toBeGreaterThan(initIdx);
   });
 
-  it("includes modern User-Agent and anti-detection headers in static fetch", async () => {
+  it("includes Chrome UA with Client Hints headers in static fetch", async () => {
+    // Force Chrome profile selection (index 0 = Chrome 133 Windows)
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
     const html = `<html><body><span class="price">$10</span></body></html>`;
     const fetchSpy = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(html, { status: 200 }));
@@ -4670,20 +4672,34 @@ describe("stealth evasion", () => {
 
     const fetchCall = fetchSpy.mock.calls[0];
     const headers = (fetchCall[1] as RequestInit)?.headers as Record<string, string>;
-    // UA is randomly selected from a pool — verify it's present and modern
-    expect(headers['User-Agent']).toBeDefined();
-    expect(headers['User-Agent']).toMatch(/Chrome\/13[234]|Firefox\/13[45]/);
-    // Sec-CH-UA-Mobile is only sent for Chrome profiles, not Firefox
-    if (headers['User-Agent'].includes('Chrome')) {
-      expect(headers['Sec-CH-UA-Mobile']).toBe('?0');
-    } else {
-      expect(headers['Sec-CH-UA-Mobile']).toBeUndefined();
-    }
-    // Direct navigation — no Referer, Sec-Fetch-Site: none
+    expect(headers['User-Agent']).toMatch(/Chrome\/13[234]/);
+    expect(headers['Sec-CH-UA-Mobile']).toBe('?0');
+    expect(headers['Sec-CH-UA']).toBeDefined();
     expect(headers['Referer']).toBeUndefined();
     expect(headers['Sec-Fetch-Site']).toBe('none');
-    // Accept-Encoding should be present
     expect(headers['Accept-Encoding']).toContain('gzip');
+    randomSpy.mockRestore();
+  });
+
+  it("includes Firefox UA without Client Hints headers in static fetch", async () => {
+    // Force Firefox profile selection (index 7 = Firefox 134 macOS, last entry)
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.99);
+    const html = `<html><body><span class="price">$10</span></body></html>`;
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    const monitor = makeMonitor({ selector: ".price" });
+    await runWithTimers(monitor);
+
+    const fetchCall = fetchSpy.mock.calls[0];
+    const headers = (fetchCall[1] as RequestInit)?.headers as Record<string, string>;
+    expect(headers['User-Agent']).toMatch(/Firefox\/13[45]/);
+    expect(headers['Sec-CH-UA-Mobile']).toBeUndefined();
+    expect(headers['Sec-CH-UA']).toBeUndefined();
+    expect(headers['Referer']).toBeUndefined();
+    expect(headers['Sec-Fetch-Site']).toBe('none');
+    expect(headers['Accept-Encoding']).toContain('gzip');
+    randomSpy.mockRestore();
   });
 
   it("calls addInitScript with stealth function in discoverSelectors", async () => {

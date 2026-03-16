@@ -70,6 +70,15 @@ function pickUaProfile() {
   return UA_PROFILES[Math.floor(Math.random() * UA_PROFILES.length)];
 }
 
+/** Chrome-only profiles for Browserless contexts where stealthInitScript injects Chrome-specific
+ *  JS stubs (window.chrome, navigator.plugins, mimeTypes). Using a Firefox UA in Chromium
+ *  creates a contradictory fingerprint that is a stronger bot signal than no stealth at all. */
+const CHROME_PROFILES = UA_PROFILES.filter(p => p.secChUa != null);
+
+function pickChromeProfile() {
+  return CHROME_PROFILES[Math.floor(Math.random() * CHROME_PROFILES.length)];
+}
+
 /** Returns browser-like headers with a randomly selected UA profile. */
 function browserLikeHeaders(url: string) {
   const profile = pickUaProfile();
@@ -95,18 +104,17 @@ function browserLikeHeaders(url: string) {
   return headers;
 }
 
-/** Returns Browserless stealth context options with a randomly selected UA profile. */
+/** Returns Browserless stealth context options with a Chrome-only UA profile.
+ *  Browserless runs Chromium — Firefox UAs would contradict the Chrome-specific
+ *  JS stubs injected by stealthInitScript(). */
 function stealthContextOptions() {
-  const profile = pickUaProfile();
+  const profile = pickChromeProfile();
   const extraHTTPHeaders: Record<string, string> = {
     'Accept-Language': 'en-US,en;q=0.9',
+    'Sec-CH-UA': profile.secChUa!,
+    'Sec-CH-UA-Mobile': '?0',
   };
-  // Only send Client Hints headers for Chrome profiles — Firefox never sends them
-  if (profile.secChUa) {
-    extraHTTPHeaders['Sec-CH-UA'] = profile.secChUa;
-    extraHTTPHeaders['Sec-CH-UA-Mobile'] = '?0';
-    if (profile.secChUaPlatform) extraHTTPHeaders['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
-  }
+  if (profile.secChUaPlatform) extraHTTPHeaders['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
   return {
     userAgent: profile.userAgent,
     locale: "en-US",
@@ -122,7 +130,10 @@ const VALUE_ATTRIBUTES = ['content', 'data-price', 'value', 'data-value'] as con
 /** Pattern matching known tracking/analytics domains to block in Browserless sessions. */
 const BLOCKED_TRACKING_PATTERN = /google-analytics|googletagmanager|facebook\.net|doubleclick|hotjar|segment\.io|newrelic|datadoghq/i;
 
-/** Resource types to block in Browserless sessions to speed up page load. */
+/** Resource types to block in Browserless sessions to speed up page load.
+ *  Images and fonts are intentionally allowed — anti-bot systems (DataDome, Akamai)
+ *  fingerprint pages that load zero images/fonts as headless. This increases bandwidth
+ *  but is necessary for evasion on retail sites. Only media (video/audio) is blocked. */
 const BLOCKED_RESOURCE_TYPES = ['media'];
 
 /** Base delay for exponential backoff on Browserless retry. */
@@ -252,7 +263,14 @@ function stealthInitScript() {
   if (!(window as any).chrome) {
     (window as any).chrome = {
       runtime: {
-        connect: function() { return {}; },
+        connect: function() {
+          return {
+            onMessage: { addListener: function() {}, removeListener: function() {} },
+            onDisconnect: { addListener: function() {}, removeListener: function() {} },
+            postMessage: function() {},
+            name: '',
+          };
+        },
         sendMessage: function() {},
         id: undefined,
         onMessage: { addListener: function() {}, removeListener: function() {} },
@@ -261,13 +279,14 @@ function stealthInitScript() {
       },
       csi: function() { return {}; },
       loadTimes: function() {
+        const t = Date.now() / 1000;
         return {
-          requestTime: Date.now() / 1000,
-          startLoadTime: Date.now() / 1000,
-          commitLoadTime: Date.now() / 1000,
-          finishDocumentLoadTime: Date.now() / 1000,
-          finishLoadTime: Date.now() / 1000,
-          firstPaintTime: Date.now() / 1000,
+          requestTime: t,
+          startLoadTime: t + 0.01,
+          commitLoadTime: t + 0.05,
+          finishDocumentLoadTime: t + 0.15,
+          finishLoadTime: t + 0.2,
+          firstPaintTime: t + 0.18,
           firstPaintAfterLoadTime: 0,
           navigationType: 'Other',
           wasFetchedViaSpdy: false,
@@ -281,12 +300,14 @@ function stealthInitScript() {
   }
 
   // 5. WebGL — spoof renderer/vendor away from SwiftShader
-  const getParameter = WebGLRenderingContext.prototype.getParameter;
-  WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
-    if (parameter === 37445) return 'Intel Inc.';   // UNMASKED_VENDOR_WEBGL
-    if (parameter === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
-    return getParameter.call(this, parameter);
-  };
+  try {
+    const getParameter = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
+      if (parameter === 37445) return 'Intel Inc.';   // UNMASKED_VENDOR_WEBGL
+      if (parameter === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+      return getParameter.call(this, parameter);
+    };
+  } catch (_) { /* WebGL may be unavailable */ }
 
   // 6. Permissions API — spoof notifications as 'prompt'
   try {
@@ -894,9 +915,11 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
       const effectiveSelector = isClassName ? `.${trimmedSelector}` : trimmedSelector;
 
-      // Small random delay before selector access to mimic human reading behavior
-      await page.waitForTimeout(800 + Math.floor(Math.random() * 1200));
-      await page.waitForSelector(effectiveSelector, { timeout: 10000 }).catch(() => {});
+      // Small random delay before selector access to mimic human reading behavior.
+      // Deduct from waitForSelector timeout to avoid pushing total beyond page budget.
+      const humanDelay = 800 + Math.floor(Math.random() * 1200);
+      await page.waitForTimeout(humanDelay);
+      await page.waitForSelector(effectiveSelector, { timeout: Math.max(10000 - humanDelay, 3000) }).catch(() => {});
       const count = await page.locator(effectiveSelector).count();
 
       let value: string | null = null;
