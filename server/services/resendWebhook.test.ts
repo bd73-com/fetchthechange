@@ -32,10 +32,14 @@ vi.mock("@shared/schema", () => ({
   campaigns: {},
 }));
 
-vi.mock("drizzle-orm", () => ({
-  eq: (a: any, b: any) => ({ field: a, value: b }),
-  sql: (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
-}));
+vi.mock("drizzle-orm", () => {
+  const sqlTag = (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values });
+  sqlTag.empty = () => ({ strings: [], values: [] });
+  return {
+    eq: (a: any, b: any) => ({ field: a, value: b }),
+    sql: sqlTag,
+  };
+});
 
 vi.mock("./logger", () => ({
   ErrorLogger: {
