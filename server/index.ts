@@ -324,16 +324,17 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       cleanupFailed = true;
       console.error("Failed to drain browser pool:", err);
     });
-    // Close global fetch connection pool (releases keep-alive sockets)
-    const { agent: globalAgent } = await import("./utils/globalAgent");
-    await globalAgent.close().catch((err: unknown) => {
-      console.error("Failed to close global agent:", err);
-    });
     // Close DB connection pool
     console.log("Closing DB pool...");
     await dbPool.end().catch((err) => {
       cleanupFailed = true;
       console.error("Failed to close DB pool:", err);
+    });
+    // Close global fetch connection pool last — in-flight webhook deliveries
+    // (from a cron tick that started before shutdown) may still need sockets.
+    const { agent: globalAgent } = await import("./utils/globalAgent");
+    await globalAgent.close().catch((err: unknown) => {
+      console.error("Failed to close global agent:", err);
     });
     console.log("Shutdown complete.");
     process.exit(cleanupFailed ? 1 : 0);

@@ -13,8 +13,8 @@
 import { Agent, setGlobalDispatcher } from "undici";
 
 export const agent = new Agent({
-  keepAliveTimeout: 30_000,       // reuse idle sockets for 30 s
-  keepAliveMaxTimeout: 60_000,    // hard cap on socket reuse
+  keepAliveTimeout: 15_000,       // reuse idle sockets for 15 s
+  keepAliveMaxTimeout: 30_000,    // hard cap — stay below Replit's idle connection timeout
   connections: 6,                 // max connections per origin (covers Slack, Resend, Browserless, webhooks)
   pipelining: 1,                  // no HTTP pipelining
   connect: {

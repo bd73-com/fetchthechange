@@ -1039,10 +1039,10 @@ describe("webhook retry cumulative backoff", () => {
     vi.useRealTimers();
   });
 
-  it("caps webhook retries at MAX_WEBHOOK_RETRIES_PER_TICK (3)", async () => {
+  it("caps webhook retries at MAX_WEBHOOK_RETRIES_PER_TICK (10)", async () => {
     const now = Date.now();
-    // Create 5 entries all past their backoff windows (attempt 1, 10s elapsed > 5s threshold)
-    const entries = Array.from({ length: 5 }, (_, i) => ({
+    // Create 15 entries all past their backoff windows (attempt 1, 10s elapsed > 5s threshold)
+    const entries = Array.from({ length: 15 }, (_, i) => ({
       id: i + 1,
       monitorId: i + 1,
       changeId: i + 1,
@@ -1067,10 +1067,10 @@ describe("webhook retry cumulative backoff", () => {
     await startScheduler();
     await runCron("*/1 * * * *");
 
-    // Only 3 should have been delivered (MAX_WEBHOOK_RETRIES_PER_TICK = 3)
-    expect(mockDeliverWebhook).toHaveBeenCalledTimes(3);
-    // Only 3 success updates
-    expect(mockStorage.updateDeliveryLog).toHaveBeenCalledTimes(3);
+    // Only 10 should have been delivered (MAX_WEBHOOK_RETRIES_PER_TICK = 10)
+    expect(mockDeliverWebhook).toHaveBeenCalledTimes(10);
+    // Only 10 success updates
+    expect(mockStorage.updateDeliveryLog).toHaveBeenCalledTimes(10);
   });
 
   it("skips retry when cumulative backoff has not elapsed", async () => {
