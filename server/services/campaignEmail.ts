@@ -35,10 +35,7 @@ function escapeHtml(str: string | null | undefined): string {
     .replace(/'/g, "&#39;");
 }
 
-function getAppUrl(): string {
-  const domains = process.env.REPLIT_DOMAINS?.split(",")[0];
-  return domains ? `https://${domains}` : "https://fetch-the-change.replit.app";
-}
+import { getAppUrl } from "../utils/appUrl";
 
 /**
  * Build a SQL query to resolve recipients matching the given filters,
@@ -494,18 +491,21 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
   // Mark remaining pending as cancelled (use failed status with reason)
   // Only proceed if the campaign is not already in a terminal state
   if (!control) {
-    const [current] = await db
-      .select({ status: campaigns.status })
-      .from(campaigns)
-      .where(eq(campaigns.id, campaignId))
-      .limit(1);
-
-    const terminalStatuses = ["sent", "cancelled", "partially_sent"];
-    if (current && terminalStatuses.includes(current.status)) {
-      return { sentSoFar, cancelled: 0 };
-    }
-
+    let skipped = false;
     await db.transaction(async (tx) => {
+      // Lock the campaign row and check terminal status atomically
+      const statusResult = await tx.execute(sql`
+        SELECT status FROM campaigns
+        WHERE id = ${campaignId}
+        FOR UPDATE
+      `);
+      const currentStatus = (statusResult.rows[0] as any)?.status;
+      const terminalStatuses = ["sent", "cancelled", "partially_sent"];
+      if (currentStatus && terminalStatuses.includes(currentStatus)) {
+        skipped = true;
+        return;
+      }
+
       // Atomically mark pending recipients as failed and count affected rows
       const failedResult = await tx.execute(sql`
         UPDATE campaign_recipients
@@ -527,6 +527,10 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
           AND status NOT IN ('sent', 'cancelled', 'partially_sent')
       `);
     });
+
+    if (skipped) {
+      return { sentSoFar, cancelled: 0 };
+    }
   }
 
   return { sentSoFar, cancelled: pendingCount };

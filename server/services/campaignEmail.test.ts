@@ -370,21 +370,17 @@ describe("cancelCampaign", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
-    // Mock the db.select().from().where().limit() chain for terminal status check
-    mockDbFrom.mockReturnValue({ where: mockDbWhere });
-    mockDbWhere.mockReturnValue({ limit: mockDbLimit });
   });
 
   it("returns sent and cancelled counts", async () => {
-    // db.execute: count query returns sentCount and pendingCount
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 25, pendingCount: 75 }],
     });
-    // db.select: terminal status check returns non-terminal status
-    mockDbLimit.mockResolvedValueOnce([{ status: "sending" }]);
-    // tx.execute inside transaction: UPDATE...RETURNING for pending recipients
+    // tx.execute: 1) SELECT FOR UPDATE (non-terminal), 2) UPDATE recipients, 3) UPDATE campaigns
     setupTransactionMock([
+      { rows: [{ status: "sending" }] },
       { rows: Array.from({ length: 75 }, (_, i) => ({ id: i + 1 })) },
+      { rows: [] },
     ]);
 
     const result = await cancelCampaign(99);
@@ -397,9 +393,12 @@ describe("cancelCampaign", () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 50, pendingCount: 0 }],
     });
-    // db.select: terminal status check returns non-terminal status
-    mockDbLimit.mockResolvedValueOnce([{ status: "sending" }]);
-    setupTransactionMock([{ rows: [] }]);
+    // tx.execute: 1) SELECT FOR UPDATE (non-terminal), 2) UPDATE recipients (0 rows), 3) UPDATE campaigns
+    setupTransactionMock([
+      { rows: [{ status: "sending" }] },
+      { rows: [] },
+      { rows: [] },
+    ]);
 
     const result = await cancelCampaign(99);
 
@@ -407,33 +406,62 @@ describe("cancelCampaign", () => {
     expect(result.cancelled).toBe(0);
   });
 
-  it("returns early when campaign is already in terminal status", async () => {
+  it("returns early when campaign is already in terminal status (sent)", async () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 50, pendingCount: 0 }],
     });
-    // db.select: terminal status check returns terminal status
-    mockDbLimit.mockResolvedValueOnce([{ status: "sent" }]);
+    // tx.execute: SELECT FOR UPDATE returns terminal status — transaction exits early
+    setupTransactionMock([
+      { rows: [{ status: "sent" }] },
+    ]);
 
     const result = await cancelCampaign(99);
 
     expect(result.sentSoFar).toBe(50);
     expect(result.cancelled).toBe(0);
-    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockTransaction).toHaveBeenCalled();
+  });
+
+  it("returns early when campaign is already cancelled", async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 30, pendingCount: 0 }],
+    });
+    setupTransactionMock([
+      { rows: [{ status: "cancelled" }] },
+    ]);
+
+    const result = await cancelCampaign(99);
+
+    expect(result.sentSoFar).toBe(30);
+    expect(result.cancelled).toBe(0);
+  });
+
+  it("returns early when campaign is already partially_sent", async () => {
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 20, pendingCount: 0 }],
+    });
+    setupTransactionMock([
+      { rows: [{ status: "partially_sent" }] },
+    ]);
+
+    const result = await cancelCampaign(99);
+
+    expect(result.sentSoFar).toBe(20);
+    expect(result.cancelled).toBe(0);
   });
 
   it("includes failedCount in campaign update when pendingCount > 0", async () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 10, pendingCount: 40 }],
     });
-    // db.select: terminal status check returns non-terminal status
-    mockDbLimit.mockResolvedValueOnce([{ status: "sending" }]);
     setupTransactionMock([
+      { rows: [{ status: "sending" }] },
       { rows: Array.from({ length: 40 }, (_, i) => ({ id: i + 1 })) },
+      { rows: [] },
     ]);
 
     await cancelCampaign(99);
 
-    // The campaign update now uses raw SQL via tx.execute, verify transaction was called
     expect(mockTransaction).toHaveBeenCalled();
   });
 
@@ -441,13 +469,14 @@ describe("cancelCampaign", () => {
     mockDbExecute.mockResolvedValueOnce({
       rows: [{ sentCount: 50, pendingCount: 0 }],
     });
-    // db.select: terminal status check returns non-terminal status
-    mockDbLimit.mockResolvedValueOnce([{ status: "sending" }]);
-    setupTransactionMock([{ rows: [] }]);
+    setupTransactionMock([
+      { rows: [{ status: "sending" }] },
+      { rows: [] },
+      { rows: [] },
+    ]);
 
     await cancelCampaign(99);
 
-    // Transaction was called even with 0 pending
     expect(mockTransaction).toHaveBeenCalled();
   });
 });

@@ -310,6 +310,17 @@ describe("sendNotificationEmail", () => {
     );
   });
 
+  it("allows free-tier email when count is 1 (current change only)", async () => {
+    // count=1 means only the just-inserted change exists — should be allowed
+    mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 1 }] });
+
+    const monitor = makeMonitor();
+    const result = await sendNotificationEmail(monitor, "old", "new");
+
+    expect(result.success).toBe(true);
+    expect(mockSend).toHaveBeenCalled();
+  });
+
   it("returns early when free-tier canSendEmail rate limit is hit", async () => {
     // Simulate 2 recent changes in last 24h for free tier (current change + 1 prior)
     mockDb.execute.mockResolvedValueOnce({ rows: [{ count: 2 }] });
@@ -413,6 +424,39 @@ describe("sendNotificationEmail", () => {
 
     const call = mockSend.mock.calls[0][0];
     expect(call.html).toContain('href=""');
+  });
+
+  it("uses REPLIT_DOMAINS for dashboard link when set", async () => {
+    const originalDomains = process.env.REPLIT_DOMAINS;
+    process.env.REPLIT_DOMAINS = "myapp.example.com";
+
+    const monitor = makeMonitor();
+    await sendNotificationEmail(monitor, "old", "new");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.html).toContain("https://myapp.example.com");
+    expect(call.html).not.toContain("fetch-the-change.replit.app");
+
+    if (originalDomains !== undefined) {
+      process.env.REPLIT_DOMAINS = originalDomains;
+    } else {
+      delete process.env.REPLIT_DOMAINS;
+    }
+  });
+
+  it("falls back to replit.app domain when REPLIT_DOMAINS is not set", async () => {
+    const originalDomains = process.env.REPLIT_DOMAINS;
+    delete process.env.REPLIT_DOMAINS;
+
+    const monitor = makeMonitor();
+    await sendNotificationEmail(monitor, "old", "new");
+
+    const call = mockSend.mock.calls[0][0];
+    expect(call.html).toContain("fetch-the-change.replit.app");
+
+    if (originalDomains !== undefined) {
+      process.env.REPLIT_DOMAINS = originalDomains;
+    }
   });
 
   it("allows https: URLs in email href", async () => {

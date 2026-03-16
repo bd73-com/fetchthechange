@@ -7,11 +7,7 @@ import { ErrorLogger } from "./logger";
 import { ResendUsageTracker } from "./resendTracker";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-
-function getAppUrl(): string {
-  const domains = process.env.REPLIT_DOMAINS?.split(",")[0];
-  return domains ? `https://${domains}` : "https://fetch-the-change.replit.app";
-}
+import { getAppUrl } from "../utils/appUrl";
 
 export interface EmailResult {
   success: boolean;
