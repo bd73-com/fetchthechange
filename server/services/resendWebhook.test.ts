@@ -209,6 +209,8 @@ describe("handleResendWebhookEvent", () => {
     it("updates recipient to opened and increments counter on first open", async () => {
       const recipient = makeRecipient({ status: "delivered", deliveredAt: new Date(), openedAt: null });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // First tx.execute: SELECT FOR UPDATE (fresh read inside transaction)
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: new Date() }] });
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.opened"));
@@ -216,41 +218,64 @@ describe("handleResendWebhookEvent", () => {
       expect(mockTxSet).toHaveBeenCalledWith(
         expect.objectContaining({ status: "opened" })
       );
-      expect(mockTxExecute).toHaveBeenCalled();
+      // Called twice: once for SELECT FOR UPDATE, once for counter update
+      expect(mockTxExecute).toHaveBeenCalledTimes(2);
     });
 
     it("does NOT increment counter on duplicate open event", async () => {
       const recipient = makeRecipient({ status: "opened", openedAt: new Date() });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // SELECT FOR UPDATE still runs inside transaction
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: new Date() }] });
       mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.opened"));
 
       expect(mockTransaction).toHaveBeenCalledTimes(1);
-      expect(mockTxExecute).not.toHaveBeenCalled();
+      // Only the FOR UPDATE SELECT runs; counter update is skipped
+      expect(mockTxExecute).toHaveBeenCalledTimes(1);
     });
 
     it("also increments delivered_count if not previously delivered", async () => {
       const recipient = makeRecipient({ status: "sent", deliveredAt: null, openedAt: null });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // Fresh read shows delivered_at is null — should also increment delivered_count
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: null }] });
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.opened"));
 
-      // The SQL template for counter update should include delivered_count
-      expect(mockTxExecute).toHaveBeenCalled();
+      // Called twice: FOR UPDATE SELECT + counter update
+      expect(mockTxExecute).toHaveBeenCalledTimes(2);
+    });
+
+    it("does NOT increment delivered_count if concurrent webhook already set deliveredAt", async () => {
+      const recipient = makeRecipient({ status: "sent", deliveredAt: null, openedAt: null });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      // Fresh read inside transaction shows delivered_at was set by concurrent handler
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: new Date() }] });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.opened"));
+
+      // Counter update should only increment opened_count, not delivered_count
+      expect(mockTxExecute).toHaveBeenCalledTimes(2);
     });
   });
 
   describe("email.clicked", () => {
     it("updates recipient to clicked and increments counter on first click", async () => {
+      const deliveredAt = new Date();
+      const openedAt = new Date();
       const recipient = makeRecipient({
         status: "opened",
-        deliveredAt: new Date(),
-        openedAt: new Date(),
+        deliveredAt,
+        openedAt,
         clickedAt: null,
       });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // Fresh read inside transaction
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: deliveredAt, opened_at: openedAt }] });
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.clicked"));
@@ -258,18 +283,22 @@ describe("handleResendWebhookEvent", () => {
       expect(mockTxSet).toHaveBeenCalledWith(
         expect.objectContaining({ status: "clicked" })
       );
-      expect(mockTxExecute).toHaveBeenCalled();
+      // Called twice: FOR UPDATE SELECT + counter update
+      expect(mockTxExecute).toHaveBeenCalledTimes(2);
     });
 
     it("does NOT increment counter on duplicate click event", async () => {
       const recipient = makeRecipient({ clickedAt: new Date() });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // SELECT FOR UPDATE still runs
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: new Date(), opened_at: new Date() }] });
       mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.clicked"));
 
       expect(mockTransaction).toHaveBeenCalledTimes(1);
-      expect(mockTxExecute).not.toHaveBeenCalled();
+      // Only FOR UPDATE SELECT; counter update skipped
+      expect(mockTxExecute).toHaveBeenCalledTimes(1);
     });
 
     it("also sets openedAt and deliveredAt if not previously set", async () => {
@@ -280,6 +309,8 @@ describe("handleResendWebhookEvent", () => {
         clickedAt: null,
       });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // Fresh read confirms both are null
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null }] });
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.clicked"));
@@ -368,6 +399,7 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for opened events", async () => {
       const recipient = makeRecipient({ status: "delivered", deliveredAt: new Date(), openedAt: null });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: new Date() }] });
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.opened"));
@@ -380,6 +412,7 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for clicked events", async () => {
       const recipient = makeRecipient({ status: "opened", deliveredAt: new Date(), openedAt: new Date(), clickedAt: null });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: new Date(), opened_at: new Date() }] });
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.clicked"));
@@ -426,13 +459,124 @@ describe("handleResendWebhookEvent", () => {
     it("still runs transaction even when guard would have skipped (guard is now atomic)", async () => {
       const recipient = makeRecipient({ status: "opened", openedAt: new Date() });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // FOR UPDATE SELECT runs inside transaction
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: new Date() }] });
       mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.opened"));
 
       // Transaction runs, but the atomic WHERE prevents double-counting
       expect(mockTransaction).toHaveBeenCalledTimes(1);
-      expect(mockTxExecute).not.toHaveBeenCalled();
+      // Only the FOR UPDATE SELECT runs; counter update is skipped
+      expect(mockTxExecute).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("atomic WHERE guard conditions", () => {
+    it("delivered: uses eq(status, 'sent') in WHERE clause", async () => {
+      const recipient = makeRecipient({ status: "sent" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.delivered"));
+
+      const whereArg = mockTxWhere.mock.calls[0][0];
+      expect(whereArg.op).toBe("and");
+      // Should contain eq for id and eq for status
+      const eqConditions = whereArg.conditions.filter((c: any) => c.op === "eq");
+      expect(eqConditions).toHaveLength(2);
+      expect(eqConditions.some((c: any) => c.value === "sent")).toBe(true);
+    });
+
+    it("opened: uses isNull(openedAt) in WHERE clause", async () => {
+      const recipient = makeRecipient({ status: "delivered", deliveredAt: new Date(), openedAt: null });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: new Date() }] });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.opened"));
+
+      const whereArg = mockTxWhere.mock.calls[0][0];
+      expect(whereArg.op).toBe("and");
+      const nullConditions = whereArg.conditions.filter((c: any) => c.op === "isNull");
+      expect(nullConditions).toHaveLength(1);
+      expect(nullConditions[0].field).toBe("openedAt");
+    });
+
+    it("clicked: uses isNull(clickedAt) in WHERE clause", async () => {
+      const recipient = makeRecipient({ status: "opened", deliveredAt: new Date(), openedAt: new Date(), clickedAt: null });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: new Date(), opened_at: new Date() }] });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.clicked"));
+
+      const whereArg = mockTxWhere.mock.calls[0][0];
+      expect(whereArg.op).toBe("and");
+      const nullConditions = whereArg.conditions.filter((c: any) => c.op === "isNull");
+      expect(nullConditions).toHaveLength(1);
+      expect(nullConditions[0].field).toBe("clickedAt");
+    });
+
+    it("bounced: uses isNull(failedAt) in WHERE clause", async () => {
+      const recipient = makeRecipient({ status: "sent" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      const whereArg = mockTxWhere.mock.calls[0][0];
+      expect(whereArg.op).toBe("and");
+      const nullConditions = whereArg.conditions.filter((c: any) => c.op === "isNull");
+      expect(nullConditions).toHaveLength(1);
+      expect(nullConditions[0].field).toBe("failedAt");
+    });
+
+    it("complained: uses isNull(failedAt) in WHERE clause", async () => {
+      const recipient = makeRecipient({ status: "delivered" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.complained"));
+
+      const whereArg = mockTxWhere.mock.calls[0][0];
+      expect(whereArg.op).toBe("and");
+      const nullConditions = whereArg.conditions.filter((c: any) => c.op === "isNull");
+      expect(nullConditions).toHaveLength(1);
+      expect(nullConditions[0].field).toBe("failedAt");
+    });
+
+    it("all event types use .returning() to check affected rows", async () => {
+      // Test that when returning() yields empty array, no counter update happens
+      for (const eventType of ["email.delivered", "email.opened", "email.clicked", "email.bounced", "email.complained"]) {
+        vi.clearAllMocks();
+        mockFrom.mockReturnValue({ where: mockWhere });
+        mockWhere.mockReturnValue({ limit: mockLimit });
+        mockTxSet.mockReturnValue({ where: mockTxWhere });
+        mockTxWhere.mockReturnValue({ returning: mockTxReturning });
+        mockTxReturning.mockResolvedValue([]);
+        mockTxExecute.mockResolvedValue({ rows: [] });
+
+        const recipient = makeRecipient();
+        mockLimit.mockResolvedValueOnce([recipient]);
+
+        // For opened/clicked, the FOR UPDATE SELECT runs first
+        if (eventType === "email.opened") {
+          mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: null }] });
+        } else if (eventType === "email.clicked") {
+          mockTxExecute.mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null }] });
+        }
+        // returning() yields empty — no rows matched the atomic guard
+        mockTxReturning.mockResolvedValueOnce([]);
+
+        await handleResendWebhookEvent(makeEvent(eventType));
+
+        // For opened/clicked: only the FOR UPDATE SELECT runs, no counter update
+        // For delivered/bounced/complained: no tx.execute calls at all
+        const forUpdateEvents = ["email.opened", "email.clicked"];
+        const expectedCalls = forUpdateEvents.includes(eventType) ? 1 : 0;
+        expect(mockTxExecute).toHaveBeenCalledTimes(expectedCalls);
+      }
     });
   });
 

@@ -94,16 +94,23 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
     case "email.opened":
       // Atomically update only if openedAt is still NULL
       await db.transaction(async (tx) => {
+        // Lock the row and read fresh state inside the transaction to avoid
+        // stale-read on deliveredAt when deciding which counters to increment
+        const freshRows = await tx.execute(sql`
+          SELECT delivered_at FROM campaign_recipients WHERE id = ${recipient.id} FOR UPDATE
+        `);
+        const fresh = freshRows.rows[0] as { delivered_at: Date | null } | undefined;
+
         const [updated] = await tx
           .update(campaignRecipients)
-          .set({ status: "opened", openedAt: now, deliveredAt: recipient.deliveredAt ?? now })
+          .set({ status: "opened", openedAt: now, deliveredAt: fresh?.delivered_at ?? now })
           .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.openedAt)))
           .returning({ id: campaignRecipients.id });
 
         if (updated) {
           await tx.execute(sql`
             UPDATE campaigns SET opened_count = opened_count + 1
-            ${recipient.deliveredAt ? sql.empty() : sql`, delivered_count = delivered_count + 1`}
+            ${fresh?.delivered_at ? sql.empty() : sql`, delivered_count = delivered_count + 1`}
             WHERE id = ${recipient.campaignId}
           `);
         }
@@ -113,24 +120,31 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
     case "email.clicked":
       // Atomically update only if clickedAt is still NULL
       await db.transaction(async (tx) => {
+        // Lock the row and read fresh state inside the transaction to avoid
+        // stale-read on openedAt/deliveredAt when deciding which counters to increment
+        const freshRows = await tx.execute(sql`
+          SELECT delivered_at, opened_at FROM campaign_recipients WHERE id = ${recipient.id} FOR UPDATE
+        `);
+        const fresh = freshRows.rows[0] as { delivered_at: Date | null; opened_at: Date | null } | undefined;
+
         const [updated] = await tx
           .update(campaignRecipients)
           .set({
             status: "clicked",
             clickedAt: now,
-            openedAt: recipient.openedAt ?? now,
-            deliveredAt: recipient.deliveredAt ?? now,
+            openedAt: fresh?.opened_at ?? now,
+            deliveredAt: fresh?.delivered_at ?? now,
           })
           .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.clickedAt)))
           .returning({ id: campaignRecipients.id });
 
         if (updated) {
-          // Build counter updates
+          // Build counter updates using fresh state from inside the transaction
           let counterUpdates = sql`clicked_count = clicked_count + 1`;
-          if (!recipient.openedAt) {
+          if (!fresh?.opened_at) {
             counterUpdates = sql`${counterUpdates}, opened_count = opened_count + 1`;
           }
-          if (!recipient.deliveredAt) {
+          if (!fresh?.delivered_at) {
             counterUpdates = sql`${counterUpdates}, delivered_count = delivered_count + 1`;
           }
 
