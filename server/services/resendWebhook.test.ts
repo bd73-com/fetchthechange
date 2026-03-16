@@ -14,6 +14,13 @@ vi.mock("../db", () => ({
     select: () => ({ from: mockFrom }),
     update: () => ({ set: mockSet }),
     execute: mockExecute,
+    transaction: async (fn: (tx: any) => Promise<void>) => {
+      const tx = {
+        update: () => ({ set: mockSet }),
+        execute: mockExecute,
+      };
+      await fn(tx);
+    },
   },
 }));
 
