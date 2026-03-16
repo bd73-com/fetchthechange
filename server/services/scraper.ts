@@ -20,61 +20,49 @@ export const monitorsNeedingRetry = new Set<number>();
 
 /** Pool of modern User-Agent profiles to rotate per request, reducing fingerprint-based blocking. */
 const UA_PROFILES: Array<{ userAgent: string; secChUa?: string; secChUaPlatform?: string }> = [
-  // Chrome 120 – Windows 10
+  // Chrome 133 – Windows 10
   {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    secChUa: '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="133", "Not(A:Brand";v="99", "Google Chrome";v="133"',
     secChUaPlatform: '"Windows"',
   },
-  // Chrome 121 – macOS
+  // Chrome 133 – macOS
   {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    secChUa: '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="133", "Not(A:Brand";v="99", "Google Chrome";v="133"',
     secChUaPlatform: '"macOS"',
   },
-  // Chrome 122 – Windows 11
+  // Chrome 134 – Windows 10
   {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
     secChUaPlatform: '"Windows"',
   },
-  // Chrome 123 – macOS
+  // Chrome 134 – macOS
   {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    secChUa: '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
     secChUaPlatform: '"macOS"',
   },
-  // Chrome 124 – Windows 10
+  // Chrome 132 – Windows 11 (one version back for diversity)
   {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="132", "Not_A Brand";v="24", "Google Chrome";v="132"',
     secChUaPlatform: '"Windows"',
   },
-  // Chrome 124 – macOS
+  // Chrome 132 – macOS
   {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="132", "Not_A Brand";v="24", "Google Chrome";v="132"',
     secChUaPlatform: '"macOS"',
   },
-  // Chrome 131 – Windows 10 (legacy entry)
+  // Firefox 135 – Windows 10 (no Sec-CH-UA headers — omitted, not empty)
   {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
-    secChUaPlatform: '"Windows"',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0',
   },
-  // Chrome 131 – macOS (legacy entry)
+  // Firefox 134 – macOS
   {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
-    secChUaPlatform: '"macOS"',
-  },
-  // Firefox 134 – Windows 10 (no Sec-CH-UA headers — omitted, not empty)
-  {
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0',
-  },
-  // Firefox 123 – macOS (no Sec-CH-UA headers — omitted, not empty)
-  {
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:134.0) Gecko/20100101 Firefox/134.0',
   },
 ];
 
@@ -82,11 +70,18 @@ function pickUaProfile() {
   return UA_PROFILES[Math.floor(Math.random() * UA_PROFILES.length)];
 }
 
+/** Chrome-only profiles for Browserless contexts where stealthInitScript injects Chrome-specific
+ *  JS stubs (window.chrome, navigator.plugins, mimeTypes). Using a Firefox UA in Chromium
+ *  creates a contradictory fingerprint that is a stronger bot signal than no stealth at all. */
+const CHROME_PROFILES = UA_PROFILES.filter(p => p.secChUa != null);
+
+function pickChromeProfile() {
+  return CHROME_PROFILES[Math.floor(Math.random() * CHROME_PROFILES.length)];
+}
+
 /** Returns browser-like headers with a randomly selected UA profile. */
 function browserLikeHeaders(url: string) {
   const profile = pickUaProfile();
-  let origin: string | undefined;
-  try { origin = new URL(url).origin; } catch {}
   const headers: Record<string, string> = {
     'User-Agent': profile.userAgent,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -96,33 +91,30 @@ function browserLikeHeaders(url: string) {
     'Upgrade-Insecure-Requests': '1',
     'Sec-Fetch-Dest': 'document',
     'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
     'Sec-Fetch-User': '?1',
-    'Sec-CH-UA-Mobile': '?0',
   };
-  if (origin) {
-    headers['Referer'] = origin + '/';
-    headers['Sec-Fetch-Site'] = 'cross-site';
-  } else {
-    headers['Sec-Fetch-Site'] = 'none';
-  }
+  // No Referer on direct navigation — real browsers don't send one
+  // Only send Client Hints headers for Chrome profiles — Firefox never sends them
   if (profile.secChUa) {
     headers['Sec-CH-UA'] = profile.secChUa;
+    headers['Sec-CH-UA-Mobile'] = '?0';
     if (profile.secChUaPlatform) headers['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
   }
   return headers;
 }
 
-/** Returns Browserless stealth context options with a randomly selected UA profile. */
+/** Returns Browserless stealth context options with a Chrome-only UA profile.
+ *  Browserless runs Chromium — Firefox UAs would contradict the Chrome-specific
+ *  JS stubs injected by stealthInitScript(). */
 function stealthContextOptions() {
-  const profile = pickUaProfile();
+  const profile = pickChromeProfile();
   const extraHTTPHeaders: Record<string, string> = {
     'Accept-Language': 'en-US,en;q=0.9',
+    'Sec-CH-UA': profile.secChUa!,
     'Sec-CH-UA-Mobile': '?0',
   };
-  if (profile.secChUa) {
-    extraHTTPHeaders['Sec-CH-UA'] = profile.secChUa;
-    if (profile.secChUaPlatform) extraHTTPHeaders['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
-  }
+  if (profile.secChUaPlatform) extraHTTPHeaders['Sec-CH-UA-Platform'] = profile.secChUaPlatform;
   return {
     userAgent: profile.userAgent,
     locale: "en-US",
@@ -138,8 +130,11 @@ const VALUE_ATTRIBUTES = ['content', 'data-price', 'value', 'data-value'] as con
 /** Pattern matching known tracking/analytics domains to block in Browserless sessions. */
 const BLOCKED_TRACKING_PATTERN = /google-analytics|googletagmanager|facebook\.net|doubleclick|hotjar|segment\.io|newrelic|datadoghq/i;
 
-/** Resource types to block in Browserless sessions to speed up page load. */
-const BLOCKED_RESOURCE_TYPES = ['image', 'media', 'font'];
+/** Resource types to block in Browserless sessions to speed up page load.
+ *  Images and fonts are intentionally allowed — anti-bot systems (DataDome, Akamai)
+ *  fingerprint pages that load zero images/fonts as headless. This increases bandwidth
+ *  but is necessary for evasion on retail sites. Only media (video/audio) is blocked. */
+const BLOCKED_RESOURCE_TYPES = ['media'];
 
 /** Base delay for exponential backoff on Browserless retry. */
 export const BASE_RETRY_MS = 2000;
@@ -266,16 +261,53 @@ function stealthInitScript() {
 
   // 4. window.chrome — absent in headless, present in real Chrome
   if (!(window as any).chrome) {
-    (window as any).chrome = { runtime: {}, csi: () => ({}) };
+    (window as any).chrome = {
+      runtime: {
+        connect: function() {
+          return {
+            onMessage: { addListener: function() {}, removeListener: function() {} },
+            onDisconnect: { addListener: function() {}, removeListener: function() {} },
+            postMessage: function() {},
+            name: '',
+          };
+        },
+        sendMessage: function() {},
+        id: undefined,
+        onMessage: { addListener: function() {}, removeListener: function() {} },
+        onConnect: { addListener: function() {}, removeListener: function() {} },
+        getManifest: function() { return {}; },
+      },
+      csi: function() { return {}; },
+      loadTimes: function() {
+        const t = Date.now() / 1000;
+        return {
+          requestTime: t,
+          startLoadTime: t + 0.01,
+          commitLoadTime: t + 0.05,
+          finishDocumentLoadTime: t + 0.15,
+          finishLoadTime: t + 0.2,
+          firstPaintTime: t + 0.18,
+          firstPaintAfterLoadTime: 0,
+          navigationType: 'Other',
+          wasFetchedViaSpdy: false,
+          wasNpnNegotiated: false,
+          npnNegotiatedProtocol: 'unknown',
+          wasAlternateProtocolAvailable: false,
+          connectionInfo: 'h2',
+        };
+      },
+    };
   }
 
   // 5. WebGL — spoof renderer/vendor away from SwiftShader
-  const getParameter = WebGLRenderingContext.prototype.getParameter;
-  WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
-    if (parameter === 37445) return 'Intel Inc.';   // UNMASKED_VENDOR_WEBGL
-    if (parameter === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
-    return getParameter.call(this, parameter);
-  };
+  try {
+    const getParameter = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(parameter: number) {
+      if (parameter === 37445) return 'Intel Inc.';   // UNMASKED_VENDOR_WEBGL
+      if (parameter === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+      return getParameter.call(this, parameter);
+    };
+  } catch (_) { /* WebGL may be unavailable */ }
 
   // 6. Permissions API — spoof notifications as 'prompt'
   try {
@@ -325,6 +357,35 @@ function stealthInitScript() {
       get: () => 'default',
     });
   } catch (_) { /* Notification API may be unavailable */ }
+
+  // 10. navigator.mimeTypes — realistic Chrome MIME types
+  try {
+    const mimeData = [
+      { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+      { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+    ];
+    const mimeArray = Object.create(MimeTypeArray.prototype);
+    Object.defineProperty(mimeArray, 'length', { get: () => mimeData.length });
+    mimeData.forEach((m, i) => {
+      const mimeType = Object.create(MimeType.prototype);
+      Object.defineProperty(mimeType, 'type', { get: () => m.type });
+      Object.defineProperty(mimeType, 'suffixes', { get: () => m.suffixes });
+      Object.defineProperty(mimeType, 'description', { get: () => m.description });
+      Object.defineProperty(mimeArray, i, { get: () => mimeType });
+      Object.defineProperty(mimeArray, m.type, { get: () => mimeType });
+    });
+    Object.defineProperty(navigator, 'mimeTypes', { get: () => mimeArray });
+  } catch (_) { /* mimeTypes may be read-only */ }
+
+  // 11. WebGL2 — same spoof as WebGL1 to prevent detection via WebGL2 fallback
+  try {
+    const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
+    WebGL2RenderingContext.prototype.getParameter = function(parameter: number) {
+      if (parameter === 37445) return 'Intel Inc.';
+      if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+      return getParameter2.call(this, parameter);
+    };
+  } catch (_) { /* WebGL2 may be unavailable */ }
 }
 
 interface SelectorSuggestion {
@@ -854,7 +915,11 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       const isClassName = !trimmedSelector.startsWith('.') && !trimmedSelector.startsWith('#') && !trimmedSelector.includes(' ');
       const effectiveSelector = isClassName ? `.${trimmedSelector}` : trimmedSelector;
 
-      await page.waitForSelector(effectiveSelector, { timeout: 10000 }).catch(() => {});
+      // Small random delay before selector access to mimic human reading behavior.
+      // Deduct from waitForSelector timeout to avoid pushing total beyond page budget.
+      const humanDelay = 800 + Math.floor(Math.random() * 1200);
+      await page.waitForTimeout(humanDelay);
+      await page.waitForSelector(effectiveSelector, { timeout: Math.max(10000 - humanDelay, 3000) }).catch(() => {});
       const count = await page.locator(effectiveSelector).count();
 
       let value: string | null = null;
