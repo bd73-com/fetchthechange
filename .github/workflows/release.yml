@@ -19,11 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.drafter.outputs.tag_name }}
+      release_id: ${{ steps.drafter.outputs.id }}
     steps:
       - uses: release-drafter/release-drafter@v6
         id: drafter
         with:
-          publish: true
+          publish: false
           config-name: release-drafter.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,3 +55,16 @@ jobs:
           gh release upload "${{ needs.update-release-draft.outputs.tag_name }}"
           extension/fetchthechange-extension.zip
           --clobber
+
+  publish-release:
+    needs: [update-release-draft, upload-extension]
+    if: needs.update-release-draft.outputs.tag_name
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release edit "${{ needs.update-release-draft.outputs.tag_name }}"
+          --repo "${{ github.repository }}"
+          --draft=false
