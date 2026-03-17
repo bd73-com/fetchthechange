@@ -179,11 +179,26 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
             failureReason: "bounced",
           })
           .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.failedAt)))
-          .returning({ id: campaignRecipients.id });
+          .returning({
+            id: campaignRecipients.id,
+            deliveredAt: campaignRecipients.deliveredAt,
+            openedAt: campaignRecipients.openedAt,
+            clickedAt: campaignRecipients.clickedAt,
+          });
 
         if (updated) {
+          let counterUpdates = sql`failed_count = failed_count + 1`;
+          if (updated.clickedAt) {
+            counterUpdates = sql`${counterUpdates}, clicked_count = GREATEST(clicked_count - 1, 0)`;
+          }
+          if (updated.openedAt) {
+            counterUpdates = sql`${counterUpdates}, opened_count = GREATEST(opened_count - 1, 0)`;
+          }
+          if (updated.deliveredAt) {
+            counterUpdates = sql`${counterUpdates}, delivered_count = GREATEST(delivered_count - 1, 0)`;
+          }
           await tx.execute(sql`
-            UPDATE campaigns SET failed_count = failed_count + 1
+            UPDATE campaigns SET ${counterUpdates}
             WHERE id = ${recipient.campaignId}
           `);
         } else {
@@ -203,11 +218,26 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
             failureReason: "spam complaint",
           })
           .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.failedAt)))
-          .returning({ id: campaignRecipients.id });
+          .returning({
+            id: campaignRecipients.id,
+            deliveredAt: campaignRecipients.deliveredAt,
+            openedAt: campaignRecipients.openedAt,
+            clickedAt: campaignRecipients.clickedAt,
+          });
 
         if (updated) {
+          let counterUpdates = sql`failed_count = failed_count + 1`;
+          if (updated.clickedAt) {
+            counterUpdates = sql`${counterUpdates}, clicked_count = GREATEST(clicked_count - 1, 0)`;
+          }
+          if (updated.openedAt) {
+            counterUpdates = sql`${counterUpdates}, opened_count = GREATEST(opened_count - 1, 0)`;
+          }
+          if (updated.deliveredAt) {
+            counterUpdates = sql`${counterUpdates}, delivered_count = GREATEST(delivered_count - 1, 0)`;
+          }
           await tx.execute(sql`
-            UPDATE campaigns SET failed_count = failed_count + 1
+            UPDATE campaigns SET ${counterUpdates}
             WHERE id = ${recipient.campaignId}
           `);
         } else {
