@@ -92,13 +92,14 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         }
       }
 
-      console.log('Syncing Stripe data...');
-      stripeSync.syncBackfill()
+      console.log('Starting Stripe data backfill...');
+      void stripeSync.syncBackfill()
         .then(() => console.log('Stripe data synced'))
         .catch((err: any) => console.error('Error syncing Stripe data:', err));
-      console.log(`Stripe initialization completed in ${Date.now() - initStart}ms`);
+      console.log(`Stripe initialization setup completed in ${Date.now() - initStart}ms`);
     } catch (error) {
       console.error(`Failed to initialize Stripe after ${Date.now() - initStart}ms:`, error);
+      throw error;
     }
   }
 
