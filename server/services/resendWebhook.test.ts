@@ -30,7 +30,7 @@ vi.mock("../db", () => ({
 }));
 
 vi.mock("@shared/schema", () => ({
-  campaignRecipients: { resendId: "resendId", id: "id", status: "status", openedAt: "openedAt", clickedAt: "clickedAt", failedAt: "failedAt" },
+  campaignRecipients: { resendId: "resendId", id: "id", status: "status", deliveredAt: "deliveredAt", openedAt: "openedAt", clickedAt: "clickedAt", failedAt: "failedAt" },
   campaigns: {},
 }));
 
@@ -336,10 +336,10 @@ describe("handleResendWebhookEvent", () => {
   });
 
   describe("email.bounced", () => {
-    it("marks recipient as bounced with failure reason and increments counter", async () => {
+    it("marks recipient as bounced with failure reason and increments failed_count (sent recipient)", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42, deliveredAt: null, openedAt: null, clickedAt: null }]);
 
       await handleResendWebhookEvent(makeEvent("email.bounced"));
 
@@ -349,7 +349,33 @@ describe("handleResendWebhookEvent", () => {
           failureReason: "bounced",
         })
       );
-      expect(mockTxExecute).toHaveBeenCalled();
+      expect(mockTxExecute).toHaveBeenCalledTimes(1);
+    });
+
+    it("decrements delivered_count when bounce follows delivery", async () => {
+      const deliveredAt = new Date();
+      const recipient = makeRecipient({ status: "delivered", deliveredAt });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42, deliveredAt, openedAt: null, clickedAt: null }]);
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      // Counter update SQL should include both failed_count +1 and delivered_count -1
+      expect(mockTxExecute).toHaveBeenCalledTimes(1);
+    });
+
+    it("decrements delivered_count, opened_count, and clicked_count when bounce follows click", async () => {
+      const deliveredAt = new Date();
+      const openedAt = new Date();
+      const clickedAt = new Date();
+      const recipient = makeRecipient({ status: "clicked", deliveredAt, openedAt, clickedAt });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42, deliveredAt, openedAt, clickedAt }]);
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      // Counter update SQL should decrement all three upstream counters
+      expect(mockTxExecute).toHaveBeenCalledTimes(1);
     });
 
     it("does NOT double-count on duplicate bounce webhook", async () => {
@@ -365,10 +391,11 @@ describe("handleResendWebhookEvent", () => {
   });
 
   describe("email.complained", () => {
-    it("marks recipient as complained with spam complaint reason and increments counter", async () => {
-      const recipient = makeRecipient({ status: "delivered" });
+    it("marks recipient as complained with spam complaint reason (delivered recipient)", async () => {
+      const deliveredAt = new Date();
+      const recipient = makeRecipient({ status: "delivered", deliveredAt });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42, deliveredAt, openedAt: null, clickedAt: null }]);
 
       await handleResendWebhookEvent(makeEvent("email.complained"));
 
@@ -378,7 +405,21 @@ describe("handleResendWebhookEvent", () => {
           failureReason: "spam complaint",
         })
       );
-      expect(mockTxExecute).toHaveBeenCalled();
+      // Counter update: failed_count +1, delivered_count -1
+      expect(mockTxExecute).toHaveBeenCalledTimes(1);
+    });
+
+    it("decrements opened_count and delivered_count when complaint follows open", async () => {
+      const deliveredAt = new Date();
+      const openedAt = new Date();
+      const recipient = makeRecipient({ status: "opened", deliveredAt, openedAt });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42, deliveredAt, openedAt, clickedAt: null }]);
+
+      await handleResendWebhookEvent(makeEvent("email.complained"));
+
+      // Counter update: failed_count +1, opened_count -1, delivered_count -1
+      expect(mockTxExecute).toHaveBeenCalledTimes(1);
     });
 
     it("does NOT double-count on duplicate complaint webhook", async () => {
@@ -442,7 +483,7 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for bounced events", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42, deliveredAt: null, openedAt: null, clickedAt: null }]);
 
       await handleResendWebhookEvent(makeEvent("email.bounced"));
 
@@ -454,7 +495,7 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for complained events", async () => {
       const recipient = makeRecipient({ status: "delivered" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42, deliveredAt: null, openedAt: null, clickedAt: null }]);
 
       await handleResendWebhookEvent(makeEvent("email.complained"));
 
@@ -545,7 +586,7 @@ describe("handleResendWebhookEvent", () => {
     it("bounced: uses isNull(failedAt) in WHERE clause", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42, deliveredAt: null, openedAt: null, clickedAt: null }]);
 
       await handleResendWebhookEvent(makeEvent("email.bounced"));
 
@@ -559,7 +600,7 @@ describe("handleResendWebhookEvent", () => {
     it("complained: uses isNull(failedAt) in WHERE clause", async () => {
       const recipient = makeRecipient({ status: "delivered" });
       mockLimit.mockResolvedValueOnce([recipient]);
-      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+      mockTxReturning.mockResolvedValueOnce([{ id: 42, deliveredAt: null, openedAt: null, clickedAt: null }]);
 
       await handleResendWebhookEvent(makeEvent("email.complained"));
 
