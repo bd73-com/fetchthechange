@@ -50,6 +50,60 @@ export async function verifyResendWebhook(
 }
 
 /**
+ * Handle a bounce or complaint by locking the recipient row, marking it
+ * as failed, and decrementing any upstream counters that were previously
+ * incremented (delivered, opened, clicked).
+ */
+async function handleRecipientFailure(
+  recipient: { id: number; campaignId: number },
+  status: string,
+  failureReason: string,
+  now: Date,
+  eventType: string,
+  resendId: string,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    // Lock the row and read fresh engagement timestamps to avoid race with
+    // concurrent opened/clicked webhooks that could inflate counters.
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    const freshRows = await tx.execute(sql`
+      SELECT delivered_at, opened_at, clicked_at FROM campaign_recipients WHERE id = ${recipient.id} FOR UPDATE
+    `);
+    const fresh = freshRows.rows[0] as { delivered_at: Date | null; opened_at: Date | null; clicked_at: Date | null } | undefined;
+
+    if (!fresh) {
+      console.warn(`[ResendWebhook] Recipient row ${recipient.id} vanished during ${eventType} for resendId=${resendId} — skipped`);
+      return;
+    }
+
+    const [updated] = await tx
+      .update(campaignRecipients)
+      .set({ status, failedAt: now, failureReason })
+      .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.failedAt)))
+      .returning({ id: campaignRecipients.id });
+
+    if (updated) {
+      let counterUpdates = sql`failed_count = failed_count + 1`;
+      if (fresh.clicked_at) {
+        counterUpdates = sql`${counterUpdates}, clicked_count = GREATEST(clicked_count - 1, 0)`;
+      }
+      if (fresh.opened_at) {
+        counterUpdates = sql`${counterUpdates}, opened_count = GREATEST(opened_count - 1, 0)`;
+      }
+      if (fresh.delivered_at) {
+        counterUpdates = sql`${counterUpdates}, delivered_count = GREATEST(delivered_count - 1, 0)`;
+      }
+      await tx.execute(sql`
+        UPDATE campaigns SET ${counterUpdates}
+        WHERE id = ${recipient.campaignId}
+      `);
+    } else {
+      console.debug(`[ResendWebhook] Duplicate or out-of-order ${eventType} for resendId=${resendId} — skipped`);
+    }
+  });
+}
+
+/**
  * Process a verified Resend webhook event.
  * Updates campaign_recipients status and denormalized campaign counters.
  */
@@ -169,87 +223,11 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
       break;
 
     case "email.bounced":
-      // Atomically update only if failedAt is still NULL
-      await db.transaction(async (tx) => {
-        // Lock the row and read fresh engagement timestamps to avoid race with
-        // concurrent opened/clicked webhooks that could inflate counters.
-        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
-        const freshRows = await tx.execute(sql`
-          SELECT delivered_at, opened_at, clicked_at FROM campaign_recipients WHERE id = ${recipient.id} FOR UPDATE
-        `);
-        const fresh = freshRows.rows[0] as { delivered_at: Date | null; opened_at: Date | null; clicked_at: Date | null } | undefined;
-
-        const [updated] = await tx
-          .update(campaignRecipients)
-          .set({
-            status: "bounced",
-            failedAt: now,
-            failureReason: "bounced",
-          })
-          .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.failedAt)))
-          .returning({ id: campaignRecipients.id });
-
-        if (updated) {
-          let counterUpdates = sql`failed_count = failed_count + 1`;
-          if (fresh?.clicked_at) {
-            counterUpdates = sql`${counterUpdates}, clicked_count = GREATEST(clicked_count - 1, 0)`;
-          }
-          if (fresh?.opened_at) {
-            counterUpdates = sql`${counterUpdates}, opened_count = GREATEST(opened_count - 1, 0)`;
-          }
-          if (fresh?.delivered_at) {
-            counterUpdates = sql`${counterUpdates}, delivered_count = GREATEST(delivered_count - 1, 0)`;
-          }
-          await tx.execute(sql`
-            UPDATE campaigns SET ${counterUpdates}
-            WHERE id = ${recipient.campaignId}
-          `);
-        } else {
-          console.debug(`[ResendWebhook] Duplicate or out-of-order ${event.type} for resendId=${resendId} — skipped`);
-        }
-      });
+      await handleRecipientFailure(recipient, "bounced", "bounced", now, event.type, resendId);
       break;
 
     case "email.complained":
-      // Atomically update only if failedAt is still NULL
-      await db.transaction(async (tx) => {
-        // Lock the row and read fresh engagement timestamps to avoid race with
-        // concurrent opened/clicked webhooks that could inflate counters.
-        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
-        const freshRows = await tx.execute(sql`
-          SELECT delivered_at, opened_at, clicked_at FROM campaign_recipients WHERE id = ${recipient.id} FOR UPDATE
-        `);
-        const fresh = freshRows.rows[0] as { delivered_at: Date | null; opened_at: Date | null; clicked_at: Date | null } | undefined;
-
-        const [updated] = await tx
-          .update(campaignRecipients)
-          .set({
-            status: "complained",
-            failedAt: now,
-            failureReason: "spam complaint",
-          })
-          .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.failedAt)))
-          .returning({ id: campaignRecipients.id });
-
-        if (updated) {
-          let counterUpdates = sql`failed_count = failed_count + 1`;
-          if (fresh?.clicked_at) {
-            counterUpdates = sql`${counterUpdates}, clicked_count = GREATEST(clicked_count - 1, 0)`;
-          }
-          if (fresh?.opened_at) {
-            counterUpdates = sql`${counterUpdates}, opened_count = GREATEST(opened_count - 1, 0)`;
-          }
-          if (fresh?.delivered_at) {
-            counterUpdates = sql`${counterUpdates}, delivered_count = GREATEST(delivered_count - 1, 0)`;
-          }
-          await tx.execute(sql`
-            UPDATE campaigns SET ${counterUpdates}
-            WHERE id = ${recipient.campaignId}
-          `);
-        } else {
-          console.debug(`[ResendWebhook] Duplicate or out-of-order ${event.type} for resendId=${resendId} — skipped`);
-        }
-      });
+      await handleRecipientFailure(recipient, "complained", "spam complaint", now, event.type, resendId);
       break;
 
     default:

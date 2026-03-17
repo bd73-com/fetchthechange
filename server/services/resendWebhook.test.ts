@@ -390,6 +390,33 @@ describe("handleResendWebhookEvent", () => {
 
       // 3 calls: lock_timeout + FOR UPDATE SELECT + counter update (all three decrements)
       expect(mockTxExecute).toHaveBeenCalledTimes(3);
+      // Verify counter update SQL includes all three decrements
+      const counterUpdateArg = mockTxExecute.mock.calls[2][0];
+      const sqlStr = JSON.stringify(counterUpdateArg);
+      expect(sqlStr).toContain("clicked_count");
+      expect(sqlStr).toContain("opened_count");
+      expect(sqlStr).toContain("delivered_count");
+      expect(sqlStr).toContain("GREATEST");
+    });
+
+    it("does NOT include delivered_count decrement when bounce follows sent (no delivery)", async () => {
+      const recipient = makeRecipient({ status: "sent" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] })  // SELECT FOR UPDATE
+        .mockResolvedValueOnce({ rows: [] });  // counter update
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      // Counter update SQL should only contain failed_count, not any decrements
+      const counterUpdateArg = mockTxExecute.mock.calls[2][0];
+      const sqlStr = JSON.stringify(counterUpdateArg);
+      expect(sqlStr).toContain("failed_count");
+      expect(sqlStr).not.toContain("delivered_count");
+      expect(sqlStr).not.toContain("opened_count");
+      expect(sqlStr).not.toContain("clicked_count");
     });
 
     it("does NOT double-count on duplicate bounce webhook", async () => {
