@@ -30,7 +30,7 @@ vi.mock("../db", () => ({
 }));
 
 vi.mock("@shared/schema", () => ({
-  campaignRecipients: { resendId: "resendId", id: "id", status: "status", openedAt: "openedAt", clickedAt: "clickedAt", failedAt: "failedAt" },
+  campaignRecipients: { resendId: "resendId", id: "id", status: "status", deliveredAt: "deliveredAt", openedAt: "openedAt", clickedAt: "clickedAt", failedAt: "failedAt" },
   campaigns: {},
 }));
 
@@ -336,9 +336,14 @@ describe("handleResendWebhookEvent", () => {
   });
 
   describe("email.bounced", () => {
-    it("marks recipient as bounced with failure reason and increments counter", async () => {
+    it("marks recipient as bounced with failure reason and increments failed_count (sent recipient)", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // tx.execute calls: SET LOCAL lock_timeout, SELECT FOR UPDATE, counter update
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] })  // SELECT FOR UPDATE
+        .mockResolvedValueOnce({ rows: [] });  // counter update
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.bounced"));
@@ -349,25 +354,121 @@ describe("handleResendWebhookEvent", () => {
           failureReason: "bounced",
         })
       );
-      expect(mockTxExecute).toHaveBeenCalled();
+      // 3 calls: lock_timeout + FOR UPDATE SELECT + counter update
+      expect(mockTxExecute).toHaveBeenCalledTimes(3);
+    });
+
+    it("decrements delivered_count when bounce follows delivery", async () => {
+      const deliveredAt = new Date();
+      const recipient = makeRecipient({ status: "delivered", deliveredAt });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: deliveredAt, opened_at: null, clicked_at: null }] })  // SELECT FOR UPDATE
+        .mockResolvedValueOnce({ rows: [] });  // counter update
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      // 3 calls: lock_timeout + FOR UPDATE SELECT + counter update (includes delivered_count decrement)
+      expect(mockTxExecute).toHaveBeenCalledTimes(3);
+      const counterUpdateArg = mockTxExecute.mock.calls[2][0];
+      const sqlStr = JSON.stringify(counterUpdateArg);
+      expect(sqlStr).toContain("failed_count");
+      expect(sqlStr).toContain("delivered_count");
+      expect(sqlStr).toContain("GREATEST");
+      expect(sqlStr).not.toContain("opened_count");
+      expect(sqlStr).not.toContain("clicked_count");
+    });
+
+    it("decrements delivered_count, opened_count, and clicked_count when bounce follows click", async () => {
+      const deliveredAt = new Date();
+      const openedAt = new Date();
+      const clickedAt = new Date();
+      const recipient = makeRecipient({ status: "clicked", deliveredAt, openedAt, clickedAt });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: deliveredAt, opened_at: openedAt, clicked_at: clickedAt }] })  // SELECT FOR UPDATE
+        .mockResolvedValueOnce({ rows: [] });  // counter update
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      // 3 calls: lock_timeout + FOR UPDATE SELECT + counter update (all three decrements)
+      expect(mockTxExecute).toHaveBeenCalledTimes(3);
+      // Verify counter update SQL includes all three decrements
+      const counterUpdateArg = mockTxExecute.mock.calls[2][0];
+      const sqlStr = JSON.stringify(counterUpdateArg);
+      expect(sqlStr).toContain("clicked_count");
+      expect(sqlStr).toContain("opened_count");
+      expect(sqlStr).toContain("delivered_count");
+      expect(sqlStr).toContain("GREATEST");
+    });
+
+    it("does NOT include delivered_count decrement when bounce follows sent (no delivery)", async () => {
+      const recipient = makeRecipient({ status: "sent" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] })  // SELECT FOR UPDATE
+        .mockResolvedValueOnce({ rows: [] });  // counter update
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      // Counter update SQL should only contain failed_count, not any decrements
+      const counterUpdateArg = mockTxExecute.mock.calls[2][0];
+      const sqlStr = JSON.stringify(counterUpdateArg);
+      expect(sqlStr).toContain("failed_count");
+      expect(sqlStr).not.toContain("delivered_count");
+      expect(sqlStr).not.toContain("opened_count");
+      expect(sqlStr).not.toContain("clicked_count");
     });
 
     it("does NOT double-count on duplicate bounce webhook", async () => {
       const recipient = makeRecipient({ status: "bounced", failedAt: new Date(), failureReason: "bounced" });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] });  // SELECT FOR UPDATE
       mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.bounced"));
 
       expect(mockTransaction).toHaveBeenCalledTimes(1);
-      expect(mockTxExecute).not.toHaveBeenCalled();
+      // 2 calls: lock_timeout + FOR UPDATE SELECT; counter update skipped
+      expect(mockTxExecute).toHaveBeenCalledTimes(2);
+    });
+
+    it("skips update and counter when recipient row vanishes during FOR UPDATE", async () => {
+      const recipient = makeRecipient({ status: "sent" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [] });  // SELECT FOR UPDATE returns no rows
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      // 2 calls: lock_timeout + FOR UPDATE SELECT; returning() and counter update both skipped
+      expect(mockTxExecute).toHaveBeenCalledTimes(2);
+      expect(mockTxReturning).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("vanished"));
+      warnSpy.mockRestore();
     });
   });
 
   describe("email.complained", () => {
-    it("marks recipient as complained with spam complaint reason and increments counter", async () => {
-      const recipient = makeRecipient({ status: "delivered" });
+    it("marks recipient as complained with spam complaint reason (delivered recipient)", async () => {
+      const deliveredAt = new Date();
+      const recipient = makeRecipient({ status: "delivered", deliveredAt });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: deliveredAt, opened_at: null, clicked_at: null }] })  // SELECT FOR UPDATE
+        .mockResolvedValueOnce({ rows: [] });  // counter update
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.complained"));
@@ -378,18 +479,65 @@ describe("handleResendWebhookEvent", () => {
           failureReason: "spam complaint",
         })
       );
-      expect(mockTxExecute).toHaveBeenCalled();
+      // 3 calls: lock_timeout + FOR UPDATE SELECT + counter update (includes delivered_count decrement)
+      expect(mockTxExecute).toHaveBeenCalledTimes(3);
+    });
+
+    it("decrements opened_count and delivered_count when complaint follows open", async () => {
+      const deliveredAt = new Date();
+      const openedAt = new Date();
+      const recipient = makeRecipient({ status: "opened", deliveredAt, openedAt });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: deliveredAt, opened_at: openedAt, clicked_at: null }] })  // SELECT FOR UPDATE
+        .mockResolvedValueOnce({ rows: [] });  // counter update
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.complained"));
+
+      // 3 calls: lock_timeout + FOR UPDATE SELECT + counter update (opened + delivered decrements)
+      expect(mockTxExecute).toHaveBeenCalledTimes(3);
+      const counterUpdateArg = mockTxExecute.mock.calls[2][0];
+      const sqlStr = JSON.stringify(counterUpdateArg);
+      expect(sqlStr).toContain("failed_count");
+      expect(sqlStr).toContain("opened_count");
+      expect(sqlStr).toContain("delivered_count");
+      expect(sqlStr).toContain("GREATEST");
+      expect(sqlStr).not.toContain("clicked_count");
     });
 
     it("does NOT double-count on duplicate complaint webhook", async () => {
       const recipient = makeRecipient({ status: "complained", failedAt: new Date(), failureReason: "spam complaint" });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] });  // SELECT FOR UPDATE
       mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.complained"));
 
       expect(mockTransaction).toHaveBeenCalledTimes(1);
-      expect(mockTxExecute).not.toHaveBeenCalled();
+      // 2 calls: lock_timeout + FOR UPDATE SELECT; counter update skipped
+      expect(mockTxExecute).toHaveBeenCalledTimes(2);
+    });
+
+    it("skips update and counter when recipient row vanishes during FOR UPDATE", async () => {
+      const recipient = makeRecipient({ status: "delivered" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [] });  // SELECT FOR UPDATE returns no rows
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await handleResendWebhookEvent(makeEvent("email.complained"));
+
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      // 2 calls: lock_timeout + FOR UPDATE SELECT; returning() and counter update both skipped
+      expect(mockTxExecute).toHaveBeenCalledTimes(2);
+      expect(mockTxReturning).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("vanished"));
+      warnSpy.mockRestore();
     });
   });
 
@@ -442,6 +590,9 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for bounced events", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] });
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.bounced"));
@@ -454,6 +605,9 @@ describe("handleResendWebhookEvent", () => {
     it("uses db.transaction for complained events", async () => {
       const recipient = makeRecipient({ status: "delivered" });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] });
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.complained"));
@@ -545,6 +699,9 @@ describe("handleResendWebhookEvent", () => {
     it("bounced: uses isNull(failedAt) in WHERE clause", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] });
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.bounced"));
@@ -559,6 +716,9 @@ describe("handleResendWebhookEvent", () => {
     it("complained: uses isNull(failedAt) in WHERE clause", async () => {
       const recipient = makeRecipient({ status: "delivered" });
       mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] });
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
       await handleResendWebhookEvent(makeEvent("email.complained"));
@@ -584,7 +744,7 @@ describe("handleResendWebhookEvent", () => {
         const recipient = makeRecipient();
         mockLimit.mockResolvedValueOnce([recipient]);
 
-        // For opened/clicked: lock_timeout + FOR UPDATE SELECT runs first
+        // For opened/clicked/bounced/complained: lock_timeout + FOR UPDATE SELECT runs first
         if (eventType === "email.opened") {
           mockTxExecute
             .mockResolvedValueOnce({ rows: [] })  // lock_timeout
@@ -593,15 +753,19 @@ describe("handleResendWebhookEvent", () => {
           mockTxExecute
             .mockResolvedValueOnce({ rows: [] })  // lock_timeout
             .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null }] });  // FOR UPDATE
+        } else if (eventType === "email.bounced" || eventType === "email.complained") {
+          mockTxExecute
+            .mockResolvedValueOnce({ rows: [] })  // lock_timeout
+            .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] });  // FOR UPDATE
         }
         // returning() yields empty — no rows matched the atomic guard
         mockTxReturning.mockResolvedValueOnce([]);
 
         await handleResendWebhookEvent(makeEvent(eventType));
 
-        // For opened/clicked: 2 calls (lock_timeout + FOR UPDATE SELECT), no counter update
-        // For delivered/bounced/complained: no tx.execute calls at all
-        const forUpdateEvents = ["email.opened", "email.clicked"];
+        // For opened/clicked/bounced/complained: 2 calls (lock_timeout + FOR UPDATE SELECT), no counter update
+        // For delivered: no tx.execute calls at all
+        const forUpdateEvents = ["email.opened", "email.clicked", "email.bounced", "email.complained"];
         const expectedCalls = forUpdateEvents.includes(eventType) ? 2 : 0;
         expect(mockTxExecute).toHaveBeenCalledTimes(expectedCalls);
         // Every event type must call .returning() exactly once for the atomic guard
