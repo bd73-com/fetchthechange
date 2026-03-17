@@ -17,10 +17,40 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.drafter.outputs.tag_name }}
     steps:
       - uses: release-drafter/release-drafter@v6
+        id: drafter
         with:
           publish: true
           config-name: release-drafter.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-extension:
+    needs: update-release-draft
+    if: needs.update-release-draft.outputs.tag_name
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: extension
+
+      - name: Build and package extension
+        run: NODE_ENV=production node scripts/build.js && node scripts/package.js
+        working-directory: extension
+
+      - name: Upload extension zip to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release upload "${{ needs.update-release-draft.outputs.tag_name }}"
+          extension/fetchthechange-extension.zip
+          --clobber
