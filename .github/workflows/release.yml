@@ -19,7 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.drafter.outputs.tag_name }}
-      release_id: ${{ steps.drafter.outputs.id }}
     steps:
       - uses: release-drafter/release-drafter@v6
         id: drafter
