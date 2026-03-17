@@ -171,6 +171,14 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
     case "email.bounced":
       // Atomically update only if failedAt is still NULL
       await db.transaction(async (tx) => {
+        // Lock the row and read fresh engagement timestamps to avoid race with
+        // concurrent opened/clicked webhooks that could inflate counters.
+        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+        const freshRows = await tx.execute(sql`
+          SELECT delivered_at, opened_at, clicked_at FROM campaign_recipients WHERE id = ${recipient.id} FOR UPDATE
+        `);
+        const fresh = freshRows.rows[0] as { delivered_at: Date | null; opened_at: Date | null; clicked_at: Date | null } | undefined;
+
         const [updated] = await tx
           .update(campaignRecipients)
           .set({
@@ -179,22 +187,17 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
             failureReason: "bounced",
           })
           .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.failedAt)))
-          .returning({
-            id: campaignRecipients.id,
-            deliveredAt: campaignRecipients.deliveredAt,
-            openedAt: campaignRecipients.openedAt,
-            clickedAt: campaignRecipients.clickedAt,
-          });
+          .returning({ id: campaignRecipients.id });
 
         if (updated) {
           let counterUpdates = sql`failed_count = failed_count + 1`;
-          if (updated.clickedAt) {
+          if (fresh?.clicked_at) {
             counterUpdates = sql`${counterUpdates}, clicked_count = GREATEST(clicked_count - 1, 0)`;
           }
-          if (updated.openedAt) {
+          if (fresh?.opened_at) {
             counterUpdates = sql`${counterUpdates}, opened_count = GREATEST(opened_count - 1, 0)`;
           }
-          if (updated.deliveredAt) {
+          if (fresh?.delivered_at) {
             counterUpdates = sql`${counterUpdates}, delivered_count = GREATEST(delivered_count - 1, 0)`;
           }
           await tx.execute(sql`
@@ -210,6 +213,14 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
     case "email.complained":
       // Atomically update only if failedAt is still NULL
       await db.transaction(async (tx) => {
+        // Lock the row and read fresh engagement timestamps to avoid race with
+        // concurrent opened/clicked webhooks that could inflate counters.
+        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+        const freshRows = await tx.execute(sql`
+          SELECT delivered_at, opened_at, clicked_at FROM campaign_recipients WHERE id = ${recipient.id} FOR UPDATE
+        `);
+        const fresh = freshRows.rows[0] as { delivered_at: Date | null; opened_at: Date | null; clicked_at: Date | null } | undefined;
+
         const [updated] = await tx
           .update(campaignRecipients)
           .set({
@@ -218,22 +229,17 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
             failureReason: "spam complaint",
           })
           .where(and(eq(campaignRecipients.id, recipient.id), isNull(campaignRecipients.failedAt)))
-          .returning({
-            id: campaignRecipients.id,
-            deliveredAt: campaignRecipients.deliveredAt,
-            openedAt: campaignRecipients.openedAt,
-            clickedAt: campaignRecipients.clickedAt,
-          });
+          .returning({ id: campaignRecipients.id });
 
         if (updated) {
           let counterUpdates = sql`failed_count = failed_count + 1`;
-          if (updated.clickedAt) {
+          if (fresh?.clicked_at) {
             counterUpdates = sql`${counterUpdates}, clicked_count = GREATEST(clicked_count - 1, 0)`;
           }
-          if (updated.openedAt) {
+          if (fresh?.opened_at) {
             counterUpdates = sql`${counterUpdates}, opened_count = GREATEST(opened_count - 1, 0)`;
           }
-          if (updated.deliveredAt) {
+          if (fresh?.delivered_at) {
             counterUpdates = sql`${counterUpdates}, delivered_count = GREATEST(delivered_count - 1, 0)`;
           }
           await tx.execute(sql`
