@@ -11,7 +11,7 @@ npm run build
 ```
 
 Then in Chrome/Brave:
-1. Navigate to `chrome://extensions`
+1. Navigate to `chrome://extensions` (or `brave://extensions` in Brave)
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select the `extension/build/` directory (not `extension/` itself)
