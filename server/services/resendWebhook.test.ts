@@ -372,6 +372,13 @@ describe("handleResendWebhookEvent", () => {
 
       // 3 calls: lock_timeout + FOR UPDATE SELECT + counter update (includes delivered_count decrement)
       expect(mockTxExecute).toHaveBeenCalledTimes(3);
+      const counterUpdateArg = mockTxExecute.mock.calls[2][0];
+      const sqlStr = JSON.stringify(counterUpdateArg);
+      expect(sqlStr).toContain("failed_count");
+      expect(sqlStr).toContain("delivered_count");
+      expect(sqlStr).toContain("GREATEST");
+      expect(sqlStr).not.toContain("opened_count");
+      expect(sqlStr).not.toContain("clicked_count");
     });
 
     it("decrements delivered_count, opened_count, and clicked_count when bounce follows click", async () => {
@@ -433,6 +440,24 @@ describe("handleResendWebhookEvent", () => {
       // 2 calls: lock_timeout + FOR UPDATE SELECT; counter update skipped
       expect(mockTxExecute).toHaveBeenCalledTimes(2);
     });
+
+    it("skips update and counter when recipient row vanishes during FOR UPDATE", async () => {
+      const recipient = makeRecipient({ status: "sent" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [] });  // SELECT FOR UPDATE returns no rows
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      // 2 calls: lock_timeout + FOR UPDATE SELECT; returning() and counter update both skipped
+      expect(mockTxExecute).toHaveBeenCalledTimes(2);
+      expect(mockTxReturning).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("vanished"));
+      warnSpy.mockRestore();
+    });
   });
 
   describe("email.complained", () => {
@@ -473,6 +498,13 @@ describe("handleResendWebhookEvent", () => {
 
       // 3 calls: lock_timeout + FOR UPDATE SELECT + counter update (opened + delivered decrements)
       expect(mockTxExecute).toHaveBeenCalledTimes(3);
+      const counterUpdateArg = mockTxExecute.mock.calls[2][0];
+      const sqlStr = JSON.stringify(counterUpdateArg);
+      expect(sqlStr).toContain("failed_count");
+      expect(sqlStr).toContain("opened_count");
+      expect(sqlStr).toContain("delivered_count");
+      expect(sqlStr).toContain("GREATEST");
+      expect(sqlStr).not.toContain("clicked_count");
     });
 
     it("does NOT double-count on duplicate complaint webhook", async () => {
@@ -488,6 +520,24 @@ describe("handleResendWebhookEvent", () => {
       expect(mockTransaction).toHaveBeenCalledTimes(1);
       // 2 calls: lock_timeout + FOR UPDATE SELECT; counter update skipped
       expect(mockTxExecute).toHaveBeenCalledTimes(2);
+    });
+
+    it("skips update and counter when recipient row vanishes during FOR UPDATE", async () => {
+      const recipient = makeRecipient({ status: "delivered" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [] });  // SELECT FOR UPDATE returns no rows
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await handleResendWebhookEvent(makeEvent("email.complained"));
+
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      // 2 calls: lock_timeout + FOR UPDATE SELECT; returning() and counter update both skipped
+      expect(mockTxExecute).toHaveBeenCalledTimes(2);
+      expect(mockTxReturning).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("vanished"));
+      warnSpy.mockRestore();
     });
   });
 
