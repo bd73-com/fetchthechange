@@ -56,6 +56,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       return;
     }
 
+    const initStart = Date.now();
     try {
       console.log('Initializing Stripe schema...');
       await runMigrations({ databaseUrl });
@@ -95,8 +96,9 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       stripeSync.syncBackfill()
         .then(() => console.log('Stripe data synced'))
         .catch((err: any) => console.error('Error syncing Stripe data:', err));
+      console.log(`Stripe initialization completed in ${Date.now() - initStart}ms`);
     } catch (error) {
-      console.error('Failed to initialize Stripe:', error);
+      console.error(`Failed to initialize Stripe after ${Date.now() - initStart}ms:`, error);
     }
   }
 
