@@ -285,45 +285,56 @@ export async function sendTestCampaignEmail(
  * Trigger a campaign send. Creates recipient rows and begins batch processing.
  */
 export async function triggerCampaignSend(campaignId: number): Promise<{ totalRecipients: number }> {
-  const [campaign] = await db
+  // Resolve recipients outside transaction to avoid long-held locks
+  const [campaignCheck] = await db
     .select()
     .from(campaigns)
     .where(eq(campaigns.id, campaignId))
     .limit(1);
 
-  if (!campaign) throw new Error("Campaign not found");
-  if (campaign.status !== "draft") throw new Error("Campaign must be in draft status to send");
+  if (!campaignCheck) throw new Error("Campaign not found");
+  if (campaignCheck.status !== "draft") throw new Error("Campaign must be in draft status to send");
 
-  const filters = (campaign.filters as CampaignFilters) || {};
+  const filters = (campaignCheck.filters as CampaignFilters) || {};
   const recipients = await resolveRecipients(filters);
 
   if (recipients.length === 0) {
     throw new Error("No recipients match the campaign filters");
   }
 
-  // Create recipient rows in batches
-  const CHUNK_SIZE = 100;
-  const recipientRows = recipients.map((r) => ({
-    campaignId,
-    userId: r.id,
-    recipientEmail: r.email,
-    status: "pending" as const,
-  }));
-  for (let i = 0; i < recipientRows.length; i += CHUNK_SIZE) {
-    await db.insert(campaignRecipients).values(recipientRows.slice(i, i + CHUNK_SIZE));
-  }
+  // Use a transaction with an atomic status guard to prevent double-sends
+  const campaign = await db.transaction(async (tx) => {
+    // Atomically claim the campaign: only one concurrent caller can succeed
+    const [claimed] = await tx
+      .update(campaigns)
+      .set({
+        status: "sending",
+        totalRecipients: recipients.length,
+        sentAt: new Date(),
+      })
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.status, "draft")))
+      .returning();
 
-  // Update campaign status
-  await db
-    .update(campaigns)
-    .set({
-      status: "sending",
-      totalRecipients: recipients.length,
-      sentAt: new Date(),
-    })
-    .where(eq(campaigns.id, campaignId));
+    if (!claimed) {
+      throw new Error("Campaign must be in draft status to send");
+    }
 
-  // Start batch sending asynchronously
+    // Create recipient rows in batches within the same transaction
+    const CHUNK_SIZE = 100;
+    const recipientRows = recipients.map((r) => ({
+      campaignId,
+      userId: r.id,
+      recipientEmail: r.email,
+      status: "pending" as const,
+    }));
+    for (let i = 0; i < recipientRows.length; i += CHUNK_SIZE) {
+      await tx.insert(campaignRecipients).values(recipientRows.slice(i, i + CHUNK_SIZE));
+    }
+
+    return claimed;
+  });
+
+  // Start batch sending asynchronously (outside transaction)
   const sendControl = { cancelled: false };
   activeSends.set(campaignId, sendControl);
   sendCampaignBatch(campaignId, campaign, sendControl).catch(async (err) => {
@@ -537,4 +548,62 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
   }
 
   return { sentSoFar, cancelled: pendingCount };
+}
+
+/**
+ * Reconcile campaign counters from actual campaign_recipients rows.
+ * Recomputes sentCount, failedCount, deliveredCount, openedCount, clickedCount
+ * from the ground truth in the recipients table.
+ */
+export async function reconcileCampaignCounters(campaignId: number): Promise<{
+  before: Record<string, number>;
+  after: Record<string, number>;
+}> {
+  const [campaign] = await db
+    .select()
+    .from(campaigns)
+    .where(eq(campaigns.id, campaignId))
+    .limit(1);
+
+  if (!campaign) throw new Error("Campaign not found");
+  if (campaign.status === "sending") throw new Error("Cannot reconcile counters while campaign is actively sending");
+
+  const before = {
+    totalRecipients: campaign.totalRecipients,
+    sentCount: campaign.sentCount,
+    failedCount: campaign.failedCount,
+    deliveredCount: campaign.deliveredCount,
+    openedCount: campaign.openedCount,
+    clickedCount: campaign.clickedCount,
+  };
+
+  // Compute actual counts from recipient rows
+  const result = await db.execute(sql`
+    SELECT
+      COUNT(*)::int AS "totalRecipients",
+      COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened', 'clicked'))::int AS "sentCount",
+      COUNT(*) FILTER (WHERE status IN ('failed', 'bounced', 'complained'))::int AS "failedCount",
+      COUNT(*) FILTER (WHERE status IN ('delivered', 'opened', 'clicked'))::int AS "deliveredCount",
+      COUNT(*) FILTER (WHERE status IN ('opened', 'clicked'))::int AS "openedCount",
+      COUNT(*) FILTER (WHERE status = 'clicked')::int AS "clickedCount"
+    FROM campaign_recipients
+    WHERE campaign_id = ${campaignId}
+  `);
+
+  const row = result.rows[0] as any;
+  const after = {
+    totalRecipients: Number(row?.totalRecipients ?? 0),
+    sentCount: Number(row?.sentCount ?? 0),
+    failedCount: Number(row?.failedCount ?? 0),
+    deliveredCount: Number(row?.deliveredCount ?? 0),
+    openedCount: Number(row?.openedCount ?? 0),
+    clickedCount: Number(row?.clickedCount ?? 0),
+  };
+
+  await db
+    .update(campaigns)
+    .set(after)
+    .where(eq(campaigns.id, campaignId));
+
+  return { before, after };
 }

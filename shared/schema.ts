@@ -1,5 +1,6 @@
 // Schema defines all database tables - drizzle-kit push compares this against the DB
 import { pgTable, text, serial, integer, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { users } from "./models/auth";
@@ -172,8 +173,11 @@ export const campaignRecipients = pgTable("campaign_recipients", {
 }, (table) => ({
   campaignIdx: index("campaign_recipients_campaign_idx").on(table.campaignId),
   userIdx: index("campaign_recipients_user_idx").on(table.userId),
-  resendIdIdx: index("campaign_recipients_resend_id_idx").on(table.resendId),
+  resendIdIdx: uniqueIndex("campaign_recipients_resend_id_idx")
+    .on(table.resendId)
+    .where(sql`resend_id IS NOT NULL`),
   statusIdx: index("campaign_recipients_status_idx").on(table.status),
+  campaignUserUniq: uniqueIndex("campaign_recipients_campaign_user_uniq").on(table.campaignId, table.userId),
 }));
 
 export const campaignsRelations = relations(campaigns, ({ many }) => ({
