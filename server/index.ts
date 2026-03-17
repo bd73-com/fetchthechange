@@ -240,9 +240,19 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   if (!process.env.STRIPE_WEBHOOK_SECRET) {
     console.warn("STRIPE_WEBHOOK_SECRET not set — webhooks will fail until managed webhook setup completes");
   }
-  initStripe().catch((err) => {
-    console.error("Stripe background init failed:", err);
-  });
+  const MAX_STRIPE_INIT_ATTEMPTS = 5;
+  const BASE_STRIPE_INIT_RETRY_MS = 5_000;
+
+  const startStripeInitWithRetry = (attempt = 1): void => {
+    initStripe().catch((err) => {
+      console.error(`Stripe background init failed (attempt ${attempt}/${MAX_STRIPE_INIT_ATTEMPTS}):`, err);
+      if (attempt >= MAX_STRIPE_INIT_ATTEMPTS) return;
+      const delay = BASE_STRIPE_INIT_RETRY_MS * 2 ** (attempt - 1);
+      setTimeout(() => startStripeInitWithRetry(attempt + 1), delay).unref();
+    });
+  };
+
+  startStripeInitWithRetry();
 
   // Error Handler
   app.use((err: any, _req: any, res: any, next: any) => {
