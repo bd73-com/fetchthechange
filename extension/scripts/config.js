@@ -41,7 +41,7 @@ const entries = [
   {
     entryPoints: [path.join(root, "src/popup/popup.ts")],
     outfile: path.join(buildDir, "popup/popup.js"),
-    format: "esm",
+    format: "iife",
   },
 ];
 
