@@ -56,6 +56,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       return;
     }
 
+    const initStart = Date.now();
     try {
       console.log('Initializing Stripe schema...');
       await runMigrations({ databaseUrl });
@@ -91,24 +92,16 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         }
       }
 
-      console.log('Syncing Stripe data...');
-      stripeSync.syncBackfill()
+      console.log('Starting Stripe data backfill...');
+      void stripeSync.syncBackfill()
         .then(() => console.log('Stripe data synced'))
         .catch((err: any) => console.error('Error syncing Stripe data:', err));
+      console.log(`Stripe initialization setup completed in ${Date.now() - initStart}ms`);
     } catch (error) {
-      console.error('Failed to initialize Stripe:', error);
+      console.error(`Failed to initialize Stripe after ${Date.now() - initStart}ms:`, error);
+      throw error;
     }
   }
-
-  // Start Stripe initialization in the background so the server can bind
-  // to port 5000 immediately.  Webhook requests arriving before init
-  // finishes will fail signature verification, but Stripe retries them.
-  if (!process.env.STRIPE_WEBHOOK_SECRET) {
-    console.warn("STRIPE_WEBHOOK_SECRET not set — webhooks will fail until managed webhook setup completes");
-  }
-  initStripe().catch((err) => {
-    console.error("Stripe background init failed:", err);
-  });
 
   // Stripe webhook route MUST be before express.json()
   app.post(
@@ -236,8 +229,30 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     next();
   });
 
-  // Register API Routes
+  // Register API Routes (runs ensure* migrations that need DB connections)
   await registerRoutes(httpServer, app);
+
+  // Start Stripe initialization in the background AFTER registerRoutes()
+  // completes — the ensure* migrations release their DB connections first,
+  // preventing pool exhaustion that causes connection timeouts.
+  // Webhook requests arriving before init finishes will fail signature
+  // verification, but Stripe retries them.
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    console.warn("STRIPE_WEBHOOK_SECRET not set — webhooks will fail until managed webhook setup completes");
+  }
+  const MAX_STRIPE_INIT_ATTEMPTS = 5;
+  const BASE_STRIPE_INIT_RETRY_MS = 5_000;
+
+  const startStripeInitWithRetry = (attempt = 1): void => {
+    initStripe().catch((err) => {
+      console.error(`Stripe background init failed (attempt ${attempt}/${MAX_STRIPE_INIT_ATTEMPTS}):`, err);
+      if (attempt >= MAX_STRIPE_INIT_ATTEMPTS) return;
+      const delay = BASE_STRIPE_INIT_RETRY_MS * 2 ** (attempt - 1);
+      setTimeout(() => startStripeInitWithRetry(attempt + 1), delay).unref();
+    });
+  };
+
+  startStripeInitWithRetry();
 
   // Error Handler
   app.use((err: any, _req: any, res: any, next: any) => {
