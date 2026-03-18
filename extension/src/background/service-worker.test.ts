@@ -74,4 +74,8 @@ describe("isValidAuthSender", () => {
   it("accepts when URL has hash fragment (pathname is still exact)", () => {
     expect(isValidAuthSender("https://ftc.bd73.com/extension-auth#section", BASE)).toBe(true);
   });
+
+  it("rejects trailing-slash variant /extension-auth/", () => {
+    expect(isValidAuthSender("https://ftc.bd73.com/extension-auth/", BASE)).toBe(false);
+  });
 });
