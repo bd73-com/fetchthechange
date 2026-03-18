@@ -547,7 +547,31 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
     return { sentSoFar, cancelled: actualCancelled };
   }
 
-  return { sentSoFar, cancelled: pendingCount };
+  // The batch loop will finalize the campaign asynchronously.
+  // Atomically mark remaining pending recipients now so the response
+  // reflects the real cancelled count instead of a stale snapshot.
+  let actualCancelled = 0;
+  await db.transaction(async (tx) => {
+    const failedResult = await tx.execute(sql`
+      UPDATE campaign_recipients
+      SET status = 'failed',
+          failed_at = NOW(),
+          failure_reason = 'Campaign cancelled'
+      WHERE campaign_id = ${campaignId} AND status = 'pending'
+      RETURNING id
+    `);
+    actualCancelled = failedResult.rows.length;
+
+    if (actualCancelled > 0) {
+      await tx.execute(sql`
+        UPDATE campaigns
+        SET failed_count = COALESCE(failed_count, 0) + ${actualCancelled}
+        WHERE id = ${campaignId}
+      `);
+    }
+  });
+
+  return { sentSoFar, cancelled: actualCancelled };
 }
 
 /**

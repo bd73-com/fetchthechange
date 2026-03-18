@@ -132,6 +132,7 @@ export async function handleResendWebhookEvent(event: ResendWebhookEvent): Promi
       // Note: if a bounce arrives before delivery (valid email pattern), the status
       // will already be 'bounced' and this guard correctly skips the delivery update.
       await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
         const [updated] = await tx
           .update(campaignRecipients)
           .set({ status: "delivered", deliveredAt: now })

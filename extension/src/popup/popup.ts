@@ -88,10 +88,18 @@ async function init(): Promise<void> {
     }
 
     userInfo = await res.json();
+    // Cache userInfo for offline fallback
+    await chrome.storage.local.set({ cachedUserInfo: userInfo });
     state = "authenticated";
   } catch {
-    // Network error — show authenticated anyway if token looks valid
-    state = "authenticated";
+    // Network error — try to restore cached userInfo so tier/account display correctly
+    const cached = await chrome.storage.local.get("cachedUserInfo");
+    if (cached.cachedUserInfo) {
+      userInfo = cached.cachedUserInfo;
+      state = "authenticated";
+    } else {
+      state = "unauthenticated";
+    }
   }
 
   render();
