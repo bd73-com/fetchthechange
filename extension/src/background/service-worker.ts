@@ -25,7 +25,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       const parsed = new URL(senderUrl);
       const expectedOrigin = new URL(BASE_URL).origin;
-      if (parsed.origin !== expectedOrigin || !parsed.pathname.startsWith("/extension-auth")) {
+      if (parsed.origin !== expectedOrigin || parsed.pathname !== "/extension-auth") {
         sendResponse({ ok: false, error: "unexpected origin" });
         return false;
       }
