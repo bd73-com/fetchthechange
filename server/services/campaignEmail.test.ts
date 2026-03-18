@@ -571,6 +571,7 @@ describe("cancelCampaign — active send path", () => {
     const txCalls: any[] = [];
     let txCallNum = 0;
     const txResults = [
+      { rows: [] },             // SET LOCAL lock_timeout
       { rows: [{ id: 1 }] },  // UPDATE recipients RETURNING
       { rows: [] },             // UPDATE campaigns
     ];

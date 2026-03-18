@@ -94,8 +94,9 @@ async function init(): Promise<void> {
   } catch {
     // Network error — try to restore cached userInfo so tier/account display correctly
     const cached = await chrome.storage.local.get("cachedUserInfo");
-    if (cached.cachedUserInfo) {
-      userInfo = cached.cachedUserInfo;
+    const c = cached.cachedUserInfo;
+    if (c && typeof c.userId === "string" && typeof c.tier === "string" && typeof c.email === "string") {
+      userInfo = c;
       state = "authenticated";
     } else {
       state = "unauthenticated";

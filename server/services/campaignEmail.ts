@@ -209,6 +209,8 @@ async function sendSingleCampaignEmail(
     }
 
     const resendId = response.data?.id;
+    // Guard: only update if still pending — a concurrent cancel may have marked
+    // this row as 'failed' between the batch SELECT and this UPDATE.
     await db
       .update(campaignRecipients)
       .set({
@@ -216,7 +218,7 @@ async function sendSingleCampaignEmail(
         resendId: resendId ?? null,
         sentAt: new Date(),
       })
-      .where(eq(campaignRecipients.id, recipientId));
+      .where(and(eq(campaignRecipients.id, recipientId), eq(campaignRecipients.status, "pending")));
 
     await ResendUsageTracker.recordUsage(userId, undefined, recipientEmail, resendId, true).catch(() => {});
     return { success: true, resendId };
@@ -553,6 +555,7 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
   // will find zero rows (already marked here), so its failed_count increment is a no-op.
   let actualCancelled = 0;
   await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
     const failedResult = await tx.execute(sql`
       UPDATE campaign_recipients
       SET status = 'failed',
