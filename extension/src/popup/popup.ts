@@ -88,10 +88,19 @@ async function init(): Promise<void> {
     }
 
     userInfo = await res.json();
+    // Cache userInfo for offline fallback
+    await chrome.storage.local.set({ cachedUserInfo: userInfo });
     state = "authenticated";
   } catch {
-    // Network error — show authenticated anyway if token looks valid
-    state = "authenticated";
+    // Network error — try to restore cached userInfo so tier/account display correctly
+    const cached = await chrome.storage.local.get("cachedUserInfo");
+    const c = cached.cachedUserInfo;
+    if (c && typeof c.userId === "string" && typeof c.tier === "string" && typeof c.email === "string") {
+      userInfo = c;
+      state = "authenticated";
+    } else {
+      state = "unauthenticated";
+    }
   }
 
   render();
@@ -197,6 +206,7 @@ function renderAccount(): void {
 
   document.getElementById("disconnect-btn")?.addEventListener("click", async () => {
     await clearToken();
+    await chrome.storage.local.remove("cachedUserInfo");
     userInfo = null;
     dropdownOpen = false;
     state = "unauthenticated";

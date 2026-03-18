@@ -209,6 +209,8 @@ async function sendSingleCampaignEmail(
     }
 
     const resendId = response.data?.id;
+    // Guard: only update if still pending — a concurrent cancel may have marked
+    // this row as 'failed' between the batch SELECT and this UPDATE.
     await db
       .update(campaignRecipients)
       .set({
@@ -216,7 +218,7 @@ async function sendSingleCampaignEmail(
         resendId: resendId ?? null,
         sentAt: new Date(),
       })
-      .where(eq(campaignRecipients.id, recipientId));
+      .where(and(eq(campaignRecipients.id, recipientId), eq(campaignRecipients.status, "pending")));
 
     await ResendUsageTracker.recordUsage(userId, undefined, recipientEmail, resendId, true).catch(() => {});
     return { success: true, resendId };
@@ -547,7 +549,34 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
     return { sentSoFar, cancelled: actualCancelled };
   }
 
-  return { sentSoFar, cancelled: pendingCount };
+  // The batch loop will finalize the campaign asynchronously via finalizeCampaign().
+  // We mark remaining pending recipients now so the response reflects the real
+  // cancelled count. When finalizeCampaign() runs later, its UPDATE...WHERE status='pending'
+  // will find zero rows (already marked here), so its failed_count increment is a no-op.
+  let actualCancelled = 0;
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+    const failedResult = await tx.execute(sql`
+      UPDATE campaign_recipients
+      SET status = 'failed',
+          failed_at = NOW(),
+          failure_reason = 'Campaign cancelled'
+      WHERE campaign_id = ${campaignId} AND status = 'pending'
+      RETURNING id
+    `);
+    actualCancelled = failedResult.rows.length;
+
+    if (actualCancelled > 0) {
+      await tx.execute(sql`
+        UPDATE campaigns
+        SET failed_count = COALESCE(failed_count, 0) + ${actualCancelled}
+        WHERE id = ${campaignId}
+          AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+      `);
+    }
+  });
+
+  return { sentSoFar, cancelled: actualCancelled };
 }
 
 /**

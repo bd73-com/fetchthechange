@@ -18,18 +18,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === MSG.FTC_EXTENSION_TOKEN) {
     // Only accept tokens from the expected auth page
     const senderUrl = sender.tab?.url;
-    if (senderUrl) {
-      try {
-        const parsed = new URL(senderUrl);
-        const expectedOrigin = new URL(BASE_URL).origin;
-        if (parsed.origin !== expectedOrigin || !parsed.pathname.startsWith("/extension-auth")) {
-          sendResponse({ ok: false, error: "unexpected origin" });
-          return false;
-        }
-      } catch {
-        sendResponse({ ok: false, error: "invalid sender URL" });
+    if (!senderUrl) {
+      sendResponse({ ok: false, error: "no sender tab" });
+      return false;
+    }
+    try {
+      const parsed = new URL(senderUrl);
+      const expectedOrigin = new URL(BASE_URL).origin;
+      if (parsed.origin !== expectedOrigin || !parsed.pathname.startsWith("/extension-auth")) {
+        sendResponse({ ok: false, error: "unexpected origin" });
         return false;
       }
+    } catch {
+      sendResponse({ ok: false, error: "invalid sender URL" });
+      return false;
     }
     handleTokenReceived(message.token, message.expiresAt, sender.tab?.id);
     sendResponse({ ok: true });

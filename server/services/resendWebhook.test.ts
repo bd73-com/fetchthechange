@@ -176,6 +176,10 @@ describe("handleResendWebhookEvent", () => {
     it("updates recipient status to delivered and increments counter when guard matches", async () => {
       const recipient = makeRecipient({ status: "sent" });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // tx.execute calls: SET LOCAL lock_timeout, then counter update
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [] });  // counter update
       // Simulate the atomic UPDATE matching (status was still 'sent')
       mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
 
@@ -191,17 +195,38 @@ describe("handleResendWebhookEvent", () => {
       expect(mockTxExecute).toHaveBeenCalled(); // counter update
     });
 
+    it("sets lock_timeout before performing the atomic update", async () => {
+      const recipient = makeRecipient({ status: "sent" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      const executeCalls: any[] = [];
+      // Capture all tx.execute calls in order
+      mockTxExecute.mockImplementation((query: any) => {
+        executeCalls.push(query);
+        return Promise.resolve({ rows: [] });
+      });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.delivered"));
+
+      // First tx.execute call should be the lock_timeout
+      expect(executeCalls.length).toBeGreaterThanOrEqual(1);
+      const lockTimeoutCall = executeCalls[0];
+      expect(lockTimeoutCall.strings.some((s: string) => s.includes("lock_timeout"))).toBe(true);
+    });
+
     it("does NOT increment counter when atomic UPDATE matches zero rows (already processed)", async () => {
       const recipient = makeRecipient({ status: "opened", openedAt: new Date() });
       mockLimit.mockResolvedValueOnce([recipient]);
+      // tx.execute calls: SET LOCAL lock_timeout (no counter update since returning is empty)
+      mockTxExecute.mockResolvedValueOnce({ rows: [] });  // SET LOCAL lock_timeout
       // Simulate the atomic UPDATE matching zero rows (status was no longer 'sent')
       mockTxReturning.mockResolvedValueOnce([]);
 
       await handleResendWebhookEvent(makeEvent("email.delivered"));
 
-      // Transaction still runs, but counter should NOT be incremented
+      // Transaction still runs, lock_timeout is set, but counter should NOT be incremented
       expect(mockTransaction).toHaveBeenCalledTimes(1);
-      expect(mockTxExecute).not.toHaveBeenCalled();
+      expect(mockTxExecute).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -764,9 +789,9 @@ describe("handleResendWebhookEvent", () => {
         await handleResendWebhookEvent(makeEvent(eventType));
 
         // For opened/clicked/bounced/complained: 2 calls (lock_timeout + FOR UPDATE SELECT), no counter update
-        // For delivered: no tx.execute calls at all
+        // For delivered: 1 call (lock_timeout only), no counter update
         const forUpdateEvents = ["email.opened", "email.clicked", "email.bounced", "email.complained"];
-        const expectedCalls = forUpdateEvents.includes(eventType) ? 2 : 0;
+        const expectedCalls = forUpdateEvents.includes(eventType) ? 2 : 1;
         expect(mockTxExecute).toHaveBeenCalledTimes(expectedCalls);
         // Every event type must call .returning() exactly once for the atomic guard
         expect(mockTxReturning).toHaveBeenCalledTimes(1);
