@@ -1,6 +1,20 @@
 import { BASE_URL, MSG } from "../shared/constants";
 import { setToken } from "../auth/token";
 
+/**
+ * Validates that a sender URL matches the expected auth page origin and path.
+ * Returns true only for the exact /extension-auth path on the expected origin.
+ */
+export function isValidAuthSender(senderUrl: string, baseUrl: string): boolean {
+  try {
+    const parsed = new URL(senderUrl);
+    const expectedOrigin = new URL(baseUrl).origin;
+    return parsed.origin === expectedOrigin && parsed.pathname === "/extension-auth";
+  } catch {
+    return false;
+  }
+}
+
 // Listen for messages from popup and content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === MSG.START_PICKER) {
@@ -22,15 +36,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, error: "no sender tab" });
       return false;
     }
-    try {
-      const parsed = new URL(senderUrl);
-      const expectedOrigin = new URL(BASE_URL).origin;
-      if (parsed.origin !== expectedOrigin || !parsed.pathname.startsWith("/extension-auth")) {
-        sendResponse({ ok: false, error: "unexpected origin" });
-        return false;
-      }
-    } catch {
-      sendResponse({ ok: false, error: "invalid sender URL" });
+    if (!isValidAuthSender(senderUrl, BASE_URL)) {
+      sendResponse({ ok: false, error: "unexpected origin" });
       return false;
     }
     handleTokenReceived(message.token, message.expiresAt, sender.tab?.id);

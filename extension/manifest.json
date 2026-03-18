@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FetchTheChange",
   "description": "Track any element on any web page for changes. Get notified when prices drop, stock updates, or content changes.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": ["https://ftc.bd73.com/*"],
   "background": {
@@ -19,7 +19,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://ftc.bd73.com/extension-auth*"],
+      "matches": ["https://ftc.bd73.com/extension-auth"],
       "js": ["auth-relay.js"],
       "run_at": "document_start"
     }
