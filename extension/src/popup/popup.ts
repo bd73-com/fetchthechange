@@ -205,6 +205,7 @@ function renderAccount(): void {
 
   document.getElementById("disconnect-btn")?.addEventListener("click", async () => {
     await clearToken();
+    await chrome.storage.local.remove("cachedUserInfo");
     userInfo = null;
     dropdownOpen = false;
     state = "unauthenticated";

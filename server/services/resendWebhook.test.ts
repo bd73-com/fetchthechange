@@ -195,6 +195,25 @@ describe("handleResendWebhookEvent", () => {
       expect(mockTxExecute).toHaveBeenCalled(); // counter update
     });
 
+    it("sets lock_timeout before performing the atomic update", async () => {
+      const recipient = makeRecipient({ status: "sent" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      const executeCalls: any[] = [];
+      // Capture all tx.execute calls in order
+      mockTxExecute.mockImplementation((query: any) => {
+        executeCalls.push(query);
+        return Promise.resolve({ rows: [] });
+      });
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.delivered"));
+
+      // First tx.execute call should be the lock_timeout
+      expect(executeCalls.length).toBeGreaterThanOrEqual(1);
+      const lockTimeoutCall = executeCalls[0];
+      expect(lockTimeoutCall.strings.some((s: string) => s.includes("lock_timeout"))).toBe(true);
+    });
+
     it("does NOT increment counter when atomic UPDATE matches zero rows (already processed)", async () => {
       const recipient = makeRecipient({ status: "opened", openedAt: new Date() });
       mockLimit.mockResolvedValueOnce([recipient]);

@@ -516,6 +516,158 @@ describe("cancelCampaign", () => {
   });
 });
 
+describe("cancelCampaign — active send path", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbFrom.mockReturnValue({ where: mockDbWhere });
+    mockDbWhere.mockReturnValue({ limit: mockDbLimit });
+    mockDbSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+  });
+
+  it("atomically marks pending recipients when campaign is actively sending", async () => {
+    // 1) triggerCampaignSend to populate activeSends
+    const draftCampaign = {
+      id: 77, name: "Active", subject: "Subj", htmlBody: "<p>Hi</p>",
+      textBody: null, status: "draft", filters: {},
+    };
+    mockDbLimit.mockResolvedValueOnce([draftCampaign]);
+    // resolveRecipients
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ id: "u1", email: "u1@test.com", firstName: "A", tier: "free", unsubscribeToken: "tok1", recipientEmail: "u1@test.com", monitorCount: 0 }],
+    });
+
+    // Transaction for triggerCampaignSend (claims campaign)
+    mockTransaction.mockImplementationOnce(async (cb: any) => {
+      const tx = {
+        update: vi.fn().mockReturnValue({
+          set: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([{ ...draftCampaign, status: "sending" }]),
+            }),
+          }),
+        }),
+        insert: vi.fn().mockReturnValue({
+          values: vi.fn().mockResolvedValue(undefined),
+        }),
+      };
+      return await cb(tx);
+    });
+
+    // The batch loop will call db.execute for pending recipients — make it hang long enough
+    // by never resolving, so the batch doesn't finish before we cancel
+    let batchResolve: (v: any) => void;
+    const batchPromise = new Promise((r) => { batchResolve = r; });
+    mockDbExecute.mockImplementationOnce(() => batchPromise);
+
+    await triggerCampaignSend(77);
+
+    // 2) Now cancel while the campaign is in activeSends
+    // cancelCampaign first calls db.execute to get counts
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 0, pendingCount: 1 }],
+    });
+
+    // Then runs a transaction to mark pending as failed
+    const txCalls: any[] = [];
+    let txCallNum = 0;
+    const txResults = [
+      { rows: [{ id: 1 }] },  // UPDATE recipients RETURNING
+      { rows: [] },             // UPDATE campaigns
+    ];
+    mockTransaction.mockImplementationOnce(async (cb: any) => {
+      const tx = {
+        execute: vi.fn().mockImplementation((query: any) => {
+          txCalls.push(query);
+          return Promise.resolve(txResults[txCallNum++] ?? { rows: [] });
+        }),
+      };
+      return await cb(tx);
+    });
+
+    const result = await cancelCampaign(77);
+
+    expect(result.sentSoFar).toBe(0);
+    expect(result.cancelled).toBe(1); // actual count from transaction, not stale pendingCount
+    expect(mockTransaction).toHaveBeenCalledTimes(2); // triggerCampaignSend + cancelCampaign
+    // Verify the transaction was used (not just returning pendingCount)
+    expect(txCalls.length).toBeGreaterThanOrEqual(1);
+
+    // Clean up: resolve the hanging batch so it doesn't leak
+    batchResolve!({ rows: [] });
+    // Allow finalizeCampaign to finish
+    mockDbExecute.mockResolvedValue({ rows: [] });
+    mockTransaction.mockImplementation(async (cb: any) => {
+      const tx = {
+        execute: vi.fn().mockResolvedValue({ rows: [] }),
+        update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }) }),
+      };
+      return await cb(tx);
+    });
+    await new Promise((r) => setTimeout(r, 50));
+  });
+
+  it("returns zero cancelled when no pending recipients remain during active send", async () => {
+    // Set up an active send
+    const draftCampaign = {
+      id: 78, name: "Active2", subject: "Subj", htmlBody: "<p>Hi</p>",
+      textBody: null, status: "draft", filters: {},
+    };
+    mockDbLimit.mockResolvedValueOnce([draftCampaign]);
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ id: "u1", email: "u1@test.com", firstName: "A", tier: "free", unsubscribeToken: "tok1", recipientEmail: "u1@test.com", monitorCount: 0 }],
+    });
+
+    mockTransaction.mockImplementationOnce(async (cb: any) => {
+      const tx = {
+        update: vi.fn().mockReturnValue({
+          set: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([{ ...draftCampaign, status: "sending" }]),
+            }),
+          }),
+        }),
+        insert: vi.fn().mockReturnValue({
+          values: vi.fn().mockResolvedValue(undefined),
+        }),
+      };
+      return await cb(tx);
+    });
+
+    let batchResolve: (v: any) => void;
+    mockDbExecute.mockImplementationOnce(() => new Promise((r) => { batchResolve = r; }));
+
+    await triggerCampaignSend(78);
+
+    // Cancel: all already sent, nothing pending
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ sentCount: 1, pendingCount: 0 }],
+    });
+    mockTransaction.mockImplementationOnce(async (cb: any) => {
+      const tx = {
+        execute: vi.fn().mockResolvedValue({ rows: [] }), // UPDATE returns 0 rows
+      };
+      return await cb(tx);
+    });
+
+    const result = await cancelCampaign(78);
+
+    expect(result.sentSoFar).toBe(1);
+    expect(result.cancelled).toBe(0);
+
+    // Clean up
+    batchResolve!({ rows: [] });
+    mockDbExecute.mockResolvedValue({ rows: [] });
+    mockTransaction.mockImplementation(async (cb: any) => {
+      const tx = {
+        execute: vi.fn().mockResolvedValue({ rows: [] }),
+        update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }) }),
+      };
+      return await cb(tx);
+    });
+    await new Promise((r) => setTimeout(r, 50));
+  });
+});
+
 describe("triggerCampaignSend", () => {
   beforeEach(() => {
     vi.clearAllMocks();
