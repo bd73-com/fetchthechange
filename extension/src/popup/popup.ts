@@ -1,5 +1,6 @@
 import { BASE_URL, MSG } from "../shared/constants";
 import { getToken, clearToken, isTokenValid } from "../auth/token";
+import { escapeAttr, sanitizeTier } from "./utils";
 
 // ──────────────────────────────────────────────────────────────────
 // State
@@ -540,14 +541,6 @@ function escapeHtml(str: string): string {
   return div.innerHTML;
 }
 
-function escapeAttr(str: string): string {
-  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-const KNOWN_TIERS = ["free", "pro", "power"];
-function sanitizeTier(tier: string): string {
-  return KNOWN_TIERS.includes(tier) ? tier : "free";
-}
 
 // ──────────────────────────────────────────────────────────────────
 // Start
