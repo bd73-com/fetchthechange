@@ -6,7 +6,8 @@ Squash-merge the current branch's PR and delete the remote branch.
 2. **Pre-flight checks** — abort and report if any of these fail:
    - PR state must be `OPEN`.
    - `reviewDecision` must be `APPROVED` (no outstanding requesting-changes reviews).
-   - All required status checks must pass (`statusCheckRollup` items are `SUCCESS` or `NEUTRAL`).
+   - `mergeStateStatus` must be `MERGEABLE` (not `CONFLICTING`, `BEHIND`, or `BLOCKED`).
+   - All required status checks must pass: every entry in `statusCheckRollup` must have a conclusion of `SUCCESS`, `NEUTRAL`, or `SKIPPED` — fail if any entry is `FAILURE`, `PENDING`, or missing.
 3. If all checks pass, merge with: `gh pr merge --squash --delete-branch`.
 4. Confirm the merge succeeded and the remote branch was deleted.
 
