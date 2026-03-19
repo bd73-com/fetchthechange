@@ -9,7 +9,7 @@ export default function ExtensionAuth() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user || tokenSent) return;
+    if (!user || tokenSent || error) return;
 
     (async () => {
       try {
