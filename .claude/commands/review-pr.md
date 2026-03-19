@@ -1,4 +1,4 @@
-Review the PR for bugs/security/architecture, fix issues found, read feedback from CodeRabbit and fix the issues, run tests, merge via squash, and delete the merged branch.
+Review the PR for bugs/security/architecture, fix issues found, read feedback from CodeRabbit and fix the issues, and run tests. Does NOT merge — use /merge-pr separately.
 
 ## Instructions
 
@@ -23,8 +23,5 @@ Review the PR for bugs/security/architecture, fix issues found, read feedback fr
    - Commit the fixes with a clear message describing what was fixed and why.
    - Push the fixes with `git push -u origin HEAD`.
 7. Output a summary of findings: what was found, what was fixed, and what was left as-is.
-8. **Ask the user for confirmation before merging.** Present the summary and wait for explicit approval.
-9. If approved, merge the PR with `gh pr merge --squash --delete-branch`.
-10. Confirm the merge succeeded and the remote branch was deleted.
 
 Fix real problems, not style preferences. When in doubt, leave it alone and mention it in the summary.
