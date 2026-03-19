@@ -1,4 +1,4 @@
-Review the PR for bugs/security/architecture, fix issues found, read feedback from CodeRabbit and fix the issues, run tests, merge via squash, and delete the merged branch.
+Review the PR for bugs/security/architecture, fix issues found, read feedback from CodeRabbit and fix the issues, and run tests. Does NOT merge — use /merge-pr separately.
 
 ## Instructions
 
