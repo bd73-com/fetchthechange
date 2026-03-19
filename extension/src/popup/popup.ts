@@ -39,6 +39,7 @@ let userInfo: UserInfo | null = null;
 let selection: Selection | null = null;
 let candidates: Candidate[] = [];
 let currentTabUrl = "";
+let currentTabTitle = "";
 let currentTabId = 0;
 let errorMessage = "";
 let createdMonitorName = "";
@@ -57,6 +58,7 @@ async function init(): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab) {
     currentTabUrl = tab.url || "";
+    currentTabTitle = tab.title || "";
     currentTabId = tab.id || 0;
   }
 
@@ -308,7 +310,7 @@ function renderAuthenticated(): void {
           selector: c.selector,
           currentValue: c.text,
           url: currentTabUrl,
-          pageTitle: document.title,
+          pageTitle: currentTabTitle,
         };
         state = "confirm";
         render();
@@ -539,7 +541,7 @@ function escapeHtml(str: string): string {
 }
 
 function escapeAttr(str: string): string {
-  return str.replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 const KNOWN_TIERS = ["free", "pro", "power"];

@@ -35,7 +35,7 @@ export default function ExtensionAuth() {
         setError("Something went wrong. Please try again.");
       }
     })();
-  }, [user, tokenSent, error]);
+  }, [user, tokenSent]);
 
   if (isLoading) {
     return (
