@@ -17,10 +17,12 @@ vi.mock("../replit_integrations/auth/storage", () => ({
 
 // Mock monitorValidation
 const mockCheckMonitorLimit = vi.fn();
+const mockCheckFrequencyTier = vi.fn().mockReturnValue(null);
 const mockValidateMonitorInput = vi.fn();
 const mockSafeHostname = vi.fn().mockReturnValue("example.com");
 vi.mock("../services/monitorValidation", () => ({
   checkMonitorLimit: (...args: any[]) => mockCheckMonitorLimit(...args),
+  checkFrequencyTier: (...args: any[]) => mockCheckFrequencyTier(...args),
   validateMonitorInput: (...args: any[]) => mockValidateMonitorInput(...args),
   safeHostname: (...args: any[]) => mockSafeHostname(...args),
 }));
@@ -115,6 +117,7 @@ describe("extension routes", () => {
     vi.stubEnv("EXTENSION_JWT_SECRET", TEST_SECRET);
     vi.clearAllMocks();
     mockCheckMonitorLimit.mockResolvedValue(null);
+    mockCheckFrequencyTier.mockReturnValue(null);
     mockValidateMonitorInput.mockResolvedValue(null);
   });
 
@@ -315,6 +318,26 @@ describe("extension routes", () => {
       expect(res.body.message).toBeDefined();
       // Consistent response shape: uses 'message', not 'error'
       expect(res.body.error).toBeUndefined();
+    });
+
+    it("rejects hourly frequency for free-tier users", async () => {
+      mockAuthStorage.getUser.mockResolvedValue({ id: "user-1", tier: "free" });
+      mockCheckFrequencyTier.mockReturnValue({
+        status: 403,
+        error: 'The "hourly" check frequency requires a pro or power plan. Upgrade to use this frequency.',
+        code: "FREQUENCY_TIER_RESTRICTED",
+      });
+
+      const token = sign("user-1", "free");
+      const app = await createApp();
+
+      const res = await makeRequest(app, "post", "/api/extension/monitors", {
+        headers: { Authorization: `Bearer ${token}` },
+        body: { ...validBody, frequency: "hourly" },
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe("FREQUENCY_TIER_RESTRICTED");
     });
 
     it("returns SSRF error for private URLs", async () => {

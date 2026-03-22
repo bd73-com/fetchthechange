@@ -52,6 +52,11 @@ export const TAG_ASSIGNMENT_LIMITS = {
   power: Infinity,
 } as const;
 
+export const FREQUENCY_TIERS = {
+  daily: ["free", "pro", "power"] as const,
+  hourly: ["pro", "power"] as const,
+} as const;
+
 export const API_RATE_LIMITS = {
   /** Maximum API requests per key per minute. */
   perMinute: 300,

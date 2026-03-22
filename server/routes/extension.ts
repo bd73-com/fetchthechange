@@ -10,6 +10,7 @@ import { api } from "@shared/routes";
 import type { UserTier } from "@shared/models/auth";
 import {
   checkMonitorLimit,
+  checkFrequencyTier,
   validateMonitorInput,
   safeHostname,
 } from "../services/monitorValidation";
@@ -74,6 +75,12 @@ router.post("/monitors", extensionAuth, createMonitorRateLimiter, async (req: an
 
     // Validate input
     const input = api.monitors.create.input.parse(req.body);
+
+    // Frequency tier check
+    const freqErr = checkFrequencyTier(input.frequency, tier);
+    if (freqErr) {
+      return res.status(freqErr.status).json({ message: freqErr.error, code: freqErr.code });
+    }
 
     // SSRF + CSS selector validation
     const validationErr = await validateMonitorInput(input.url, input.selector);
