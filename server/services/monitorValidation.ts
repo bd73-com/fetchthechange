@@ -38,8 +38,10 @@ export function checkFrequencyTier(
   frequency: string | undefined,
   tier: UserTier,
 ): MonitorValidationError | null {
-  if (!frequency || frequency === "daily") return null;
-  const allowedTiers = FREQUENCY_TIERS[frequency as keyof typeof FREQUENCY_TIERS];
+  if (frequency === undefined || frequency === "daily") return null;
+  const allowedTiers = Object.prototype.hasOwnProperty.call(FREQUENCY_TIERS, frequency)
+    ? FREQUENCY_TIERS[frequency as keyof typeof FREQUENCY_TIERS]
+    : undefined;
   if (!allowedTiers) {
     return {
       status: 400,
