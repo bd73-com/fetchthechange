@@ -2,14 +2,33 @@ Squash-merge the current branch's PR and delete the remote branch.
 
 ## Instructions
 
-1. Run `gh pr view --json number,state,reviewDecision,mergeStateStatus,statusCheckRollup,labels` to check the PR's current status.
-2. **Pre-flight checks** — abort and report if any of these fail:
+1. Run `gh pr view --repo bd73-com/fetchthechange --json number,url,state,reviewDecision,mergeStateStatus,statusCheckRollup,labels` to check the PR's current status.
+2. **Pre-flight checks** — evaluate all of these and report a summary table:
    - PR state must be `OPEN`.
    - `reviewDecision` must be `APPROVED` (no outstanding requesting-changes reviews).
-   - `mergeStateStatus` must be `MERGEABLE` (not `CONFLICTING`, `BEHIND`, or `BLOCKED`).
+   - `mergeStateStatus` must be `CLEAN` or `MERGEABLE` (not `CONFLICTING`, `BEHIND`, or `BLOCKED`).
    - PR must have exactly one release label from: `feature`, `fix`, `breaking`, `chore`, `docs`, `security`.
    - All required status checks must pass: every entry in `statusCheckRollup` must have a conclusion of `SUCCESS`, `NEUTRAL`, or `SKIPPED` — fail if any entry is `FAILURE`, `PENDING`, or missing.
-3. If all checks pass, merge with: `gh pr merge --squash --delete-branch`.
+3. If all checks pass, merge with: `gh pr merge --repo bd73-com/fetchthechange --squash --delete-branch`.
 4. Confirm the merge succeeded and the remote branch was deleted.
 
-If a pre-flight check fails, report exactly which check failed and what the user needs to resolve — do NOT retry or attempt to bypass branch protection.
+## Handling failures
+
+If a pre-flight check fails, report exactly which check failed. Do NOT retry or attempt to bypass branch protection. Then take **automatic recovery actions** based on the failure type:
+
+### reviewDecision is empty or not APPROVED
+1. Fetch repo collaborators: `gh api repos/bd73-com/fetchthechange/collaborators --jq '.[].login'`.
+2. Exclude the PR author from the list.
+3. Request a review from the first available collaborator: `gh pr edit <number> --repo bd73-com/fetchthechange --add-reviewer <login>`.
+4. Tell the user: who was requested, the PR URL, and that they can run `/merge-pr` again once approved.
+
+### Status checks FAILURE or PENDING
+- List which specific checks failed or are still running.
+- If checks are PENDING, tell the user to wait and re-run `/merge-pr` once they finish.
+- If checks FAILED, suggest investigating the failed check (link to the PR's checks tab).
+
+### mergeStateStatus is CONFLICTING
+- Tell the user to rebase or resolve conflicts locally, push, then re-run `/merge-pr`.
+
+### Missing release label
+- Ask the user which label to apply and offer to add it: `gh pr edit <number> --repo bd73-com/fetchthechange --add-label <label>`.
