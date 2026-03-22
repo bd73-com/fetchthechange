@@ -1,7 +1,7 @@
 import { isPrivateUrl } from "../utils/ssrf";
 import { validateCssSelector } from "./scraper";
 import { storage } from "../storage";
-import { TIER_LIMITS, type UserTier } from "@shared/models/auth";
+import { TIER_LIMITS, FREQUENCY_TIERS, type UserTier } from "@shared/models/auth";
 
 export interface MonitorValidationError {
   status: number;
@@ -25,6 +25,36 @@ export async function checkMonitorLimit(
       status: 403,
       error: `You've reached your ${tier} plan limit of ${limitStr} monitors. Upgrade to add more.`,
       code: "TIER_LIMIT_REACHED",
+    };
+  }
+  return null;
+}
+
+/**
+ * Validates that the user's tier allows the requested check frequency.
+ * Returns null if OK, or an error object if the frequency is not allowed.
+ */
+export function checkFrequencyTier(
+  frequency: string | undefined,
+  tier: UserTier,
+): MonitorValidationError | null {
+  if (frequency === undefined || frequency === "daily") return null;
+  const allowedTiers = Object.prototype.hasOwnProperty.call(FREQUENCY_TIERS, frequency)
+    ? FREQUENCY_TIERS[frequency as keyof typeof FREQUENCY_TIERS]
+    : undefined;
+  if (!allowedTiers) {
+    return {
+      status: 400,
+      error: `Unsupported check frequency: "${frequency}".`,
+      code: "INVALID_FREQUENCY",
+    };
+  }
+  if (!(allowedTiers as readonly string[]).includes(tier)) {
+    const requiredTiers = allowedTiers.join(" or ");
+    return {
+      status: 403,
+      error: `The "${frequency}" check frequency requires a ${requiredTiers} plan. Upgrade to use this frequency.`,
+      code: "FREQUENCY_TIER_RESTRICTED",
     };
   }
   return null;

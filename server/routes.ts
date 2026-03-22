@@ -42,6 +42,7 @@ import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureT
 // URL VALIDATION - SSRF PROTECTION (shared module)
 // ------------------------------------------------------------------
 import { isPrivateUrl, ssrfSafeFetch } from './utils/ssrf';
+import { checkFrequencyTier } from './services/monitorValidation';
 
 // ------------------------------------------------------------------
 // 1. CHECK MONITOR FUNCTION
@@ -403,6 +404,12 @@ export async function registerRoutes(
       
       const input = api.monitors.create.input.parse(req.body);
 
+      // Frequency tier check
+      const freqErr = checkFrequencyTier(input.frequency, tier);
+      if (freqErr) {
+        return res.status(freqErr.status).json({ message: freqErr.error, code: freqErr.code });
+      }
+
       const urlError = await isPrivateUrl(input.url);
       if (urlError) {
         return res.status(400).json({ message: urlError });
@@ -464,6 +471,17 @@ export async function registerRoutes(
     if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
     const input = api.monitors.update.input.parse(req.body);
+
+    // Frequency tier check
+    if (input.frequency) {
+      const userId = req.user.claims.sub;
+      const user = await authStorage.getUser(userId);
+      const tier = (user?.tier || "free") as UserTier;
+      const freqErr = checkFrequencyTier(input.frequency, tier);
+      if (freqErr) {
+        return res.status(freqErr.status).json({ message: freqErr.error, code: freqErr.code });
+      }
+    }
 
     if (input.url) {
       const urlError = await isPrivateUrl(input.url);
