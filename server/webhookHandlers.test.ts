@@ -512,6 +512,7 @@ describe("WebhookHandlers.handleSubscriptionChange", () => {
     expect(mockAuthStorage.updateUser).toHaveBeenCalledWith("user_8", {
       stripeSubscriptionId: "sub_error",
     });
+    expect(mockStorage.downgradeHourlyMonitors).not.toHaveBeenCalled();
   });
 
   it("handles trialing status as active (processes tier upgrade)", async () => {
