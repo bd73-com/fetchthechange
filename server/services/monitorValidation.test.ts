@@ -32,4 +32,17 @@ describe("checkFrequencyTier", () => {
   it("allows hourly frequency for power tier", () => {
     expect(checkFrequencyTier("hourly", "power")).toBeNull();
   });
+
+  it("returns descriptive error message for rejected frequency", () => {
+    const result = checkFrequencyTier("hourly", "free");
+    expect(result!.error).toContain("hourly");
+    expect(result!.error).toContain("pro or power plan");
+  });
+
+  it("rejects unknown frequency values", () => {
+    const result = checkFrequencyTier("minutely" as any, "pro");
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe(403);
+    expect(result!.code).toBe("FREQUENCY_TIER_RESTRICTED");
+  });
 });

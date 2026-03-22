@@ -5,6 +5,7 @@ import { apiRateLimit } from "../middleware/apiRateLimit";
 import { storage } from "../storage";
 import {
   checkMonitorLimit,
+  checkFrequencyTier,
   validateMonitorInput,
   safeHostname,
 } from "../services/monitorValidation";
@@ -88,6 +89,12 @@ router.post("/monitors", async (req: any, res) => {
       return res.status(limitErr.status).json({ error: limitErr.error, code: limitErr.code });
     }
 
+    // Frequency tier check
+    const freqErr = checkFrequencyTier(input.frequency, req.apiUser.tier);
+    if (freqErr) {
+      return res.status(freqErr.status).json({ error: freqErr.error, code: freqErr.code });
+    }
+
     // SSRF + CSS selector validation
     const validationErr = await validateMonitorInput(input.url, input.selector);
     if (validationErr) {
@@ -133,6 +140,14 @@ router.patch("/monitors/:id", async (req: any, res) => {
     }
 
     const input = apiV1UpdateMonitorSchema.parse(req.body);
+
+    // Frequency tier check
+    if (input.frequency) {
+      const freqErr = checkFrequencyTier(input.frequency, req.apiUser.tier);
+      if (freqErr) {
+        return res.status(freqErr.status).json({ error: freqErr.error, code: freqErr.code });
+      }
+    }
 
     // Validate only the fields being updated
     if (input.url || input.selector) {
