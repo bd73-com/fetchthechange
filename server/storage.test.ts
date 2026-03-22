@@ -4,9 +4,10 @@ import { monitors, monitorChanges, monitorConditions, monitorTags, monitorMetric
 // ── Drizzle mocks ─────────────────────────────────────────────────────────────
 // vi.hoisted ensures these are available when the vi.mock factories run.
 
-const { mockTransaction, mockDbDelete, mockDbSelect, mockChain } = vi.hoisted(() => {
+const { mockTransaction, mockDbDelete, mockDbSelect, mockDbUpdate, mockChain } = vi.hoisted(() => {
   const mockChain: any = {
     from: vi.fn(),
+    set: vi.fn(),
     where: vi.fn(),
     orderBy: vi.fn(),
     limit: vi.fn(),
@@ -14,6 +15,7 @@ const { mockTransaction, mockDbDelete, mockDbSelect, mockChain } = vi.hoisted(()
   };
   // Every chaining method returns the chain itself
   mockChain.from.mockReturnValue(mockChain);
+  mockChain.set.mockReturnValue(mockChain);
   mockChain.where.mockReturnValue(mockChain);
   mockChain.orderBy.mockReturnValue(mockChain);
   mockChain.limit.mockReturnValue(mockChain);
@@ -24,14 +26,16 @@ const { mockTransaction, mockDbDelete, mockDbSelect, mockChain } = vi.hoisted(()
   const mockTransaction = vi.fn();
   const mockDbDelete = vi.fn().mockReturnValue(mockChain);
   const mockDbSelect = vi.fn().mockReturnValue(mockChain);
+  const mockDbUpdate = vi.fn().mockReturnValue(mockChain);
 
-  return { mockTransaction, mockDbDelete, mockDbSelect, mockChain };
+  return { mockTransaction, mockDbDelete, mockDbSelect, mockDbUpdate, mockChain };
 });
 
 vi.mock("./db", () => ({
   db: {
     delete: mockDbDelete,
     select: mockDbSelect,
+    update: mockDbUpdate,
     transaction: mockTransaction,
   },
 }));
@@ -52,12 +56,14 @@ describe("DatabaseStorage", () => {
 
     // Reset default implementations
     mockChain.from.mockReturnValue(mockChain);
+    mockChain.set.mockReturnValue(mockChain);
     mockChain.where.mockReturnValue(mockChain);
     mockChain.orderBy.mockReturnValue(mockChain);
     mockChain.limit.mockReturnValue(mockChain);
     mockChain.then = (resolve: any) => resolve([]);
     mockDbDelete.mockReturnValue(mockChain);
     mockDbSelect.mockReturnValue(mockChain);
+    mockDbUpdate.mockReturnValue(mockChain);
   });
 
   describe("deleteMonitor", () => {
@@ -224,6 +230,38 @@ describe("DatabaseStorage", () => {
     it("filters by monitorId", async () => {
       await storage.getMonitorChanges(42);
       expect(mockChain.where).toHaveBeenCalled();
+    });
+  });
+
+  describe("downgradeHourlyMonitors", () => {
+    it("calls db.update on monitors table with correct filters", async () => {
+      const updateChain: any = {
+        set: vi.fn(),
+        where: vi.fn(),
+        returning: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]),
+      };
+      updateChain.set.mockReturnValue(updateChain);
+      updateChain.where.mockReturnValue(updateChain);
+      mockDbUpdate.mockReturnValue(updateChain);
+
+      const count = await storage.downgradeHourlyMonitors("user_123");
+      expect(count).toBe(2);
+      expect(mockDbUpdate).toHaveBeenCalledWith(monitors);
+      expect(updateChain.set).toHaveBeenCalledWith({ frequency: "daily" });
+    });
+
+    it("returns 0 when no hourly monitors exist", async () => {
+      const updateChain: any = {
+        set: vi.fn(),
+        where: vi.fn(),
+        returning: vi.fn().mockResolvedValue([]),
+      };
+      updateChain.set.mockReturnValue(updateChain);
+      updateChain.where.mockReturnValue(updateChain);
+      mockDbUpdate.mockReturnValue(updateChain);
+
+      const count = await storage.downgradeHourlyMonitors("user_no_hourly");
+      expect(count).toBe(0);
     });
   });
 

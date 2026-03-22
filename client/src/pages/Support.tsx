@@ -336,7 +336,7 @@ const faqSections: FAQSection[] = [
       {
         question: "What happens to my monitors if I downgrade?",
         answer:
-          "Your existing monitors will continue to work, but you won't be able to create new ones if you exceed the lower plan's limit. You'll need to delete monitors to get below the new limit before creating new ones.",
+          "Your existing monitors will continue to work, but you won't be able to create new ones if you exceed the lower plan's limit. You'll need to delete monitors to get below the new limit before creating new ones. Additionally, any monitors set to hourly check frequency will be automatically switched to daily, since hourly checks require a Pro or Power plan.",
       },
     ],
   },

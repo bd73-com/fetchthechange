@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon, Globe, MessageSquare, ShieldAlert, Lock } from "lucide-react";
+import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon, Globe, MessageSquare, ShieldAlert } from "lucide-react";
 import { useUpdateMonitor, useMonitorHistory } from "@/hooks/use-monitors";
 import { useNotificationPreferences } from "@/hooks/use-notification-preferences";
 import { useNotificationChannels } from "@/hooks/use-notification-channels";

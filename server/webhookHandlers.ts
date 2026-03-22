@@ -3,7 +3,7 @@ import { getStripeSync, getUncachableStripeClient, getWebhookSecret } from './st
 import { authStorage } from './replit_integrations/auth/storage';
 import { storage } from './storage';
 import { ErrorLogger } from './services/logger';
-import { type UserTier, TIER_LIMITS } from '@shared/models/auth';
+import { type UserTier, TIER_LIMITS, FREQUENCY_TIERS } from '@shared/models/auth';
 
 const VALID_TIERS = new Set<UserTier>(Object.keys(TIER_LIMITS) as UserTier[]);
 const isUserTier = (value: string): value is UserTier => VALID_TIERS.has(value as UserTier);
@@ -99,9 +99,13 @@ export class WebhookHandlers {
         tier: 'free',
         stripeSubscriptionId: subscription.id,
       });
-      const downgraded = await storage.downgradeHourlyMonitors(user.id);
-      if (downgraded > 0) {
-        console.log(`[Stripe] Downgraded ${downgraded} hourly monitor(s) to daily for user ${user.id}`);
+      try {
+        const downgraded = await storage.downgradeHourlyMonitors(user.id);
+        if (downgraded > 0) {
+          console.log(`[Stripe] Downgraded ${downgraded} hourly monitor(s) to daily for user ${user.id}`);
+        }
+      } catch (error) {
+        await ErrorLogger.error("stripe", `Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error : null, { userId: user.id });
       }
       console.log(`[Stripe] User ${user.id} subscription inactive, set to free tier`);
       return;
@@ -137,6 +141,18 @@ export class WebhookHandlers {
       stripeSubscriptionId: subscription.id,
     });
 
+    // Downgrade hourly monitors if the new tier doesn't support hourly frequency
+    if (!(FREQUENCY_TIERS.hourly as readonly string[]).includes(newTier)) {
+      try {
+        const downgraded = await storage.downgradeHourlyMonitors(user.id);
+        if (downgraded > 0) {
+          console.log(`[Stripe] Downgraded ${downgraded} hourly monitor(s) to daily for user ${user.id}`);
+        }
+      } catch (error) {
+        await ErrorLogger.error("stripe", `Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error : null, { userId: user.id, newTier });
+      }
+    }
+
     console.log(`[Stripe] Updated user ${user.id} to tier: ${newTier}`);
   }
 
@@ -153,9 +169,13 @@ export class WebhookHandlers {
       tier: 'free',
       stripeSubscriptionId: null,
     });
-    const downgraded = await storage.downgradeHourlyMonitors(user.id);
-    if (downgraded > 0) {
-      console.log(`[Stripe] Downgraded ${downgraded} hourly monitor(s) to daily for user ${user.id}`);
+    try {
+      const downgraded = await storage.downgradeHourlyMonitors(user.id);
+      if (downgraded > 0) {
+        console.log(`[Stripe] Downgraded ${downgraded} hourly monitor(s) to daily for user ${user.id}`);
+      }
+    } catch (error) {
+      await ErrorLogger.error("stripe", `Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error : null, { userId: user.id });
     }
 
     console.log(`[Stripe] User ${user.id} downgraded to free tier`);

@@ -484,6 +484,7 @@ describe("WebhookHandlers.handleSubscriptionChange", () => {
       tier: "free",
       stripeSubscriptionId: "sub_basic",
     });
+    expect(mockStorage.downgradeHourlyMonitors).toHaveBeenCalledWith("user_7");
   });
 
   it("handles price retrieval error gracefully and updates only subscription ID", async () => {
@@ -544,5 +545,6 @@ describe("WebhookHandlers.handleSubscriptionChange", () => {
       tier: "pro",
       stripeSubscriptionId: "sub_trial",
     });
+    expect(mockStorage.downgradeHourlyMonitors).not.toHaveBeenCalled();
   });
 });
