@@ -19,9 +19,9 @@ If a pre-flight check fails, report exactly which check failed. Do NOT retry or 
 ### reviewDecision is empty or not APPROVED
 
 1. Get the PR author from the JSON retrieved in step 1 (the `author` or `user` field).
-2. Fetch repo collaborators, excluding the PR author: `gh api repos/bd73-com/fetchthechange/collaborators --jq '[.[].login] | map(select(. != "AUTHOR_LOGIN")) | first'` (replace `AUTHOR_LOGIN` with the actual author login).
+2. Fetch repo collaborators, excluding the PR author and any already-requested reviewers: `gh api repos/bd73-com/fetchthechange/collaborators --jq '[.[].login] | map(select(. != "AUTHOR_LOGIN"))' | jq -r 'first'` (replace `AUTHOR_LOGIN` with the actual author login; also exclude logins already in the PR's `requestedReviewers` list).
 3. If no eligible collaborators remain, tell the user no reviewers are available and they must manually request one.
-4. Otherwise, request a review: `gh pr edit <number> --repo bd73-com/fetchthechange --add-reviewer <login>`.
+4. Otherwise, request a review: `gh pr edit <number> --repo bd73-com/fetchthechange --add-reviewer <login>` (replace `<number>` with the PR number from step 1).
 5. Tell the user: who was requested, the PR URL, and that they can run `/merge-pr` again once approved.
 
 ### Status checks FAILURE or PENDING
@@ -37,3 +37,8 @@ If a pre-flight check fails, report exactly which check failed. Do NOT retry or 
 ### Missing release label
 
 - Ask the user which label to apply (`feature`, `fix`, `breaking`, `chore`, `docs`, or `security`) and offer to add it: `gh pr edit <number> --repo bd73-com/fetchthechange --add-label <label>` (replace `<number>` with the PR number from step 1, and `<label>` with the user's choice).
+
+### Multiple release labels
+
+- List the current release labels and ask which single label to keep.
+- Remove extras with `gh pr edit <number> --repo bd73-com/fetchthechange --remove-label <extra_label>` until exactly one remains, then re-run the pre-flight checks.
