@@ -9,7 +9,7 @@ export default function ExtensionAuth() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user || tokenSent) return;
+    if (!user || tokenSent || error) return;
 
     (async () => {
       try {
@@ -35,7 +35,7 @@ export default function ExtensionAuth() {
         setError("Something went wrong. Please try again.");
       }
     })();
-  }, [user, tokenSent, error]);
+  }, [user, tokenSent]);
 
   if (isLoading) {
     return (
