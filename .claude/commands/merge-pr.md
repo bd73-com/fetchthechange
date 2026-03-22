@@ -2,7 +2,7 @@ Squash-merge the current branch's PR and delete the remote branch.
 
 ## Instructions
 
-1. Run `gh pr view --repo bd73-com/fetchthechange --json number,url,state,reviewDecision,mergeStateStatus,statusCheckRollup,labels,author` to check the PR's current status.
+1. Run `gh pr view --repo bd73-com/fetchthechange --json number,url,state,reviewDecision,mergeStateStatus,statusCheckRollup,labels,author,reviewRequests` to check the PR's current status.
 2. **Pre-flight checks** — evaluate all of these and report a summary table:
    - PR state must be `OPEN`.
    - `reviewDecision` must be `APPROVED` (no outstanding requesting-changes reviews).
