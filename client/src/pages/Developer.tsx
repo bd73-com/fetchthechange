@@ -259,7 +259,7 @@ export default function Developer() {
                 <code className="text-foreground">name</code>,{" "}
                 <code className="text-foreground">url</code>,{" "}
                 <code className="text-foreground">selector</code>. Optional:{" "}
-                <code className="text-foreground">frequency</code> (daily/hourly),{" "}
+                <code className="text-foreground">frequency</code> (daily/hourly; hourly requires Pro or Power plan),{" "}
                 <code className="text-foreground">active</code> (boolean).
               </p>
               <CodeBlock>{`curl -X POST https://ftc.bd73.com/api/v1/monitors \\
@@ -447,6 +447,11 @@ print("Recent changes:", changes["data"])`}</CodeBlock>
                     <td className="py-2 pr-4"><code className="text-foreground">KEY_LIMIT_REACHED</code></td>
                     <td className="py-2 pr-4">400</td>
                     <td className="py-2">Maximum 5 active API keys per user</td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="py-2 pr-4"><code className="text-foreground">FREQUENCY_TIER_RESTRICTED</code></td>
+                    <td className="py-2 pr-4">403</td>
+                    <td className="py-2">Hourly frequency requires a Pro or Power plan</td>
                   </tr>
                   <tr className="border-b">
                     <td className="py-2 pr-4"><code className="text-foreground">NOT_FOUND</code></td>
