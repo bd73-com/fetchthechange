@@ -5,12 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon, Globe, MessageSquare, ShieldAlert } from "lucide-react";
+import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon, Globe, MessageSquare, ShieldAlert, Lock } from "lucide-react";
 import { useUpdateMonitor, useMonitorHistory } from "@/hooks/use-monitors";
 import { useNotificationPreferences } from "@/hooks/use-notification-preferences";
 import { useNotificationChannels } from "@/hooks/use-notification-channels";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
@@ -147,20 +148,25 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Frequency</FormLabel>
-                    <FormControl>
-                      <select
-                        {...field}
-                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                        data-testid="select-frequency"
-                      >
-                        <option value="daily">Daily</option>
+                    <Select onValueChange={field.onChange} defaultValue={field.value} data-testid="select-frequency">
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select frequency" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="daily">Daily</SelectItem>
                         {(FREQUENCY_TIERS.hourly as readonly string[]).includes(userTier) ? (
-                          <option value="hourly">Hourly</option>
+                          <SelectItem value="hourly">Hourly</SelectItem>
                         ) : (
-                          <option value="hourly" disabled>Hourly (Pro)</option>
+                          <SelectItem value="hourly" disabled>
+                            <span className="flex items-center gap-1.5">
+                              Hourly <Lock className="h-3 w-3 text-muted-foreground" /> <span className="text-xs text-muted-foreground">Pro</span>
+                            </span>
+                          </SelectItem>
                         )}
-                      </select>
-                    </FormControl>
+                      </SelectContent>
+                    </Select>
                   </FormItem>
                 )}
               />
