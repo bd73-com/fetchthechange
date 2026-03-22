@@ -47,7 +47,7 @@ export function checkFrequencyTier(
       code: "INVALID_FREQUENCY",
     };
   }
-  if (!allowedTiers.includes(tier as any)) {
+  if (!(allowedTiers as readonly string[]).includes(tier)) {
     const requiredTiers = allowedTiers.join(" or ");
     return {
       status: 403,
