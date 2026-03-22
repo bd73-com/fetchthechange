@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { getStripeSync, getUncachableStripeClient, getWebhookSecret } from './stripeClient';
 import { authStorage } from './replit_integrations/auth/storage';
+import { storage } from './storage';
 import { ErrorLogger } from './services/logger';
 import { type UserTier, TIER_LIMITS } from '@shared/models/auth';
 
@@ -98,6 +99,10 @@ export class WebhookHandlers {
         tier: 'free',
         stripeSubscriptionId: subscription.id,
       });
+      const downgraded = await storage.downgradeHourlyMonitors(user.id);
+      if (downgraded > 0) {
+        console.log(`[Stripe] Downgraded ${downgraded} hourly monitor(s) to daily for user ${user.id}`);
+      }
       console.log(`[Stripe] User ${user.id} subscription inactive, set to free tier`);
       return;
     }
@@ -148,6 +153,10 @@ export class WebhookHandlers {
       tier: 'free',
       stripeSubscriptionId: null,
     });
+    const downgraded = await storage.downgradeHourlyMonitors(user.id);
+    if (downgraded > 0) {
+      console.log(`[Stripe] Downgraded ${downgraded} hourly monitor(s) to daily for user ${user.id}`);
+    }
 
     console.log(`[Stripe] User ${user.id} downgraded to free tier`);
   }

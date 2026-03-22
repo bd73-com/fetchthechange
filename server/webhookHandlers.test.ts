@@ -24,10 +24,18 @@ vi.mock("./services/logger", () => ({
   },
 }));
 
+vi.mock("./storage", () => ({
+  storage: {
+    downgradeHourlyMonitors: vi.fn().mockResolvedValue(0),
+  },
+}));
+
 import { WebhookHandlers, determineTierFromProduct } from "./webhookHandlers";
 import { authStorage } from "./replit_integrations/auth/storage";
+import { storage } from "./storage";
 
 const mockAuthStorage = vi.mocked(authStorage);
+const mockStorage = vi.mocked(storage);
 
 describe("determineTierFromProduct", () => {
   it("returns tier from explicit metadata.tier", () => {
@@ -273,6 +281,7 @@ describe("WebhookHandlers.handleSubscriptionDeleted", () => {
       tier: "free",
       stripeSubscriptionId: null,
     });
+    expect(mockStorage.downgradeHourlyMonitors).toHaveBeenCalledWith("user_1");
   });
 
   it("does nothing when user is not found", async () => {
@@ -307,6 +316,7 @@ describe("WebhookHandlers.handleSubscriptionChange", () => {
       tier: "free",
       stripeSubscriptionId: "sub_456",
     });
+    expect(mockStorage.downgradeHourlyMonitors).toHaveBeenCalledWith("user_2");
   });
 
   it("does nothing when user is not found by customer ID", async () => {

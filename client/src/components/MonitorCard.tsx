@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon, Globe, MessageSquare, ShieldAlert } from "lucide-react";
+import { Clock, ExternalLink, Activity, ArrowRight, Bell, Edit2, Check, X, AlertTriangle, Inbox, Moon, Globe, MessageSquare, ShieldAlert, Lock } from "lucide-react";
 import { useUpdateMonitor, useMonitorHistory } from "@/hooks/use-monitors";
 import { useNotificationPreferences } from "@/hooks/use-notification-preferences";
 import { useNotificationChannels } from "@/hooks/use-notification-channels";
@@ -19,6 +19,8 @@ import { TagBadge } from "@/components/TagBadge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { detectBotProtectedUrl } from "@/lib/bot-protection";
 import { type HealthState, getHealthState } from "@/lib/monitor-health";
+import { useAuth } from "@/hooks/use-auth";
+import { FREQUENCY_TIERS, type UserTier } from "@shared/models/auth";
 
 const healthDotStyles: Record<HealthState, string> = {
   healthy: "bg-green-500",
@@ -41,6 +43,8 @@ interface MonitorCardProps {
 
 export function MonitorCard({ monitor }: MonitorCardProps) {
   const { mutate: update } = useUpdateMonitor();
+  const { user } = useAuth();
+  const userTier = ((user as any)?.tier || "free") as UserTier;
   const { data: history } = useMonitorHistory(monitor.id);
   const { data: prefs } = useNotificationPreferences(monitor.id);
   const { data: channels = [] } = useNotificationChannels(monitor.id);
@@ -144,13 +148,17 @@ export function MonitorCard({ monitor }: MonitorCardProps) {
                   <FormItem>
                     <FormLabel>Frequency</FormLabel>
                     <FormControl>
-                      <select 
-                        {...field} 
+                      <select
+                        {...field}
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                         data-testid="select-frequency"
                       >
                         <option value="daily">Daily</option>
-                        <option value="hourly">Hourly</option>
+                        {(FREQUENCY_TIERS.hourly as readonly string[]).includes(userTier) ? (
+                          <option value="hourly">Hourly</option>
+                        ) : (
+                          <option value="hourly" disabled>Hourly (Pro)</option>
+                        )}
                       </select>
                     </FormControl>
                   </FormItem>

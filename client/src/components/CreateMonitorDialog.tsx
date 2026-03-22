@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Loader2, HelpCircle, ShieldAlert } from "lucide-react";
+import { Plus, Loader2, HelpCircle, ShieldAlert, Lock } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { detectBotProtectedUrl } from "@/lib/bot-protection";
 import {
@@ -36,7 +36,7 @@ import {
 import { TagPicker } from "@/components/TagPicker";
 import { useSetMonitorTags, useTags } from "@/hooks/use-tags";
 import { useAuth } from "@/hooks/use-auth";
-import { TAG_ASSIGNMENT_LIMITS, type UserTier } from "@shared/models/auth";
+import { TAG_ASSIGNMENT_LIMITS, FREQUENCY_TIERS, type UserTier } from "@shared/models/auth";
 import { useToast } from "@/hooks/use-toast";
 
 export function CreateMonitorDialog() {
@@ -192,7 +192,15 @@ export function CreateMonitorDialog() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="hourly">Hourly</SelectItem>
+                        {(FREQUENCY_TIERS.hourly as readonly string[]).includes(userTier) ? (
+                          <SelectItem value="hourly">Hourly</SelectItem>
+                        ) : (
+                          <SelectItem value="hourly" disabled>
+                            <span className="flex items-center gap-1.5">
+                              Hourly <Lock className="h-3 w-3 text-muted-foreground" /> <span className="text-xs text-muted-foreground">Pro</span>
+                            </span>
+                          </SelectItem>
+                        )}
                         <SelectItem value="daily">Daily</SelectItem>
                       </SelectContent>
                     </Select>

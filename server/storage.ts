@@ -58,6 +58,7 @@ export interface IStorage {
   addMonitorCondition(monitorId: number, type: string, value: string, groupIndex: number): Promise<MonitorCondition>;
   deleteMonitorCondition(id: number, monitorId: number): Promise<void>;
   countMonitorConditions(monitorId: number): Promise<number>;
+  downgradeHourlyMonitors(userId: string): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -638,6 +639,14 @@ export class DatabaseStorage implements IStorage {
       .from(monitorConditions)
       .where(eq(monitorConditions.monitorId, monitorId));
     return Number(result[0]?.count ?? 0);
+  }
+
+  async downgradeHourlyMonitors(userId: string): Promise<number> {
+    const result = await db.update(monitors)
+      .set({ frequency: "daily" })
+      .where(and(eq(monitors.userId, userId), eq(monitors.frequency, "hourly")))
+      .returning({ id: monitors.id });
+    return result.length;
   }
 }
 
