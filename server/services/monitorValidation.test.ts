@@ -39,10 +39,10 @@ describe("checkFrequencyTier", () => {
     expect(result!.error).toContain("pro or power plan");
   });
 
-  it("rejects unknown frequency values", () => {
+  it("rejects unknown frequency values with 400", () => {
     const result = checkFrequencyTier("minutely" as any, "pro");
     expect(result).not.toBeNull();
-    expect(result!.status).toBe(403);
-    expect(result!.code).toBe("FREQUENCY_TIER_RESTRICTED");
+    expect(result!.status).toBe(400);
+    expect(result!.code).toBe("INVALID_FREQUENCY");
   });
 });

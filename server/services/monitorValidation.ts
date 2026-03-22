@@ -40,10 +40,18 @@ export function checkFrequencyTier(
 ): MonitorValidationError | null {
   if (!frequency || frequency === "daily") return null;
   const allowedTiers = FREQUENCY_TIERS[frequency as keyof typeof FREQUENCY_TIERS];
-  if (!allowedTiers || !allowedTiers.includes(tier as any)) {
+  if (!allowedTiers) {
+    return {
+      status: 400,
+      error: `Unsupported check frequency: "${frequency}".`,
+      code: "INVALID_FREQUENCY",
+    };
+  }
+  if (!allowedTiers.includes(tier as any)) {
+    const requiredTiers = allowedTiers.join(" or ");
     return {
       status: 403,
-      error: `The "${frequency}" check frequency requires a pro or power plan. Upgrade to use this frequency.`,
+      error: `The "${frequency}" check frequency requires a ${requiredTiers} plan. Upgrade to use this frequency.`,
       code: "FREQUENCY_TIER_RESTRICTED",
     };
   }
