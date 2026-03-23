@@ -418,6 +418,72 @@ FetchTheChange Team`,
   }
 }
 
+export async function sendTierDowngradeEmail(userId: string, monitorNames: string[]): Promise<EmailResult> {
+  if (monitorNames.length === 0) {
+    return { success: false, error: "No monitors to report" };
+  }
+
+  const resendCapCheck = await ResendUsageTracker.canSendEmail();
+  if (!resendCapCheck.allowed) {
+    return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
+  }
+
+  const resend = getResendClient();
+  if (!resend) {
+    console.log(`[MOCK EMAIL] tier-downgrade for user ${userId}`);
+    return { success: false, error: "RESEND_API_KEY not configured" };
+  }
+
+  const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
+
+  try {
+    const user = await authStorage.getUser(userId);
+    if (!user || !user.email) {
+      return { success: false, error: "User has no email address" };
+    }
+
+    const recipientEmail = user.notificationEmail || user.email;
+    const monitorList = monitorNames.map(n => `  • ${sanitizePlainText(n || "(unnamed monitor)")}`).join("\n");
+    const monitorHtmlList = monitorNames.map(n => `<li>${escapeHtml(n || "(unnamed monitor)")}</li>`).join("");
+
+    const response = await resend.emails.send({
+      from: fromAddress,
+      to: recipientEmail,
+      subject: `FetchTheChange: ${monitorNames.length} monitor${monitorNames.length === 1 ? "" : "s"} changed to daily frequency`,
+      text: `Hello,
+
+Your subscription has changed and the following monitor${monitorNames.length === 1 ? " has" : "s have"} been switched from hourly to daily frequency:
+
+${monitorList}
+
+To restore hourly monitoring, upgrade your plan from your dashboard.
+
+FetchTheChange Team`,
+      html: `
+        <h2>Monitors Changed to Daily Frequency</h2>
+        <p>Your subscription has changed and the following monitor${monitorNames.length === 1 ? " has" : "s have"} been switched from hourly to daily frequency:</p>
+        <ul>${monitorHtmlList}</ul>
+        <hr/>
+        <p>To restore hourly monitoring, <a href="${safeHref(getAppUrl())}">upgrade your plan</a> from your dashboard.</p>
+        <br/>
+        <p>FetchTheChange Team</p>
+      `
+    });
+
+    if (response.error) {
+      await ResendUsageTracker.recordUsage(userId, undefined, recipientEmail, undefined, false).catch(() => {});
+      return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
+    }
+
+    await ResendUsageTracker.recordUsage(userId, undefined, recipientEmail, response.data?.id, true).catch(() => {});
+    console.log(`[Email] Sent tier downgrade notification to ${recipientEmail} for user ${userId}`);
+    return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
+  } catch (error: any) {
+    await ErrorLogger.error("email", `Tier downgrade email failed for user ${userId}`, error instanceof Error ? error : null, { userId });
+    return { success: false, error: String(error?.message ?? error) };
+  }
+}
+
 export async function sendDigestEmail(monitor: Monitor, changes: MonitorChange[], emailOverride?: string): Promise<EmailResult> {
   if (changes.length === 0) {
     return { success: false, error: "No changes to include in digest" };

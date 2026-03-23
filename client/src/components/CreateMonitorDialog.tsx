@@ -62,7 +62,7 @@ export function CreateMonitorDialog() {
     defaultValues: {
       name: "",
       url: "",
-      selector: "name of the selctor",
+      selector: "",
       frequency: "daily",
       emailEnabled: true,
       active: true,

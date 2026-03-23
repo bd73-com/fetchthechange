@@ -238,14 +238,15 @@ describe("DatabaseStorage", () => {
       const updateChain: any = {
         set: vi.fn(),
         where: vi.fn(),
-        returning: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]),
+        returning: vi.fn().mockResolvedValue([{ id: 1, name: "Monitor A" }, { id: 2, name: "Monitor B" }]),
       };
       updateChain.set.mockReturnValue(updateChain);
       updateChain.where.mockReturnValue(updateChain);
       mockDbUpdate.mockReturnValue(updateChain);
 
-      const count = await storage.downgradeHourlyMonitors("user_123");
-      expect(count).toBe(2);
+      const result = await storage.downgradeHourlyMonitors("user_123");
+      expect(result.count).toBe(2);
+      expect(result.monitorNames).toEqual(["Monitor A", "Monitor B"]);
       expect(mockDbUpdate).toHaveBeenCalledWith(monitors);
       expect(updateChain.set).toHaveBeenCalledWith({ frequency: "daily" });
     });
@@ -260,8 +261,9 @@ describe("DatabaseStorage", () => {
       updateChain.where.mockReturnValue(updateChain);
       mockDbUpdate.mockReturnValue(updateChain);
 
-      const count = await storage.downgradeHourlyMonitors("user_no_hourly");
-      expect(count).toBe(0);
+      const result = await storage.downgradeHourlyMonitors("user_no_hourly");
+      expect(result.count).toBe(0);
+      expect(result.monitorNames).toEqual([]);
     });
   });
 
