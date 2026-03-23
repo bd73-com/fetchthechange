@@ -1,4 +1,10 @@
 {
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Write"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
