@@ -20,7 +20,7 @@ When `reviewDecision` is `CHANGES_REQUESTED` or `mergeStateStatus` is `BLOCKED`,
 1. Fetch all reviews on the PR: `gh api repos/bd73-com/fetchthechange/pulls/<number>/reviews --jq '[.[] | {id: .id, user: .user.login, user_type: .user.type, state: .state, submitted_at: .submitted_at}]'`
 2. Identify reviews with `state: "CHANGES_REQUESTED"`.
 3. For each such review, check if the reviewer is a bot (`user_type == "Bot"` — e.g., `coderabbitai[bot]`, `github-actions[bot]`).
-4. If the reviewer is a bot, check whether new commits were pushed **after** the review's `submitted_at` timestamp: `gh api repos/bd73-com/fetchthechange/pulls/<number>/commits --jq '[.[].commit.committer.date]' | jq -r 'last'` — compare the last commit date to the review date.
+4. If the reviewer is a bot, check whether new commits were pushed **after** the review's `submitted_at` timestamp: `gh api --paginate repos/bd73-com/fetchthechange/pulls/<number>/commits --jq '.[].commit.committer.date' | tail -n1` — compare that latest commit date to the review date.
 5. If the last commit is newer than the bot's review, the review is stale. **Dismiss it automatically**: `gh api repos/bd73-com/fetchthechange/pulls/<number>/reviews/<review_id>/dismissals -f message="Dismissing stale bot review — fixes were pushed in subsequent commits." -f event="DISMISS"`
 6. After dismissing, re-fetch PR status from step 1 and continue the pre-flight checks. If the PR is now `APPROVED` (or `reviewDecision` is empty with no blocking reviews) and `mergeStateStatus` is `CLEAN`/`HAS_HOOKS`, proceed to merge.
 
@@ -33,7 +33,7 @@ If a pre-flight check fails (and was not auto-resolved above), report exactly wh
 ### reviewDecision is empty or not APPROVED (human reviewers)
 
 1. Get the PR author from the JSON retrieved in step 1 (the `author` or `user` field).
-2. Fetch repo collaborators, excluding the PR author and any already-requested reviewers: `gh api repos/bd73-com/fetchthechange/collaborators --jq '[.[].login] | map(select(. != "AUTHOR_LOGIN"))' | jq -r 'first'` (replace `AUTHOR_LOGIN` with the actual author login; also exclude logins already in the PR's `requestedReviewers` list).
+2. Fetch repo collaborators, excluding the PR author and any already-requested reviewers: `gh api repos/bd73-com/fetchthechange/collaborators --jq '[.[].login] | map(select(. != "AUTHOR_LOGIN"))' | jq -r 'first'` (replace `AUTHOR_LOGIN` with the actual author login; also exclude logins already in the PR's `reviewRequests` list from step 1).
 3. If no eligible collaborators remain, tell the user no reviewers are available and they must manually request one.
 4. Otherwise, request a review: `gh pr edit <number> --repo bd73-com/fetchthechange --add-reviewer <login>` (replace `<number>` with the PR number from step 1).
 5. Tell the user: who was requested, the PR URL, and that they can run `/merge-pr` again once approved.
