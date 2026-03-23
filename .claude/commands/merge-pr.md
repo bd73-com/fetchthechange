@@ -19,10 +19,12 @@ When `reviewDecision` is `CHANGES_REQUESTED` or `mergeStateStatus` is `BLOCKED`,
 
 1. Fetch all reviews on the PR: `gh api repos/bd73-com/fetchthechange/pulls/<number>/reviews --jq '[.[] | {id: .id, user: .user.login, user_type: .user.type, state: .state, submitted_at: .submitted_at}]'`
 2. Identify reviews with `state: "CHANGES_REQUESTED"`.
-3. For each such review, check if the reviewer is a bot (`user_type == "Bot"` — e.g., `coderabbitai[bot]`, `github-actions[bot]`).
-4. If the reviewer is a bot, check whether new commits were pushed **after** the review's `submitted_at` timestamp: `gh api --paginate repos/bd73-com/fetchthechange/pulls/<number>/commits --jq '.[].commit.committer.date' | tail -n1` — compare that latest commit date to the review date.
-5. If the last commit is newer than the bot's review, the review is stale. **Dismiss it automatically**: `gh api repos/bd73-com/fetchthechange/pulls/<number>/reviews/<review_id>/dismissals -f message="Dismissing stale bot review — fixes were pushed in subsequent commits." -f event="DISMISS"`
-6. After dismissing, re-fetch PR status from step 1 and continue the pre-flight checks. If the PR is now `APPROVED` (or `reviewDecision` is empty with no blocking reviews) and `mergeStateStatus` is `CLEAN`/`HAS_HOOKS`, proceed to merge.
+3. For each such review, check if the reviewer is a **trusted bot** by matching the login against this allowlist: `coderabbitai[bot]`, `github-actions[bot]`, `dependabot[bot]`. Do not rely solely on `user_type == "Bot"` — only dismiss reviews from bots on this list.
+4. If the reviewer is a trusted bot, check whether new commits were pushed **after** the review's `submitted_at` timestamp:
+   - Get the latest commit date: `gh api --paginate repos/bd73-com/fetchthechange/pulls/<number>/commits --jq '.[].commit.committer.date' | tail -n1`
+   - Compare timestamps: convert both to epoch seconds (`date -d "$COMMIT_DATE" +%s` vs `date -d "$REVIEW_DATE" +%s`) and only proceed if the commit timestamp is strictly greater than the review timestamp.
+5. If the last commit is newer than the bot's review, the review is stale. **Dismiss it automatically**: `gh api --method PUT repos/bd73-com/fetchthechange/pulls/<number>/reviews/<review_id>/dismissals -f message="Dismissing stale bot review — fixes were pushed in subsequent commits." -f event="DISMISS"`. If the dismissal API call fails (e.g., insufficient permissions, rate limit), log the error and skip to reporting the original failure — do not attempt to re-fetch or merge.
+6. After a successful dismissal, re-fetch PR status from step 1 and continue the pre-flight checks. If the PR is now `APPROVED` (or `reviewDecision` is empty/null and `mergeStateStatus` is not `BLOCKED`) and `mergeStateStatus` is `CLEAN`/`HAS_HOOKS`, proceed to merge.
 
 **Important**: Only dismiss bot reviews automatically. Never dismiss reviews from human collaborators — those always require manual resolution.
 
