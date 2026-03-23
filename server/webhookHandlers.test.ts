@@ -26,8 +26,12 @@ vi.mock("./services/logger", () => ({
 
 vi.mock("./storage", () => ({
   storage: {
-    downgradeHourlyMonitors: vi.fn().mockResolvedValue(0),
+    downgradeHourlyMonitors: vi.fn().mockResolvedValue({ count: 0, monitorNames: [] }),
   },
+}));
+
+vi.mock("./services/email", () => ({
+  sendTierDowngradeEmail: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 import { WebhookHandlers, determineTierFromProduct } from "./webhookHandlers";
