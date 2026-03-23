@@ -28,7 +28,7 @@ reviews:
   sequence_diagrams: true
   review_status: true
   poem: false
-  commit_status: true
+  commit_status: false
   assess_linked_issues: true
   related_issues: true
   related_prs: true
