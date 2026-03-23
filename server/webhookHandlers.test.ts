@@ -37,9 +37,11 @@ vi.mock("./services/email", () => ({
 import { WebhookHandlers, determineTierFromProduct } from "./webhookHandlers";
 import { authStorage } from "./replit_integrations/auth/storage";
 import { storage } from "./storage";
+import { sendTierDowngradeEmail } from "./services/email";
 
 const mockAuthStorage = vi.mocked(authStorage);
 const mockStorage = vi.mocked(storage);
+const mockSendTierDowngradeEmail = vi.mocked(sendTierDowngradeEmail);
 
 describe("determineTierFromProduct", () => {
   it("returns tier from explicit metadata.tier", () => {
@@ -286,6 +288,37 @@ describe("WebhookHandlers.handleSubscriptionDeleted", () => {
       stripeSubscriptionId: null,
     });
     expect(mockStorage.downgradeHourlyMonitors).toHaveBeenCalledWith("user_1");
+  });
+
+  it("sends downgrade email when monitors are downgraded", async () => {
+    mockAuthStorage.getUserByStripeCustomerId.mockResolvedValue({
+      id: "user_1",
+      email: "test@example.com",
+      tier: "pro",
+    } as any);
+    mockStorage.downgradeHourlyMonitors.mockResolvedValueOnce({ count: 2, monitorNames: ["Monitor A", "Monitor B"] });
+
+    await WebhookHandlers.handleSubscriptionDeleted({
+      customer: "cus_abc",
+      id: "sub_123",
+    });
+
+    expect(mockSendTierDowngradeEmail).toHaveBeenCalledWith("user_1", ["Monitor A", "Monitor B"]);
+  });
+
+  it("does not send downgrade email when no monitors are downgraded", async () => {
+    mockAuthStorage.getUserByStripeCustomerId.mockResolvedValue({
+      id: "user_1",
+      email: "test@example.com",
+      tier: "pro",
+    } as any);
+
+    await WebhookHandlers.handleSubscriptionDeleted({
+      customer: "cus_abc",
+      id: "sub_123",
+    });
+
+    expect(mockSendTierDowngradeEmail).not.toHaveBeenCalled();
   });
 
   it("does nothing when user is not found", async () => {

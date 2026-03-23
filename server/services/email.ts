@@ -419,6 +419,10 @@ FetchTheChange Team`,
 }
 
 export async function sendTierDowngradeEmail(userId: string, monitorNames: string[]): Promise<EmailResult> {
+  if (monitorNames.length === 0) {
+    return { success: false, error: "No monitors to report" };
+  }
+
   const resendCapCheck = await ResendUsageTracker.canSendEmail();
   if (!resendCapCheck.allowed) {
     return { success: false, error: resendCapCheck.reason || "Resend usage cap reached" };
@@ -439,8 +443,8 @@ export async function sendTierDowngradeEmail(userId: string, monitorNames: strin
     }
 
     const recipientEmail = user.notificationEmail || user.email;
-    const monitorList = monitorNames.map(n => `  • ${sanitizePlainText(n)}`).join("\n");
-    const monitorHtmlList = monitorNames.map(n => `<li>${escapeHtml(n)}</li>`).join("");
+    const monitorList = monitorNames.map(n => `  • ${sanitizePlainText(n || "(unnamed monitor)")}`).join("\n");
+    const monitorHtmlList = monitorNames.map(n => `<li>${escapeHtml(n || "(unnamed monitor)")}</li>`).join("");
 
     const response = await resend.emails.send({
       from: fromAddress,
@@ -467,14 +471,16 @@ FetchTheChange Team`,
     });
 
     if (response.error) {
+      await ResendUsageTracker.recordUsage(userId, undefined, recipientEmail, undefined, false).catch(() => {});
       return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
     }
 
+    await ResendUsageTracker.recordUsage(userId, undefined, recipientEmail, response.data?.id, true).catch(() => {});
     console.log(`[Email] Sent tier downgrade notification to ${recipientEmail} for user ${userId}`);
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
     await ErrorLogger.error("email", `Tier downgrade email failed for user ${userId}`, error instanceof Error ? error : null, { userId });
-    return { success: false, error: error.message };
+    return { success: false, error: String(error?.message ?? error) };
   }
 }
 

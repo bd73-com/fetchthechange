@@ -46,7 +46,7 @@ vi.mock("drizzle-orm", () => ({
   sql: (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
 }));
 
-import { sendNotificationEmail, sendAutoPauseEmail, sendDigestEmail, sendHealthWarningEmail, sendRecoveryEmail } from "./email";
+import { sendNotificationEmail, sendAutoPauseEmail, sendDigestEmail, sendHealthWarningEmail, sendRecoveryEmail, sendTierDowngradeEmail } from "./email";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { ResendUsageTracker } from "./resendTracker";
 import { ErrorLogger } from "./logger";
@@ -1219,6 +1219,149 @@ describe("sendRecoveryEmail", () => {
       "email",
       expect.stringContaining("Recovery email failed"),
       expect.objectContaining({ monitorId: 1 })
+    );
+  });
+});
+
+describe("sendTierDowngradeEmail", () => {
+  const originalResendKey = process.env.RESEND_API_KEY;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.RESEND_API_KEY = "re_test_key";
+    mockSend.mockResolvedValue({ data: { id: "email_downgrade" }, error: null });
+  });
+
+  afterEach(() => {
+    if (originalResendKey !== undefined) {
+      process.env.RESEND_API_KEY = originalResendKey;
+    } else {
+      delete process.env.RESEND_API_KEY;
+    }
+  });
+
+  it("returns early when monitorNames is empty", async () => {
+    const result = await sendTierDowngradeEmail("user1", []);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("No monitors to report");
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("returns early when Resend usage cap is reached", async () => {
+    vi.mocked(ResendUsageTracker.canSendEmail).mockResolvedValueOnce({
+      allowed: false,
+      reason: "Monthly cap reached",
+    });
+
+    const result = await sendTierDowngradeEmail("user1", ["Monitor A"]);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Monthly cap reached");
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("returns early when RESEND_API_KEY is not set", async () => {
+    delete process.env.RESEND_API_KEY;
+
+    const result = await sendTierDowngradeEmail("user1", ["Monitor A"]);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("RESEND_API_KEY not configured");
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("returns error when user has no email", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce({
+      id: "user1",
+      email: null,
+      firstName: null,
+      lastName: null,
+      profileImageUrl: null,
+      tier: "free",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      notificationEmail: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const result = await sendTierDowngradeEmail("user1", ["Monitor A"]);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("User has no email address");
+  });
+
+  it("sends email with correct subject for single monitor", async () => {
+    const result = await sendTierDowngradeEmail("user1", ["Price Tracker"]);
+
+    expect(result.success).toBe(true);
+    expect(result.id).toBe("email_downgrade");
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "user@example.com",
+        subject: "FetchTheChange: 1 monitor changed to daily frequency",
+        text: expect.stringContaining("Price Tracker"),
+        html: expect.stringContaining("Price Tracker"),
+      })
+    );
+  });
+
+  it("sends email with plural subject for multiple monitors", async () => {
+    const result = await sendTierDowngradeEmail("user1", ["Monitor A", "Monitor B"]);
+
+    expect(result.success).toBe(true);
+    const call = mockSend.mock.calls[0][0];
+    expect(call.subject).toBe("FetchTheChange: 2 monitors changed to daily frequency");
+    expect(call.text).toContain("Monitor A");
+    expect(call.text).toContain("Monitor B");
+    expect(call.html).toContain("Monitor A");
+    expect(call.html).toContain("Monitor B");
+  });
+
+  it("uses notificationEmail when set", async () => {
+    vi.mocked(authStorage.getUser).mockResolvedValueOnce({
+      id: "user1",
+      email: "user@example.com",
+      notificationEmail: "alerts@example.com",
+      firstName: null,
+      lastName: null,
+      profileImageUrl: null,
+      tier: "pro",
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await sendTierDowngradeEmail("user1", ["Monitor A"]);
+
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "alerts@example.com" })
+    );
+  });
+
+  it("returns error when resend returns an error", async () => {
+    mockSend.mockResolvedValueOnce({ data: null, error: { message: "Invalid API key" } });
+
+    const result = await sendTierDowngradeEmail("user1", ["Monitor A"]);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Invalid API key");
+  });
+
+  it("handles thrown exceptions gracefully", async () => {
+    mockSend.mockRejectedValueOnce(new Error("Connection reset"));
+
+    const result = await sendTierDowngradeEmail("user1", ["Monitor A"]);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Connection reset");
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "email",
+      expect.stringContaining("Tier downgrade email failed"),
+      expect.any(Error),
+      expect.objectContaining({ userId: "user1" })
     );
   });
 });
