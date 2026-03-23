@@ -1432,7 +1432,7 @@ export async function registerRoutes(
       if (level && ["error", "warning", "info"].includes(level)) {
         conditions.push(eq(errorLogs.level, level));
       }
-      if (source && ["scraper", "email", "scheduler", "api"].includes(source)) {
+      if (source && ["scraper", "email", "scheduler", "api", "stripe", "resend"].includes(source)) {
         conditions.push(eq(errorLogs.source, source));
       }
 
@@ -1553,7 +1553,7 @@ export async function registerRoutes(
         if (filters.level && ["error", "warning", "info"].includes(filters.level)) {
           conditions.push(eq(errorLogs.level, filters.level));
         }
-        if (filters.source && ["scraper", "email", "scheduler", "api"].includes(filters.source)) {
+        if (filters.source && ["scraper", "email", "scheduler", "api", "stripe", "resend"].includes(filters.source)) {
           conditions.push(eq(errorLogs.source, filters.source));
         }
         const excludeList = Array.isArray(excludeIds) ? excludeIds.filter((id: any) => Number.isInteger(id) && id > 0) : [];
