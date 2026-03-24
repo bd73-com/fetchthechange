@@ -23,8 +23,11 @@ When `reviewDecision` is `CHANGES_REQUESTED` or `mergeStateStatus` is `BLOCKED`,
 4. If the reviewer is a trusted bot, check whether new commits were pushed **after** the review's `submitted_at` timestamp:
    - Get the latest commit date: `gh api --paginate repos/bd73-com/fetchthechange/pulls/<number>/commits --jq '.[].commit.committer.date' | tail -n1`
    - Compare timestamps: convert both to epoch seconds (`date -d "$COMMIT_DATE" +%s` vs `date -d "$REVIEW_DATE" +%s`) and only proceed if the commit timestamp is strictly greater than the review timestamp.
-5. If the last commit is newer than the bot's review, the review is stale. **Dismiss it automatically**: `gh api --method PUT repos/bd73-com/fetchthechange/pulls/<number>/reviews/<review_id>/dismissals -f message="Dismissing stale bot review — fixes were pushed in subsequent commits." -f event="DISMISS"`. If the dismissal API call fails (e.g., insufficient permissions, rate limit), log the error and skip to reporting the original failure — do not attempt to re-fetch or merge.
+5. If the last commit is newer than the bot's review, the review is stale. **Dismiss it automatically**: `gh api --method PUT repos/bd73-com/fetchthechange/pulls/<number>/reviews/<review_id>/dismissals -f message="Dismissing stale bot review — fixes were pushed in subsequent commits." -f event="DISMISS"`.
 6. After a successful dismissal, re-fetch PR status from step 1 and continue the pre-flight checks. If the PR is now `APPROVED` (or `reviewDecision` is empty/null and `mergeStateStatus` is not `BLOCKED`) and `mergeStateStatus` is `CLEAN`/`HAS_HOOKS`/`UNSTABLE`, proceed to merge.
+7. **If dismissal fails** (insufficient permissions, rate limit, etc.), do NOT give up. Instead:
+   - If the **only** `CHANGES_REQUESTED` reviews are from trusted bots (no human reviewers requested changes), still attempt the merge: `gh pr merge --repo bd73-com/fetchthechange --squash --delete-branch --admin`. The `--admin` flag bypasses branch protection for repo admins.
+   - If `--admin` also fails, tell the user to dismiss the bot review manually from the GitHub UI (PR → Reviews → Dismiss review) and re-run `/merge-pr`.
 
 **Important**: Only dismiss bot reviews automatically. Never dismiss reviews from human collaborators — those always require manual resolution.
 
@@ -34,8 +37,9 @@ If a pre-flight check fails (and was not auto-resolved above), report exactly wh
 
 ### reviewDecision is CHANGES_REQUESTED
 
-- List the reviewers who requested changes and their comments.
-- Tell the user to address the feedback, push updates, then re-run `/merge-pr`.
+- Fetch all reviews (see "Auto-resolving stale bot reviews" step 1) and categorize reviewers as bot or human.
+- If only bot reviewers requested changes, this should have been auto-resolved above. If auto-resolution failed, tell the user to dismiss the bot review from the GitHub UI and re-run `/merge-pr`.
+- If any human reviewers requested changes, list their comments and tell the user to address the feedback, push updates, then re-run `/merge-pr`.
 
 ### Status checks FAILURE or PENDING
 
