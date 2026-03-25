@@ -8,6 +8,21 @@ import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
 
+/**
+ * Validates and sanitizes a returnTo query parameter.
+ * Only relative paths (starting with "/" but not "//") are allowed
+ * to prevent open-redirect attacks.
+ */
+export function sanitizeReturnTo(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (value.length > 2048) return undefined;
+  if (!value.startsWith("/")) return undefined;
+  if (value.startsWith("//")) return undefined;
+  if (value.includes("\\") || /%5c/i.test(value)) return undefined;
+  if (/[\x00-\x1f]/.test(value) || /%[01][0-9a-f]/i.test(value)) return undefined;
+  return value;
+}
+
 const getOidcConfig = memoize(
   async () => {
     return await client.discovery(
@@ -113,11 +128,31 @@ export async function setupAuth(app: Express) {
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", (req, res, next) => {
-    ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      prompt: "login consent",
-      scope: ["openid", "email", "profile", "offline_access"],
-    })(req, res, next);
+    const returnTo = sanitizeReturnTo(req.query.returnTo);
+    if (returnTo) {
+      (req.session as any).returnTo = returnTo;
+    } else {
+      delete (req.session as any).returnTo;
+    }
+
+    const proceed = () => {
+      ensureStrategy(req.hostname);
+      passport.authenticate(`replitauth:${req.hostname}`, {
+        prompt: "login consent",
+        scope: ["openid", "email", "profile", "offline_access"],
+      })(req, res, next);
+    };
+
+    // Persist returnTo to the session store before the OAuth redirect
+    // so it survives the round-trip to the identity provider.
+    if (returnTo) {
+      req.session.save((err) => {
+        if (err) return next(err);
+        proceed();
+      });
+    } else {
+      proceed();
+    }
   });
 
   app.get("/api/callback", (req, res, next) => {
@@ -137,9 +172,12 @@ export async function setupAuth(app: Express) {
         req.logIn(user, (loginErr) => {
           if (loginErr) return next(loginErr);
 
+          const returnTo = (req.session as any).returnTo;
+          delete (req.session as any).returnTo;
+
           req.session.save((saveErr) => {
             if (saveErr) return next(saveErr);
-            res.redirect("/");
+            res.redirect(returnTo || "/");
           });
         });
       });
