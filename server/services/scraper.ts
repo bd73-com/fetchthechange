@@ -5,6 +5,7 @@ import { processChangeNotification } from "./notification";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
+import { isTransientDbError } from "../utils/dbErrors";
 import { browserPool } from "./browserPool";
 import { validateUrlBeforeFetch, ssrfSafeFetch } from "../utils/ssrf";
 import { type Monitor, monitorMetrics, monitors } from "@shared/schema";
@@ -1350,7 +1351,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           // Non-transient errors (schema/constraint) indicate a real problem — log as error.
           const dbErrMsg = dbError instanceof Error ? dbError.message : String(dbError);
           const retryErrMsg = retryError instanceof Error ? retryError.message : String(retryError);
-          const isTransientSave = /connection terminated|connection timeout|connection refused|econnreset|econnrefused|cannot acquire|timeout expired/i.test(retryErrMsg);
+          const isTransientSave = isTransientDbError(retryError);
           const saveContext = {
             monitorId: monitor.id,
             monitorName: monitor.name,
@@ -1467,7 +1468,10 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     // Transient network/connection errors are expected and retried automatically —
     // log as warnings to avoid polluting the error log with recoverable conditions.
     // Note: "database error" (schema/constraint issues) is NOT transient and stays at error level.
-    const isTransient = logContext === "network error" || logContext === "database connection error";
+    // Note: ENOTFOUND, certificate/ssl/tls errors are permanent misconfigurations, not transient.
+    const errMsg = error instanceof Error ? error.message : "";
+    const isPermanentNetworkError = /ENOTFOUND|EAI_AGAIN|certificate|ssl|tls/i.test(errMsg);
+    const isTransient = (logContext === "network error" && !isPermanentNetworkError) || logContext === "database connection error";
     const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
     if (isTransient) {
       await ErrorLogger.warning("scraper", logMessage, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }).catch(() => {});
