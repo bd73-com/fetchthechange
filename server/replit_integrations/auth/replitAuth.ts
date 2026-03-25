@@ -18,6 +18,7 @@ export function sanitizeReturnTo(value: unknown): string | undefined {
   if (value.length > 2048) return undefined;
   if (!value.startsWith("/")) return undefined;
   if (value.startsWith("//")) return undefined;
+  if (value.includes("\\") || /%5c/i.test(value)) return undefined;
   if (/[\x00-\x1f]/.test(value) || /%[01][0-9a-f]/i.test(value)) return undefined;
   return value;
 }
@@ -130,6 +131,8 @@ export async function setupAuth(app: Express) {
     const returnTo = sanitizeReturnTo(req.query.returnTo);
     if (returnTo) {
       (req.session as any).returnTo = returnTo;
+    } else {
+      delete (req.session as any).returnTo;
     }
 
     const proceed = () => {

@@ -86,6 +86,12 @@ describe("sanitizeReturnTo", () => {
     expect(sanitizeReturnTo("\\evil.com")).toBeUndefined();
   });
 
+  it("rejects backslash after leading slash (browser normalization bypass)", () => {
+    expect(sanitizeReturnTo("/\\evil.com")).toBeUndefined();
+    expect(sanitizeReturnTo("/%5Cevil.com")).toBeUndefined();
+    expect(sanitizeReturnTo("/%5cevil.com")).toBeUndefined();
+  });
+
   it("rejects non-string values", () => {
     expect(sanitizeReturnTo(undefined)).toBeUndefined();
     expect(sanitizeReturnTo(null)).toBeUndefined();
