@@ -411,11 +411,19 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${deleted} monitor_metrics rows older than 90 days`);
       }
     } catch (error) {
-      await ErrorLogger.warning("scheduler", "monitor_metrics cleanup failed (will retry tomorrow)", {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        retentionDays: 90,
-        table: "monitor_metrics",
-      });
+      if (isTransientDbError(error)) {
+        await ErrorLogger.warning("scheduler", "monitor_metrics cleanup failed (will retry tomorrow)", {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          retentionDays: 90,
+          table: "monitor_metrics",
+        });
+      } else {
+        await ErrorLogger.error("scheduler", "monitor_metrics cleanup failed", error instanceof Error ? error : null, {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          retentionDays: 90,
+          table: "monitor_metrics",
+        });
+      }
     }
 
     // Delivery log cleanup: prune entries older than 30 days
@@ -426,11 +434,19 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${entriesDeleted} delivery_log rows older than 30 days`);
       }
     } catch (error) {
-      await ErrorLogger.warning("scheduler", "delivery_log cleanup failed (will retry tomorrow)", {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        retentionDays: 30,
-        table: "delivery_log",
-      });
+      if (isTransientDbError(error)) {
+        await ErrorLogger.warning("scheduler", "delivery_log cleanup failed (will retry tomorrow)", {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          retentionDays: 30,
+          table: "delivery_log",
+        });
+      } else {
+        await ErrorLogger.error("scheduler", "delivery_log cleanup failed", error instanceof Error ? error : null, {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          retentionDays: 30,
+          table: "delivery_log",
+        });
+      }
     }
 
     // Notification queue cleanup: prune permanently failed entries older than 7 days
@@ -442,11 +458,19 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${deleted} permanently failed notification_queue rows older than 7 days`);
       }
     } catch (error) {
-      await ErrorLogger.warning("scheduler", "notification_queue cleanup failed (will retry tomorrow)", {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        retentionDays: 7,
-        table: "notification_queue",
-      });
+      if (isTransientDbError(error)) {
+        await ErrorLogger.warning("scheduler", "notification_queue cleanup failed (will retry tomorrow)", {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          retentionDays: 7,
+          table: "notification_queue",
+        });
+      } else {
+        await ErrorLogger.error("scheduler", "notification_queue cleanup failed", error instanceof Error ? error : null, {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          retentionDays: 7,
+          table: "notification_queue",
+        });
+      }
     }
   }));
 

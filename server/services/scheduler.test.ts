@@ -664,16 +664,37 @@ describe("daily metrics cleanup", () => {
     consoleSpy.mockRestore();
   });
 
-  it("logs warning when cleanup query fails (non-critical background task)", async () => {
+  it("logs error when cleanup fails with non-transient DB error", async () => {
     await startScheduler();
     mockDbExecute.mockRejectedValueOnce(new Error("DB timeout"));
     await runCron("0 3 * * *");
+
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      "monitor_metrics cleanup failed",
+      expect.any(Error),
+      expect.objectContaining({
+        errorMessage: "DB timeout",
+        retentionDays: 90,
+        table: "monitor_metrics",
+      })
+    );
+  });
+
+  it("logs warning when cleanup fails with transient DB error", async () => {
+    await startScheduler();
+    mockDbExecute
+      .mockRejectedValueOnce(new Error("Connection terminated"))
+      .mockRejectedValueOnce(new Error("Connection terminated"));
+    const cronPromise = runCron("0 3 * * *");
+    await vi.advanceTimersByTimeAsync(2000);
+    await cronPromise;
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
       "monitor_metrics cleanup failed (will retry tomorrow)",
       expect.objectContaining({
-        errorMessage: "DB timeout",
+        errorMessage: "Connection terminated",
         retentionDays: 90,
         table: "monitor_metrics",
       })
@@ -685,9 +706,11 @@ describe("daily metrics cleanup", () => {
     mockDbExecute.mockRejectedValueOnce("disk full");
     await runCron("0 3 * * *");
 
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+    // Non-Error values are not transient, so logged as error
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
       "scheduler",
-      "monitor_metrics cleanup failed (will retry tomorrow)",
+      "monitor_metrics cleanup failed",
+      null,
       expect.objectContaining({
         errorMessage: "disk full",
         retentionDays: 90,

@@ -486,8 +486,13 @@ export function classifyOuterError(error: unknown): { userMessage: string; logCo
     return { userMessage: "A temporary server error occurred. The check will be retried automatically.", logContext: "database connection error" };
   }
 
+  // SSRF blocks — security-relevant, must stay at error level (not transient)
+  if (/SSRF blocked/i.test(msg)) {
+    return { userMessage: sanitizeErrorForClient(msg), logContext: "ssrf_blocked" };
+  }
+
   // Network errors — delegate to the existing fetch-error sanitizer
-  if (/abort|timeout|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|socket hang up|certificate|ssl|tls|SSRF|UND_ERR_HEADERS_OVERFLOW/i.test(msg)) {
+  if (/abort|timeout|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|socket hang up|certificate|ssl|tls|UND_ERR_HEADERS_OVERFLOW/i.test(msg)) {
     return { userMessage: sanitizeErrorForClient(msg), logContext: "network error" };
   }
 
@@ -1340,23 +1345,35 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             consecutiveFailures: 0,
           });
         } catch (retryError) {
-          // Both attempts failed — log as warning since it's marked for
-          // accelerated retry and will self-heal on the next cycle.
+          // Both attempts failed. Transient DB errors (connection drops) are
+          // expected and will self-heal via accelerated retry — log as warning.
+          // Non-transient errors (schema/constraint) indicate a real problem — log as error.
           const dbErrMsg = dbError instanceof Error ? dbError.message : String(dbError);
           const retryErrMsg = retryError instanceof Error ? retryError.message : String(retryError);
-          await ErrorLogger.warning(
-            "scraper",
-            `"${monitor.name}" check succeeded but failed to save result (will retry)`,
-            {
-              monitorId: monitor.id,
-              monitorName: monitor.name,
-              extractedValue: newValue?.substring(0, 200) ?? null,
-              previousValue: oldValue?.substring(0, 200) ?? null,
-              changed,
-              dbError: dbErrMsg,
-              retryError: retryErrMsg,
-            },
-          ).catch(() => {});
+          const isTransientSave = /connection terminated|connection timeout|connection refused|econnreset|econnrefused|cannot acquire|timeout expired/i.test(retryErrMsg);
+          const saveContext = {
+            monitorId: monitor.id,
+            monitorName: monitor.name,
+            extractedValue: newValue?.substring(0, 200) ?? null,
+            previousValue: oldValue?.substring(0, 200) ?? null,
+            changed,
+            dbError: dbErrMsg,
+            retryError: retryErrMsg,
+          };
+          if (isTransientSave) {
+            await ErrorLogger.warning(
+              "scraper",
+              `"${monitor.name}" check succeeded but failed to save result (will retry)`,
+              saveContext,
+            ).catch(() => {});
+          } else {
+            await ErrorLogger.error(
+              "scraper",
+              `"${monitor.name}" check succeeded but failed to save result`,
+              retryError instanceof Error ? retryError : null,
+              saveContext,
+            ).catch(() => {});
+          }
 
           saveFailed = true;
         }
