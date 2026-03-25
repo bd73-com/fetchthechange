@@ -113,6 +113,17 @@ export async function setupAuth(app: Express) {
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", (req, res, next) => {
+    // Preserve returnTo so we can redirect back after OAuth (e.g. /extension-auth).
+    // Only allow relative paths to prevent open-redirect attacks.
+    const returnTo = typeof req.query.returnTo === "string"
+        && req.query.returnTo.startsWith("/")
+        && !req.query.returnTo.startsWith("//")
+      ? req.query.returnTo
+      : undefined;
+    if (returnTo) {
+      (req.session as any).returnTo = returnTo;
+    }
+
     ensureStrategy(req.hostname);
     passport.authenticate(`replitauth:${req.hostname}`, {
       prompt: "login consent",
@@ -137,9 +148,12 @@ export async function setupAuth(app: Express) {
         req.logIn(user, (loginErr) => {
           if (loginErr) return next(loginErr);
 
+          const returnTo = (req.session as any).returnTo;
+          delete (req.session as any).returnTo;
+
           req.session.save((saveErr) => {
             if (saveErr) return next(saveErr);
-            res.redirect("/");
+            res.redirect(returnTo || "/");
           });
         });
       });

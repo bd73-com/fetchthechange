@@ -75,7 +75,7 @@ export default function ExtensionAuth() {
         ) : (
           <div className="space-y-4">
             <Button asChild size="lg" className="w-full">
-              <a href="/api/login">Sign in to FetchTheChange</a>
+              <a href="/api/login?returnTo=/extension-auth">Sign in to FetchTheChange</a>
             </Button>
             <p className="text-xs text-muted-foreground">
               Sign in to connect the browser extension to your account.
