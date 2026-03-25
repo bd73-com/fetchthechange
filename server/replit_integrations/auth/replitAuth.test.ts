@@ -371,5 +371,59 @@ describe("isAuthenticated", () => {
     expect(mockRefreshTokenGrant).toHaveBeenCalledTimes(1);
     expect(r1.next).toHaveBeenCalled();
     expect(r2.next).toHaveBeenCalled();
+
+    // Both waiters' user objects must have the refreshed tokens
+    expect(r1.req.user.access_token).toBe("new_access");
+    expect(r2.req.user.access_token).toBe("new_access");
+    expect(r2.req.user.refresh_token).toBe("new_refresh");
+  });
+
+  it("propagates refresh rejection to all concurrent waiters", async () => {
+    const pastExp = Math.floor(Date.now() / 1000) - 100;
+
+    let rejectRefresh!: (reason: any) => void;
+    const refreshPromise = new Promise((_resolve, reject) => { rejectRefresh = reject; });
+
+    mockDiscovery.mockResolvedValue({ serverMetadata: () => ({}) });
+    mockRefreshTokenGrant.mockReset();
+    mockRefreshTokenGrant.mockReturnValue(refreshPromise);
+
+    const sharedSessionId = "test-dedup-reject";
+    const makeReq = () => {
+      const user = {
+        expires_at: pastExp,
+        access_token: "old",
+        refresh_token: "old_refresh",
+        claims: { sub: "user1", exp: pastExp },
+      };
+      const saveFn = vi.fn((cb: (err?: any) => void) => cb());
+      return {
+        req: {
+          isAuthenticated: () => true,
+          user,
+          sessionID: sharedSessionId,
+          session: { passport: { user: {} }, save: saveFn },
+        } as any,
+        res: { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() } as any,
+        next: vi.fn(),
+      };
+    };
+
+    const r1 = makeReq();
+    const r2 = makeReq();
+
+    const p1 = isAuthenticated(r1.req, r1.res, r1.next);
+    const p2 = isAuthenticated(r2.req, r2.res, r2.next);
+
+    rejectRefresh(new Error("invalid_grant"));
+
+    await p1;
+    await p2;
+
+    // Both should get 401, neither should call next
+    expect(r1.res.status).toHaveBeenCalledWith(401);
+    expect(r2.res.status).toHaveBeenCalledWith(401);
+    expect(r1.next).not.toHaveBeenCalled();
+    expect(r2.next).not.toHaveBeenCalled();
   });
 });
