@@ -4261,6 +4261,22 @@ describe("checkMonitor outer catch resilience", () => {
     // Must NOT be the old generic message
     expect(result.error).not.toBe("Failed to fetch page");
   });
+  it("classifyOuterError returns 'network error' for transient network errors", () => {
+    // Verify the classification that drives the transient/non-transient logging split
+    const { userMessage, logContext } = classifyOuterError(new Error("Connection terminated due to connection timeout"));
+    expect(logContext).toBe("network error");
+    expect(userMessage).toBe("Page took too long to respond");
+  });
+
+  it("classifyOuterError returns 'database error' for DB-specific errors", () => {
+    const { logContext } = classifyOuterError(new Error("relation 'monitors' does not exist"));
+    expect(logContext).toBe("database error");
+  });
+
+  it("classifyOuterError returns 'unclassified error' for non-transient errors", () => {
+    const { logContext } = classifyOuterError(new Error("Something totally unexpected"));
+    expect(logContext).toBe("unclassified error");
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -818,6 +818,62 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
       })
     );
   });
+
+  it("logs warning (not error) when processQueuedNotifications fails with transient DB error", async () => {
+    // withDbRetry retries once on transient error (1s delay via trackTimeout),
+    // then outer catch checks isTransientDbError for warning vs error.
+    mockProcessQueuedNotifications
+      .mockRejectedValueOnce(new Error("Connection terminated"))
+      .mockRejectedValueOnce(new Error("Connection terminated"));
+
+    await startScheduler();
+    const callbacks = cronCallbacks["*/1 * * * *"];
+    // Run notification cron (index 0) without awaiting — withDbRetry's 1s timeout needs advancement
+    const cronPromise = callbacks[0]();
+    await vi.advanceTimersByTimeAsync(2000);
+    await cronPromise;
+
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("Queued notification processing skipped"),
+      expect.objectContaining({
+        errorMessage: "Connection terminated",
+      })
+    );
+    // Should NOT have called ErrorLogger.error for this transient failure
+    expect(ErrorLogger.error).not.toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("notification"),
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  it("logs warning (not error) when processDigestCron fails with transient DB error", async () => {
+    mockProcessDigestCron
+      .mockRejectedValueOnce(new Error("Connection terminated"))
+      .mockRejectedValueOnce(new Error("Connection terminated"));
+
+    await startScheduler();
+    const callbacks = cronCallbacks["*/1 * * * *"];
+    const cronPromise = callbacks[0]();
+    await vi.advanceTimersByTimeAsync(2000);
+    await cronPromise;
+
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("Digest processing skipped"),
+      expect.objectContaining({
+        errorMessage: "Connection terminated",
+      })
+    );
+    expect(ErrorLogger.error).not.toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("Digest"),
+      expect.anything(),
+      expect.anything()
+    );
+  });
 });
 
 describe("stopScheduler", () => {
@@ -1042,6 +1098,34 @@ describe("withDbRetry and re-entrancy guards", () => {
 
     resolveRetries([]);
     await firstRun;
+  });
+
+  it("logs warning (not error) when webhook processing fails with transient DB error", async () => {
+    // Both withDbRetry attempts fail with transient error
+    mockStorage.getPendingWebhookRetries
+      .mockRejectedValueOnce(new Error("Connection terminated"))
+      .mockRejectedValueOnce(new Error("Connection terminated"));
+
+    await startScheduler();
+    const callbacks = cronCallbacks["*/1 * * * *"];
+    await callbacks[0](); // notification cron
+    const webhookPromise = callbacks[1]();
+    await vi.advanceTimersByTimeAsync(2000);
+    await webhookPromise;
+
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("Webhook retry processing skipped"),
+      expect.objectContaining({
+        errorMessage: "Connection terminated",
+      })
+    );
+    expect(ErrorLogger.error).not.toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("Webhook"),
+      expect.anything(),
+      expect.anything()
+    );
   });
 });
 
