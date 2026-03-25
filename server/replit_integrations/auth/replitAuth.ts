@@ -71,7 +71,7 @@ function updateUserSession(
 ) {
   user.claims = tokens.claims();
   user.access_token = tokens.access_token;
-  user.refresh_token = tokens.refresh_token;
+  user.refresh_token = tokens.refresh_token ?? user.refresh_token;
   user.expires_at = user.claims?.exp;
 }
 
@@ -200,6 +200,10 @@ export async function setupAuth(app: Express) {
   });
 }
 
+// Per-session in-flight refresh promise cache to deduplicate concurrent
+// refresh attempts that would otherwise invalidate rotated refresh tokens.
+const inflightRefreshes = new Map<string, Promise<void>>();
+
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
   const user = req.user as any;
 
@@ -218,10 +222,23 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
     return;
   }
 
+  const sessionId = req.sessionID;
+
   try {
-    const config = await getOidcConfig();
-    const tokenResponse = await client.refreshTokenGrant(config, refreshToken);
-    updateUserSession(user, tokenResponse);
+    let refreshPromise = inflightRefreshes.get(sessionId);
+    if (!refreshPromise) {
+      refreshPromise = (async () => {
+        const config = await getOidcConfig();
+        const tokenResponse = await client.refreshTokenGrant(config, refreshToken);
+        updateUserSession(user, tokenResponse);
+      })();
+      inflightRefreshes.set(sessionId, refreshPromise);
+      // Suppress unhandled rejection on the cleanup chain; callers
+      // handle errors via their own await + try/catch.
+      refreshPromise.catch(() => {}).finally(() => inflightRefreshes.delete(sessionId));
+    }
+
+    await refreshPromise;
 
     // Persist refreshed tokens to the session store.
     // resave is false, so we must explicitly re-serialize and save.

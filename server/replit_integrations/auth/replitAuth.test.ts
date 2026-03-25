@@ -119,6 +119,7 @@ describe("isAuthenticated", () => {
     const req = {
       isAuthenticated: () => overrides.isAuthenticated ?? true,
       user: overrides.user ?? {},
+      sessionID: "test-session-id",
       session: {
         passport: { user: overrides.passportUser ?? {} },
         save: saveFn,
@@ -259,6 +260,7 @@ describe("isAuthenticated", () => {
     const req = {
       isAuthenticated: () => true,
       user,
+      sessionID: "test-session-id-save-fail",
       session: {
         passport: { user: {} },
         save: saveFn,
