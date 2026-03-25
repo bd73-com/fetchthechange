@@ -664,15 +664,14 @@ describe("daily metrics cleanup", () => {
     consoleSpy.mockRestore();
   });
 
-  it("logs error when cleanup query fails", async () => {
+  it("logs warning when cleanup query fails (non-critical background task)", async () => {
     await startScheduler();
     mockDbExecute.mockRejectedValueOnce(new Error("DB timeout"));
     await runCron("0 3 * * *");
 
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      "monitor_metrics cleanup failed",
-      expect.any(Error),
+      "monitor_metrics cleanup failed (will retry tomorrow)",
       expect.objectContaining({
         errorMessage: "DB timeout",
         retentionDays: 90,
@@ -686,10 +685,9 @@ describe("daily metrics cleanup", () => {
     mockDbExecute.mockRejectedValueOnce("disk full");
     await runCron("0 3 * * *");
 
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      "monitor_metrics cleanup failed",
-      null,
+      "monitor_metrics cleanup failed (will retry tomorrow)",
       expect.objectContaining({
         errorMessage: "disk full",
         retentionDays: 90,
@@ -931,7 +929,7 @@ describe("withDbRetry and re-entrancy guards", () => {
     );
   });
 
-  it("logs error when retry also fails on transient error", async () => {
+  it("logs warning when retry also fails on transient error", async () => {
     mockGetAllActiveMonitors
       .mockRejectedValueOnce(new Error("Connection terminated"))
       .mockRejectedValueOnce(new Error("Connection terminated again"));
@@ -942,11 +940,11 @@ describe("withDbRetry and re-entrancy guards", () => {
     await cronPromise;
 
     expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
+    // Transient DB errors are downgraded to warnings since the next tick retries automatically
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      "Scheduler iteration failed",
-      expect.any(Error),
-      expect.objectContaining({ phase: "fetching active monitors" })
+      expect.stringContaining("Scheduler iteration skipped"),
+      expect.objectContaining({ activeChecks: 0 })
     );
   });
 

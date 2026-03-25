@@ -952,9 +952,8 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       };
     }, { pageTimeoutMs });
   } catch (error) {
-    const label = monitorName ? `"${monitorName}" — browser` : "Browser";
-    const classified = classifyBrowserlessError(error instanceof Error ? error.message : "Unknown error");
-    await ErrorLogger.error("scraper", `${label}-based extraction failed: ${classified}`, error instanceof Error ? error : null, { url, selector, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
+    // Don't log here — the caller (checkMonitor) logs with fuller context.
+    // Logging here too would create duplicate error entries for every failure.
     throw error;
   }
 }
@@ -976,8 +975,8 @@ async function fetchWithCurl(url: string, monitorId?: number, monitorName?: stri
     const rethrow = isAbort
       ? new Error("Page took too long to respond (15s timeout)")
       : error;
-    const label = monitorName ? `"${monitorName}" — page` : "Page";
-    await ErrorLogger.error("scraper", `${label} fetch with curl failed — the site returned an error or is blocking the request. Verify the URL is correct and the site is accessible.`, rethrow instanceof Error ? rethrow : null, { url, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
+    // Don't log here — this is a fallback fetch. The caller decides
+    // whether to log based on the overall pipeline outcome.
     throw rethrow;
   } finally {
     clearTimeout(timeout);
@@ -1194,7 +1193,10 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         }
 
         if (lastBrowserlessErr) {
-          await ErrorLogger.error("scraper", `"${monitor.name}" — rendered page extraction failed. The site may block automated browsers or the page took too long to load. Try simplifying the selector or check if the site requires login.`, lastBrowserlessErr instanceof Error ? lastBrowserlessErr : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+          // Downgrade to warning: Browserless failures are expected for sites that
+          // block headless browsers. The circuit breaker and retry logic handle recovery.
+          const classified = classifyBrowserlessError(lastBrowserlessErr instanceof Error ? lastBrowserlessErr.message : "Unknown error");
+          await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
         }
 
         const durationMs = Date.now() - startTime;
@@ -1338,13 +1340,13 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             consecutiveFailures: 0,
           });
         } catch (retryError) {
-          // Both attempts failed — log with full context
+          // Both attempts failed — log as warning since it's marked for
+          // accelerated retry and will self-heal on the next cycle.
           const dbErrMsg = dbError instanceof Error ? dbError.message : String(dbError);
           const retryErrMsg = retryError instanceof Error ? retryError.message : String(retryError);
-          await ErrorLogger.error(
+          await ErrorLogger.warning(
             "scraper",
-            `"${monitor.name}" check succeeded but failed to save result`,
-            dbError instanceof Error ? dbError : null,
+            `"${monitor.name}" check succeeded but failed to save result (will retry)`,
             {
               monitorId: monitor.id,
               monitorName: monitor.name,
@@ -1445,12 +1447,20 @@ export async function checkMonitor(monitor: Monitor): Promise<{
   } catch (error) {
     const { userMessage, logContext } = classifyOuterError(error);
 
-    await ErrorLogger.error(
-      "scraper",
-      `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`,
-      error instanceof Error ? error : null,
-      { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }
-    ).catch(() => {});
+    // Transient network/DB errors are expected and retried automatically —
+    // log as warnings to avoid polluting the error log with recoverable conditions.
+    const isTransient = logContext === "network error" || logContext === "database error" || logContext === "database connection error";
+    const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
+    if (isTransient) {
+      await ErrorLogger.warning("scraper", logMessage, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }).catch(() => {});
+    } else {
+      await ErrorLogger.error(
+        "scraper",
+        logMessage,
+        error instanceof Error ? error : null,
+        { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }
+      ).catch(() => {});
+    }
 
     try {
       await handleMonitorFailure(monitor, "error", userMessage, false);

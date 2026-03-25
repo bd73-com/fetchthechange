@@ -4214,11 +4214,10 @@ describe("checkMonitor outer catch resilience", () => {
     expect(result.currentValue).toBe("$49.99");
     expect(result.changed).toBe(true);
     expect(result.error).toContain("server error prevented saving");
-    // Verify enhanced logging includes extracted and previous values
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
+    // Verify enhanced logging includes extracted and previous values (downgraded to warning)
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scraper",
       expect.stringContaining("check succeeded but failed to save result"),
-      expect.any(Error),
       expect.objectContaining({
         monitorId: 1,
         extractedValue: "$49.99",
@@ -5831,49 +5830,36 @@ describe("extractWithBrowserless error classification in logs", () => {
     delete process.env.BROWSERLESS_TOKEN;
   });
 
-  it("logs classified timeout message to ErrorLogger", async () => {
+  it("does not log to ErrorLogger (caller handles logging)", async () => {
     mockConnectOverCDP.mockRejectedValue(new Error("Navigation timeout of 30000ms exceeded"));
 
     await expect(
       extractWithBrowserless("https://example.com", ".price", 1, "My Monitor")
     ).rejects.toThrow();
 
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
-      "scraper",
-      expect.stringContaining("took too long"),
-      expect.any(Error),
-      expect.objectContaining({ url: "https://example.com" }),
-    );
+    // extractWithBrowserless no longer logs — the caller (checkMonitor) logs
+    // with fuller context to avoid duplicate error entries.
+    expect(ErrorLogger.error).not.toHaveBeenCalled();
   });
 
-  it("logs classified ECONNREFUSED message to ErrorLogger", async () => {
+  it("re-throws ECONNREFUSED without logging", async () => {
     mockConnectOverCDP.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:443"));
 
     await expect(
       extractWithBrowserless("https://example.com", ".price")
     ).rejects.toThrow();
 
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
-      "scraper",
-      expect.stringContaining("refused the connection"),
-      expect.any(Error),
-      expect.objectContaining({ url: "https://example.com" }),
-    );
+    expect(ErrorLogger.error).not.toHaveBeenCalled();
   });
 
-  it("includes monitor name in error label when provided", async () => {
+  it("re-throws errors without logging even when monitor name provided", async () => {
     mockConnectOverCDP.mockRejectedValue(new Error("some error"));
 
     await expect(
       extractWithBrowserless("https://example.com", ".price", 1, "Price Tracker")
     ).rejects.toThrow();
 
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
-      "scraper",
-      expect.stringContaining('"Price Tracker"'),
-      expect.any(Error),
-      expect.objectContaining({ monitorName: "Price Tracker", monitorId: 1 }),
-    );
+    expect(ErrorLogger.error).not.toHaveBeenCalled();
   });
 });
 

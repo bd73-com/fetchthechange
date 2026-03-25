@@ -227,11 +227,21 @@ export async function startScheduler() {
         }
       }
     } catch (error) {
-      await ErrorLogger.error("scheduler", "Scheduler iteration failed", error instanceof Error ? error : null, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        activeChecks,
-        phase: "fetching active monitors",
-      });
+      // Transient DB errors (connection drops, pool exhaustion) are expected during
+      // spikes — the next tick will retry automatically. Only log as error for
+      // non-transient failures that indicate a real problem.
+      if (isTransientDbError(error)) {
+        await ErrorLogger.warning("scheduler", "Scheduler iteration skipped (transient DB error, will retry next tick)", {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          activeChecks,
+        });
+      } else {
+        await ErrorLogger.error("scheduler", "Scheduler iteration failed", error instanceof Error ? error : null, {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          activeChecks,
+          phase: "fetching active monitors",
+        });
+      }
     } finally {
       mainCronRunning = false;
     }
@@ -249,18 +259,30 @@ export async function startScheduler() {
       notificationCronRunning = true;
       try {
         try {
-          await processQueuedNotifications();
+          await withDbRetry(() => processQueuedNotifications());
         } catch (error) {
-          await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null, {
-            errorMessage: error instanceof Error ? error.message : String(error),
-          });
+          if (isTransientDbError(error)) {
+            await ErrorLogger.warning("scheduler", "Queued notification processing skipped (transient DB error)", {
+              errorMessage: error instanceof Error ? error.message : String(error),
+            });
+          } else {
+            await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null, {
+              errorMessage: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
         try {
-          await processDigestCron();
+          await withDbRetry(() => processDigestCron());
         } catch (error) {
-          await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null, {
-            errorMessage: error instanceof Error ? error.message : String(error),
-          });
+          if (isTransientDbError(error)) {
+            await ErrorLogger.warning("scheduler", "Digest processing skipped (transient DB error)", {
+              errorMessage: error instanceof Error ? error.message : String(error),
+            });
+          } else {
+            await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null, {
+              errorMessage: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
       } finally {
         notificationCronRunning = false;
@@ -361,9 +383,15 @@ export async function startScheduler() {
           }
         }
       } catch (error) {
-        await ErrorLogger.error("scheduler", "Webhook retry processing failed", error instanceof Error ? error : null, {
-          errorMessage: error instanceof Error ? error.message : String(error),
-        });
+        if (isTransientDbError(error)) {
+          await ErrorLogger.warning("scheduler", "Webhook retry processing skipped (transient DB error)", {
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+        } else {
+          await ErrorLogger.error("scheduler", "Webhook retry processing failed", error instanceof Error ? error : null, {
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+        }
       } finally {
         webhookCronRunning = false;
       }
@@ -371,17 +399,19 @@ export async function startScheduler() {
   }
 
   // Daily cleanup: prune monitor_metrics older than 90 days to prevent unbounded growth
+  // All cleanup operations are best-effort background tasks — transient DB failures
+  // are logged as warnings since the next daily run will catch up.
   cronTasks.push(cron.schedule("0 3 * * *", async () => {
     try {
-      const result = await db.execute(
+      const result = await withDbRetry(() => db.execute(
         sql`DELETE FROM monitor_metrics WHERE checked_at < NOW() - INTERVAL '90 days'`
-      );
+      ));
       const deleted = (result as any).rowCount ?? 0;
       if (deleted > 0) {
         console.log(`[Cleanup] Pruned ${deleted} monitor_metrics rows older than 90 days`);
       }
     } catch (error) {
-      await ErrorLogger.error("scheduler", "monitor_metrics cleanup failed", error instanceof Error ? error : null, {
+      await ErrorLogger.warning("scheduler", "monitor_metrics cleanup failed (will retry tomorrow)", {
         errorMessage: error instanceof Error ? error.message : String(error),
         retentionDays: 90,
         table: "monitor_metrics",
@@ -391,12 +421,12 @@ export async function startScheduler() {
     // Delivery log cleanup: prune entries older than 30 days
     try {
       const olderThan = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const entriesDeleted = await storage.cleanupOldDeliveryLogs(olderThan);
+      const entriesDeleted = await withDbRetry(() => storage.cleanupOldDeliveryLogs(olderThan));
       if (entriesDeleted > 0) {
         console.log(`[Cleanup] Pruned ${entriesDeleted} delivery_log rows older than 30 days`);
       }
     } catch (error) {
-      await ErrorLogger.error("scheduler", "delivery_log cleanup failed", error instanceof Error ? error : null, {
+      await ErrorLogger.warning("scheduler", "delivery_log cleanup failed (will retry tomorrow)", {
         errorMessage: error instanceof Error ? error.message : String(error),
         retentionDays: 30,
         table: "delivery_log",
@@ -405,14 +435,14 @@ export async function startScheduler() {
 
     // Notification queue cleanup: prune permanently failed entries older than 7 days
     try {
-      const deleted = await storage.cleanupPermanentlyFailedQueueEntries(
+      const deleted = await withDbRetry(() => storage.cleanupPermanentlyFailedQueueEntries(
         new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-      );
+      ));
       if (deleted > 0) {
         console.log(`[Cleanup] Pruned ${deleted} permanently failed notification_queue rows older than 7 days`);
       }
     } catch (error) {
-      await ErrorLogger.error("scheduler", "notification_queue cleanup failed", error instanceof Error ? error : null, {
+      await ErrorLogger.warning("scheduler", "notification_queue cleanup failed (will retry tomorrow)", {
         errorMessage: error instanceof Error ? error.message : String(error),
         retentionDays: 7,
         table: "notification_queue",
