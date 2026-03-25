@@ -27,7 +27,8 @@ When `reviewDecision` is `CHANGES_REQUESTED` or `mergeStateStatus` is `BLOCKED`,
 6. After a successful dismissal, re-fetch PR status from step 1 and continue the pre-flight checks. If the PR is now `APPROVED` (or `reviewDecision` is empty/null and `mergeStateStatus` is not `BLOCKED`) and `mergeStateStatus` is `CLEAN`/`HAS_HOOKS`/`UNSTABLE`, proceed to merge.
 7. **If dismissal fails** (insufficient permissions, rate limit, etc.), do NOT give up. Instead:
    - Re-verify that all OTHER pre-flight checks still pass exactly as defined in step 2 (PR is `OPEN`; exactly one release label; all non-bot status checks are `SUCCESS`/`NEUTRAL`/`SKIPPED`; `mergeStateStatus` is `CLEAN`, `HAS_HOOKS`, or `UNSTABLE`). The `--admin` flag bypasses ALL branch protections — only use it when the bot review is the sole remaining blocker.
-   - If the **only** remaining blocker is trusted-bot `CHANGES_REQUESTED` (no human `CHANGES_REQUESTED`, no other blocking condition) **and** all other pre-flight checks pass, attempt: `gh pr merge --repo bd73-com/fetchthechange --squash --delete-branch --admin`.
+   - Verify that zero human reviewers have `state: "CHANGES_REQUESTED"`. Fetch all reviews (using the same query from step 1 of "Auto-resolving stale bot reviews" if not already available) and apply the trusted-bot allowlist to distinguish bot vs human reviewers.
+   - If the **only** remaining blockers are trusted-bot `CHANGES_REQUESTED` reviews (no human `CHANGES_REQUESTED`, no other blocking condition) **and** all other pre-flight checks pass, attempt: `gh pr merge --repo bd73-com/fetchthechange --squash --delete-branch --admin`.
    - If `--admin` also fails, tell the user to dismiss the bot review manually from the GitHub UI (PR → Reviews → Dismiss review) and re-run `/merge-pr`.
 
 **Important**: Only dismiss bot reviews automatically. Never dismiss reviews from human collaborators — those always require manual resolution.
