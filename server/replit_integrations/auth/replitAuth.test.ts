@@ -278,7 +278,7 @@ describe("isAuthenticated", () => {
     expect(res.json).toHaveBeenCalledWith({ message: "Internal Server Error" });
     expect(consoleSpy).toHaveBeenCalledWith(
       "[auth] Failed to save refreshed session:",
-      "store write failed"
+      expect.stringContaining("store write failed")
     );
     consoleSpy.mockRestore();
   });

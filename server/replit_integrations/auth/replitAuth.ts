@@ -225,10 +225,14 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
 
     // Persist refreshed tokens to the session store.
     // resave is false, so we must explicitly re-serialize and save.
-    (req.session as any).passport.user = serializeUserPayload(user);
+    const passport = (req.session as any).passport;
+    if (passport) {
+      passport.user = serializeUserPayload(user);
+    }
     req.session.save((err) => {
       if (err) {
-        console.error("[auth] Failed to save refreshed session:", err.message);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[auth] Failed to save refreshed session:", msg);
         return res.status(500).json({ message: "Internal Server Error" });
       }
       return next();
