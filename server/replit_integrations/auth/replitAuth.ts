@@ -56,6 +56,15 @@ export function getSession() {
   });
 }
 
+function serializeUserPayload(user: any) {
+  return {
+    claims: user.claims,
+    access_token: user.access_token,
+    refresh_token: user.refresh_token,
+    expires_at: user.expires_at,
+  };
+}
+
 function updateUserSession(
   user: any,
   tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers
@@ -118,12 +127,7 @@ export async function setupAuth(app: Express) {
   passport.serializeUser((user: any, cb) => {
     // Only persist the fields needed for authentication — avoid leaking
     // the full user object (tokens, profile data) into the session store.
-    cb(null, {
-      claims: user.claims,
-      access_token: user.access_token,
-      refresh_token: user.refresh_token,
-      expires_at: user.expires_at,
-    });
+    cb(null, serializeUserPayload(user));
   });
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
@@ -221,17 +225,14 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
 
     // Persist refreshed tokens to the session store.
     // resave is false, so we must explicitly re-serialize and save.
-    (req.session as any).passport.user = {
-      claims: user.claims,
-      access_token: user.access_token,
-      refresh_token: user.refresh_token,
-      expires_at: user.expires_at,
-    };
+    (req.session as any).passport.user = serializeUserPayload(user);
     req.session.save((err) => {
-      if (err) console.error("[auth] Failed to save refreshed session:", err);
+      if (err) {
+        console.error("[auth] Failed to save refreshed session:", err.message);
+        return res.status(500).json({ message: "Internal Server Error" });
+      }
+      return next();
     });
-
-    return next();
   } catch (error) {
     res.status(401).json({ message: "Unauthorized" });
     return;

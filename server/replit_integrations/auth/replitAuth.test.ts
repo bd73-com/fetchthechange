@@ -1,16 +1,25 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock heavy dependencies that require DATABASE_URL / external services
 vi.mock("./storage", () => ({ authStorage: {} }));
-vi.mock("openid-client", () => ({ discovery: vi.fn() }));
+
+const mockRefreshTokenGrant = vi.fn();
+const mockDiscovery = vi.fn();
+vi.mock("openid-client", () => ({
+  discovery: mockDiscovery,
+  refreshTokenGrant: mockRefreshTokenGrant,
+}));
 vi.mock("openid-client/passport", () => ({ Strategy: vi.fn() }));
 vi.mock("connect-pg-simple", () => ({ default: vi.fn(() => vi.fn()) }));
 vi.mock("express-session", () => ({ default: vi.fn() }));
 vi.mock("passport", () => ({
   default: { use: vi.fn(), serializeUser: vi.fn(), deserializeUser: vi.fn() },
 }));
+vi.mock("memoizee", () => ({
+  default: (fn: any) => fn,
+}));
 
-const { sanitizeReturnTo } = await import("./replitAuth");
+const { sanitizeReturnTo, isAuthenticated } = await import("./replitAuth");
 
 describe("sanitizeReturnTo", () => {
   it("accepts a valid relative path", () => {
@@ -97,5 +106,180 @@ describe("sanitizeReturnTo", () => {
     expect(sanitizeReturnTo(null)).toBeUndefined();
     expect(sanitizeReturnTo(123)).toBeUndefined();
     expect(sanitizeReturnTo(["/"])).toBeUndefined();
+  });
+});
+
+describe("isAuthenticated", () => {
+  function createMockReqResNext(overrides: {
+    isAuthenticated?: boolean;
+    user?: any;
+    passportUser?: any;
+  }) {
+    const saveFn = vi.fn((cb: (err?: any) => void) => cb());
+    const req = {
+      isAuthenticated: () => overrides.isAuthenticated ?? true,
+      user: overrides.user ?? {},
+      session: {
+        passport: { user: overrides.passportUser ?? {} },
+        save: saveFn,
+      },
+    } as any;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    } as any;
+    const next = vi.fn();
+    return { req, res, next, saveFn };
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns 401 when not authenticated", async () => {
+    const { req, res, next } = createMockReqResNext({
+      isAuthenticated: false,
+      user: {},
+    });
+    await isAuthenticated(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when expires_at is missing", async () => {
+    const { req, res, next } = createMockReqResNext({
+      user: { access_token: "tok" },
+    });
+    await isAuthenticated(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("calls next() when token is not expired", async () => {
+    const futureExp = Math.floor(Date.now() / 1000) + 3600;
+    const { req, res, next } = createMockReqResNext({
+      user: { expires_at: futureExp, access_token: "tok" },
+    });
+    await isAuthenticated(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when token expired and no refresh_token", async () => {
+    const pastExp = Math.floor(Date.now() / 1000) - 100;
+    const { req, res, next } = createMockReqResNext({
+      user: { expires_at: pastExp, access_token: "tok" },
+    });
+    await isAuthenticated(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("refreshes token and persists to session store when expired", async () => {
+    const pastExp = Math.floor(Date.now() / 1000) - 100;
+    const newExp = Math.floor(Date.now() / 1000) + 3600;
+    const user = {
+      expires_at: pastExp,
+      access_token: "old_access",
+      refresh_token: "old_refresh",
+      claims: { sub: "user1", exp: pastExp },
+    };
+
+    mockDiscovery.mockResolvedValue({ serverMetadata: () => ({}) });
+    mockRefreshTokenGrant.mockResolvedValue({
+      access_token: "new_access",
+      refresh_token: "new_refresh",
+      claims: () => ({ sub: "user1", exp: newExp }),
+    });
+
+    const { req, res, next, saveFn } = createMockReqResNext({
+      user,
+      passportUser: {
+        claims: user.claims,
+        access_token: "old_access",
+        refresh_token: "old_refresh",
+        expires_at: pastExp,
+      },
+    });
+
+    await isAuthenticated(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(mockRefreshTokenGrant).toHaveBeenCalled();
+
+    // Verify session.passport.user was updated with new tokens
+    expect(req.session.passport.user.access_token).toBe("new_access");
+    expect(req.session.passport.user.refresh_token).toBe("new_refresh");
+    expect(req.session.passport.user.expires_at).toBe(newExp);
+
+    // Verify session.save() was called
+    expect(saveFn).toHaveBeenCalled();
+  });
+
+  it("returns 401 when refresh token grant fails", async () => {
+    const pastExp = Math.floor(Date.now() / 1000) - 100;
+    const user = {
+      expires_at: pastExp,
+      access_token: "old_access",
+      refresh_token: "old_refresh",
+      claims: { sub: "user1", exp: pastExp },
+    };
+
+    mockDiscovery.mockResolvedValue({ serverMetadata: () => ({}) });
+    mockRefreshTokenGrant.mockRejectedValue(new Error("invalid_grant"));
+
+    const { req, res, next } = createMockReqResNext({ user });
+
+    await isAuthenticated(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 and logs error when session.save fails", async () => {
+    const pastExp = Math.floor(Date.now() / 1000) - 100;
+    const newExp = Math.floor(Date.now() / 1000) + 3600;
+    const user = {
+      expires_at: pastExp,
+      access_token: "old_access",
+      refresh_token: "old_refresh",
+      claims: { sub: "user1", exp: pastExp },
+    };
+
+    mockDiscovery.mockResolvedValue({ serverMetadata: () => ({}) });
+    mockRefreshTokenGrant.mockResolvedValue({
+      access_token: "new_access",
+      refresh_token: "new_refresh",
+      claims: () => ({ sub: "user1", exp: newExp }),
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const saveErr = new Error("store write failed");
+    const saveFn = vi.fn((cb: (err?: any) => void) => cb(saveErr));
+    const req = {
+      isAuthenticated: () => true,
+      user,
+      session: {
+        passport: { user: {} },
+        save: saveFn,
+      },
+    } as any;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    } as any;
+    const next = vi.fn();
+
+    await isAuthenticated(req, res, next);
+
+    // Should NOT call next — should return 500
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ message: "Internal Server Error" });
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[auth] Failed to save refreshed session:",
+      "store write failed"
+    );
+    consoleSpy.mockRestore();
   });
 });
