@@ -218,6 +218,19 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
     const config = await getOidcConfig();
     const tokenResponse = await client.refreshTokenGrant(config, refreshToken);
     updateUserSession(user, tokenResponse);
+
+    // Persist refreshed tokens to the session store.
+    // resave is false, so we must explicitly re-serialize and save.
+    (req.session as any).passport.user = {
+      claims: user.claims,
+      access_token: user.access_token,
+      refresh_token: user.refresh_token,
+      expires_at: user.expires_at,
+    };
+    req.session.save((err) => {
+      if (err) console.error("[auth] Failed to save refreshed session:", err);
+    });
+
     return next();
   } catch (error) {
     res.status(401).json({ message: "Unauthorized" });
