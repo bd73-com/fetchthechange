@@ -203,6 +203,7 @@ export async function setupAuth(app: Express) {
 // Per-session in-flight refresh promise cache to deduplicate concurrent
 // refresh attempts that would otherwise invalidate rotated refresh tokens.
 const inflightRefreshes = new Map<string, Promise<void>>();
+const MAX_INFLIGHT_REFRESHES = 10_000;
 
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
   const user = req.user as any;
@@ -232,10 +233,12 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
         const tokenResponse = await client.refreshTokenGrant(config, refreshToken);
         updateUserSession(user, tokenResponse);
       })();
-      inflightRefreshes.set(sessionId, refreshPromise);
-      // Suppress unhandled rejection on the cleanup chain; callers
-      // handle errors via their own await + try/catch.
-      refreshPromise.catch(() => {}).finally(() => inflightRefreshes.delete(sessionId));
+      if (inflightRefreshes.size < MAX_INFLIGHT_REFRESHES) {
+        inflightRefreshes.set(sessionId, refreshPromise);
+        // Suppress unhandled rejection on the cleanup chain; callers
+        // handle errors via their own await + try/catch.
+        refreshPromise.catch(() => {}).finally(() => inflightRefreshes.delete(sessionId));
+      }
     }
 
     await refreshPromise;
