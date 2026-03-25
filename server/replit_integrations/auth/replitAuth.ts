@@ -8,6 +8,20 @@ import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
 
+/**
+ * Validates and sanitizes a returnTo query parameter.
+ * Only relative paths (starting with "/" but not "//") are allowed
+ * to prevent open-redirect attacks.
+ */
+export function sanitizeReturnTo(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (value.length > 2048) return undefined;
+  if (!value.startsWith("/")) return undefined;
+  if (value.startsWith("//")) return undefined;
+  if (/[\r\n]/.test(value) || /%0[dDaA]/i.test(value)) return undefined;
+  return value;
+}
+
 const getOidcConfig = memoize(
   async () => {
     return await client.discovery(
@@ -113,13 +127,7 @@ export async function setupAuth(app: Express) {
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", (req, res, next) => {
-    // Preserve returnTo so we can redirect back after OAuth (e.g. /extension-auth).
-    // Only allow relative paths to prevent open-redirect attacks.
-    const returnTo = typeof req.query.returnTo === "string"
-        && req.query.returnTo.startsWith("/")
-        && !req.query.returnTo.startsWith("//")
-      ? req.query.returnTo
-      : undefined;
+    const returnTo = sanitizeReturnTo(req.query.returnTo);
     if (returnTo) {
       (req.session as any).returnTo = returnTo;
     }
