@@ -18,7 +18,7 @@ export function sanitizeReturnTo(value: unknown): string | undefined {
   if (value.length > 2048) return undefined;
   if (!value.startsWith("/")) return undefined;
   if (value.startsWith("//")) return undefined;
-  if (/[\r\n]/.test(value) || /%0[dDaA]/i.test(value)) return undefined;
+  if (/[\x00-\x1f]/.test(value) || /%[01][0-9a-f]/i.test(value)) return undefined;
   return value;
 }
 
@@ -132,11 +132,24 @@ export async function setupAuth(app: Express) {
       (req.session as any).returnTo = returnTo;
     }
 
-    ensureStrategy(req.hostname);
-    passport.authenticate(`replitauth:${req.hostname}`, {
-      prompt: "login consent",
-      scope: ["openid", "email", "profile", "offline_access"],
-    })(req, res, next);
+    const proceed = () => {
+      ensureStrategy(req.hostname);
+      passport.authenticate(`replitauth:${req.hostname}`, {
+        prompt: "login consent",
+        scope: ["openid", "email", "profile", "offline_access"],
+      })(req, res, next);
+    };
+
+    // Persist returnTo to the session store before the OAuth redirect
+    // so it survives the round-trip to the identity provider.
+    if (returnTo) {
+      req.session.save((err) => {
+        if (err) return next(err);
+        proceed();
+      });
+    } else {
+      proceed();
+    }
   });
 
   app.get("/api/callback", (req, res, next) => {

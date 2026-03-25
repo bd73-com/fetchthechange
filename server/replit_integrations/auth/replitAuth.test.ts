@@ -64,6 +64,15 @@ describe("sanitizeReturnTo", () => {
     expect(sanitizeReturnTo("/foo%0D%0ASet-Cookie:%20evil=1")).toBeUndefined();
   });
 
+  it("rejects null bytes", () => {
+    expect(sanitizeReturnTo("/foo\x00bar")).toBeUndefined();
+    expect(sanitizeReturnTo("/foo%00bar")).toBeUndefined();
+  });
+
+  it("rejects tab characters", () => {
+    expect(sanitizeReturnTo("/foo\tbar")).toBeUndefined();
+  });
+
   it("rejects excessively long paths", () => {
     expect(sanitizeReturnTo("/" + "a".repeat(2048))).toBeUndefined();
   });
