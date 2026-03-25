@@ -692,7 +692,7 @@ describe("daily metrics cleanup", () => {
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      "monitor_metrics cleanup failed (will retry tomorrow)",
+      "monitor_metrics cleanup failed (transient, will retry)",
       expect.objectContaining({
         errorMessage: "Connection terminated",
         retentionDays: 90,
@@ -858,7 +858,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      expect.stringContaining("Queued notification processing skipped"),
+      expect.stringContaining("Queued notification processing failed (transient, will retry)"),
       expect.objectContaining({
         errorMessage: "Connection terminated",
       })
@@ -885,7 +885,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      expect.stringContaining("Digest processing skipped"),
+      expect.stringContaining("Digest processing failed (transient, will retry)"),
       expect.objectContaining({
         errorMessage: "Connection terminated",
       })
@@ -1019,10 +1019,10 @@ describe("withDbRetry and re-entrancy guards", () => {
     await cronPromise;
 
     expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
-    // Transient DB errors are downgraded to warnings since the next tick retries automatically
+    // Transient DB errors are downgraded to warnings via logSchedulerError helper
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      expect.stringContaining("Scheduler iteration skipped"),
+      expect.stringContaining("Scheduler iteration failed (transient, will retry)"),
       expect.objectContaining({ activeChecks: 0 })
     );
   });
@@ -1138,7 +1138,7 @@ describe("withDbRetry and re-entrancy guards", () => {
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      expect.stringContaining("Webhook retry processing skipped"),
+      expect.stringContaining("Webhook retry processing failed (transient, will retry)"),
       expect.objectContaining({
         errorMessage: "Connection terminated",
       })

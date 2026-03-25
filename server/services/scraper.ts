@@ -1464,9 +1464,10 @@ export async function checkMonitor(monitor: Monitor): Promise<{
   } catch (error) {
     const { userMessage, logContext } = classifyOuterError(error);
 
-    // Transient network/DB errors are expected and retried automatically —
+    // Transient network/connection errors are expected and retried automatically —
     // log as warnings to avoid polluting the error log with recoverable conditions.
-    const isTransient = logContext === "network error" || logContext === "database error" || logContext === "database connection error";
+    // Note: "database error" (schema/constraint issues) is NOT transient and stays at error level.
+    const isTransient = logContext === "network error" || logContext === "database connection error";
     const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
     if (isTransient) {
       await ErrorLogger.warning("scraper", logMessage, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }).catch(() => {});
