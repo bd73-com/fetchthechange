@@ -30,7 +30,7 @@ interface ResolvedRecipient {
  * Uses lastIndexOf to avoid matching </body> inside comments or scripts.
  * Returns null if no </body> tag is found.
  */
-function insertBeforeLastBodyClose(html: string, content: string): string | null {
+export function insertBeforeLastBodyClose(html: string, content: string): string | null {
   const lower = html.toLowerCase();
   const idx = lower.lastIndexOf("</body>");
   if (idx === -1) return null;
@@ -281,7 +281,7 @@ export async function sendTestCampaignEmail(
   if (footerInserted) {
     // Insert banner after the opening <body> tag, or prepend if no <body> found
     if (/<body([^>]*)>/i.test(footerInserted)) {
-      htmlWithBanner = footerInserted.replace(/<body([^>]*)>/i, `<body$1>${banner}`);
+      htmlWithBanner = footerInserted.replace(/<body([^>]*)>/i, (match) => `${match}${banner}`);
     } else {
       htmlWithBanner = banner + footerInserted;
     }

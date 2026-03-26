@@ -265,7 +265,6 @@ export default function AdminErrors() {
   }, [finalizePrevious, batchDeleteMutation]);
 
   const handleBatchDelete = useCallback(() => {
-    finalizePrevious();
     if (selectAll) {
       const filters: { level?: string; source?: string } = {};
       if (levelFilter !== "all") filters.level = levelFilter;
@@ -275,11 +274,13 @@ export default function AdminErrors() {
         return;
       }
       const excluded = Array.from(excludedIds);
+      finalizePrevious();
       batchDeleteMutation.mutate({
         filters,
         ...(excluded.length > 0 ? { excludeIds: excluded } : {}),
       });
     } else {
+      finalizePrevious();
       batchDeleteMutation.mutate({ ids: Array.from(selectedIds) });
     }
   }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, toast]);

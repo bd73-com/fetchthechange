@@ -78,6 +78,7 @@ import {
   triggerCampaignSend,
   cancelCampaign,
   reconcileCampaignCounters,
+  insertBeforeLastBodyClose,
 } from "./campaignEmail";
 
 describe("sendTestCampaignEmail", () => {
@@ -855,40 +856,26 @@ describe("reconcileCampaignCounters", () => {
   });
 });
 
-describe("unsubscribe footer HTML insertion logic", () => {
-  // Tests for the regex pattern used in sendSingleCampaignEmail (line 178)
-  // to insert the footer before </body> when present, or append otherwise.
+describe("insertBeforeLastBodyClose", () => {
   const footer = '<hr/><p>Unsubscribe</p>';
 
-  function insertFooter(htmlBody: string): string {
-    const lower = htmlBody.toLowerCase();
-    const idx = lower.lastIndexOf("</body>");
-    if (idx === -1) return htmlBody + footer;
-    const originalTag = htmlBody.slice(idx, idx + 7);
-    return htmlBody.slice(0, idx) + footer + originalTag + htmlBody.slice(idx + 7);
-  }
-
   it("inserts footer before </body> in a complete HTML document", () => {
-    const html = "<html><body><p>Hello</p></body></html>";
-    const result = insertFooter(html);
+    const result = insertBeforeLastBodyClose("<html><body><p>Hello</p></body></html>", footer);
     expect(result).toBe("<html><body><p>Hello</p><hr/><p>Unsubscribe</p></body></html>");
   });
 
   it("handles case-insensitive </BODY> tag and preserves case", () => {
-    const html = "<html><BODY><p>Hello</p></BODY></html>";
-    const result = insertFooter(html);
+    const result = insertBeforeLastBodyClose("<html><BODY><p>Hello</p></BODY></html>", footer);
     expect(result).toBe("<html><BODY><p>Hello</p><hr/><p>Unsubscribe</p></BODY></html>");
   });
 
-  it("appends footer when no </body> tag exists (fragment)", () => {
-    const html = "<p>Hello</p>";
-    const result = insertFooter(html);
-    expect(result).toBe("<p>Hello</p><hr/><p>Unsubscribe</p>");
+  it("returns null when no </body> tag exists (fragment)", () => {
+    const result = insertBeforeLastBodyClose("<p>Hello</p>", footer);
+    expect(result).toBeNull();
   });
 
   it("inserts before the last </body> (skipping one in comment)", () => {
-    const html = "<body><!-- </body> --><p>Hi</p></body>";
-    const result = insertFooter(html);
+    const result = insertBeforeLastBodyClose("<body><!-- </body> --><p>Hi</p></body>", footer);
     expect(result).toBe("<body><!-- </body> --><p>Hi</p><hr/><p>Unsubscribe</p></body>");
   });
 });
