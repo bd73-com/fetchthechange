@@ -234,8 +234,6 @@ export const insertAutomatedCampaignConfigSchema = createInsertSchema(automatedC
   updatedAt: true,
 });
 
-export const selectAutomatedCampaignConfigSchema = createInsertSchema(automatedCampaignConfigs);
-
 export type AutomatedCampaignConfig = typeof automatedCampaignConfigs.$inferSelect;
 export type InsertAutomatedCampaignConfig = typeof automatedCampaignConfigs.$inferInsert;
 
