@@ -175,7 +175,9 @@ async function sendSingleCampaignEmail(
     </p>
   `;
 
-  const htmlWithFooter = campaign.htmlBody + unsubscribeFooter;
+  const htmlWithFooter = /<\/body>/i.test(campaign.htmlBody)
+    ? campaign.htmlBody.replace(/<\/body>/i, unsubscribeFooter + "</body>")
+    : campaign.htmlBody + unsubscribeFooter;
 
   const textBody = campaign.textBody
     ? `${campaign.textBody}\n\n---\nUnsubscribe from campaign emails: ${unsubscribeUrl}\nYou will still receive monitor notifications.`

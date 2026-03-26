@@ -1563,11 +1563,17 @@ export async function registerRoutes(
         }
         res.json({ message: `${authorized.length} entries deleted`, count: authorized.length });
       } else {
+        const hasLevel = filters.level && ["error", "warning", "info"].includes(filters.level);
+        const hasSource = filters.source && (ERROR_LOG_SOURCES as readonly string[]).includes(filters.source);
+        if (!hasLevel && !hasSource) {
+          return res.status(400).json({ message: "filters must include at least one of: level, source" });
+        }
+
         const conditions = [isNull(errorLogs.deletedAt)];
-        if (filters.level && ["error", "warning", "info"].includes(filters.level)) {
+        if (hasLevel) {
           conditions.push(eq(errorLogs.level, filters.level));
         }
-        if (filters.source && (ERROR_LOG_SOURCES as readonly string[]).includes(filters.source)) {
+        if (hasSource) {
           conditions.push(eq(errorLogs.source, filters.source));
         }
         const excludeList = Array.isArray(excludeIds) ? excludeIds.filter((id: any) => Number.isInteger(id) && id > 0) : [];
