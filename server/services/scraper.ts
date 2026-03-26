@@ -5,6 +5,7 @@ import { processChangeNotification } from "./notification";
 import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
+import { isTransientDbError } from "../utils/dbErrors";
 import { browserPool } from "./browserPool";
 import { validateUrlBeforeFetch, ssrfSafeFetch } from "../utils/ssrf";
 import { type Monitor, monitorMetrics, monitors } from "@shared/schema";
@@ -486,8 +487,13 @@ export function classifyOuterError(error: unknown): { userMessage: string; logCo
     return { userMessage: "A temporary server error occurred. The check will be retried automatically.", logContext: "database connection error" };
   }
 
+  // SSRF blocks — security-relevant, must stay at error level (not transient)
+  if (/SSRF blocked/i.test(msg)) {
+    return { userMessage: sanitizeErrorForClient(msg), logContext: "ssrf_blocked" };
+  }
+
   // Network errors — delegate to the existing fetch-error sanitizer
-  if (/abort|timeout|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|socket hang up|certificate|ssl|tls|SSRF|UND_ERR_HEADERS_OVERFLOW/i.test(msg)) {
+  if (/abort|timeout|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|socket hang up|certificate|ssl|tls|UND_ERR_HEADERS_OVERFLOW/i.test(msg)) {
     return { userMessage: sanitizeErrorForClient(msg), logContext: "network error" };
   }
 
@@ -952,9 +958,8 @@ export async function extractWithBrowserless(url: string, selector: string, moni
       };
     }, { pageTimeoutMs });
   } catch (error) {
-    const label = monitorName ? `"${monitorName}" — browser` : "Browser";
-    const classified = classifyBrowserlessError(error instanceof Error ? error.message : "Unknown error");
-    await ErrorLogger.error("scraper", `${label}-based extraction failed: ${classified}`, error instanceof Error ? error : null, { url, selector, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
+    // Don't log here — the caller (checkMonitor) logs with fuller context.
+    // Logging here too would create duplicate error entries for every failure.
     throw error;
   }
 }
@@ -976,8 +981,8 @@ async function fetchWithCurl(url: string, monitorId?: number, monitorName?: stri
     const rethrow = isAbort
       ? new Error("Page took too long to respond (15s timeout)")
       : error;
-    const label = monitorName ? `"${monitorName}" — page` : "Page";
-    await ErrorLogger.error("scraper", `${label} fetch with curl failed — the site returned an error or is blocking the request. Verify the URL is correct and the site is accessible.`, rethrow instanceof Error ? rethrow : null, { url, ...(monitorId ? { monitorId } : {}), ...(monitorName ? { monitorName } : {}) });
+    // Don't log here — this is a fallback fetch. The caller decides
+    // whether to log based on the overall pipeline outcome.
     throw rethrow;
   } finally {
     clearTimeout(timeout);
@@ -1194,7 +1199,21 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         }
 
         if (lastBrowserlessErr) {
-          await ErrorLogger.error("scraper", `"${monitor.name}" — rendered page extraction failed. The site may block automated browsers or the page took too long to load. Try simplifying the selector or check if the site requires login.`, lastBrowserlessErr instanceof Error ? lastBrowserlessErr : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+          const rawBrowserlessMsg = lastBrowserlessErr instanceof Error ? lastBrowserlessErr.message : "Unknown error";
+          if (/SSRF blocked/i.test(rawBrowserlessMsg)) {
+            // SSRF blocks are security-relevant — keep at error level
+            await ErrorLogger.error(
+              "scraper",
+              `"${monitor.name}" — rendered page extraction blocked by SSRF protection`,
+              lastBrowserlessErr instanceof Error ? lastBrowserlessErr : null,
+              { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector },
+            ).catch(() => {});
+          } else {
+            // Downgrade to warning: Browserless failures are expected for sites that
+            // block headless browsers. The circuit breaker and retry logic handle recovery.
+            const classified = classifyBrowserlessError(rawBrowserlessMsg);
+            await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+          }
         }
 
         const durationMs = Date.now() - startTime;
@@ -1338,23 +1357,35 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             consecutiveFailures: 0,
           });
         } catch (retryError) {
-          // Both attempts failed — log with full context
+          // Both attempts failed. Transient DB errors (connection drops) are
+          // expected and will self-heal via accelerated retry — log as warning.
+          // Non-transient errors (schema/constraint) indicate a real problem — log as error.
           const dbErrMsg = dbError instanceof Error ? dbError.message : String(dbError);
           const retryErrMsg = retryError instanceof Error ? retryError.message : String(retryError);
-          await ErrorLogger.error(
-            "scraper",
-            `"${monitor.name}" check succeeded but failed to save result`,
-            dbError instanceof Error ? dbError : null,
-            {
-              monitorId: monitor.id,
-              monitorName: monitor.name,
-              extractedValue: newValue?.substring(0, 200) ?? null,
-              previousValue: oldValue?.substring(0, 200) ?? null,
-              changed,
-              dbError: dbErrMsg,
-              retryError: retryErrMsg,
-            },
-          ).catch(() => {});
+          const isTransientSave = isTransientDbError(retryError);
+          const saveContext = {
+            monitorId: monitor.id,
+            monitorName: monitor.name,
+            extractedValue: newValue?.substring(0, 200) ?? null,
+            previousValue: oldValue?.substring(0, 200) ?? null,
+            changed,
+            dbError: dbErrMsg,
+            retryError: retryErrMsg,
+          };
+          if (isTransientSave) {
+            await ErrorLogger.warning(
+              "scraper",
+              `"${monitor.name}" check succeeded but failed to save result (will retry)`,
+              saveContext,
+            ).catch(() => {});
+          } else {
+            await ErrorLogger.error(
+              "scraper",
+              `"${monitor.name}" check succeeded but failed to save result`,
+              retryError instanceof Error ? retryError : null,
+              saveContext,
+            ).catch(() => {});
+          }
 
           saveFailed = true;
         }
@@ -1445,12 +1476,25 @@ export async function checkMonitor(monitor: Monitor): Promise<{
   } catch (error) {
     const { userMessage, logContext } = classifyOuterError(error);
 
-    await ErrorLogger.error(
-      "scraper",
-      `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`,
-      error instanceof Error ? error : null,
-      { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }
-    ).catch(() => {});
+    // Transient network/connection errors are expected and retried automatically —
+    // log as warnings to avoid polluting the error log with recoverable conditions.
+    // Note: "database error" (schema/constraint issues) is NOT transient and stays at error level.
+    // Note: ENOTFOUND, certificate/ssl/tls errors are permanent misconfigurations, not transient.
+    // Note: EAI_AGAIN is transient (temporary DNS resolver failure), so it is NOT in this list.
+    const errMsg = error instanceof Error ? error.message : "";
+    const isPermanentNetworkError = /ENOTFOUND|certificate|ssl|tls/i.test(errMsg);
+    const isTransient = (logContext === "network error" && !isPermanentNetworkError) || logContext === "database connection error";
+    const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
+    if (isTransient) {
+      await ErrorLogger.warning("scraper", logMessage, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }).catch(() => {});
+    } else {
+      await ErrorLogger.error(
+        "scraper",
+        logMessage,
+        error instanceof Error ? error : null,
+        { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }
+      ).catch(() => {});
+    }
 
     try {
       await handleMonitorFailure(monitor, "error", userMessage, false);

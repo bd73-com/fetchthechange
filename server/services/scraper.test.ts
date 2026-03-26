@@ -4044,9 +4044,9 @@ describe("classifyOuterError", () => {
     expect(result.userMessage).toBe("Connection was reset by the target site");
   });
 
-  it("classifies SSRF blocked errors as network error", () => {
+  it("classifies SSRF blocked errors as ssrf_blocked (not network error)", () => {
     const result = classifyOuterError(new Error("SSRF blocked: This URL resolves to a private address"));
-    expect(result.logContext).toBe("network error");
+    expect(result.logContext).toBe("ssrf_blocked");
     expect(result.userMessage).toBe("URL is not allowed");
   });
 
@@ -4201,9 +4201,9 @@ describe("checkMonitor outer catch resilience", () => {
     const html = `<html><body><span class="price">$49.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
 
-    // Both attempts fail
-    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("conn reset"));
-    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("conn reset again"));
+    // Both attempts fail with transient connection error
+    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("connection terminated"));
+    mockStorage.updateMonitor.mockRejectedValueOnce(new Error("connection terminated"));
 
     const { ErrorLogger } = await import("./logger");
 
@@ -4214,20 +4214,20 @@ describe("checkMonitor outer catch resilience", () => {
     expect(result.currentValue).toBe("$49.99");
     expect(result.changed).toBe(true);
     expect(result.error).toContain("server error prevented saving");
-    // Verify enhanced logging includes extracted and previous values
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
+    // Transient DB errors are downgraded to warnings (will retry via accelerated retry)
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scraper",
       expect.stringContaining("check succeeded but failed to save result"),
-      expect.any(Error),
       expect.objectContaining({
         monitorId: 1,
         extractedValue: "$49.99",
         previousValue: "$39.99",
         changed: true,
-        dbError: "conn reset",
-        retryError: "conn reset again",
+        dbError: "connection terminated",
+        retryError: "connection terminated",
       }),
     );
+    expect(ErrorLogger.error).not.toHaveBeenCalled();
   });
 
   it("returns result even when ErrorLogger.error rejects in outer catch", async () => {
@@ -4261,6 +4261,28 @@ describe("checkMonitor outer catch resilience", () => {
     expect(result.error).toBe("Could not resolve the target hostname");
     // Must NOT be the old generic message
     expect(result.error).not.toBe("Failed to fetch page");
+  });
+  it("classifyOuterError returns 'network error' for transient network errors", () => {
+    // Verify the classification that drives the transient/non-transient logging split
+    const { userMessage, logContext } = classifyOuterError(new Error("Connection terminated due to connection timeout"));
+    expect(logContext).toBe("network error");
+    expect(userMessage).toBe("Page took too long to respond");
+  });
+
+  it("classifyOuterError returns 'database error' for DB-specific errors", () => {
+    const { logContext } = classifyOuterError(new Error("relation 'monitors' does not exist"));
+    expect(logContext).toBe("database error");
+  });
+
+  it("classifyOuterError returns 'unclassified error' for non-transient errors", () => {
+    const { logContext } = classifyOuterError(new Error("Something totally unexpected"));
+    expect(logContext).toBe("unclassified error");
+  });
+
+  it("classifyOuterError returns 'ssrf_blocked' for SSRF errors (not grouped with network errors)", () => {
+    const { userMessage, logContext } = classifyOuterError(new Error("SSRF blocked: URL is not allowed"));
+    expect(logContext).toBe("ssrf_blocked");
+    expect(userMessage).toBe("URL is not allowed");
   });
 });
 
@@ -5831,49 +5853,39 @@ describe("extractWithBrowserless error classification in logs", () => {
     delete process.env.BROWSERLESS_TOKEN;
   });
 
-  it("logs classified timeout message to ErrorLogger", async () => {
+  it("does not log to ErrorLogger (caller handles logging)", async () => {
     mockConnectOverCDP.mockRejectedValue(new Error("Navigation timeout of 30000ms exceeded"));
 
     await expect(
       extractWithBrowserless("https://example.com", ".price", 1, "My Monitor")
     ).rejects.toThrow();
 
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
-      "scraper",
-      expect.stringContaining("took too long"),
-      expect.any(Error),
-      expect.objectContaining({ url: "https://example.com" }),
-    );
+    // extractWithBrowserless no longer logs — the caller (checkMonitor) logs
+    // with fuller context to avoid duplicate error entries.
+    expect(ErrorLogger.error).not.toHaveBeenCalled();
+    expect(ErrorLogger.warning).not.toHaveBeenCalled();
   });
 
-  it("logs classified ECONNREFUSED message to ErrorLogger", async () => {
+  it("re-throws ECONNREFUSED without logging", async () => {
     mockConnectOverCDP.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:443"));
 
     await expect(
       extractWithBrowserless("https://example.com", ".price")
     ).rejects.toThrow();
 
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
-      "scraper",
-      expect.stringContaining("refused the connection"),
-      expect.any(Error),
-      expect.objectContaining({ url: "https://example.com" }),
-    );
+    expect(ErrorLogger.error).not.toHaveBeenCalled();
+    expect(ErrorLogger.warning).not.toHaveBeenCalled();
   });
 
-  it("includes monitor name in error label when provided", async () => {
+  it("re-throws errors without logging even when monitor name provided", async () => {
     mockConnectOverCDP.mockRejectedValue(new Error("some error"));
 
     await expect(
       extractWithBrowserless("https://example.com", ".price", 1, "Price Tracker")
     ).rejects.toThrow();
 
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
-      "scraper",
-      expect.stringContaining('"Price Tracker"'),
-      expect.any(Error),
-      expect.objectContaining({ monitorName: "Price Tracker", monitorId: 1 }),
-    );
+    expect(ErrorLogger.error).not.toHaveBeenCalled();
+    expect(ErrorLogger.warning).not.toHaveBeenCalled();
   });
 });
 

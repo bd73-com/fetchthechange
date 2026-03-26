@@ -7,6 +7,7 @@ import { ErrorLogger } from "./logger";
 import { notificationTablesExist } from "./notificationReady";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { ensureMonitorConditionsTable } from "./ensureTables";
+import { isTransientDbError } from "../utils/dbErrors";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -21,25 +22,6 @@ let schedulerStarted = false;
 const cronTasks: ReturnType<typeof cron.schedule>[] = [];
 const pendingTimeouts = new Set<ReturnType<typeof setTimeout>>();
 
-/**
- * Transient DB errors that are safe to retry (connection drops, pool exhaustion).
- * Checks both PostgreSQL error codes (stable across driver versions) and message
- * substrings (fallback for connection-level errors that lack a code).
- */
-function isTransientDbError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  // PostgreSQL error codes: 08xxx = connection exceptions, 57P01 = admin shutdown
-  const code = (err as any).code;
-  if (typeof code === "string" && (/^08/.test(code) || code === "57P01")) return true;
-  const msg = err.message.toLowerCase();
-  return msg.includes("connection terminated")
-    || msg.includes("connection timeout")
-    || msg.includes("connection refused")
-    || msg.includes("econnreset")
-    || msg.includes("econnrefused")
-    || msg.includes("cannot acquire")
-    || msg.includes("timeout expired");
-}
 
 /** Retry a DB operation once after a 1 s delay on transient connection errors. */
 async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
@@ -53,6 +35,30 @@ async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
       return fn();
     }
     throw err;
+  }
+}
+
+/** Log a caught error as warning (transient) or error (non-transient) based on isTransientDbError. */
+async function logSchedulerError(
+  message: string,
+  error: unknown,
+  context?: Record<string, any>,
+): Promise<void> {
+  try {
+    if (isTransientDbError(error)) {
+      await ErrorLogger.warning("scheduler", `${message} (transient, will retry)`, {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        ...context,
+      });
+    } else {
+      await ErrorLogger.error("scheduler", message, error instanceof Error ? error : null, {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        ...context,
+      });
+    }
+  } catch {
+    // If logging itself fails (e.g., logging DB also down), don't mask the original error
+    console.error(`[Scheduler] Failed to log error: ${message}`, error instanceof Error ? error.message : error);
   }
 }
 
@@ -227,11 +233,7 @@ export async function startScheduler() {
         }
       }
     } catch (error) {
-      await ErrorLogger.error("scheduler", "Scheduler iteration failed", error instanceof Error ? error : null, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        activeChecks,
-        phase: "fetching active monitors",
-      });
+      await logSchedulerError("Scheduler iteration failed", error, { activeChecks, phase: "fetching active monitors" });
     } finally {
       mainCronRunning = false;
     }
@@ -249,18 +251,17 @@ export async function startScheduler() {
       notificationCronRunning = true;
       try {
         try {
+          // Not wrapped in withDbRetry: these functions deliver notifications
+          // before marking entries as delivered. Retrying the entire function
+          // could cause duplicate email/webhook/Slack deliveries.
           await processQueuedNotifications();
         } catch (error) {
-          await ErrorLogger.error("scheduler", "Queued notification processing failed", error instanceof Error ? error : null, {
-            errorMessage: error instanceof Error ? error.message : String(error),
-          });
+          await logSchedulerError("Queued notification processing failed", error);
         }
         try {
           await processDigestCron();
         } catch (error) {
-          await ErrorLogger.error("scheduler", "Digest processing failed", error instanceof Error ? error : null, {
-            errorMessage: error instanceof Error ? error.message : String(error),
-          });
+          await logSchedulerError("Digest processing failed", error);
         }
       } finally {
         notificationCronRunning = false;
@@ -361,9 +362,7 @@ export async function startScheduler() {
           }
         }
       } catch (error) {
-        await ErrorLogger.error("scheduler", "Webhook retry processing failed", error instanceof Error ? error : null, {
-          errorMessage: error instanceof Error ? error.message : String(error),
-        });
+        await logSchedulerError("Webhook retry processing failed", error);
       } finally {
         webhookCronRunning = false;
       }
@@ -371,52 +370,42 @@ export async function startScheduler() {
   }
 
   // Daily cleanup: prune monitor_metrics older than 90 days to prevent unbounded growth
+  // All cleanup operations are best-effort background tasks — transient DB failures
+  // are logged as warnings since the next daily run will catch up.
   cronTasks.push(cron.schedule("0 3 * * *", async () => {
     try {
-      const result = await db.execute(
+      const result = await withDbRetry(() => db.execute(
         sql`DELETE FROM monitor_metrics WHERE checked_at < NOW() - INTERVAL '90 days'`
-      );
+      ));
       const deleted = (result as any).rowCount ?? 0;
       if (deleted > 0) {
         console.log(`[Cleanup] Pruned ${deleted} monitor_metrics rows older than 90 days`);
       }
     } catch (error) {
-      await ErrorLogger.error("scheduler", "monitor_metrics cleanup failed", error instanceof Error ? error : null, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        retentionDays: 90,
-        table: "monitor_metrics",
-      });
+      await logSchedulerError("monitor_metrics cleanup failed", error, { retentionDays: 90, table: "monitor_metrics" });
     }
 
     // Delivery log cleanup: prune entries older than 30 days
     try {
       const olderThan = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      const entriesDeleted = await storage.cleanupOldDeliveryLogs(olderThan);
+      const entriesDeleted = await withDbRetry(() => storage.cleanupOldDeliveryLogs(olderThan));
       if (entriesDeleted > 0) {
         console.log(`[Cleanup] Pruned ${entriesDeleted} delivery_log rows older than 30 days`);
       }
     } catch (error) {
-      await ErrorLogger.error("scheduler", "delivery_log cleanup failed", error instanceof Error ? error : null, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        retentionDays: 30,
-        table: "delivery_log",
-      });
+      await logSchedulerError("delivery_log cleanup failed", error, { retentionDays: 30, table: "delivery_log" });
     }
 
     // Notification queue cleanup: prune permanently failed entries older than 7 days
     try {
-      const deleted = await storage.cleanupPermanentlyFailedQueueEntries(
+      const deleted = await withDbRetry(() => storage.cleanupPermanentlyFailedQueueEntries(
         new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-      );
+      ));
       if (deleted > 0) {
         console.log(`[Cleanup] Pruned ${deleted} permanently failed notification_queue rows older than 7 days`);
       }
     } catch (error) {
-      await ErrorLogger.error("scheduler", "notification_queue cleanup failed", error instanceof Error ? error : null, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        retentionDays: 7,
-        table: "notification_queue",
-      });
+      await logSchedulerError("notification_queue cleanup failed", error, { retentionDays: 7, table: "notification_queue" });
     }
   }));
 
