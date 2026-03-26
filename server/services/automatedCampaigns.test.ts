@@ -65,6 +65,7 @@ vi.mock("@shared/schema", () => ({
 vi.mock("drizzle-orm", () => ({
   eq: (a: any, b: any) => ({ field: a, value: b }),
   and: (...args: any[]) => ({ type: "and", args }),
+  isNull: (a: any) => ({ type: "isNull", field: a }),
   lte: (a: any, b: any) => ({ type: "lte", field: a, value: b }),
   sql: Object.assign(
     (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),

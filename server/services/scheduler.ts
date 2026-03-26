@@ -420,7 +420,7 @@ export async function startScheduler() {
         { errorMessage: error instanceof Error ? error.message : String(error) }
       );
     }
-  }));
+  }, { timezone: "UTC" }));
 
   schedulerStarted = true;
 }

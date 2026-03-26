@@ -3,7 +3,7 @@ import { campaigns, automatedCampaignConfigs, type AutomatedCampaignConfig } fro
 import { triggerCampaignSend } from "./campaignEmail";
 import { resolveRecipients } from "./campaignEmail";
 import { ErrorLogger } from "./logger";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 
 export const WELCOME_CAMPAIGN_DEFAULTS = {
   key: "welcome",
@@ -217,18 +217,29 @@ export async function bootstrapWelcomeCampaign(): Promise<void> {
 
   console.log("[Bootstrap] Running first welcome campaign for early adopters...");
 
-  // Set lastRunAt BEFORE sending to prevent duplicate bootstrap on retry after partial failure
+  // Atomically claim bootstrap: only proceed if lastRunAt IS NULL (prevents concurrent deploys sending twice)
   const now = new Date();
   const nextRunAt = computeNextRunAt(now);
 
-  await db
+  const [claimed] = await db
     .update(automatedCampaignConfigs)
     .set({
       lastRunAt: now,
       nextRunAt,
       updatedAt: now,
     })
-    .where(eq(automatedCampaignConfigs.id, config.id));
+    .where(
+      and(
+        eq(automatedCampaignConfigs.id, config.id),
+        isNull(automatedCampaignConfigs.lastRunAt),
+      )
+    )
+    .returning();
+
+  if (!claimed) {
+    console.log("[Bootstrap] Welcome campaign already claimed by another instance, skipping.");
+    return;
+  }
 
   const signupAfter = new Date("2025-03-19T00:00:00Z");
   const signupBefore = now;
