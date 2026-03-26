@@ -3,7 +3,7 @@ import { getResendClient } from "./services/resendClient";
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { api, channelTypeSchema, webhookConfigInputSchema, slackConfigInputSchema, createTagSchema, updateTagSchema, setMonitorTagsSchema, createConditionSchema, ERROR_LOG_SOURCES } from "@shared/routes";
+import { api, channelTypeSchema, webhookConfigInputSchema, slackConfigInputSchema, createTagSchema, updateTagSchema, setMonitorTagsSchema, createConditionSchema, ERROR_LOG_SOURCES, errorLogSourceSchema } from "@shared/routes";
 import { isSafeRegex } from "./services/conditions";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
@@ -82,7 +82,7 @@ export async function registerRoutes(
     console.error("CRITICAL: notification_queue columns missing — notification cron queries will fail");
   }
   await ensureTagTables();
-  const campaignConfigsReady = await ensureAutomatedCampaignConfigsTable();
+  let campaignConfigsReady = await ensureAutomatedCampaignConfigsTable();
   if (!campaignConfigsReady) {
     console.error("CRITICAL: automated_campaign_configs table missing — campaign bootstrap and admin routes will fail");
   }
@@ -105,6 +105,27 @@ export async function registerRoutes(
     }
     if (!conditionsReady) {
       res.status(503).json({ message: "Conditions not available", code: "SERVICE_UNAVAILABLE" });
+      return false;
+    }
+    return true;
+  }
+
+  // Lazy retry guard for automated campaign configs table (mirrors requireConditionsReady)
+  let campaignConfigsReadyProbe: Promise<boolean> | null = null;
+  async function requireCampaignConfigsReady(res: any): Promise<boolean> {
+    if (!campaignConfigsReady) {
+      campaignConfigsReadyProbe ??= ensureAutomatedCampaignConfigsTable()
+        .then((ready) => {
+          if (ready) campaignConfigsReady = true;
+          return campaignConfigsReady;
+        })
+        .finally(() => {
+          campaignConfigsReadyProbe = null;
+        });
+      await campaignConfigsReadyProbe;
+    }
+    if (!campaignConfigsReady) {
+      res.status(503).json({ message: "Campaign configs not available", code: "SERVICE_UNAVAILABLE" });
       return false;
     }
     return true;
@@ -1533,13 +1554,29 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      const { ids, filters, excludeIds } = req.body;
-      if (!ids && !filters) {
-        return res.status(400).json({ message: "Must provide ids or filters" });
+      const batchDeleteSchema = z.object({
+        ids: z.array(z.number().int().positive()).min(1).max(500).optional(),
+        filters: z.object({
+          level: z.enum(["error", "warning", "info"]).optional(),
+          source: errorLogSourceSchema.optional(),
+        }).strict().refine(
+          (data) => data.level !== undefined || data.source !== undefined,
+          { message: "filters must include at least one of: level, source" },
+        ).optional(),
+        excludeIds: z.array(z.number().int().positive()).max(500).optional(),
+      }).strict().refine(
+        (data) => (data.ids !== undefined) !== (data.filters !== undefined),
+        { message: "Provide either ids or filters, not both" },
+      ).refine(
+        (data) => !(data.ids && data.excludeIds),
+        { message: "excludeIds cannot be used with ids" },
+      );
+
+      const parsed = batchDeleteSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid request body", errors: parsed.error.flatten() });
       }
-      if (ids && filters) {
-        return res.status(400).json({ message: "Provide either ids or filters, not both" });
-      }
+      const { ids, filters, excludeIds } = parsed.data;
 
       const isAppOwner = userId === APP_OWNER_ID;
       const userMonitorIds = new Set(
@@ -1549,10 +1586,6 @@ export async function registerRoutes(
       const now = new Date();
 
       if (ids) {
-        if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id: any) => Number.isInteger(id) && id > 0)) {
-          return res.status(400).json({ message: "ids must be a non-empty array of positive integers" });
-        }
-
         const entries = await db.select().from(errorLogs)
           .where(and(inArray(errorLogs.id, ids), isNull(errorLogs.deletedAt)));
 
@@ -1568,21 +1601,15 @@ export async function registerRoutes(
           await db.update(errorLogs).set({ deletedAt: now }).where(inArray(errorLogs.id, authorizedIds));
         }
         res.json({ message: `${authorized.length} entries deleted`, count: authorized.length });
-      } else {
-        const hasLevel = filters.level && ["error", "warning", "info"].includes(filters.level);
-        const hasSource = filters.source && (ERROR_LOG_SOURCES as readonly string[]).includes(filters.source);
-        if (!hasLevel && !hasSource) {
-          return res.status(400).json({ message: "filters must include at least one of: level, source" });
-        }
-
+      } else if (filters) {
         const conditions = [isNull(errorLogs.deletedAt)];
-        if (hasLevel) {
+        if (filters.level) {
           conditions.push(eq(errorLogs.level, filters.level));
         }
-        if (hasSource) {
+        if (filters.source) {
           conditions.push(eq(errorLogs.source, filters.source));
         }
-        const excludeList = Array.isArray(excludeIds) ? excludeIds.filter((id: any) => Number.isInteger(id) && id > 0) : [];
+        const excludeList = excludeIds ?? [];
         if (excludeList.length > 0) {
           conditions.push(notInArray(errorLogs.id, excludeList));
         }
@@ -2416,6 +2443,7 @@ export async function registerRoutes(
 
   // GET /api/admin/automated-campaigns — list all configs
   app.get("/api/admin/automated-campaigns", isAuthenticated, async (req: any, res) => {
+    if (!(await requireCampaignConfigsReady(res))) return;
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -2437,6 +2465,7 @@ export async function registerRoutes(
 
   // PATCH /api/admin/automated-campaigns/:key — update config
   app.patch("/api/admin/automated-campaigns/:key", isAuthenticated, async (req: any, res) => {
+    if (!(await requireCampaignConfigsReady(res))) return;
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -2485,6 +2514,7 @@ export async function registerRoutes(
     message: { message: "Too many trigger requests. Try again later." },
   });
   app.post("/api/admin/automated-campaigns/:key/trigger", isAuthenticated, autoCampaignTriggerRateLimiter, async (req: any, res) => {
+    if (!(await requireCampaignConfigsReady(res))) return;
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
