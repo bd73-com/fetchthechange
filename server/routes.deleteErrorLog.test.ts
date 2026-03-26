@@ -490,11 +490,14 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     await ensureRoutes();
     vi.clearAllMocks();
 
-    // For batch endpoints, the select chain ends at .where() (no .limit/.orderBy)
-    // so mockSelectWhereFn must resolve to data directly.
+    // For batch endpoints:
+    // - ID path: .where() resolves directly (no .limit)
+    // - Filter path: .where().limit(500)
+    // Default to filter chain; ID-based tests override with mockResolvedValue.
+    mockLimitFn.mockResolvedValue([]);
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
-    mockSelectWhereFn.mockResolvedValue([]);
 
     mockUpdateWhereFn.mockResolvedValue(undefined);
     mockUpdateSetFn.mockReturnValue({ where: mockUpdateWhereFn });
@@ -607,7 +610,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
   it("soft-deletes entries matching filters for app owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([
+    mockLimitFn.mockResolvedValue([
       { id: 1, context: null },
       { id: 2, context: null },
       { id: 3, context: null },
@@ -616,14 +619,14 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: { filters: { level: "error" } } };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "3 entries deleted", count: 3 });
+    expect(res._json).toEqual({ message: "3 entries deleted", count: 3, hasMore: false });
     expect(mockDbUpdate).toHaveBeenCalled();
   });
 
   it("soft-deletes with filter and excludeIds", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([
+    mockLimitFn.mockResolvedValue([
       { id: 1, context: null },
       { id: 3, context: null },
     ]);
@@ -634,7 +637,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "2 entries deleted", count: 2 });
+    expect(res._json).toEqual({ message: "2 entries deleted", count: 2, hasMore: false });
   });
 
   it("rejects empty filters object", async () => {
@@ -659,7 +662,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
   it("applies ownership filtering with filters mode", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 10 }]);
-    mockSelectWhereFn.mockResolvedValue([
+    mockLimitFn.mockResolvedValue([
       { id: 1, context: { monitorId: 10 } },
       { id: 2, context: null },
     ]);
@@ -667,7 +670,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const req = { user: { claims: { sub: "not-the-owner" } }, body: { filters: { level: "error" } } };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "1 entries deleted", count: 1 });
+    expect(res._json).toEqual({ message: "1 entries deleted", count: 1, hasMore: false });
   });
 
   it("rejects filters with only invalid values", async () => {

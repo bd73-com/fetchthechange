@@ -217,7 +217,7 @@ export async function registerRoutes(
   });
 
   // Test Email Endpoint - verifies Resend email delivery
-  app.get("/api/test-email", isAuthenticated, emailUpdateRateLimiter, async (req: any, res) => {
+  app.post("/api/test-email", isAuthenticated, emailUpdateRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const user = await authStorage.getUser(userId);
@@ -1614,7 +1614,7 @@ export async function registerRoutes(
           conditions.push(notInArray(errorLogs.id, excludeList));
         }
 
-        const entries = await db.select().from(errorLogs).where(and(...conditions));
+        const entries = await db.select().from(errorLogs).where(and(...conditions)).limit(500);
 
         const authorized = entries.filter((log: any) => {
           const ctx = log.context as Record<string, unknown> | null;
@@ -1627,7 +1627,8 @@ export async function registerRoutes(
           const authorizedIds = authorized.map((e: any) => e.id);
           await db.update(errorLogs).set({ deletedAt: now }).where(inArray(errorLogs.id, authorizedIds));
         }
-        res.json({ message: `${authorized.length} entries deleted`, count: authorized.length });
+        const hasMore = entries.length === 500;
+        res.json({ message: `${authorized.length} entries deleted`, count: authorized.length, hasMore });
       }
     } catch (error: any) {
       console.error("Error batch deleting error logs:", error);
