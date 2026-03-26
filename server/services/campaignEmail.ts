@@ -26,6 +26,19 @@ interface ResolvedRecipient {
 }
 
 /** Escape HTML special characters to prevent XSS in email templates. */
+/**
+ * Insert content before the last </body> tag in an HTML string.
+ * Uses lastIndexOf to avoid matching </body> inside comments or scripts.
+ * Returns null if no </body> tag is found.
+ */
+function insertBeforeLastBodyClose(html: string, content: string): string | null {
+  const lower = html.toLowerCase();
+  const idx = lower.lastIndexOf("</body>");
+  if (idx === -1) return null;
+  const originalTag = html.slice(idx, idx + 7); // preserve original case
+  return html.slice(0, idx) + content + originalTag + html.slice(idx + 7);
+}
+
 function escapeHtml(str: string | null | undefined): string {
   if (!str) return "";
   return str
@@ -175,9 +188,8 @@ async function sendSingleCampaignEmail(
     </p>
   `;
 
-  const htmlWithFooter = /<\/body>/i.test(campaign.htmlBody)
-    ? campaign.htmlBody.replace(/<\/body>/i, (match) => unsubscribeFooter + match)
-    : campaign.htmlBody + unsubscribeFooter;
+  const htmlWithFooter = insertBeforeLastBodyClose(campaign.htmlBody, unsubscribeFooter)
+    ?? campaign.htmlBody + unsubscribeFooter;
 
   const textBody = campaign.textBody
     ? `${campaign.textBody}\n\n---\nUnsubscribe from campaign emails: ${unsubscribeUrl}\nYou will still receive monitor notifications.`
@@ -265,14 +277,14 @@ export async function sendTestCampaignEmail(
       &mdash; you will still receive monitor notifications.
     </p>`;
   let htmlWithBanner: string;
-  if (/<\/body>/i.test(campaign.htmlBody)) {
-    let result = campaign.htmlBody.replace(/<\/body>/i, (match) => footer + match);
-    if (/<body([^>]*)>/i.test(result)) {
-      result = result.replace(/<body([^>]*)>/i, `<body$1>${banner}`);
+  const footerInserted = insertBeforeLastBodyClose(campaign.htmlBody, footer);
+  if (footerInserted) {
+    // Insert banner after the opening <body> tag, or prepend if no <body> found
+    if (/<body([^>]*)>/i.test(footerInserted)) {
+      htmlWithBanner = footerInserted.replace(/<body([^>]*)>/i, `<body$1>${banner}`);
     } else {
-      result = banner + result;
+      htmlWithBanner = banner + footerInserted;
     }
-    htmlWithBanner = result;
   } else {
     htmlWithBanner = banner + campaign.htmlBody + footer;
   }

@@ -861,9 +861,11 @@ describe("unsubscribe footer HTML insertion logic", () => {
   const footer = '<hr/><p>Unsubscribe</p>';
 
   function insertFooter(htmlBody: string): string {
-    return /<\/body>/i.test(htmlBody)
-      ? htmlBody.replace(/<\/body>/i, (match) => footer + match)
-      : htmlBody + footer;
+    const lower = htmlBody.toLowerCase();
+    const idx = lower.lastIndexOf("</body>");
+    if (idx === -1) return htmlBody + footer;
+    const originalTag = htmlBody.slice(idx, idx + 7);
+    return htmlBody.slice(0, idx) + footer + originalTag + htmlBody.slice(idx + 7);
   }
 
   it("inserts footer before </body> in a complete HTML document", () => {
@@ -884,9 +886,9 @@ describe("unsubscribe footer HTML insertion logic", () => {
     expect(result).toBe("<p>Hello</p><hr/><p>Unsubscribe</p>");
   });
 
-  it("only replaces the first </body> occurrence", () => {
-    const html = "<body>A</body><!-- -->B</body>";
+  it("inserts before the last </body> (skipping one in comment)", () => {
+    const html = "<body><!-- </body> --><p>Hi</p></body>";
     const result = insertFooter(html);
-    expect(result).toBe("<body>A<hr/><p>Unsubscribe</p></body><!-- -->B</body>");
+    expect(result).toBe("<body><!-- </body> --><p>Hi</p><hr/><p>Unsubscribe</p></body>");
   });
 });
