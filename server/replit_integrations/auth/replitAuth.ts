@@ -71,7 +71,7 @@ function updateUserSession(
 ) {
   user.claims = tokens.claims();
   user.access_token = tokens.access_token;
-  user.refresh_token = tokens.refresh_token;
+  user.refresh_token = tokens.refresh_token ?? user.refresh_token;
   user.expires_at = user.claims?.exp;
 }
 
@@ -200,6 +200,15 @@ export async function setupAuth(app: Express) {
   });
 }
 
+// Per-session in-flight refresh promise cache to deduplicate concurrent
+// refresh attempts that would otherwise invalidate rotated refresh tokens.
+// The promise resolves with the token response so every waiter can update
+// its own `user` object (Express deserializes a separate `req.user` per request).
+type TokenResult = client.TokenEndpointResponse & client.TokenEndpointResponseHelpers;
+const inflightRefreshes = new Map<string, Promise<TokenResult>>();
+const MAX_INFLIGHT_REFRESHES = 10_000;
+const REFRESH_TIMEOUT_MS = 15_000;
+
 export const isAuthenticated: RequestHandler = async (req, res, next) => {
   const user = req.user as any;
 
@@ -218,9 +227,34 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
     return;
   }
 
+  const sessionId = req.sessionID;
+
   try {
-    const config = await getOidcConfig();
-    const tokenResponse = await client.refreshTokenGrant(config, refreshToken);
+    let refreshPromise = inflightRefreshes.get(sessionId);
+    if (!refreshPromise) {
+      refreshPromise = (async () => {
+        const config = await getOidcConfig();
+        const tokenResponse = await client.refreshTokenGrant(config, refreshToken);
+        return tokenResponse;
+      })();
+
+      // Add a timeout to prevent indefinite hangs if the OIDC provider stalls
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("Token refresh timed out")), REFRESH_TIMEOUT_MS);
+      });
+      refreshPromise = Promise.race([refreshPromise, timeoutPromise]);
+
+      if (inflightRefreshes.size < MAX_INFLIGHT_REFRESHES) {
+        inflightRefreshes.set(sessionId, refreshPromise);
+        // Suppress unhandled rejection on the cleanup chain; callers
+        // handle errors via their own await + try/catch.
+        refreshPromise.catch(() => {}).finally(() => inflightRefreshes.delete(sessionId));
+      } else {
+        console.warn("[auth] Inflight refresh map at capacity (%d), skipping dedup", inflightRefreshes.size);
+      }
+    }
+
+    const tokenResponse = await refreshPromise;
     updateUserSession(user, tokenResponse);
 
     // Persist refreshed tokens to the session store.

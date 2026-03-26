@@ -119,6 +119,7 @@ describe("isAuthenticated", () => {
     const req = {
       isAuthenticated: () => overrides.isAuthenticated ?? true,
       user: overrides.user ?? {},
+      sessionID: "test-session-id",
       session: {
         passport: { user: overrides.passportUser ?? {} },
         save: saveFn,
@@ -259,6 +260,7 @@ describe("isAuthenticated", () => {
     const req = {
       isAuthenticated: () => true,
       user,
+      sessionID: "test-session-id-save-fail",
       session: {
         passport: { user: {} },
         save: saveFn,
@@ -281,5 +283,147 @@ describe("isAuthenticated", () => {
       expect.stringContaining("store write failed")
     );
     consoleSpy.mockRestore();
+  });
+
+  it("preserves existing refresh_token when OIDC provider omits it from response", async () => {
+    const pastExp = Math.floor(Date.now() / 1000) - 100;
+    const newExp = Math.floor(Date.now() / 1000) + 3600;
+    const user = {
+      expires_at: pastExp,
+      access_token: "old_access",
+      refresh_token: "original_refresh",
+      claims: { sub: "user1", exp: pastExp },
+    };
+
+    mockDiscovery.mockResolvedValue({ serverMetadata: () => ({}) });
+    mockRefreshTokenGrant.mockResolvedValue({
+      access_token: "new_access",
+      refresh_token: undefined, // OIDC provider omits refresh token
+      claims: () => ({ sub: "user1", exp: newExp }),
+    });
+
+    const { req, res, next } = createMockReqResNext({
+      user,
+      passportUser: { ...user },
+    });
+    req.sessionID = "test-preserve-refresh";
+
+    await isAuthenticated(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    // The original refresh token must be preserved, not overwritten with undefined
+    expect(user.refresh_token).toBe("original_refresh");
+    expect(req.session.passport.user.refresh_token).toBe("original_refresh");
+  });
+
+  it("deduplicates concurrent refresh calls for the same session", async () => {
+    const pastExp = Math.floor(Date.now() / 1000) - 100;
+    const newExp = Math.floor(Date.now() / 1000) + 3600;
+
+    // Use a deferred promise so we control when the refresh resolves
+    let resolveRefresh!: (value: any) => void;
+    const refreshPromise = new Promise((r) => { resolveRefresh = r; });
+
+    mockDiscovery.mockResolvedValue({ serverMetadata: () => ({}) });
+    mockRefreshTokenGrant.mockReset();
+    mockRefreshTokenGrant.mockReturnValue(refreshPromise);
+
+    const sharedSessionId = "test-dedup-session";
+
+    const makeReq = () => {
+      const user = {
+        expires_at: pastExp,
+        access_token: "old_access",
+        refresh_token: "old_refresh",
+        claims: { sub: "user1", exp: pastExp },
+      };
+      const saveFn = vi.fn((cb: (err?: any) => void) => cb());
+      return {
+        req: {
+          isAuthenticated: () => true,
+          user,
+          sessionID: sharedSessionId,
+          session: { passport: { user: {} }, save: saveFn },
+        } as any,
+        res: { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() } as any,
+        next: vi.fn(),
+      };
+    };
+
+    const r1 = makeReq();
+    const r2 = makeReq();
+
+    // Fire both concurrently — don't await yet
+    const p1 = isAuthenticated(r1.req, r1.res, r1.next);
+    const p2 = isAuthenticated(r2.req, r2.res, r2.next);
+
+    // Resolve the single refresh
+    resolveRefresh({
+      access_token: "new_access",
+      refresh_token: "new_refresh",
+      claims: () => ({ sub: "user1", exp: newExp }),
+    });
+
+    await p1;
+    await p2;
+
+    // refreshTokenGrant should only have been called ONCE despite two concurrent requests
+    expect(mockRefreshTokenGrant).toHaveBeenCalledTimes(1);
+    expect(r1.next).toHaveBeenCalled();
+    expect(r2.next).toHaveBeenCalled();
+
+    // Both waiters' user objects must have the refreshed tokens
+    expect(r1.req.user.access_token).toBe("new_access");
+    expect(r2.req.user.access_token).toBe("new_access");
+    expect(r2.req.user.refresh_token).toBe("new_refresh");
+  });
+
+  it("propagates refresh rejection to all concurrent waiters", async () => {
+    const pastExp = Math.floor(Date.now() / 1000) - 100;
+
+    let rejectRefresh!: (reason: any) => void;
+    const refreshPromise = new Promise((_resolve, reject) => { rejectRefresh = reject; });
+
+    mockDiscovery.mockResolvedValue({ serverMetadata: () => ({}) });
+    mockRefreshTokenGrant.mockReset();
+    mockRefreshTokenGrant.mockReturnValue(refreshPromise);
+
+    const sharedSessionId = "test-dedup-reject";
+    const makeReq = () => {
+      const user = {
+        expires_at: pastExp,
+        access_token: "old",
+        refresh_token: "old_refresh",
+        claims: { sub: "user1", exp: pastExp },
+      };
+      const saveFn = vi.fn((cb: (err?: any) => void) => cb());
+      return {
+        req: {
+          isAuthenticated: () => true,
+          user,
+          sessionID: sharedSessionId,
+          session: { passport: { user: {} }, save: saveFn },
+        } as any,
+        res: { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() } as any,
+        next: vi.fn(),
+      };
+    };
+
+    const r1 = makeReq();
+    const r2 = makeReq();
+
+    const p1 = isAuthenticated(r1.req, r1.res, r1.next);
+    const p2 = isAuthenticated(r2.req, r2.res, r2.next);
+
+    rejectRefresh(new Error("invalid_grant"));
+
+    await p1;
+    await p2;
+
+    // Both should get 401, neither should call next
+    expect(r1.res.status).toHaveBeenCalledWith(401);
+    expect(r2.res.status).toHaveBeenCalledWith(401);
+    expect(r1.next).not.toHaveBeenCalled();
+    expect(r2.next).not.toHaveBeenCalled();
   });
 });
