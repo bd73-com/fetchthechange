@@ -65,6 +65,15 @@ vi.mock("../db", () => ({
 
 vi.mock("drizzle-orm", () => ({
   sql: (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
+  relations: vi.fn(),
+  eq: vi.fn(),
+  and: vi.fn(),
+  isNull: vi.fn(),
+  lte: vi.fn(),
+}));
+
+vi.mock("./automatedCampaigns", () => ({
+  processAutomatedCampaigns: vi.fn().mockResolvedValue(undefined),
 }));
 
 const { mockOnClose } = vi.hoisted(() => ({

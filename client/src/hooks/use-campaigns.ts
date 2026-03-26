@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import type { Campaign, CampaignRecipient } from "@shared/schema";
+import type { Campaign, CampaignRecipient, AutomatedCampaignConfig } from "@shared/schema";
 
 const CAMPAIGNS_KEY = "/api/admin/campaigns";
 const DASHBOARD_KEY = "/api/admin/campaigns/dashboard";
@@ -224,6 +224,78 @@ export function useCancelCampaign() {
         title: "Campaign cancelled",
         description: `${data.sentSoFar} sent, ${data.cancelled} cancelled.`,
       });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+// ------------------------------------------------------------------
+// AUTOMATED CAMPAIGNS
+// ------------------------------------------------------------------
+
+const AUTO_CAMPAIGNS_KEY = "/api/admin/automated-campaigns";
+
+// GET /api/admin/automated-campaigns
+export function useAutomatedCampaigns() {
+  return useQuery<AutomatedCampaignConfig[]>({
+    queryKey: [AUTO_CAMPAIGNS_KEY],
+    queryFn: () => fetchJson(AUTO_CAMPAIGNS_KEY),
+  });
+}
+
+// PATCH /api/admin/automated-campaigns/:key
+export function useUpdateAutomatedCampaign() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: ({ key, ...updates }: { key: string } & Partial<{
+      subject: string;
+      htmlBody: string;
+      textBody: string;
+      enabled: boolean;
+    }>) =>
+      fetchJson(`${AUTO_CAMPAIGNS_KEY}/${key}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [AUTO_CAMPAIGNS_KEY] });
+      toast({ title: "Config updated", description: "Automated campaign config saved." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
+// POST /api/admin/automated-campaigns/:key/trigger
+export function useTriggerAutomatedCampaign() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: ({ key, signupAfter }: { key: string; signupAfter?: string }) =>
+      fetchJson(`${AUTO_CAMPAIGNS_KEY}/${key}/trigger`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(signupAfter ? { signupAfter } : {}),
+      }),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: [AUTO_CAMPAIGNS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [CAMPAIGNS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [DASHBOARD_KEY] });
+      if (data.skipped) {
+        toast({ title: "No new recipients", description: "No new users since the last run." });
+      } else {
+        toast({
+          title: "Campaign triggered",
+          description: `Sending to ${data.totalRecipients} recipients...`,
+        });
+      }
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });

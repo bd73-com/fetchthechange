@@ -141,6 +141,7 @@ export const campaigns = pgTable("campaigns", {
   htmlBody: text("html_body").notNull(),
   textBody: text("text_body"),
   status: text("status").default("draft").notNull(), // 'draft' | 'sending' | 'sent' | 'partially_sent' | 'cancelled'
+  type: text("type").default("manual").notNull(), // 'manual' | 'automated'
   filters: jsonb("filters"), // { tier?: string[], signupBefore?, signupAfter?, minMonitors?, maxMonitors?, hasActiveMonitors? }
   totalRecipients: integer("total_recipients").default(0).notNull(),
   sentCount: integer("sent_count").default(0).notNull(),
@@ -211,6 +212,30 @@ export const insertCampaignSchema = createInsertSchema(campaigns).omit({
 export type Campaign = typeof campaigns.$inferSelect;
 export type InsertCampaign = z.infer<typeof insertCampaignSchema>;
 export type CampaignRecipient = typeof campaignRecipients.$inferSelect;
+
+// Automated campaign configurations
+export const automatedCampaignConfigs = pgTable("automated_campaign_configs", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  subject: text("subject").notNull(),
+  htmlBody: text("html_body").notNull(),
+  textBody: text("text_body"),
+  enabled: boolean("enabled").default(true).notNull(),
+  lastRunAt: timestamp("last_run_at"),
+  nextRunAt: timestamp("next_run_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertAutomatedCampaignConfigSchema = createInsertSchema(automatedCampaignConfigs).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type AutomatedCampaignConfig = typeof automatedCampaignConfigs.$inferSelect;
+export type InsertAutomatedCampaignConfig = typeof automatedCampaignConfigs.$inferInsert;
 
 export const notificationPreferences = pgTable("notification_preferences", {
   id: serial("id").primaryKey(),

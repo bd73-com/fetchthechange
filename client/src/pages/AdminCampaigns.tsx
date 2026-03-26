@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -48,6 +49,8 @@ import {
   Trash2,
   TestTube,
   Loader2,
+  Play,
+  Pencil,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import DashboardNav from "@/components/DashboardNav";
@@ -60,8 +63,11 @@ import {
   usePreviewRecipients,
   useSendTestCampaign,
   useSendCampaign,
+  useAutomatedCampaigns,
+  useUpdateAutomatedCampaign,
+  useTriggerAutomatedCampaign,
 } from "@/hooks/use-campaigns";
-import type { Campaign } from "@shared/schema";
+import type { Campaign, AutomatedCampaignConfig } from "@shared/schema";
 
 const statusConfig: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
   draft: { variant: "outline", label: "Draft" },
@@ -478,6 +484,214 @@ function CreateCampaignDialog() {
   );
 }
 
+function WelcomeCampaignCard({ config }: { config: AutomatedCampaignConfig }) {
+  const [editOpen, setEditOpen] = useState(false);
+  const [confirmTriggerOpen, setConfirmTriggerOpen] = useState(false);
+  const [editSubject, setEditSubject] = useState(config.subject);
+  const [editHtmlBody, setEditHtmlBody] = useState(config.htmlBody);
+  const [editTextBody, setEditTextBody] = useState(config.textBody || "");
+
+  const updateConfig = useUpdateAutomatedCampaign();
+  const triggerCampaign = useTriggerAutomatedCampaign();
+
+  const handleToggleEnabled = () => {
+    updateConfig.mutate({ key: config.key, enabled: !config.enabled });
+  };
+
+  const handleSaveTemplate = async () => {
+    await updateConfig.mutateAsync({
+      key: config.key,
+      subject: editSubject,
+      htmlBody: editHtmlBody,
+      textBody: editTextBody || undefined,
+    });
+    setEditOpen(false);
+  };
+
+  const handleTrigger = async () => {
+    await triggerCampaign.mutateAsync({ key: config.key });
+    setConfirmTriggerOpen(false);
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <CardTitle className="text-lg">Welcome Campaign</CardTitle>
+              {config.enabled ? (
+                <Badge variant="outline">Active</Badge>
+              ) : (
+                <Badge variant="secondary">Paused</Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={config.enabled}
+                onCheckedChange={handleToggleEnabled}
+                disabled={updateConfig.isPending}
+              />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm text-muted-foreground">Last run</p>
+              <p className="text-sm font-medium">
+                {config.lastRunAt ? formatDate(config.lastRunAt as any) : "Never"}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Next run</p>
+              <p className="text-sm font-medium">
+                {config.nextRunAt ? formatDate(config.nextRunAt as any) : "\u2014"}
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm text-muted-foreground">Subject</p>
+            <p className="text-sm font-medium">{config.subject}</p>
+          </div>
+
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => {
+              setEditSubject(config.subject);
+              setEditHtmlBody(config.htmlBody);
+              setEditTextBody(config.textBody || "");
+              setEditOpen(true);
+            }}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Edit Template
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmTriggerOpen(true)}
+              disabled={triggerCampaign.isPending}
+            >
+              {triggerCampaign.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4 mr-2" />
+              )}
+              Trigger Now
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Edit Template Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Welcome Template</DialogTitle>
+            <DialogDescription>Update the welcome email template.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="auto-subject">Subject</Label>
+              <Input
+                id="auto-subject"
+                value={editSubject}
+                onChange={(e) => setEditSubject(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="auto-html">HTML Body</Label>
+              <Textarea
+                id="auto-html"
+                value={editHtmlBody}
+                onChange={(e) => setEditHtmlBody(e.target.value)}
+                className="font-mono text-sm min-h-[200px]"
+                rows={12}
+              />
+            </div>
+            <div>
+              <Label htmlFor="auto-text">Plain Text Body (optional)</Label>
+              <Textarea
+                id="auto-text"
+                value={editTextBody}
+                onChange={(e) => setEditTextBody(e.target.value)}
+                className="text-sm min-h-[80px]"
+                rows={4}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handleSaveTemplate}
+              disabled={!editSubject || !editHtmlBody || updateConfig.isPending}
+            >
+              {updateConfig.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Trigger Dialog */}
+      <AlertDialog open={confirmTriggerOpen} onOpenChange={setConfirmTriggerOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Trigger Welcome Campaign?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will send to all users who joined since the last run. Continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleTrigger} disabled={triggerCampaign.isPending}>
+              {triggerCampaign.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4 mr-2" />
+              )}
+              Trigger Now
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+function AutomatedCampaignsTab() {
+  const { data: configs, isLoading } = useAutomatedCampaigns();
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  }
+
+  if (!configs || configs.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-muted-foreground">
+          <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
+          <p className="text-lg font-medium">No automated campaigns configured</p>
+          <p className="text-sm mt-1">Automated campaigns will appear here once configured.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {configs.map((config) => (
+        <WelcomeCampaignCard key={config.id} config={config} />
+      ))}
+    </div>
+  );
+}
+
 export default function AdminCampaigns() {
   const [, navigate] = useLocation();
   const { data: campaigns, isLoading } = useCampaigns();
@@ -543,85 +757,102 @@ export default function AdminCampaigns() {
           </div>
         )}
 
-        {/* Campaigns Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BarChart3 className="h-5 w-5" />
-              All Campaigns
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : !campaigns || campaigns.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p className="text-lg font-medium">No campaigns yet</p>
-                <p className="text-sm mt-1">Create your first email campaign to start communicating with users.</p>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Recipients</TableHead>
-                    <TableHead className="text-right">Open Rate</TableHead>
-                    <TableHead className="text-right">Click Rate</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {campaigns.map((c: Campaign) => {
-                    const config = statusConfig[c.status] || statusConfig.draft;
-                    return (
-                      <TableRow
-                        key={c.id}
-                        className="cursor-pointer"
-                        onClick={() => navigate(`/admin/campaigns/${c.id}`)}
-                      >
-                        <TableCell className="font-medium">{c.name}</TableCell>
-                        <TableCell>
-                          <Badge variant={config.variant}>{config.label}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right">{c.totalRecipients}</TableCell>
-                        <TableCell className="text-right">
-                          {formatRate(c.openedCount, c.sentCount)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {formatRate(c.clickedCount, c.sentCount)}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {formatDate(c.createdAt as any)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {c.status === "draft" && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                deleteCampaign.mutate(c.id);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          )}
-                        </TableCell>
+        {/* Tabs: Manual / Automated */}
+        <Tabs defaultValue="manual">
+          <TabsList className="mb-4">
+            <TabsTrigger value="manual">Manual</TabsTrigger>
+            <TabsTrigger value="automated">Automated</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="manual">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5" />
+                  All Campaigns
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
+                  </div>
+                ) : !campaigns || campaigns.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p className="text-lg font-medium">No campaigns yet</p>
+                    <p className="text-sm mt-1">Create your first email campaign to start communicating with users.</p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Recipients</TableHead>
+                        <TableHead className="text-right">Open Rate</TableHead>
+                        <TableHead className="text-right">Click Rate</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                    </TableHeader>
+                    <TableBody>
+                      {campaigns.map((c: Campaign) => {
+                        const cfg = statusConfig[c.status] || statusConfig.draft;
+                        const isAutomated = c.type === "automated";
+                        return (
+                          <TableRow
+                            key={c.id}
+                            className="cursor-pointer"
+                            onClick={() => navigate(`/admin/campaigns/${c.id}`)}
+                          >
+                            <TableCell className="font-medium">{c.name}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1.5">
+                                <Badge variant={cfg.variant}>{cfg.label}</Badge>
+                                {isAutomated && <Badge variant="outline">Auto</Badge>}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right">{c.totalRecipients}</TableCell>
+                            <TableCell className="text-right">
+                              {formatRate(c.openedCount, c.sentCount)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {formatRate(c.clickedCount, c.sentCount)}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {formatDate(c.createdAt as any)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {c.status === "draft" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteCampaign.mutate(c.id);
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="automated">
+            <AutomatedCampaignsTab />
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   );
