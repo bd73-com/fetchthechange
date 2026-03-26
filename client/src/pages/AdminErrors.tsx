@@ -659,7 +659,7 @@ export default function AdminErrors() {
                 aria-label="Select all entries"
               />
               <span className="text-sm text-muted-foreground">
-                {selectAll ? "All matching entries selected" : "Select all"}
+                {selectAll ? `All ${logs.length} visible entries selected` : "Select all"}
               </span>
             </div>
             <div className="space-y-2">
@@ -761,7 +761,7 @@ export default function AdminErrors() {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50" data-testid="floating-action-bar">
           <div className="flex items-center gap-3 bg-background border rounded-lg shadow-lg px-4 py-3">
             <span className="text-sm font-medium" data-testid="text-selection-count">
-              {selectAll ? `All matching entries` : `${selectionCount} selected`}
+              {selectAll ? `${selectionCount} visible entries` : `${selectionCount} selected`}
             </span>
             <Button
               variant="destructive"
