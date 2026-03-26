@@ -491,11 +491,12 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     vi.clearAllMocks();
 
     // For batch endpoints:
-    // - ID path: .where() resolves directly (no .limit)
-    // - Filter path: .where().limit(500)
+    // - ID path: .where() resolves directly (no .limit/.orderBy)
+    // - Filter path: .where().orderBy().limit(500)
     // Default to filter chain; ID-based tests override with mockResolvedValue.
     mockLimitFn.mockResolvedValue([]);
-    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ orderBy: mockOrderByFn, limit: mockLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
 
@@ -671,6 +672,20 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(res._json).toEqual({ message: "1 entries deleted", count: 1, hasMore: false });
+  });
+
+  it("returns hasMore true when filter query hits the 500-row limit", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    // Simulate exactly 500 rows returned (the limit)
+    const entries = Array.from({ length: 500 }, (_, i) => ({ id: i + 1, context: null }));
+    mockLimitFn.mockResolvedValue(entries);
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: { filters: { level: "error" } } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json.count).toBe(500);
+    expect(res._json.hasMore).toBe(true);
   });
 
   it("rejects filters with only invalid values", async () => {
@@ -933,5 +948,13 @@ describe("POST /api/admin/error-logs/finalize", () => {
     expect(res._status).toBe(500);
     expect(res._json).toEqual({ message: "Failed to finalize error logs" });
     errorSpy.mockRestore();
+  });
+});
+
+describe("POST /api/test-email", () => {
+  it("is registered as POST, not GET", async () => {
+    await ensureRoutes();
+    expect(registeredRoutes["post"]?.["/api/test-email"]).toBeDefined();
+    expect(registeredRoutes["get"]?.["/api/test-email"]).toBeUndefined();
   });
 });

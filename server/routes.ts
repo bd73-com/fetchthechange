@@ -12,7 +12,7 @@ import { TIER_LIMITS, TAG_LIMITS, TAG_ASSIGNMENT_LIMITS, BROWSERLESS_CAPS, RESEN
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
-import { sql, desc, eq, and, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
+import { sql, asc, desc, eq, and, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
@@ -1614,7 +1614,7 @@ export async function registerRoutes(
           conditions.push(notInArray(errorLogs.id, excludeList));
         }
 
-        const entries = await db.select().from(errorLogs).where(and(...conditions)).limit(500);
+        const entries = await db.select().from(errorLogs).where(and(...conditions)).orderBy(asc(errorLogs.id)).limit(500);
 
         const authorized = entries.filter((log: any) => {
           const ctx = log.context as Record<string, unknown> | null;
