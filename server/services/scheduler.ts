@@ -7,6 +7,7 @@ import { ErrorLogger } from "./logger";
 import { notificationTablesExist } from "./notificationReady";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { ensureMonitorConditionsTable } from "./ensureTables";
+import { processAutomatedCampaigns } from "./automatedCampaigns";
 import { isTransientDbError } from "../utils/dbErrors";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
@@ -406,6 +407,18 @@ export async function startScheduler() {
       }
     } catch (error) {
       await logSchedulerError("notification_queue cleanup failed", error, { retentionDays: 7, table: "notification_queue" });
+    }
+  }));
+
+  // Automated campaigns: run at midnight UTC on the 1st and 15th of each month
+  cronTasks.push(cron.schedule("0 0 1,15 * *", async () => {
+    try {
+      await processAutomatedCampaigns();
+    } catch (error) {
+      await ErrorLogger.error("scheduler", "Automated campaign processing failed",
+        error instanceof Error ? error : null,
+        { errorMessage: error instanceof Error ? error.message : String(error) }
+      );
     }
   }));
 

@@ -141,6 +141,16 @@ export async function registerRoutes(
     await ErrorLogger.error("scheduler", "Scheduler failed to start after all retries — monitoring is disabled", null, { maxRetries });
   })();
 
+  // Bootstrap welcome campaign: one-time send for early adopters, then schedule takes over
+  (async () => {
+    try {
+      const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
+      await bootstrapWelcomeCampaign();
+    } catch (err) {
+      console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
+    }
+  })();
+
   // Debug Browserless Endpoint (admin-only, SSRF-validated)
   app.post("/api/debug/browserless", isAuthenticated, async (req: any, res) => {
     try {
@@ -2378,6 +2388,133 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Error processing resubscribe:", error);
       res.status(500).send("An error occurred. Please try again.");
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // AUTOMATED CAMPAIGN ROUTES
+  // ------------------------------------------------------------------
+
+  const { automatedCampaignConfigs: automatedConfigsTable } = await import("@shared/schema");
+  const automatedCampaignService = await import("./services/automatedCampaigns");
+
+  // GET /api/admin/automated-campaigns — list all configs
+  app.get("/api/admin/automated-campaigns", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const configs = await db
+        .select()
+        .from(automatedConfigsTable)
+        .orderBy(automatedConfigsTable.key);
+
+      res.json(configs);
+    } catch (error: any) {
+      console.error("Error fetching automated campaign configs:", error);
+      res.status(500).json({ message: "Failed to fetch automated campaign configs" });
+    }
+  });
+
+  // PATCH /api/admin/automated-campaigns/:key — update config
+  app.patch("/api/admin/automated-campaigns/:key", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const { key } = req.params;
+      const updateSchema = z.object({
+        subject: z.string().optional(),
+        htmlBody: z.string().optional(),
+        textBody: z.string().optional(),
+        enabled: z.boolean().optional(),
+      }).strict();
+
+      const parsed = updateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid request body", errors: parsed.error.flatten() });
+      }
+
+      const updates = parsed.data;
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No fields to update" });
+      }
+
+      const [updated] = await db
+        .update(automatedConfigsTable)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(eq(automatedConfigsTable.key, key))
+        .returning();
+
+      if (!updated) return res.status(404).json({ message: "Config not found" });
+
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating automated campaign config:", error);
+      res.status(500).json({ message: "Failed to update automated campaign config" });
+    }
+  });
+
+  // POST /api/admin/automated-campaigns/:key/trigger — manual trigger
+  app.post("/api/admin/automated-campaigns/:key/trigger", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      const { key } = req.params;
+      const triggerSchema = z.object({
+        signupAfter: z.string().datetime().optional(),
+      }).strict();
+
+      const parsed = triggerSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid request body", errors: parsed.error.flatten() });
+      }
+
+      const [config] = await db
+        .select()
+        .from(automatedConfigsTable)
+        .where(eq(automatedConfigsTable.key, key))
+        .limit(1);
+
+      if (!config) return res.status(404).json({ message: "Config not found" });
+
+      const signupAfter = parsed.data.signupAfter
+        ? new Date(parsed.data.signupAfter)
+        : config.lastRunAt || new Date("2025-03-19T00:00:00Z");
+      const signupBefore = new Date();
+
+      const result = await automatedCampaignService.runWelcomeCampaign({
+        signupAfter,
+        signupBefore,
+        configId: config.id,
+      });
+
+      if ("skipped" in result) {
+        res.json({ skipped: true, reason: "No new recipients" });
+      } else {
+        // Update lastRunAt and nextRunAt
+        const now = new Date();
+        const nextRunAt = automatedCampaignService.computeNextRunAt(now);
+        await db
+          .update(automatedConfigsTable)
+          .set({ lastRunAt: now, nextRunAt, updatedAt: now })
+          .where(eq(automatedConfigsTable.id, config.id));
+
+        res.json({ campaignId: result.campaignId, totalRecipients: result.totalRecipients });
+      }
+    } catch (error: any) {
+      console.error("Error triggering automated campaign:", error);
+      res.status(500).json({ message: error.message || "Failed to trigger automated campaign" });
     }
   });
 
