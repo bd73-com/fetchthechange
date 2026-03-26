@@ -82,7 +82,10 @@ export async function registerRoutes(
     console.error("CRITICAL: notification_queue columns missing — notification cron queries will fail");
   }
   await ensureTagTables();
-  await ensureAutomatedCampaignConfigsTable();
+  const campaignConfigsReady = await ensureAutomatedCampaignConfigsTable();
+  if (!campaignConfigsReady) {
+    console.error("CRITICAL: automated_campaign_configs table missing — campaign bootstrap and admin routes will fail");
+  }
   // Per-route 503 guard (not conditional registration like apiKeysReady)
   // because condition routes are inline — 503 gives clients a clear retry signal.
   // Lazy retry: if startup fails (transient DB error), first request retries once.
@@ -143,18 +146,20 @@ export async function registerRoutes(
   })();
 
   // Bootstrap welcome campaign: one-time send for early adopters, then schedule takes over
-  (async () => {
-    try {
-      const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
-      await bootstrapWelcomeCampaign();
-    } catch (err) {
-      console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
-      await ErrorLogger.error("scheduler", "Welcome campaign bootstrap failed",
-        err instanceof Error ? err : null,
-        { errorMessage: err instanceof Error ? err.message : String(err) }
-      ).catch(() => {});
-    }
-  })();
+  if (campaignConfigsReady) {
+    (async () => {
+      try {
+        const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
+        await bootstrapWelcomeCampaign();
+      } catch (err) {
+        console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
+        await ErrorLogger.error("scheduler", "Welcome campaign bootstrap failed",
+          err instanceof Error ? err : null,
+          { errorMessage: err instanceof Error ? err.message : String(err) }
+        ).catch(() => {});
+      }
+    })();
+  }
 
   // Debug Browserless Endpoint (admin-only, SSRF-validated)
   app.post("/api/debug/browserless", isAuthenticated, async (req: any, res) => {
