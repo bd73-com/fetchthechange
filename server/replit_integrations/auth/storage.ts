@@ -19,15 +19,28 @@ class AuthStorage implements IAuthStorage {
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
+    // Only update OIDC-sourced profile fields on conflict — never overwrite
+    // user-managed fields (tier, stripeCustomerId, notificationEmail, etc.).
+    // Filter out undefined to avoid relying on Drizzle's internal handling.
+    const oidcFields: Record<string, unknown> = {
+      email: userData.email,
+      firstName: userData.firstName,
+      lastName: userData.lastName,
+      profileImageUrl: userData.profileImageUrl,
+    };
+    const setClause: Record<string, unknown> = { updatedAt: new Date() };
+    for (const [key, value] of Object.entries(oidcFields)) {
+      if (value !== undefined) {
+        setClause[key] = value;
+      }
+    }
+
     const [user] = await db
       .insert(users)
       .values(userData)
       .onConflictDoUpdate({
         target: users.id,
-        set: {
-          ...userData,
-          updatedAt: new Date(),
-        },
+        set: setClause,
       })
       .returning();
     return user;
