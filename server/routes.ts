@@ -2466,7 +2466,13 @@ export async function registerRoutes(
   });
 
   // POST /api/admin/automated-campaigns/:key/trigger — manual trigger
-  app.post("/api/admin/automated-campaigns/:key/trigger", isAuthenticated, async (req: any, res) => {
+  const autoCampaignTriggerRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 2,
+    keyGenerator: (req: any) => req.user?.claims?.sub || ipKeyGenerator(req.ip || "0.0.0.0"),
+    message: { message: "Too many trigger requests. Try again later." },
+  });
+  app.post("/api/admin/automated-campaigns/:key/trigger", isAuthenticated, autoCampaignTriggerRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -2518,7 +2524,7 @@ export async function registerRoutes(
       }
     } catch (error: any) {
       console.error("Error triggering automated campaign:", error);
-      res.status(500).json({ message: error.message || "Failed to trigger automated campaign" });
+      res.status(500).json({ message: "Failed to trigger automated campaign" });
     }
   });
 
