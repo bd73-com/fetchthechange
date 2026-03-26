@@ -157,10 +157,6 @@ export async function ensureNotificationQueueColumns(): Promise<boolean> {
 }
 
 /**
- * Ensures tags and monitor_tags tables exist (added in PR #86).
- * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
- */
-/**
  * Ensures automated_campaign_configs table exists (added in PR #275).
  * Without this, bootstrapWelcomeCampaign() and automated campaign routes
  * crash with: relation "automated_campaign_configs" does not exist.
@@ -189,6 +185,10 @@ export async function ensureAutomatedCampaignConfigsTable(): Promise<boolean> {
   }
 }
 
+/**
+ * Ensures tags and monitor_tags tables exist (added in PR #86).
+ * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
+ */
 export async function ensureTagTables(): Promise<void> {
   try {
     await db.execute(sql`
