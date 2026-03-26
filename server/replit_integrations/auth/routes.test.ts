@@ -142,4 +142,29 @@ describe("PATCH /api/auth/user/notification-email handler", () => {
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({ message: "Invalid email address" });
   });
+
+  it("returns 500 when storage throws", async () => {
+    mockUpdateNotificationEmail.mockRejectedValue(new Error("DB error"));
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { req, res } = createMockReqRes();
+    req.body = { notificationEmail: "valid@example.com" };
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ message: "Failed to update notification email" });
+    consoleSpy.mockRestore();
+  });
+
+  it("accepts null to clear notification email", async () => {
+    const userData = { id: "user-123", notificationEmail: null };
+    mockUpdateNotificationEmail.mockResolvedValue(userData);
+    const { req, res } = createMockReqRes();
+    req.body = { notificationEmail: null };
+
+    await handler(req, res);
+
+    expect(mockUpdateNotificationEmail).toHaveBeenCalledWith("user-123", null);
+    expect(res.json).toHaveBeenCalledWith(userData);
+  });
 });
