@@ -1,9 +1,10 @@
 import { db } from "../db";
 import { errorLogs } from "@shared/schema";
 import { and, eq, sql } from "drizzle-orm";
+import type { ERROR_LOG_SOURCES } from "@shared/routes";
 
 type LogLevel = "error" | "warning" | "info";
-type LogSource = "scraper" | "email" | "api" | "scheduler" | "stripe" | "browserless";
+type LogSource = (typeof ERROR_LOG_SOURCES)[number];
 
 const SENSITIVE_KEYS = [
   "password", "token", "apikey", "api_key", "secret", "authorization",

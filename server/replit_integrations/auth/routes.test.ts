@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockGetUser = vi.fn();
+const mockUpdateNotificationEmail = vi.fn();
 
 vi.mock("./storage", () => ({
   authStorage: {
     getUser: (...args: any[]) => mockGetUser(...args),
-    updateNotificationEmail: vi.fn(),
+    updateNotificationEmail: (...args: any[]) => mockUpdateNotificationEmail(...args),
   },
 }));
 
@@ -90,5 +91,55 @@ describe("GET /api/auth/user handler", () => {
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({ message: "Failed to fetch user" });
     consoleSpy.mockRestore();
+  });
+});
+
+describe("PATCH /api/auth/user/notification-email handler", () => {
+  let handler: (req: any, res: any) => Promise<void>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const app = {
+      get: vi.fn(),
+      patch: vi.fn(),
+    } as any;
+    registerAuthRoutes(app);
+    const patchCall = app.patch.mock.calls.find(
+      (call: any[]) => call[0] === "/api/auth/user/notification-email"
+    );
+    handler = patchCall[patchCall.length - 1];
+  });
+
+  it("returns updated user on success", async () => {
+    const userData = { id: "user-123", notificationEmail: "new@example.com" };
+    mockUpdateNotificationEmail.mockResolvedValue(userData);
+    const { req, res } = createMockReqRes();
+    req.body = { notificationEmail: "new@example.com" };
+
+    await handler(req, res);
+
+    expect(res.json).toHaveBeenCalledWith(userData);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when user does not exist", async () => {
+    mockUpdateNotificationEmail.mockResolvedValue(undefined);
+    const { req, res } = createMockReqRes();
+    req.body = { notificationEmail: "new@example.com" };
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith({ message: "User not found" });
+  });
+
+  it("returns 400 for invalid email", async () => {
+    const { req, res } = createMockReqRes();
+    req.body = { notificationEmail: "not-an-email" };
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ message: "Invalid email address" });
   });
 });

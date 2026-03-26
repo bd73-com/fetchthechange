@@ -32,6 +32,9 @@ export function registerAuthRoutes(app: Express): void {
       }
 
       const user = await authStorage.updateNotificationEmail(userId, parsed.data.notificationEmail);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
       res.json(user);
     } catch (error) {
       console.error("Error updating notification email:", error);
