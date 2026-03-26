@@ -251,12 +251,15 @@ export async function startScheduler() {
       notificationCronRunning = true;
       try {
         try {
-          await withDbRetry(() => processQueuedNotifications());
+          // Not wrapped in withDbRetry: these functions deliver notifications
+          // before marking entries as delivered. Retrying the entire function
+          // could cause duplicate email/webhook/Slack deliveries.
+          await processQueuedNotifications();
         } catch (error) {
           await logSchedulerError("Queued notification processing failed", error);
         }
         try {
-          await withDbRetry(() => processDigestCron());
+          await processDigestCron();
         } catch (error) {
           await logSchedulerError("Digest processing failed", error);
         }

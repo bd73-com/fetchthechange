@@ -666,7 +666,7 @@ describe("daily metrics cleanup", () => {
 
   it("logs error when cleanup fails with non-transient DB error", async () => {
     await startScheduler();
-    mockDbExecute.mockRejectedValueOnce(new Error("DB timeout"));
+    mockDbExecute.mockRejectedValueOnce(new Error('relation "monitor_metrics" does not exist'));
     await runCron("0 3 * * *");
 
     expect(ErrorLogger.error).toHaveBeenCalledWith(
@@ -674,7 +674,7 @@ describe("daily metrics cleanup", () => {
       "monitor_metrics cleanup failed",
       expect.any(Error),
       expect.objectContaining({
-        errorMessage: "DB timeout",
+        errorMessage: 'relation "monitor_metrics" does not exist',
         retentionDays: 90,
         table: "monitor_metrics",
       })
@@ -698,6 +698,13 @@ describe("daily metrics cleanup", () => {
         retentionDays: 90,
         table: "monitor_metrics",
       })
+    );
+    // Verify the monitor_metrics cleanup itself didn't log an error (other cleanup tasks may)
+    expect(ErrorLogger.error).not.toHaveBeenCalledWith(
+      "scheduler",
+      "monitor_metrics cleanup failed",
+      expect.anything(),
+      expect.anything()
     );
   });
 
@@ -843,18 +850,13 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
   });
 
   it("logs warning (not error) when processQueuedNotifications fails with transient DB error", async () => {
-    // withDbRetry retries once on transient error (1s delay via trackTimeout),
-    // then outer catch checks isTransientDbError for warning vs error.
+    // Not wrapped in withDbRetry (to prevent duplicate deliveries), but
+    // logSchedulerError still classifies transient errors as warnings.
     mockProcessQueuedNotifications
-      .mockRejectedValueOnce(new Error("Connection terminated"))
       .mockRejectedValueOnce(new Error("Connection terminated"));
 
     await startScheduler();
-    const callbacks = cronCallbacks["*/1 * * * *"];
-    // Run notification cron (index 0) without awaiting — withDbRetry's 1s timeout needs advancement
-    const cronPromise = callbacks[0]();
-    await vi.advanceTimersByTimeAsync(2000);
-    await cronPromise;
+    await runCron("*/1 * * * *");
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
@@ -863,25 +865,15 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
         errorMessage: "Connection terminated",
       })
     );
-    // Should NOT have called ErrorLogger.error for this transient failure
-    expect(ErrorLogger.error).not.toHaveBeenCalledWith(
-      "scheduler",
-      expect.stringContaining("notification"),
-      expect.anything(),
-      expect.anything()
-    );
+    expect(ErrorLogger.error).not.toHaveBeenCalled();
   });
 
   it("logs warning (not error) when processDigestCron fails with transient DB error", async () => {
     mockProcessDigestCron
-      .mockRejectedValueOnce(new Error("Connection terminated"))
       .mockRejectedValueOnce(new Error("Connection terminated"));
 
     await startScheduler();
-    const callbacks = cronCallbacks["*/1 * * * *"];
-    const cronPromise = callbacks[0]();
-    await vi.advanceTimersByTimeAsync(2000);
-    await cronPromise;
+    await runCron("*/1 * * * *");
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
@@ -890,12 +882,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
         errorMessage: "Connection terminated",
       })
     );
-    expect(ErrorLogger.error).not.toHaveBeenCalledWith(
-      "scheduler",
-      expect.stringContaining("Digest"),
-      expect.anything(),
-      expect.anything()
-    );
+    expect(ErrorLogger.error).not.toHaveBeenCalled();
   });
 });
 

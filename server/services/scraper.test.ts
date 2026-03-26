@@ -4227,6 +4227,7 @@ describe("checkMonitor outer catch resilience", () => {
         retryError: "connection terminated",
       }),
     );
+    expect(ErrorLogger.error).not.toHaveBeenCalled();
   });
 
   it("returns result even when ErrorLogger.error rejects in outer catch", async () => {
@@ -5862,6 +5863,7 @@ describe("extractWithBrowserless error classification in logs", () => {
     // extractWithBrowserless no longer logs — the caller (checkMonitor) logs
     // with fuller context to avoid duplicate error entries.
     expect(ErrorLogger.error).not.toHaveBeenCalled();
+    expect(ErrorLogger.warning).not.toHaveBeenCalled();
   });
 
   it("re-throws ECONNREFUSED without logging", async () => {
@@ -5872,6 +5874,7 @@ describe("extractWithBrowserless error classification in logs", () => {
     ).rejects.toThrow();
 
     expect(ErrorLogger.error).not.toHaveBeenCalled();
+    expect(ErrorLogger.warning).not.toHaveBeenCalled();
   });
 
   it("re-throws errors without logging even when monitor name provided", async () => {
@@ -5882,6 +5885,7 @@ describe("extractWithBrowserless error classification in logs", () => {
     ).rejects.toThrow();
 
     expect(ErrorLogger.error).not.toHaveBeenCalled();
+    expect(ErrorLogger.warning).not.toHaveBeenCalled();
   });
 });
 

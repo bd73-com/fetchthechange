@@ -1199,10 +1199,21 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         }
 
         if (lastBrowserlessErr) {
-          // Downgrade to warning: Browserless failures are expected for sites that
-          // block headless browsers. The circuit breaker and retry logic handle recovery.
-          const classified = classifyBrowserlessError(lastBrowserlessErr instanceof Error ? lastBrowserlessErr.message : "Unknown error");
-          await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+          const rawBrowserlessMsg = lastBrowserlessErr instanceof Error ? lastBrowserlessErr.message : "Unknown error";
+          if (/SSRF blocked/i.test(rawBrowserlessMsg)) {
+            // SSRF blocks are security-relevant — keep at error level
+            await ErrorLogger.error(
+              "scraper",
+              `"${monitor.name}" — rendered page extraction blocked by SSRF protection`,
+              lastBrowserlessErr instanceof Error ? lastBrowserlessErr : null,
+              { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector },
+            ).catch(() => {});
+          } else {
+            // Downgrade to warning: Browserless failures are expected for sites that
+            // block headless browsers. The circuit breaker and retry logic handle recovery.
+            const classified = classifyBrowserlessError(rawBrowserlessMsg);
+            await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+          }
         }
 
         const durationMs = Date.now() - startTime;
@@ -1469,8 +1480,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     // log as warnings to avoid polluting the error log with recoverable conditions.
     // Note: "database error" (schema/constraint issues) is NOT transient and stays at error level.
     // Note: ENOTFOUND, certificate/ssl/tls errors are permanent misconfigurations, not transient.
+    // Note: EAI_AGAIN is transient (temporary DNS resolver failure), so it is NOT in this list.
     const errMsg = error instanceof Error ? error.message : "";
-    const isPermanentNetworkError = /ENOTFOUND|EAI_AGAIN|certificate|ssl|tls/i.test(errMsg);
+    const isPermanentNetworkError = /ENOTFOUND|certificate|ssl|tls/i.test(errMsg);
     const isTransient = (logContext === "network error" && !isPermanentNetworkError) || logContext === "database connection error";
     const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
     if (isTransient) {
