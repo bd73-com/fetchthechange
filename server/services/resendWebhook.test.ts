@@ -383,6 +383,23 @@ describe("handleResendWebhookEvent", () => {
       expect(mockTxExecute).toHaveBeenCalledTimes(3);
     });
 
+    it("decrements sent_count on bounce", async () => {
+      const recipient = makeRecipient({ status: "sent" });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: null, opened_at: null, clicked_at: null }] })  // SELECT FOR UPDATE
+        .mockResolvedValueOnce({ rows: [] });  // counter update
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.bounced"));
+
+      const counterUpdateArg = mockTxExecute.mock.calls[2][0];
+      const sqlStr = JSON.stringify(counterUpdateArg);
+      expect(sqlStr).toContain("sent_count");
+      expect(sqlStr).toContain("GREATEST");
+    });
+
     it("decrements delivered_count when bounce follows delivery", async () => {
       const deliveredAt = new Date();
       const recipient = makeRecipient({ status: "delivered", deliveredAt });
@@ -506,6 +523,24 @@ describe("handleResendWebhookEvent", () => {
       );
       // 3 calls: lock_timeout + FOR UPDATE SELECT + counter update (includes delivered_count decrement)
       expect(mockTxExecute).toHaveBeenCalledTimes(3);
+    });
+
+    it("decrements sent_count on complaint", async () => {
+      const deliveredAt = new Date();
+      const recipient = makeRecipient({ status: "delivered", deliveredAt });
+      mockLimit.mockResolvedValueOnce([recipient]);
+      mockTxExecute
+        .mockResolvedValueOnce({ rows: [] })  // SET LOCAL lock_timeout
+        .mockResolvedValueOnce({ rows: [{ delivered_at: deliveredAt, opened_at: null, clicked_at: null }] })  // SELECT FOR UPDATE
+        .mockResolvedValueOnce({ rows: [] });  // counter update
+      mockTxReturning.mockResolvedValueOnce([{ id: 42 }]);
+
+      await handleResendWebhookEvent(makeEvent("email.complained"));
+
+      const counterUpdateArg = mockTxExecute.mock.calls[2][0];
+      const sqlStr = JSON.stringify(counterUpdateArg);
+      expect(sqlStr).toContain("sent_count");
+      expect(sqlStr).toContain("GREATEST");
     });
 
     it("decrements opened_count and delivered_count when complaint follows open", async () => {

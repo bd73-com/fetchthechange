@@ -854,3 +854,39 @@ describe("reconcileCampaignCounters", () => {
     });
   });
 });
+
+describe("unsubscribe footer HTML insertion logic", () => {
+  // Tests for the regex pattern used in sendSingleCampaignEmail (line 178)
+  // to insert the footer before </body> when present, or append otherwise.
+  const footer = '<hr/><p>Unsubscribe</p>';
+
+  function insertFooter(htmlBody: string): string {
+    return /<\/body>/i.test(htmlBody)
+      ? htmlBody.replace(/<\/body>/i, footer + "</body>")
+      : htmlBody + footer;
+  }
+
+  it("inserts footer before </body> in a complete HTML document", () => {
+    const html = "<html><body><p>Hello</p></body></html>";
+    const result = insertFooter(html);
+    expect(result).toBe("<html><body><p>Hello</p><hr/><p>Unsubscribe</p></body></html>");
+  });
+
+  it("handles case-insensitive </BODY> tag", () => {
+    const html = "<html><BODY><p>Hello</p></BODY></html>";
+    const result = insertFooter(html);
+    expect(result).toBe("<html><BODY><p>Hello</p><hr/><p>Unsubscribe</p></body></html>");
+  });
+
+  it("appends footer when no </body> tag exists (fragment)", () => {
+    const html = "<p>Hello</p>";
+    const result = insertFooter(html);
+    expect(result).toBe("<p>Hello</p><hr/><p>Unsubscribe</p>");
+  });
+
+  it("only replaces the first </body> occurrence", () => {
+    const html = "<body>A</body><!-- -->B</body>";
+    const result = insertFooter(html);
+    expect(result).toBe("<body>A<hr/><p>Unsubscribe</p></body><!-- -->B</body>");
+  });
+});
