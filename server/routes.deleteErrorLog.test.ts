@@ -637,6 +637,16 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     expect(res._json).toEqual({ message: "2 entries deleted", count: 2 });
   });
 
+  it("rejects empty filters object", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 10 }]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, body: { filters: {} } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "filters must include at least one of: level, source" });
+  });
+
   it("applies ownership filtering with filters mode", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 10 }]);
@@ -645,27 +655,39 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
       { id: 2, context: null },
     ]);
 
-    const req = { user: { claims: { sub: "not-the-owner" } }, body: { filters: {} } };
+    const req = { user: { claims: { sub: "not-the-owner" } }, body: { filters: { level: "error" } } };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(res._json).toEqual({ message: "1 entries deleted", count: 1 });
   });
 
-  it("ignores invalid filter values (uses only valid level/source)", async () => {
+  it("rejects filters with only invalid values", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([]);
 
     const req = {
       user: { claims: { sub: "owner-123" } },
       body: { filters: { level: "critical", source: "unknown" } },
     };
     const res = await callHandler("post", ENDPOINT, req);
-    expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "0 entries deleted", count: 0 });
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "filters must include at least one of: level, source" });
   });
 
-  it("ignores non-integer excludeIds", async () => {
+  it("rejects empty filters even with excludeIds", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+
+    const req = {
+      user: { claims: { sub: "owner-123" } },
+      body: { filters: {}, excludeIds: ["abc", -1, 0] },
+    };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "filters must include at least one of: level, source" });
+  });
+
+  it("ignores non-integer excludeIds with valid filters", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
     mockSelectWhereFn.mockResolvedValue([
@@ -674,7 +696,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
 
     const req = {
       user: { claims: { sub: "owner-123" } },
-      body: { filters: {}, excludeIds: ["abc", -1, 0] },
+      body: { filters: { level: "error" }, excludeIds: ["abc", -1, 0] },
     };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);

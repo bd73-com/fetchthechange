@@ -78,6 +78,7 @@ import {
   triggerCampaignSend,
   cancelCampaign,
   reconcileCampaignCounters,
+  insertBeforeLastBodyClose,
 } from "./campaignEmail";
 
 describe("sendTestCampaignEmail", () => {
@@ -852,5 +853,29 @@ describe("reconcileCampaignCounters", () => {
     expect(result.after).toEqual({
       totalRecipients: 0, sentCount: 0, failedCount: 0, deliveredCount: 0, openedCount: 0, clickedCount: 0,
     });
+  });
+});
+
+describe("insertBeforeLastBodyClose", () => {
+  const footer = '<hr/><p>Unsubscribe</p>';
+
+  it("inserts footer before </body> in a complete HTML document", () => {
+    const result = insertBeforeLastBodyClose("<html><body><p>Hello</p></body></html>", footer);
+    expect(result).toBe("<html><body><p>Hello</p><hr/><p>Unsubscribe</p></body></html>");
+  });
+
+  it("handles case-insensitive </BODY> tag and preserves case", () => {
+    const result = insertBeforeLastBodyClose("<html><BODY><p>Hello</p></BODY></html>", footer);
+    expect(result).toBe("<html><BODY><p>Hello</p><hr/><p>Unsubscribe</p></BODY></html>");
+  });
+
+  it("returns null when no </body> tag exists (fragment)", () => {
+    const result = insertBeforeLastBodyClose("<p>Hello</p>", footer);
+    expect(result).toBeNull();
+  });
+
+  it("inserts before the last </body> (skipping one in comment)", () => {
+    const result = insertBeforeLastBodyClose("<body><!-- </body> --><p>Hi</p></body>", footer);
+    expect(result).toBe("<body><!-- </body> --><p>Hi</p><hr/><p>Unsubscribe</p></body>");
   });
 });

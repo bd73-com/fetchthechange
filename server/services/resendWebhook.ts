@@ -83,7 +83,7 @@ async function handleRecipientFailure(
       .returning({ id: campaignRecipients.id });
 
     if (updated) {
-      let counterUpdates = sql`failed_count = failed_count + 1`;
+      let counterUpdates = sql`failed_count = failed_count + 1, sent_count = GREATEST(sent_count - 1, 0)`;
       if (fresh.clicked_at) {
         counterUpdates = sql`${counterUpdates}, clicked_count = GREATEST(clicked_count - 1, 0)`;
       }

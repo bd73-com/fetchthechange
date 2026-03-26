@@ -243,7 +243,10 @@ export default function AdminErrors() {
         credentials: "include",
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error("Failed to delete entries");
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.message || "Failed to delete entries");
+      }
       return res.json() as Promise<{ count: number }>;
     },
     onSuccess: (data) => {
@@ -251,8 +254,8 @@ export default function AdminErrors() {
       clearSelection();
       showUndoToast(data.count);
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to delete entries", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
 
@@ -262,20 +265,25 @@ export default function AdminErrors() {
   }, [finalizePrevious, batchDeleteMutation]);
 
   const handleBatchDelete = useCallback(() => {
-    finalizePrevious();
     if (selectAll) {
       const filters: { level?: string; source?: string } = {};
       if (levelFilter !== "all") filters.level = levelFilter;
       if (sourceFilter !== "all") filters.source = sourceFilter;
+      if (!filters.level && !filters.source) {
+        toast({ title: "Filter required", description: "Apply a level or source filter before deleting all entries", variant: "destructive" });
+        return;
+      }
       const excluded = Array.from(excludedIds);
+      finalizePrevious();
       batchDeleteMutation.mutate({
         filters,
         ...(excluded.length > 0 ? { excludeIds: excluded } : {}),
       });
     } else {
+      finalizePrevious();
       batchDeleteMutation.mutate({ ids: Array.from(selectedIds) });
     }
-  }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter]);
+  }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, toast]);
 
   const selectionCount = selectAll ? logs.length - excludedIds.size : selectedIds.size;
   const hasSelection = selectionCount > 0;

@@ -25,6 +25,19 @@ interface ResolvedRecipient {
   unsubscribeToken: string;
 }
 
+/**
+ * Insert content before the last </body> tag in an HTML string.
+ * Uses lastIndexOf to avoid matching </body> inside comments or scripts.
+ * Returns null if no </body> tag is found.
+ */
+export function insertBeforeLastBodyClose(html: string, content: string): string | null {
+  const lower = html.toLowerCase();
+  const idx = lower.lastIndexOf("</body>");
+  if (idx === -1) return null;
+  const originalTag = html.slice(idx, idx + 7); // preserve original case
+  return html.slice(0, idx) + content + originalTag + html.slice(idx + 7);
+}
+
 /** Escape HTML special characters to prevent XSS in email templates. */
 function escapeHtml(str: string | null | undefined): string {
   if (!str) return "";
@@ -175,7 +188,8 @@ async function sendSingleCampaignEmail(
     </p>
   `;
 
-  const htmlWithFooter = campaign.htmlBody + unsubscribeFooter;
+  const htmlWithFooter = insertBeforeLastBodyClose(campaign.htmlBody, unsubscribeFooter)
+    ?? campaign.htmlBody + unsubscribeFooter;
 
   const textBody = campaign.textBody
     ? `${campaign.textBody}\n\n---\nUnsubscribe from campaign emails: ${unsubscribeUrl}\nYou will still receive monitor notifications.`
@@ -251,18 +265,29 @@ export async function sendTestCampaignEmail(
 
   const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
 
-  const htmlWithBanner = `
+  const banner = `
     <div style="background:#fbbf24; color:#000; padding:8px 16px; text-align:center; font-weight:bold;">
       TEST EMAIL &mdash; This is a preview of campaign "${escapeHtml(campaign.subject)}"
-    </div>
-    ${campaign.htmlBody}
+    </div>`;
+  const footer = `
     <hr style="margin-top:32px; border:none; border-top:1px solid #333;"/>
     <p style="color:#888; font-size:12px; text-align:center; margin-top:16px;">
       You received this email because you have an account on FetchTheChange.<br/>
       <a href="#" style="color:#888; text-decoration:underline;">Unsubscribe from campaign emails</a>
       &mdash; you will still receive monitor notifications.
-    </p>
-  `;
+    </p>`;
+  let htmlWithBanner: string;
+  const footerInserted = insertBeforeLastBodyClose(campaign.htmlBody, footer);
+  if (footerInserted) {
+    // Insert banner after the opening <body> tag, or prepend if no <body> found
+    if (/<body([^>]*)>/i.test(footerInserted)) {
+      htmlWithBanner = footerInserted.replace(/<body([^>]*)>/i, (match) => `${match}${banner}`);
+    } else {
+      htmlWithBanner = banner + footerInserted;
+    }
+  } else {
+    htmlWithBanner = banner + campaign.htmlBody + footer;
+  }
 
   try {
     const response = await resend.emails.send({
