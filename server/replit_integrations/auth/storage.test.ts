@@ -59,6 +59,20 @@ describe("AuthStorage.upsertUser", () => {
     capturedConflictSet = undefined;
   });
 
+  it("propagates database errors from conflict upsert", async () => {
+    returningMock.mockRejectedValueOnce(new Error("db failure"));
+
+    await expect(
+      authStorage.upsertUser({
+        id: "user-1",
+        email: "user@example.com",
+        firstName: "Jane",
+        lastName: "Doe",
+        profileImageUrl: null,
+      }),
+    ).rejects.toThrow("db failure");
+  });
+
   it("passes only OIDC claim fields to onConflictDoUpdate SET clause", async () => {
     await authStorage.upsertUser({
       id: "user-1",
