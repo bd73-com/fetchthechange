@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { formatDate, formatDateTime } from "@/lib/date-format";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { buildBatchDeletePayload } from "./adminErrorsUtils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -265,28 +266,12 @@ export default function AdminErrors() {
   }, [finalizePrevious, batchDeleteMutation]);
 
   const handleBatchDelete = useCallback(() => {
-    if (selectAll) {
-      const filters: { level?: string; source?: string } = {};
-      if (levelFilter !== "all") filters.level = levelFilter;
-      if (sourceFilter !== "all") filters.source = sourceFilter;
-      finalizePrevious();
-      if (filters.level || filters.source) {
-        const excluded = Array.from(excludedIds);
-        batchDeleteMutation.mutate({
-          filters,
-          ...(excluded.length > 0 ? { excludeIds: excluded } : {}),
-        });
-      } else {
-        const ids = logs
-          .filter(l => !excludedIds.has(l.id))
-          .map(l => l.id);
-        if (ids.length === 0) return;
-        batchDeleteMutation.mutate({ ids });
-      }
-    } else {
-      finalizePrevious();
-      batchDeleteMutation.mutate({ ids: Array.from(selectedIds) });
-    }
+    const payload = buildBatchDeletePayload({
+      selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, logs,
+    });
+    if (!payload) return;
+    finalizePrevious();
+    batchDeleteMutation.mutate(payload);
   }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, logs]);
 
   const selectionCount = selectAll ? logs.length - excludedIds.size : selectedIds.size;
