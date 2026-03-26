@@ -776,9 +776,10 @@ describe("POST /api/admin/error-logs/restore", () => {
     await ensureRoutes();
     vi.clearAllMocks();
 
-    // restore uses .where(...).limit(500), so chain through mockLimitFn
+    // restore uses .where(...).orderBy(...).limit(500), so chain through mockOrderByFn/mockLimitFn
     mockLimitFn.mockResolvedValue([]);
-    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ orderBy: mockOrderByFn, limit: mockLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
 
@@ -869,9 +870,10 @@ describe("POST /api/admin/error-logs/finalize", () => {
     await ensureRoutes();
     vi.clearAllMocks();
 
-    // finalize uses .where(...).limit(500), so chain through mockLimitFn
+    // finalize uses .where(...).orderBy(...).limit(500), so chain through mockOrderByFn/mockLimitFn
     mockLimitFn.mockResolvedValue([]);
-    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ orderBy: mockOrderByFn, limit: mockLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
 

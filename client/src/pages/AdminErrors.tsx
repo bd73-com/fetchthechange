@@ -155,7 +155,7 @@ export default function AdminErrors() {
   }, []);
 
   const finalizeMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<{ count: number; hasMore?: boolean }> => {
       const res = await fetch("/api/admin/error-logs/finalize", {
         method: "POST",
         credentials: "include",
@@ -163,9 +163,12 @@ export default function AdminErrors() {
       if (!res.ok) throw new Error("Failed to finalize deletion");
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       invalidateAll();
       clearSelection();
+      if (data.hasMore) {
+        toast({ title: "More entries remain", description: "Some soft-deleted entries were not finalized. Repeat to finalize more." });
+      }
     },
     onError: () => {
       toast({ title: "Error", description: "Failed to permanently delete entries", variant: "destructive" });
@@ -173,7 +176,7 @@ export default function AdminErrors() {
   });
 
   const restoreMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<{ count: number; hasMore?: boolean }> => {
       const res = await fetch("/api/admin/error-logs/restore", {
         method: "POST",
         credentials: "include",
@@ -181,8 +184,11 @@ export default function AdminErrors() {
       if (!res.ok) throw new Error("Failed to restore entries");
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       invalidateAll();
+      if (data.hasMore) {
+        toast({ title: "More entries remain", description: "Some soft-deleted entries were not restored. Repeat to restore more." });
+      }
     },
     onError: () => {
       toast({ title: "Error", description: "Failed to restore entries", variant: "destructive" });

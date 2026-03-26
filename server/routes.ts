@@ -1653,7 +1653,7 @@ export async function registerRoutes(
         (await storage.getMonitors(userId)).map((m: any) => m.id)
       );
 
-      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).limit(500);
+      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).orderBy(asc(errorLogs.id)).limit(500);
 
       const authorized = softDeleted.filter((log: any) => {
         const ctx = log.context as Record<string, unknown> | null;
@@ -1691,7 +1691,7 @@ export async function registerRoutes(
         (await storage.getMonitors(userId)).map((m: any) => m.id)
       );
 
-      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).limit(500);
+      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).orderBy(asc(errorLogs.id)).limit(500);
 
       const authorized = softDeleted.filter((log: any) => {
         const ctx = log.context as Record<string, unknown> | null;
