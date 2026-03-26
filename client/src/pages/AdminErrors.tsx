@@ -243,7 +243,10 @@ export default function AdminErrors() {
         credentials: "include",
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error("Failed to delete entries");
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.message || "Failed to delete entries");
+      }
       return res.json() as Promise<{ count: number }>;
     },
     onSuccess: (data) => {
@@ -251,8 +254,8 @@ export default function AdminErrors() {
       clearSelection();
       showUndoToast(data.count);
     },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to delete entries", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
 

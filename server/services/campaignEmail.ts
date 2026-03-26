@@ -253,18 +253,22 @@ export async function sendTestCampaignEmail(
 
   const fromAddress = process.env.RESEND_FROM || "onboarding@resend.dev";
 
-  const htmlWithBanner = `
+  const banner = `
     <div style="background:#fbbf24; color:#000; padding:8px 16px; text-align:center; font-weight:bold;">
       TEST EMAIL &mdash; This is a preview of campaign "${escapeHtml(campaign.subject)}"
-    </div>
-    ${campaign.htmlBody}
+    </div>`;
+  const footer = `
     <hr style="margin-top:32px; border:none; border-top:1px solid #333;"/>
     <p style="color:#888; font-size:12px; text-align:center; margin-top:16px;">
       You received this email because you have an account on FetchTheChange.<br/>
       <a href="#" style="color:#888; text-decoration:underline;">Unsubscribe from campaign emails</a>
       &mdash; you will still receive monitor notifications.
-    </p>
-  `;
+    </p>`;
+  const htmlWithBanner = /<\/body>/i.test(campaign.htmlBody)
+    ? campaign.htmlBody
+        .replace(/<body([^>]*)>/i, `<body$1>${banner}`)
+        .replace(/<\/body>/i, footer + "</body>")
+    : banner + campaign.htmlBody + footer;
 
   try {
     const response = await resend.emails.send({
