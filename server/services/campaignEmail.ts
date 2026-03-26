@@ -176,7 +176,7 @@ async function sendSingleCampaignEmail(
   `;
 
   const htmlWithFooter = /<\/body>/i.test(campaign.htmlBody)
-    ? campaign.htmlBody.replace(/<\/body>/i, unsubscribeFooter + "</body>")
+    ? campaign.htmlBody.replace(/<\/body>/i, (match) => unsubscribeFooter + match)
     : campaign.htmlBody + unsubscribeFooter;
 
   const textBody = campaign.textBody
@@ -264,11 +264,18 @@ export async function sendTestCampaignEmail(
       <a href="#" style="color:#888; text-decoration:underline;">Unsubscribe from campaign emails</a>
       &mdash; you will still receive monitor notifications.
     </p>`;
-  const htmlWithBanner = /<\/body>/i.test(campaign.htmlBody)
-    ? campaign.htmlBody
-        .replace(/<body([^>]*)>/i, `<body$1>${banner}`)
-        .replace(/<\/body>/i, footer + "</body>")
-    : banner + campaign.htmlBody + footer;
+  let htmlWithBanner: string;
+  if (/<\/body>/i.test(campaign.htmlBody)) {
+    let result = campaign.htmlBody.replace(/<\/body>/i, (match) => footer + match);
+    if (/<body([^>]*)>/i.test(result)) {
+      result = result.replace(/<body([^>]*)>/i, `<body$1>${banner}`);
+    } else {
+      result = banner + result;
+    }
+    htmlWithBanner = result;
+  } else {
+    htmlWithBanner = banner + campaign.htmlBody + footer;
+  }
 
   try {
     const response = await resend.emails.send({

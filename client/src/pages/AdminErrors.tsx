@@ -270,6 +270,10 @@ export default function AdminErrors() {
       const filters: { level?: string; source?: string } = {};
       if (levelFilter !== "all") filters.level = levelFilter;
       if (sourceFilter !== "all") filters.source = sourceFilter;
+      if (!filters.level && !filters.source) {
+        toast({ title: "Filter required", description: "Apply a level or source filter before deleting all entries", variant: "destructive" });
+        return;
+      }
       const excluded = Array.from(excludedIds);
       batchDeleteMutation.mutate({
         filters,
@@ -278,7 +282,7 @@ export default function AdminErrors() {
     } else {
       batchDeleteMutation.mutate({ ids: Array.from(selectedIds) });
     }
-  }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter]);
+  }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, toast]);
 
   const selectionCount = selectAll ? logs.length - excludedIds.size : selectedIds.size;
   const hasSelection = selectionCount > 0;

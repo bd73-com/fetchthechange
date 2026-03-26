@@ -862,7 +862,7 @@ describe("unsubscribe footer HTML insertion logic", () => {
 
   function insertFooter(htmlBody: string): string {
     return /<\/body>/i.test(htmlBody)
-      ? htmlBody.replace(/<\/body>/i, footer + "</body>")
+      ? htmlBody.replace(/<\/body>/i, (match) => footer + match)
       : htmlBody + footer;
   }
 
@@ -872,10 +872,10 @@ describe("unsubscribe footer HTML insertion logic", () => {
     expect(result).toBe("<html><body><p>Hello</p><hr/><p>Unsubscribe</p></body></html>");
   });
 
-  it("handles case-insensitive </BODY> tag", () => {
+  it("handles case-insensitive </BODY> tag and preserves case", () => {
     const html = "<html><BODY><p>Hello</p></BODY></html>";
     const result = insertFooter(html);
-    expect(result).toBe("<html><BODY><p>Hello</p><hr/><p>Unsubscribe</p></body></html>");
+    expect(result).toBe("<html><BODY><p>Hello</p><hr/><p>Unsubscribe</p></BODY></html>");
   });
 
   it("appends footer when no </body> tag exists (fragment)", () => {
