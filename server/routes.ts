@@ -1555,12 +1555,12 @@ export async function registerRoutes(
       }
 
       const batchDeleteSchema = z.object({
-        ids: z.array(z.number().int().positive()).min(1).optional(),
+        ids: z.array(z.number().int().positive()).min(1).max(500).optional(),
         filters: z.object({
           level: z.enum(["error", "warning", "info"]).optional(),
           source: errorLogSourceSchema.optional(),
         }).strict().optional(),
-        excludeIds: z.array(z.number().int().positive()).optional(),
+        excludeIds: z.array(z.number().int().positive()).max(500).optional(),
       }).strict().refine(
         (data) => (data.ids !== undefined) !== (data.filters !== undefined),
         { message: "Provide either ids or filters, not both" },
