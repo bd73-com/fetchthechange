@@ -1666,7 +1666,8 @@ export async function registerRoutes(
         const authorizedIds = authorized.map((e: any) => e.id);
         await db.update(errorLogs).set({ deletedAt: null }).where(inArray(errorLogs.id, authorizedIds));
       }
-      res.json({ message: `${authorized.length} entries restored`, count: authorized.length });
+      const hasMore = softDeleted.length === 500;
+      res.json({ message: `${authorized.length} entries restored`, count: authorized.length, hasMore });
     } catch (error: any) {
       console.error("Error restoring error logs:", error);
       res.status(500).json({ message: "Failed to restore error logs" });
@@ -1703,7 +1704,8 @@ export async function registerRoutes(
         const authorizedIds = authorized.map((e: any) => e.id);
         await db.delete(errorLogs).where(inArray(errorLogs.id, authorizedIds));
       }
-      res.json({ message: `${authorized.length} entries finalized`, count: authorized.length });
+      const hasMore = softDeleted.length === 500;
+      res.json({ message: `${authorized.length} entries finalized`, count: authorized.length, hasMore });
     } catch (error: any) {
       console.error("Error finalizing error logs:", error);
       res.status(500).json({ message: "Failed to finalize error logs" });

@@ -813,7 +813,7 @@ describe("POST /api/admin/error-logs/restore", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "2 entries restored", count: 2 });
+    expect(res._json).toEqual({ message: "2 entries restored", count: 2, hasMore: false });
     expect(mockDbUpdate).toHaveBeenCalled();
     expect(mockUpdateSetFn).toHaveBeenCalled();
   });
@@ -830,7 +830,7 @@ describe("POST /api/admin/error-logs/restore", () => {
     const req = { user: { claims: { sub: "not-the-owner" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "1 entries restored", count: 1 });
+    expect(res._json).toEqual({ message: "1 entries restored", count: 1, hasMore: false });
   });
 
   it("returns count 0 when no soft-deleted entries exist", async () => {
@@ -841,7 +841,7 @@ describe("POST /api/admin/error-logs/restore", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "0 entries restored", count: 0 });
+    expect(res._json).toEqual({ message: "0 entries restored", count: 0, hasMore: false });
     expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
@@ -905,7 +905,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "2 entries finalized", count: 2 });
+    expect(res._json).toEqual({ message: "2 entries finalized", count: 2, hasMore: false });
     expect(mockDbDelete).toHaveBeenCalled();
     expect(mockDeleteWhereFn).toHaveBeenCalled();
   });
@@ -922,7 +922,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
     const req = { user: { claims: { sub: "not-the-owner" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "1 entries finalized", count: 1 });
+    expect(res._json).toEqual({ message: "1 entries finalized", count: 1, hasMore: false });
   });
 
   it("returns count 0 when no soft-deleted entries exist", async () => {
@@ -933,7 +933,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "0 entries finalized", count: 0 });
+    expect(res._json).toEqual({ message: "0 entries finalized", count: 0, hasMore: false });
     expect(mockDbDelete).not.toHaveBeenCalled();
   });
 

@@ -247,12 +247,15 @@ export default function AdminErrors() {
         const err = await res.json().catch(() => null);
         throw new Error(err?.message || "Failed to delete entries");
       }
-      return res.json() as Promise<{ count: number }>;
+      return res.json() as Promise<{ count: number; hasMore?: boolean }>;
     },
     onSuccess: (data) => {
       invalidateAll();
       clearSelection();
       showUndoToast(data.count);
+      if (data.hasMore) {
+        toast({ title: "More entries remain", description: "Some matching entries were not deleted. Repeat to delete more." });
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
