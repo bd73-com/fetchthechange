@@ -148,6 +148,10 @@ export async function registerRoutes(
       await bootstrapWelcomeCampaign();
     } catch (err) {
       console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
+      await ErrorLogger.error("scheduler", "Welcome campaign bootstrap failed",
+        err instanceof Error ? err : null,
+        { errorMessage: err instanceof Error ? err.message : String(err) }
+      ).catch(() => {});
     }
   })();
 
@@ -2430,8 +2434,8 @@ export async function registerRoutes(
 
       const { key } = req.params;
       const updateSchema = z.object({
-        subject: z.string().optional(),
-        htmlBody: z.string().optional(),
+        subject: z.string().min(1).optional(),
+        htmlBody: z.string().min(1).optional(),
         textBody: z.string().optional(),
         enabled: z.boolean().optional(),
       }).strict();

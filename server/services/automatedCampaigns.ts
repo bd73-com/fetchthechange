@@ -3,7 +3,7 @@ import { campaigns, automatedCampaignConfigs, type AutomatedCampaignConfig } fro
 import { triggerCampaignSend } from "./campaignEmail";
 import { resolveRecipients } from "./campaignEmail";
 import { ErrorLogger } from "./logger";
-import { eq, sql, lte } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 export const WELCOME_CAMPAIGN_DEFAULTS = {
   key: "welcome",
@@ -90,17 +90,6 @@ export const WELCOME_CAMPAIGN_DEFAULTS = {
                 <span style="color:#6366f1;font-family:'DM Mono',monospace;font-size:13px;">FetchTheChange</span>
               </p>
 
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="padding-top:24px;text-align:center;">
-              <p style="margin:0;font-size:12px;color:#52525b;line-height:1.6;">
-                You received this because you have an account on FetchTheChange.<br />
-                <a href="{{unsubscribe_url}}" style="color:#52525b;text-decoration:underline;">Unsubscribe from campaign emails</a>
-                &mdash; you will still receive monitor notifications.
-              </p>
             </td>
           </tr>
 
@@ -191,7 +180,7 @@ export async function ensureWelcomeConfig(): Promise<AutomatedCampaignConfig> {
 
   if (existing) return existing;
 
-  const [inserted] = await db
+  await db
     .insert(automatedCampaignConfigs)
     .values({
       key: WELCOME_CAMPAIGN_DEFAULTS.key,
@@ -202,7 +191,14 @@ export async function ensureWelcomeConfig(): Promise<AutomatedCampaignConfig> {
       enabled: true,
       nextRunAt: computeNextRunAt(new Date()),
     })
-    .returning();
+    .onConflictDoNothing();
+
+  // Re-select to get the canonical row (handles concurrent inserts)
+  const [inserted] = await db
+    .select()
+    .from(automatedCampaignConfigs)
+    .where(eq(automatedCampaignConfigs.key, "welcome"))
+    .limit(1);
 
   return inserted;
 }
@@ -221,15 +217,7 @@ export async function bootstrapWelcomeCampaign(): Promise<void> {
 
   console.log("[Bootstrap] Running first welcome campaign for early adopters...");
 
-  const signupAfter = new Date("2025-03-19T00:00:00Z");
-  const signupBefore = new Date();
-
-  const result = await runWelcomeCampaign({
-    signupAfter,
-    signupBefore,
-    configId: config.id,
-  });
-
+  // Set lastRunAt BEFORE sending to prevent duplicate bootstrap on retry after partial failure
   const now = new Date();
   const nextRunAt = computeNextRunAt(now);
 
@@ -241,6 +229,15 @@ export async function bootstrapWelcomeCampaign(): Promise<void> {
       updatedAt: now,
     })
     .where(eq(automatedCampaignConfigs.id, config.id));
+
+  const signupAfter = new Date("2025-03-19T00:00:00Z");
+  const signupBefore = now;
+
+  const result = await runWelcomeCampaign({
+    signupAfter,
+    signupBefore,
+    configId: config.id,
+  });
 
   if ("skipped" in result) {
     console.log("[Bootstrap] Welcome campaign bootstrap complete — no new recipients in window.");
@@ -325,22 +322,35 @@ export async function processAutomatedCampaigns(): Promise<void> {
     try {
       const signupAfter = config.lastRunAt || new Date("2025-03-19T00:00:00Z");
       const signupBefore = now;
-
-      const result = await runWelcomeCampaign({
-        signupAfter,
-        signupBefore,
-        configId: config.id,
-      });
-
       const nextRunAt = computeNextRunAt(now);
-      await db
+
+      // Atomically claim this run by updating nextRunAt + lastRunAt.
+      // If another instance already claimed it, the WHERE won't match and we skip.
+      const [claimed] = await db
         .update(automatedCampaignConfigs)
         .set({
           lastRunAt: now,
           nextRunAt,
           updatedAt: now,
         })
-        .where(eq(automatedCampaignConfigs.id, config.id));
+        .where(
+          and(
+            eq(automatedCampaignConfigs.id, config.id),
+            eq(automatedCampaignConfigs.nextRunAt, config.nextRunAt),
+          )
+        )
+        .returning();
+
+      if (!claimed) {
+        console.log(`[AutoCampaign] Config '${config.key}' already claimed by another instance, skipping.`);
+        continue;
+      }
+
+      const result = await runWelcomeCampaign({
+        signupAfter,
+        signupBefore,
+        configId: config.id,
+      });
 
       if (!("skipped" in result)) {
         console.log(`[AutoCampaign] Sent welcome campaign #${result.campaignId} to ${result.totalRecipients} recipients. Next run: ${nextRunAt.toISOString()}`);

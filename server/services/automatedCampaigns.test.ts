@@ -49,7 +49,7 @@ mockDbFrom.mockReturnValue({ where: mockDbWhere, orderBy: mockDbOrderBy });
 mockDbWhere.mockReturnValue({ limit: mockDbLimit, returning: mockDbReturning });
 mockDbLimit.mockReturnValue([]);
 mockDbOrderBy.mockReturnValue([]);
-mockDbValues.mockReturnValue({ returning: mockDbReturning });
+mockDbValues.mockReturnValue({ returning: mockDbReturning, onConflictDoNothing: vi.fn().mockResolvedValue(undefined) });
 mockDbReturning.mockResolvedValue([]);
 mockDbSet.mockReturnValue({ where: mockDbWhere });
 
@@ -64,6 +64,7 @@ vi.mock("@shared/schema", () => ({
 
 vi.mock("drizzle-orm", () => ({
   eq: (a: any, b: any) => ({ field: a, value: b }),
+  and: (...args: any[]) => ({ type: "and", args }),
   lte: (a: any, b: any) => ({ type: "lte", field: a, value: b }),
   sql: Object.assign(
     (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
@@ -83,7 +84,7 @@ vi.mock("./logger", () => ({
   },
 }));
 
-import { computeNextRunAt, ensureWelcomeConfig, bootstrapWelcomeCampaign, processAutomatedCampaigns, WELCOME_CAMPAIGN_DEFAULTS } from "./automatedCampaigns";
+import { computeNextRunAt, ensureWelcomeConfig, bootstrapWelcomeCampaign, processAutomatedCampaigns, runWelcomeCampaign, WELCOME_CAMPAIGN_DEFAULTS } from "./automatedCampaigns";
 
 describe("computeNextRunAt", () => {
   it("Jan 1 00:00 UTC → Jan 15", () => {
@@ -152,7 +153,7 @@ describe("ensureWelcomeConfig", () => {
     mockDbFrom.mockReturnValue({ where: mockDbWhere, orderBy: mockDbOrderBy });
     mockDbWhere.mockReturnValue({ limit: mockDbLimit, returning: mockDbReturning });
     mockDbLimit.mockResolvedValue([]);
-    mockDbValues.mockReturnValue({ returning: mockDbReturning });
+    mockDbValues.mockReturnValue({ returning: mockDbReturning, onConflictDoNothing: vi.fn().mockResolvedValue(undefined) });
     mockDbReturning.mockResolvedValue([]);
     mockDbSet.mockReturnValue({ where: mockDbWhere });
   });
@@ -180,7 +181,6 @@ describe("ensureWelcomeConfig", () => {
   });
 
   it("inserts the welcome config if it does not exist", async () => {
-    mockDbLimit.mockResolvedValue([]);
     const newConfig = {
       id: 1,
       key: "welcome",
@@ -194,7 +194,13 @@ describe("ensureWelcomeConfig", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    mockDbReturning.mockResolvedValue([newConfig]);
+    // First select returns empty (no existing config), second select (after insert) returns new config
+    let selectCallCount = 0;
+    mockDbLimit.mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) return Promise.resolve([]);
+      return Promise.resolve([newConfig]);
+    });
 
     const result = await ensureWelcomeConfig();
     expect(result).toEqual(newConfig);
@@ -208,7 +214,7 @@ describe("bootstrapWelcomeCampaign", () => {
     mockDbFrom.mockReturnValue({ where: mockDbWhere, orderBy: mockDbOrderBy });
     mockDbWhere.mockReturnValue({ limit: mockDbLimit, returning: mockDbReturning });
     mockDbSet.mockReturnValue({ where: mockDbWhere });
-    mockDbValues.mockReturnValue({ returning: mockDbReturning });
+    mockDbValues.mockReturnValue({ returning: mockDbReturning, onConflictDoNothing: vi.fn().mockResolvedValue(undefined) });
   });
 
   it("triggers a send and sets lastRunAt when lastRunAt is null", async () => {
@@ -266,13 +272,95 @@ describe("bootstrapWelcomeCampaign", () => {
   });
 });
 
+describe("WELCOME_CAMPAIGN_DEFAULTS", () => {
+  it("has all required fields", () => {
+    expect(WELCOME_CAMPAIGN_DEFAULTS.key).toBe("welcome");
+    expect(WELCOME_CAMPAIGN_DEFAULTS.name).toBeTruthy();
+    expect(WELCOME_CAMPAIGN_DEFAULTS.subject).toBeTruthy();
+    expect(WELCOME_CAMPAIGN_DEFAULTS.htmlBody).toContain("FetchTheChange");
+    expect(WELCOME_CAMPAIGN_DEFAULTS.textBody).toContain("FetchTheChange");
+  });
+
+  it("HTML body does not contain unsubscribe placeholder (handled by sendSingleCampaignEmail)", () => {
+    expect(WELCOME_CAMPAIGN_DEFAULTS.htmlBody).not.toContain("{{unsubscribe_url}}");
+  });
+
+  it("HTML body contains extension and dashboard links", () => {
+    expect(WELCOME_CAMPAIGN_DEFAULTS.htmlBody).toContain("https://ftc.bd73.com/docs/extension");
+    expect(WELCOME_CAMPAIGN_DEFAULTS.htmlBody).toContain("https://ftc.bd73.com/dashboard");
+  });
+});
+
+describe("runWelcomeCampaign", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbFrom.mockReturnValue({ where: mockDbWhere, orderBy: mockDbOrderBy });
+    mockDbWhere.mockReturnValue({ limit: mockDbLimit, returning: mockDbReturning });
+    mockDbSet.mockReturnValue({ where: mockDbWhere });
+    mockDbValues.mockReturnValue({ returning: mockDbReturning, onConflictDoNothing: vi.fn().mockResolvedValue(undefined) });
+  });
+
+  it("returns { skipped: true } when zero recipients match", async () => {
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockResolveRecipients.mockResolvedValue([]);
+
+    const result = await runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 1,
+    });
+
+    expect(result).toEqual({ skipped: true });
+    expect(mockTriggerCampaignSend).not.toHaveBeenCalled();
+  });
+
+  it("creates campaign and calls triggerCampaignSend when recipients exist", async () => {
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockResolveRecipients.mockResolvedValue([
+      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+    ]);
+    mockDbReturning.mockResolvedValue([{ id: 42, ...config, status: "draft", type: "automated" }]);
+    mockTriggerCampaignSend.mockResolvedValue({ totalRecipients: 1 });
+
+    const result = await runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 1,
+    });
+
+    expect(result).toHaveProperty("campaignId");
+    expect(result).toHaveProperty("totalRecipients", 1);
+    expect(mockTriggerCampaignSend).toHaveBeenCalled();
+  });
+
+  it("throws when config not found", async () => {
+    mockDbLimit.mockResolvedValue([]);
+
+    await expect(runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 999,
+    })).rejects.toThrow("Automated campaign config not found");
+  });
+});
+
 describe("processAutomatedCampaigns", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbFrom.mockReturnValue({ where: mockDbWhere, orderBy: mockDbOrderBy });
     mockDbWhere.mockReturnValue({ limit: mockDbLimit, returning: mockDbReturning });
     mockDbSet.mockReturnValue({ where: mockDbWhere });
-    mockDbValues.mockReturnValue({ returning: mockDbReturning });
+    mockDbValues.mockReturnValue({ returning: mockDbReturning, onConflictDoNothing: vi.fn().mockResolvedValue(undefined) });
   });
 
   it("skips configs where nextRunAt is in the future", async () => {

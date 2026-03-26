@@ -801,7 +801,7 @@ export default function AdminCampaigns() {
                     <TableBody>
                       {campaigns.map((c: Campaign) => {
                         const cfg = statusConfig[c.status] || statusConfig.draft;
-                        const isAutomated = (c as any).type === "automated";
+                        const isAutomated = c.type === "automated";
                         return (
                           <TableRow
                             key={c.id}
