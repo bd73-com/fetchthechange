@@ -167,7 +167,7 @@ describe("error_logs dedup column migration at startup", () => {
     const app = makeMockApp();
     await registerRoutes(app as any, app as any);
 
-    // db.execute should have been called 24 times:
+    // db.execute should have been called 25 times:
     // 2 for the ALTER TABLE monitors statements (health_alert_sent_at, last_healthy_at)
     // 3 for the ALTER TABLE error_logs statements (first_occurrence, occurrence_count, deleted_at)
     // 2 for the api_keys table creation (CREATE TABLE + CREATE INDEX)
@@ -175,7 +175,8 @@ describe("error_logs dedup column migration at startup", () => {
     // 3 for notification_queue columns (2 ALTER TABLE + 1 CREATE INDEX)
     // 5 for tag tables (2 CREATE TABLE + 2 indexes + 1 unique index)
     // 2 for monitor_conditions table (1 CREATE TABLE + 1 CREATE INDEX)
-    expect(mockDbExecute).toHaveBeenCalledTimes(24);
+    // 1 for automated_campaign_configs table (1 CREATE TABLE)
+    expect(mockDbExecute).toHaveBeenCalledTimes(25);
 
     // Verify specific DDL statements were issued (drizzle sql`` produces SQL objects)
     const callStrings = mockDbExecute.mock.calls.map((c: any[]) => {
@@ -195,6 +196,7 @@ describe("error_logs dedup column migration at startup", () => {
     expect(callStrings.some((s: string) => s.includes("monitor_conditions_monitor_idx"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("notification_queue") && s.includes("attempts"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("notification_queue") && s.includes("permanently_failed"))).toBe(true);
+    expect(callStrings.some((s: string) => s.includes("automated_campaign_configs"))).toBe(true);
   });
 
   it("still registers all route groups when migration succeeds", async () => {

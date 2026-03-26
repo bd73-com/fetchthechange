@@ -35,7 +35,7 @@ import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encry
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns } from "./services/ensureTables";
+import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable } from "./services/ensureTables";
 
 
 // ------------------------------------------------------------------
@@ -82,6 +82,7 @@ export async function registerRoutes(
     console.error("CRITICAL: notification_queue columns missing — notification cron queries will fail");
   }
   await ensureTagTables();
+  await ensureAutomatedCampaignConfigsTable();
   // Per-route 503 guard (not conditional registration like apiKeysReady)
   // because condition routes are inline — 503 gives clients a clear retry signal.
   // Lazy retry: if startup fails (transient DB error), first request retries once.
