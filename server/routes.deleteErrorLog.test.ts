@@ -521,7 +521,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(400);
-    expect(res._json).toEqual({ message: "Must provide ids or filters" });
+    expect(res._json.message).toBe("Invalid request body");
   });
 
   it("returns 400 when both ids and filters provided", async () => {
@@ -529,7 +529,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [1], filters: { level: "error" } } };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(400);
-    expect(res._json).toEqual({ message: "Provide either ids or filters, not both" });
+    expect(res._json.message).toBe("Invalid request body");
   });
 
   it("returns 400 for empty ids array", async () => {
@@ -538,7 +538,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [] } };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(400);
-    expect(res._json).toEqual({ message: "ids must be a non-empty array of positive integers" });
+    expect(res._json.message).toBe("Invalid request body");
   });
 
   it("returns 400 for ids containing non-integers", async () => {
@@ -547,7 +547,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [1, "abc", 3] } };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(400);
-    expect(res._json).toEqual({ message: "ids must be a non-empty array of positive integers" });
+    expect(res._json.message).toBe("Invalid request body");
   });
 
   it("returns 400 for ids containing zero or negative values", async () => {
@@ -556,7 +556,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [0, -1] } };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(400);
-    expect(res._json).toEqual({ message: "ids must be a non-empty array of positive integers" });
+    expect(res._json.message).toBe("Invalid request body");
   });
 
   it("soft-deletes authorized entries by IDs for app owner", async () => {
@@ -671,7 +671,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(400);
-    expect(res._json).toEqual({ message: "filters must include at least one of: level, source" });
+    expect(res._json.message).toBe("Invalid request body");
   });
 
   it("rejects empty filters even with excludeIds", async () => {
@@ -684,23 +684,20 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(400);
-    expect(res._json).toEqual({ message: "filters must include at least one of: level, source" });
+    expect(res._json.message).toBe("Invalid request body");
   });
 
-  it("ignores non-integer excludeIds with valid filters", async () => {
+  it("rejects non-integer excludeIds with valid filters", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([
-      { id: 1, context: null },
-    ]);
 
     const req = {
       user: { claims: { sub: "owner-123" } },
       body: { filters: { level: "error" }, excludeIds: ["abc", -1, 0] },
     };
     const res = await callHandler("post", ENDPOINT, req);
-    expect(res._status).toBe(200);
-    expect(res._json.count).toBe(1);
+    expect(res._status).toBe(400);
+    expect(res._json.message).toBe("Invalid request body");
   });
 
   it("returns 500 when database throws", async () => {
