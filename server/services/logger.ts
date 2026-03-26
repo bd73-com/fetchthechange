@@ -3,7 +3,7 @@ import { errorLogs } from "@shared/schema";
 import { and, eq, sql } from "drizzle-orm";
 
 type LogLevel = "error" | "warning" | "info";
-type LogSource = "scraper" | "email" | "api" | "scheduler" | "stripe";
+type LogSource = "scraper" | "email" | "api" | "scheduler" | "stripe" | "browserless";
 
 const SENSITIVE_KEYS = [
   "password", "token", "apikey", "api_key", "secret", "authorization",

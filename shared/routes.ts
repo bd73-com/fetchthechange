@@ -24,6 +24,7 @@ export const ERROR_LOG_SOURCES = [
   "api",
   "stripe",
   "resend",
+  "browserless",
 ] as const;
 
 export const errorLogSourceSchema = z.enum(ERROR_LOG_SOURCES);
