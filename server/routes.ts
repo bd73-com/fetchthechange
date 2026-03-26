@@ -1559,11 +1559,17 @@ export async function registerRoutes(
         filters: z.object({
           level: z.enum(["error", "warning", "info"]).optional(),
           source: errorLogSourceSchema.optional(),
-        }).strict().optional(),
+        }).strict().refine(
+          (data) => data.level !== undefined || data.source !== undefined,
+          { message: "filters must include at least one of: level, source" },
+        ).optional(),
         excludeIds: z.array(z.number().int().positive()).max(500).optional(),
       }).strict().refine(
         (data) => (data.ids !== undefined) !== (data.filters !== undefined),
         { message: "Provide either ids or filters, not both" },
+      ).refine(
+        (data) => !(data.ids && data.excludeIds),
+        { message: "excludeIds cannot be used with ids" },
       );
 
       const parsed = batchDeleteSchema.safeParse(req.body);
@@ -1596,10 +1602,6 @@ export async function registerRoutes(
         }
         res.json({ message: `${authorized.length} entries deleted`, count: authorized.length });
       } else if (filters) {
-        if (!filters.level && !filters.source) {
-          return res.status(400).json({ message: "filters must include at least one of: level, source" });
-        }
-
         const conditions = [isNull(errorLogs.deletedAt)];
         if (filters.level) {
           conditions.push(eq(errorLogs.level, filters.level));

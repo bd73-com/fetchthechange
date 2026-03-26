@@ -644,7 +644,16 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const req = { user: { claims: { sub: "not-the-owner" } }, body: { filters: {} } };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(400);
-    expect(res._json).toEqual({ message: "filters must include at least one of: level, source" });
+    expect(res._json.message).toBe("Invalid request body");
+  });
+
+  it("rejects excludeIds when combined with ids", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [1, 2, 3], excludeIds: [2] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json.message).toBe("Invalid request body");
   });
 
   it("applies ownership filtering with filters mode", async () => {
