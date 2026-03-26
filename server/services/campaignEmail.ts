@@ -25,7 +25,6 @@ interface ResolvedRecipient {
   unsubscribeToken: string;
 }
 
-/** Escape HTML special characters to prevent XSS in email templates. */
 /**
  * Insert content before the last </body> tag in an HTML string.
  * Uses lastIndexOf to avoid matching </body> inside comments or scripts.
@@ -39,6 +38,7 @@ function insertBeforeLastBodyClose(html: string, content: string): string | null
   return html.slice(0, idx) + content + originalTag + html.slice(idx + 7);
 }
 
+/** Escape HTML special characters to prevent XSS in email templates. */
 function escapeHtml(str: string | null | undefined): string {
   if (!str) return "";
   return str
