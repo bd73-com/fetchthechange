@@ -269,21 +269,25 @@ export default function AdminErrors() {
       const filters: { level?: string; source?: string } = {};
       if (levelFilter !== "all") filters.level = levelFilter;
       if (sourceFilter !== "all") filters.source = sourceFilter;
-      if (!filters.level && !filters.source) {
-        toast({ title: "Filter required", description: "Apply a level or source filter before deleting all entries", variant: "destructive" });
-        return;
-      }
-      const excluded = Array.from(excludedIds);
       finalizePrevious();
-      batchDeleteMutation.mutate({
-        filters,
-        ...(excluded.length > 0 ? { excludeIds: excluded } : {}),
-      });
+      if (filters.level || filters.source) {
+        const excluded = Array.from(excludedIds);
+        batchDeleteMutation.mutate({
+          filters,
+          ...(excluded.length > 0 ? { excludeIds: excluded } : {}),
+        });
+      } else {
+        const ids = logs
+          .filter(l => !excludedIds.has(l.id))
+          .map(l => l.id);
+        if (ids.length === 0) return;
+        batchDeleteMutation.mutate({ ids });
+      }
     } else {
       finalizePrevious();
       batchDeleteMutation.mutate({ ids: Array.from(selectedIds) });
     }
-  }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, toast]);
+  }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, logs]);
 
   const selectionCount = selectAll ? logs.length - excludedIds.size : selectedIds.size;
   const hasSelection = selectionCount > 0;
