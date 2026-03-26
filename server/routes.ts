@@ -1559,7 +1559,7 @@ export async function registerRoutes(
         filters: z.object({
           level: z.enum(["error", "warning", "info"]).optional(),
           source: errorLogSourceSchema.optional(),
-        }).optional(),
+        }).strict().optional(),
         excludeIds: z.array(z.number().int().positive()).optional(),
       }).strict().refine(
         (data) => (data.ids !== undefined) !== (data.filters !== undefined),

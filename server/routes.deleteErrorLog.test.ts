@@ -700,6 +700,31 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     expect(res._json.message).toBe("Invalid request body");
   });
 
+  it("rejects unexpected properties via strict schema", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+
+    const req = {
+      user: { claims: { sub: "owner-123" } },
+      body: { ids: [1], extraProp: "should not be here" },
+    };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json.message).toBe("Invalid request body");
+    expect(res._json.errors).toBeDefined();
+  });
+
+  it("rejects filters with unexpected nested properties via strict schema", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+
+    const req = {
+      user: { claims: { sub: "owner-123" } },
+      body: { filters: { level: "error", unknownField: true } },
+    };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json.message).toBe("Invalid request body");
+  });
+
   it("returns 500 when database throws", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockGetUser.mockResolvedValue({ tier: "power" });
