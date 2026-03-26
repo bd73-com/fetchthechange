@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { getTableColumns } from "drizzle-orm";
-import { notificationChannels, deliveryLog, slackConnections, monitorConditions } from "@shared/schema";
+import { notificationChannels, deliveryLog, slackConnections, monitorConditions, automatedCampaignConfigs } from "@shared/schema";
 
 const mockExecute = vi.fn();
 
@@ -10,7 +10,7 @@ vi.mock("../db", () => ({
   },
 }));
 
-import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns } from "./ensureTables";
+import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable } from "./ensureTables";
 
 describe("ensureMonitorHealthColumns", () => {
   beforeEach(() => {
@@ -216,6 +216,47 @@ describe("ensureNotificationQueueColumns", () => {
   });
 });
 
+describe("ensureAutomatedCampaignConfigsTable", () => {
+  beforeEach(() => {
+    mockExecute.mockReset();
+  });
+
+  it("returns true when CREATE TABLE succeeds", async () => {
+    mockExecute.mockResolvedValue([]);
+    const result = await ensureAutomatedCampaignConfigsTable();
+    expect(result).toBe(true);
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits DDL containing automated_campaign_configs with all expected columns", async () => {
+    mockExecute.mockResolvedValue([]);
+    await ensureAutomatedCampaignConfigsTable();
+    const stmt = JSON.stringify(mockExecute.mock.calls[0][0]);
+    expect(stmt).toContain("automated_campaign_configs");
+    expect(stmt).toContain("key");
+    expect(stmt).toContain("html_body");
+    expect(stmt).toContain("enabled");
+    expect(stmt).toContain("next_run_at");
+  });
+
+  it("returns false and does not throw on error", async () => {
+    mockExecute.mockRejectedValue(new Error("connection refused"));
+    const result = await ensureAutomatedCampaignConfigsTable();
+    expect(result).toBe(false);
+  });
+
+  it("logs error when table creation fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockExecute.mockRejectedValue(new Error("connection refused"));
+    await ensureAutomatedCampaignConfigsTable();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Could not ensure automated_campaign_configs table:",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Schema sync guard — ensures ensureTables.ts DDL stays in sync with Drizzle.
 // If a column is added/removed in shared/schema.ts, this test fails and
@@ -229,6 +270,7 @@ describe("schema sync between ensureTables DDL and Drizzle schema", () => {
     delivery_log: ["id", "monitor_id", "change_id", "channel", "status", "attempt", "response", "delivered_at", "created_at"],
     slack_connections: ["id", "user_id", "team_id", "team_name", "bot_token", "scope", "created_at", "updated_at"],
     monitor_conditions: ["id", "monitor_id", "type", "value", "group_index", "created_at"],
+    automated_campaign_configs: ["id", "key", "name", "subject", "html_body", "text_body", "enabled", "last_run_at", "next_run_at", "created_at", "updated_at"],
   };
 
   function drizzleColumnNames(table: Parameters<typeof getTableColumns>[0]): string[] {
@@ -249,5 +291,9 @@ describe("schema sync between ensureTables DDL and Drizzle schema", () => {
 
   it("monitor_conditions columns match Drizzle schema", () => {
     expect(DDL_COLUMNS.monitor_conditions.sort()).toEqual(drizzleColumnNames(monitorConditions));
+  });
+
+  it("automated_campaign_configs columns match Drizzle schema", () => {
+    expect(DDL_COLUMNS.automated_campaign_configs.sort()).toEqual(drizzleColumnNames(automatedCampaignConfigs));
   });
 });
