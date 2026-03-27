@@ -2386,7 +2386,7 @@ export async function registerRoutes(
         let status: string;
         if (sentCount === 0 && failedCount === 0) {
           status = "draft";
-        } else if (failedCount > 0 && sentCount + failedCount < totalCount) {
+        } else if (failedCount > 0) {
           status = "partially_sent";
         } else {
           status = "sent";

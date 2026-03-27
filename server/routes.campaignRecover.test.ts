@@ -491,4 +491,39 @@ describe("POST /api/admin/campaigns/recover", () => {
     // but we verify the endpoint succeeded and returned the campaign
     expect(res._json.campaigns[0].id).toBe(55);
   });
+
+  it("skips already-recovered campaigns (idempotent retry)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetResendClient.mockReturnValue(null);
+
+    let callCount = 0;
+    mockDbExecute.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({ rows: [{ campaign_id: 42 }] });
+      }
+      if (callCount === 2) {
+        return Promise.resolve({
+          rows: [{
+            total: 10, sent: 10, failed: 0, delivered: 10,
+            opened: 5, clicked: 2,
+            first_sent: "2026-01-01T00:00:00Z",
+            last_sent: "2026-01-01T01:00:00Z",
+          }],
+        });
+      }
+      if (callCount === 3) {
+        // INSERT returns rowCount: 0 (already exists via ON CONFLICT DO NOTHING)
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+
+    expect(res._status).toBe(200);
+    expect(res._json.recovered).toBe(0);
+    expect(res._json.campaigns).toHaveLength(0);
+  });
 });
