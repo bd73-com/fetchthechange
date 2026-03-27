@@ -251,7 +251,8 @@ export async function registerRoutes(
         createdAt: new Date()
       };
 
-      console.log(`[Test Email] Sending test email to ${user.email}`);
+      const maskedEmail = user.email ? user.email.replace(/^(.)(.*)(@.*)$/, (_, first: string, middle: string, domain: string) => first + '*'.repeat(middle.length) + domain) : 'unknown';
+      console.log(`[Test Email] Sending test email to ${maskedEmail}`);
       const result = await sendNotificationEmail(testMonitor, "Old Test Value", "New Test Value");
       
       if (result.success) {
@@ -1469,7 +1470,7 @@ export async function registerRoutes(
       const source = req.query.source as string | undefined;
       const limitNum = Math.min(Number(req.query.limit) || 100, 500);
 
-      const conditions = [isNull(errorLogs.deletedAt)];
+      const conditions = [eq(errorLogs.resolved, false), isNull(errorLogs.deletedAt)];
       if (level && ["error", "warning", "info"].includes(level)) {
         conditions.push(eq(errorLogs.level, level));
       }
@@ -1519,7 +1520,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invalid log ID" });
       }
 
-      const [log] = await db.select().from(errorLogs).where(eq(errorLogs.id, id)).limit(1);
+      const [log] = await db.select().from(errorLogs).where(and(eq(errorLogs.id, id), isNull(errorLogs.deletedAt))).limit(1);
       if (!log) {
         return res.status(404).json({ message: "Log entry not found" });
       }
@@ -2022,6 +2023,7 @@ export async function registerRoutes(
       if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
 
       const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid campaign ID" });
       const [campaign] = await db
         .select()
         .from(campaignsTable)
@@ -2080,6 +2082,7 @@ export async function registerRoutes(
       if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
 
       const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid campaign ID" });
       const [existing] = await db
         .select()
         .from(campaignsTable)
@@ -2097,6 +2100,10 @@ export async function registerRoutes(
       if (textBody !== undefined) updates.textBody = textBody;
       if (filters !== undefined) updates.filters = filters;
       if (scheduledAt !== undefined) updates.scheduledAt = scheduledAt ? new Date(scheduledAt) : null;
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No valid fields to update" });
+      }
 
       const [updated] = await db
         .update(campaignsTable)
@@ -2121,6 +2128,7 @@ export async function registerRoutes(
       if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
 
       const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid campaign ID" });
       const [existing] = await db
         .select()
         .from(campaignsTable)
@@ -2168,6 +2176,7 @@ export async function registerRoutes(
       if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
 
       const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid campaign ID" });
       const [campaign] = await db
         .select()
         .from(campaignsTable)
@@ -2201,6 +2210,7 @@ export async function registerRoutes(
       if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
 
       const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid campaign ID" });
       const result = await campaignEmailService.triggerCampaignSend(id);
       res.json({ success: true, totalRecipients: result.totalRecipients });
     } catch (error: any) {
@@ -2219,6 +2229,7 @@ export async function registerRoutes(
       if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
 
       const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid campaign ID" });
       const result = await campaignEmailService.cancelCampaign(id);
       res.json({ success: true, sentSoFar: result.sentSoFar, cancelled: result.cancelled });
     } catch (error: any) {
@@ -2237,6 +2248,7 @@ export async function registerRoutes(
       if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
 
       const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid campaign ID" });
       const [campaign] = await db
         .select()
         .from(campaignsTable)

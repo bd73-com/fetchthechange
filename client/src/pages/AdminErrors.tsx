@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe, Mail, Users, Trash2, Loader2, X } from "lucide-react";
 import { Link } from "wouter";
+import { ERROR_LOG_SOURCES } from "@shared/routes";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
@@ -391,10 +392,11 @@ export default function AdminErrors() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All categories</SelectItem>
-                <SelectItem value="scraper">Scraper</SelectItem>
-                <SelectItem value="email">Email</SelectItem>
-                <SelectItem value="scheduler">Scheduler</SelectItem>
-                <SelectItem value="api">API</SelectItem>
+                {ERROR_LOG_SOURCES.map((source) => (
+                  <SelectItem key={source} value={source}>
+                    {source.charAt(0).toUpperCase() + source.slice(1)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Button
