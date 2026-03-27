@@ -2374,18 +2374,28 @@ export async function registerRoutes(
                 htmlBody = emailData.data.html ?? htmlBody;
               }
             } catch (e) {
-              console.warn(`[CampaignRecover] Could not fetch email ${sampleResendId} from Resend:`, e);
+              console.warn(`[CampaignRecover] Could not fetch sample email for campaign ${campaignId}:`, e instanceof Error ? e.message : "unknown error");
             }
           }
         }
 
         // Determine status from counters
-        const allDone = Number(stats.sent) + Number(stats.failed) === Number(stats.total);
-        const status = Number(stats.failed) > 0 && !allDone ? "partially_sent" : "sent";
+        const sentCount = Number(stats.sent);
+        const failedCount = Number(stats.failed);
+        const totalCount = Number(stats.total);
+        let status: string;
+        if (sentCount === 0 && failedCount === 0) {
+          status = "draft";
+        } else if (failedCount > 0 && sentCount + failedCount < totalCount) {
+          status = "partially_sent";
+        } else {
+          status = "sent";
+        }
 
         // Re-insert the campaign row with its original ID using raw SQL
         // so that the foreign key from campaign_recipients is satisfied again.
-        await db.execute(sql`
+        // ON CONFLICT DO NOTHING makes retries safe if a prior attempt partially completed.
+        const insertResult = await db.execute(sql`
           INSERT INTO campaigns (id, name, subject, html_body, status, type, total_recipients,
             sent_count, failed_count, delivered_count, opened_count, clicked_count,
             created_at, sent_at, completed_at)
@@ -2406,12 +2416,11 @@ export async function registerRoutes(
             ${stats.first_sent ?? null}::timestamptz,
             ${stats.last_sent ?? null}::timestamptz
           )
+          ON CONFLICT (id) DO NOTHING
         `);
 
-        // Advance the serial sequence past the recovered ID so future inserts don't collide
-        await db.execute(sql`
-          SELECT setval('campaigns_id_seq', GREATEST(nextval('campaigns_id_seq'), ${campaignId + 1}))
-        `);
+        // Skip if already recovered (idempotent retry)
+        if (insertResult.rowCount === 0) continue;
 
         recovered.push({
           id: campaignId,
@@ -2421,9 +2430,16 @@ export async function registerRoutes(
         });
       }
 
+      // Advance the serial sequence past all recovered IDs so future inserts don't collide
+      if (recovered.length > 0) {
+        await db.execute(sql`
+          SELECT setval('campaigns_id_seq', (SELECT MAX(id) FROM campaigns))
+        `);
+      }
+
       res.json({ recovered: recovered.length, campaigns: recovered });
     } catch (error: any) {
-      console.error("Error recovering campaigns:", error);
+      console.error("Error recovering campaigns:", error instanceof Error ? error.message : "unknown error");
       res.status(500).json({ message: "Failed to recover campaigns" });
     }
   });
