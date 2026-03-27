@@ -11,23 +11,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe, Mail, Users, Trash2, Loader2, X } from "lucide-react";
 import { Link } from "wouter";
 import { ERROR_LOG_SOURCES } from "@shared/routes";
+import type { ErrorLog } from "@shared/schema";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 
-interface ErrorLogEntry {
-  id: number;
-  timestamp: string;
-  level: string;
-  source: string;
-  errorType: string | null;
-  message: string;
-  stackTrace: string | null;
-  context: any;
-  resolved: boolean;
-  firstOccurrence: string | null;
-  occurrenceCount: number;
-}
+/** JSON-serialized ErrorLog — Date fields become strings over the wire. */
+type ErrorLogEntry = {
+  [K in keyof ErrorLog]: ErrorLog[K] extends Date ? string : ErrorLog[K] extends Date | null ? string | null : ErrorLog[K];
+};
 
 interface BrowserlessUsageData {
   systemUsage: number;
@@ -747,7 +739,7 @@ export default function AdminErrors() {
                                   </pre>
                                 </div>
                               )}
-                              {log.context && (
+                              {log.context != null && (
                                 <div>
                                   <p className="text-xs font-medium text-muted-foreground mb-1">Context</p>
                                   <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-32 overflow-y-auto select-text">
