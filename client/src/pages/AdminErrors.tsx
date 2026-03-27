@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { formatDate, formatDateTime } from "@/lib/date-format";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { buildBatchDeletePayload } from "./adminErrorsUtils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -265,25 +266,13 @@ export default function AdminErrors() {
   }, [finalizePrevious, batchDeleteMutation]);
 
   const handleBatchDelete = useCallback(() => {
-    if (selectAll) {
-      const filters: { level?: string; source?: string } = {};
-      if (levelFilter !== "all") filters.level = levelFilter;
-      if (sourceFilter !== "all") filters.source = sourceFilter;
-      if (!filters.level && !filters.source) {
-        toast({ title: "Filter required", description: "Apply a level or source filter before deleting all entries", variant: "destructive" });
-        return;
-      }
-      const excluded = Array.from(excludedIds);
-      finalizePrevious();
-      batchDeleteMutation.mutate({
-        filters,
-        ...(excluded.length > 0 ? { excludeIds: excluded } : {}),
-      });
-    } else {
-      finalizePrevious();
-      batchDeleteMutation.mutate({ ids: Array.from(selectedIds) });
-    }
-  }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, toast]);
+    const payload = buildBatchDeletePayload({
+      selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, logs,
+    });
+    if (!payload) return;
+    finalizePrevious();
+    batchDeleteMutation.mutate(payload);
+  }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, logs]);
 
   const selectionCount = selectAll ? logs.length - excludedIds.size : selectedIds.size;
   const hasSelection = selectionCount > 0;
@@ -670,7 +659,7 @@ export default function AdminErrors() {
                 aria-label="Select all entries"
               />
               <span className="text-sm text-muted-foreground">
-                {selectAll ? "All matching entries selected" : "Select all"}
+                {selectAll ? `All ${logs.length} visible entries selected` : "Select all"}
               </span>
             </div>
             <div className="space-y-2">
@@ -772,7 +761,7 @@ export default function AdminErrors() {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50" data-testid="floating-action-bar">
           <div className="flex items-center gap-3 bg-background border rounded-lg shadow-lg px-4 py-3">
             <span className="text-sm font-medium" data-testid="text-selection-count">
-              {selectAll ? `All matching entries` : `${selectionCount} selected`}
+              {selectAll ? `${selectionCount} visible entries` : `${selectionCount} selected`}
             </span>
             <Button
               variant="destructive"
