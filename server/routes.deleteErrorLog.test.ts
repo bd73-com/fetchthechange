@@ -490,11 +490,15 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     await ensureRoutes();
     vi.clearAllMocks();
 
-    // For batch endpoints, the select chain ends at .where() (no .limit/.orderBy)
-    // so mockSelectWhereFn must resolve to data directly.
+    // For batch endpoints:
+    // - ID path: .where() resolves directly (no .limit/.orderBy)
+    // - Filter path: .where().orderBy().limit(500)
+    // Default to filter chain; ID-based tests override with mockResolvedValue.
+    mockLimitFn.mockResolvedValue([]);
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ orderBy: mockOrderByFn, limit: mockLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
-    mockSelectWhereFn.mockResolvedValue([]);
 
     mockUpdateWhereFn.mockResolvedValue(undefined);
     mockUpdateSetFn.mockReturnValue({ where: mockUpdateWhereFn });
@@ -607,7 +611,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
   it("soft-deletes entries matching filters for app owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([
+    mockLimitFn.mockResolvedValue([
       { id: 1, context: null },
       { id: 2, context: null },
       { id: 3, context: null },
@@ -616,14 +620,14 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: { filters: { level: "error" } } };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "3 entries deleted", count: 3 });
+    expect(res._json).toEqual({ message: "3 entries deleted", count: 3, hasMore: false });
     expect(mockDbUpdate).toHaveBeenCalled();
   });
 
   it("soft-deletes with filter and excludeIds", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([
+    mockLimitFn.mockResolvedValue([
       { id: 1, context: null },
       { id: 3, context: null },
     ]);
@@ -634,7 +638,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "2 entries deleted", count: 2 });
+    expect(res._json).toEqual({ message: "2 entries deleted", count: 2, hasMore: false });
   });
 
   it("rejects empty filters object", async () => {
@@ -659,7 +663,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
   it("applies ownership filtering with filters mode", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 10 }]);
-    mockSelectWhereFn.mockResolvedValue([
+    mockLimitFn.mockResolvedValue([
       { id: 1, context: { monitorId: 10 } },
       { id: 2, context: null },
     ]);
@@ -667,7 +671,21 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     const req = { user: { claims: { sub: "not-the-owner" } }, body: { filters: { level: "error" } } };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "1 entries deleted", count: 1 });
+    expect(res._json).toEqual({ message: "1 entries deleted", count: 1, hasMore: false });
+  });
+
+  it("returns hasMore true when filter query hits the 500-row limit", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    // Simulate exactly 500 rows returned (the limit)
+    const entries = Array.from({ length: 500 }, (_, i) => ({ id: i + 1, context: null }));
+    mockLimitFn.mockResolvedValue(entries);
+
+    const req = { user: { claims: { sub: "owner-123" } }, body: { filters: { level: "error" } } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json.count).toBe(500);
+    expect(res._json.hasMore).toBe(true);
   });
 
   it("rejects filters with only invalid values", async () => {
@@ -758,9 +776,10 @@ describe("POST /api/admin/error-logs/restore", () => {
     await ensureRoutes();
     vi.clearAllMocks();
 
-    // restore uses .where(...).limit(500), so chain through mockLimitFn
+    // restore uses .where(...).orderBy(...).limit(500), so chain through mockOrderByFn/mockLimitFn
     mockLimitFn.mockResolvedValue([]);
-    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ orderBy: mockOrderByFn, limit: mockLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
 
@@ -795,7 +814,7 @@ describe("POST /api/admin/error-logs/restore", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "2 entries restored", count: 2 });
+    expect(res._json).toEqual({ message: "2 entries restored", count: 2, hasMore: false });
     expect(mockDbUpdate).toHaveBeenCalled();
     expect(mockUpdateSetFn).toHaveBeenCalled();
   });
@@ -812,7 +831,7 @@ describe("POST /api/admin/error-logs/restore", () => {
     const req = { user: { claims: { sub: "not-the-owner" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "1 entries restored", count: 1 });
+    expect(res._json).toEqual({ message: "1 entries restored", count: 1, hasMore: false });
   });
 
   it("returns count 0 when no soft-deleted entries exist", async () => {
@@ -823,7 +842,7 @@ describe("POST /api/admin/error-logs/restore", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "0 entries restored", count: 0 });
+    expect(res._json).toEqual({ message: "0 entries restored", count: 0, hasMore: false });
     expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
@@ -851,9 +870,10 @@ describe("POST /api/admin/error-logs/finalize", () => {
     await ensureRoutes();
     vi.clearAllMocks();
 
-    // finalize uses .where(...).limit(500), so chain through mockLimitFn
+    // finalize uses .where(...).orderBy(...).limit(500), so chain through mockOrderByFn/mockLimitFn
     mockLimitFn.mockResolvedValue([]);
-    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ orderBy: mockOrderByFn, limit: mockLimitFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
 
@@ -887,7 +907,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "2 entries finalized", count: 2 });
+    expect(res._json).toEqual({ message: "2 entries finalized", count: 2, hasMore: false });
     expect(mockDbDelete).toHaveBeenCalled();
     expect(mockDeleteWhereFn).toHaveBeenCalled();
   });
@@ -904,7 +924,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
     const req = { user: { claims: { sub: "not-the-owner" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "1 entries finalized", count: 1 });
+    expect(res._json).toEqual({ message: "1 entries finalized", count: 1, hasMore: false });
   });
 
   it("returns count 0 when no soft-deleted entries exist", async () => {
@@ -915,7 +935,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "0 entries finalized", count: 0 });
+    expect(res._json).toEqual({ message: "0 entries finalized", count: 0, hasMore: false });
     expect(mockDbDelete).not.toHaveBeenCalled();
   });
 
@@ -930,5 +950,13 @@ describe("POST /api/admin/error-logs/finalize", () => {
     expect(res._status).toBe(500);
     expect(res._json).toEqual({ message: "Failed to finalize error logs" });
     errorSpy.mockRestore();
+  });
+});
+
+describe("POST /api/test-email", () => {
+  it("is registered as POST, not GET", async () => {
+    await ensureRoutes();
+    expect(registeredRoutes["post"]?.["/api/test-email"]).toBeDefined();
+    expect(registeredRoutes["get"]?.["/api/test-email"]).toBeUndefined();
   });
 });

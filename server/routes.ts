@@ -12,7 +12,7 @@ import { TIER_LIMITS, TAG_LIMITS, TAG_ASSIGNMENT_LIMITS, BROWSERLESS_CAPS, RESEN
 import { startScheduler } from "./services/scheduler";
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
-import { sql, desc, eq, and, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
+import { sql, asc, desc, eq, and, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
@@ -217,7 +217,7 @@ export async function registerRoutes(
   });
 
   // Test Email Endpoint - verifies Resend email delivery
-  app.get("/api/test-email", isAuthenticated, emailUpdateRateLimiter, async (req: any, res) => {
+  app.post("/api/test-email", isAuthenticated, emailUpdateRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
       const user = await authStorage.getUser(userId);
@@ -1614,7 +1614,7 @@ export async function registerRoutes(
           conditions.push(notInArray(errorLogs.id, excludeList));
         }
 
-        const entries = await db.select().from(errorLogs).where(and(...conditions));
+        const entries = await db.select().from(errorLogs).where(and(...conditions)).orderBy(asc(errorLogs.id)).limit(500);
 
         const authorized = entries.filter((log: any) => {
           const ctx = log.context as Record<string, unknown> | null;
@@ -1627,7 +1627,8 @@ export async function registerRoutes(
           const authorizedIds = authorized.map((e: any) => e.id);
           await db.update(errorLogs).set({ deletedAt: now }).where(inArray(errorLogs.id, authorizedIds));
         }
-        res.json({ message: `${authorized.length} entries deleted`, count: authorized.length });
+        const hasMore = entries.length === 500;
+        res.json({ message: `${authorized.length} entries deleted`, count: authorized.length, hasMore });
       }
     } catch (error: any) {
       console.error("Error batch deleting error logs:", error);
@@ -1652,7 +1653,7 @@ export async function registerRoutes(
         (await storage.getMonitors(userId)).map((m: any) => m.id)
       );
 
-      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).limit(500);
+      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).orderBy(asc(errorLogs.id)).limit(500);
 
       const authorized = softDeleted.filter((log: any) => {
         const ctx = log.context as Record<string, unknown> | null;
@@ -1665,7 +1666,8 @@ export async function registerRoutes(
         const authorizedIds = authorized.map((e: any) => e.id);
         await db.update(errorLogs).set({ deletedAt: null }).where(inArray(errorLogs.id, authorizedIds));
       }
-      res.json({ message: `${authorized.length} entries restored`, count: authorized.length });
+      const hasMore = softDeleted.length === 500;
+      res.json({ message: `${authorized.length} entries restored`, count: authorized.length, hasMore });
     } catch (error: any) {
       console.error("Error restoring error logs:", error);
       res.status(500).json({ message: "Failed to restore error logs" });
@@ -1689,7 +1691,7 @@ export async function registerRoutes(
         (await storage.getMonitors(userId)).map((m: any) => m.id)
       );
 
-      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).limit(500);
+      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).orderBy(asc(errorLogs.id)).limit(500);
 
       const authorized = softDeleted.filter((log: any) => {
         const ctx = log.context as Record<string, unknown> | null;
@@ -1702,7 +1704,8 @@ export async function registerRoutes(
         const authorizedIds = authorized.map((e: any) => e.id);
         await db.delete(errorLogs).where(inArray(errorLogs.id, authorizedIds));
       }
-      res.json({ message: `${authorized.length} entries finalized`, count: authorized.length });
+      const hasMore = softDeleted.length === 500;
+      res.json({ message: `${authorized.length} entries finalized`, count: authorized.length, hasMore });
     } catch (error: any) {
       console.error("Error finalizing error logs:", error);
       res.status(500).json({ message: "Failed to finalize error logs" });

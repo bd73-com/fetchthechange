@@ -156,7 +156,7 @@ export default function AdminErrors() {
   }, []);
 
   const finalizeMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<{ count: number; hasMore?: boolean }> => {
       const res = await fetch("/api/admin/error-logs/finalize", {
         method: "POST",
         credentials: "include",
@@ -164,9 +164,12 @@ export default function AdminErrors() {
       if (!res.ok) throw new Error("Failed to finalize deletion");
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       invalidateAll();
       clearSelection();
+      if (data.hasMore) {
+        toast({ title: "More entries remain", description: "Some soft-deleted entries were not finalized. Repeat to finalize more." });
+      }
     },
     onError: () => {
       toast({ title: "Error", description: "Failed to permanently delete entries", variant: "destructive" });
@@ -174,7 +177,7 @@ export default function AdminErrors() {
   });
 
   const restoreMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<{ count: number; hasMore?: boolean }> => {
       const res = await fetch("/api/admin/error-logs/restore", {
         method: "POST",
         credentials: "include",
@@ -182,8 +185,11 @@ export default function AdminErrors() {
       if (!res.ok) throw new Error("Failed to restore entries");
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       invalidateAll();
+      if (data.hasMore) {
+        toast({ title: "More entries remain", description: "Some soft-deleted entries were not restored. Repeat to restore more." });
+      }
     },
     onError: () => {
       toast({ title: "Error", description: "Failed to restore entries", variant: "destructive" });
@@ -248,12 +254,15 @@ export default function AdminErrors() {
         const err = await res.json().catch(() => null);
         throw new Error(err?.message || "Failed to delete entries");
       }
-      return res.json() as Promise<{ count: number }>;
+      return res.json() as Promise<{ count: number; hasMore?: boolean }>;
     },
     onSuccess: (data) => {
       invalidateAll();
       clearSelection();
       showUndoToast(data.count);
+      if (data.hasMore) {
+        toast({ title: "More entries remain", description: "Some matching entries were not deleted. Repeat to delete more." });
+      }
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
