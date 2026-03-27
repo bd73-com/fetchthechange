@@ -251,7 +251,7 @@ export async function registerRoutes(
         createdAt: new Date()
       };
 
-      const maskedEmail = user.email ? user.email.replace(/^(.)(.*)(@.*)$/, (_, first: string, middle: string, domain: string) => first + '*'.repeat(middle.length) + domain) : 'unknown';
+      const maskedEmail = user.email ? user.email.replace(/^(.)(.*)(@.*)$/, (_, first: string, middle: string, domain: string) => first + '*'.repeat(Math.max(middle.length, 1)) + domain) : 'unknown';
       console.log(`[Test Email] Sending test email to ${maskedEmail}`);
       const result = await sendNotificationEmail(testMonitor, "Old Test Value", "New Test Value");
       
