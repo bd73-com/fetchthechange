@@ -448,6 +448,29 @@ describe("#287: POST /api/test-email masks email in log output", () => {
     consoleSpy.mockRestore();
   });
 
+  it("logs [redacted] for malformed emails without @ sign", async () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockGetUser.mockResolvedValue({
+      id: "user-1",
+      email: "malformed-no-at",
+      notificationEmail: "malformed-no-at",
+      tier: "pro",
+    });
+    mockSendNotificationEmail.mockResolvedValue({ success: true, id: "re_123", to: "malformed-no-at", from: "noreply@example.com" });
+
+    const req = ownerReq({ user: { claims: { sub: "user-1" } } });
+    await callHandler("post", ENDPOINT, req);
+
+    const testEmailLog = consoleSpy.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("[Test Email]")
+    );
+    expect(testEmailLog).toBeDefined();
+    expect(testEmailLog![0]).not.toContain("malformed-no-at");
+    expect(testEmailLog![0]).toContain("[redacted]");
+
+    consoleSpy.mockRestore();
+  });
+
   it("returns 400 early when user has no email (never reaches log line)", async () => {
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     mockGetUser.mockResolvedValue({
