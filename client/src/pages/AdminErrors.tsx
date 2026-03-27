@@ -20,13 +20,13 @@ interface ErrorLogEntry {
   timestamp: string;
   level: string;
   source: string;
-  error_type: string | null;
+  errorType: string | null;
   message: string;
-  stack_trace: string | null;
+  stackTrace: string | null;
   context: any;
   resolved: boolean;
-  first_occurrence: string | null;
-  occurrence_count: number;
+  firstOccurrence: string | null;
+  occurrenceCount: number;
 }
 
 interface BrowserlessUsageData {
@@ -706,17 +706,17 @@ export default function AdminErrors() {
                             <Badge variant="outline" data-testid={`badge-source-${log.id}`}>
                               {log.source}
                             </Badge>
-                            {log.error_type && (
-                              <span className="text-xs text-muted-foreground">{log.error_type}</span>
+                            {log.errorType && (
+                              <span className="text-xs text-muted-foreground">{log.errorType}</span>
                             )}
-                            {log.occurrence_count > 1 && (
+                            {log.occurrenceCount > 1 && (
                               <Badge variant="secondary" className="text-[10px] px-1.5 py-0" data-testid={`badge-count-${log.id}`}>
-                                {log.occurrence_count}x
+                                {log.occurrenceCount}x
                               </Badge>
                             )}
                             <span className="text-xs text-muted-foreground ml-auto shrink-0">
-                              {log.occurrence_count > 1 && log.first_occurrence
-                                ? `${formatTimestamp(log.first_occurrence)} \u2014 ${formatTimestamp(log.timestamp)}`
+                              {log.occurrenceCount > 1 && log.firstOccurrence
+                                ? `${formatTimestamp(log.firstOccurrence)} \u2014 ${formatTimestamp(log.timestamp)}`
                                 : formatTimestamp(log.timestamp)}
                             </span>
                             <Button
@@ -739,11 +739,11 @@ export default function AdminErrors() {
                           </p>
                           {isExpanded && (
                             <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
-                              {log.stack_trace && (
+                              {log.stackTrace && (
                                 <div>
                                   <p className="text-xs font-medium text-muted-foreground mb-1">Stack Trace</p>
                                   <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-48 overflow-y-auto select-text">
-                                    {log.stack_trace}
+                                    {log.stackTrace}
                                   </pre>
                                 </div>
                               )}
