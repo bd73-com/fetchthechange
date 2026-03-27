@@ -51,6 +51,7 @@ import {
   Loader2,
   Play,
   Pencil,
+  RotateCcw,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import DashboardNav from "@/components/DashboardNav";
@@ -66,6 +67,7 @@ import {
   useAutomatedCampaigns,
   useUpdateAutomatedCampaign,
   useTriggerAutomatedCampaign,
+  useRecoverCampaigns,
 } from "@/hooks/use-campaigns";
 import type { Campaign, AutomatedCampaignConfig } from "@shared/schema";
 
@@ -697,6 +699,7 @@ export default function AdminCampaigns() {
   const { data: campaigns, isLoading } = useCampaigns();
   const { data: dashboard } = useCampaignDashboard();
   const deleteCampaign = useDeleteCampaign();
+  const recoverCampaigns = useRecoverCampaigns();
 
   return (
     <div className="min-h-screen bg-background">
@@ -784,6 +787,20 @@ export default function AdminCampaigns() {
                     <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
                     <p className="text-lg font-medium">No campaigns yet</p>
                     <p className="text-sm mt-1">Create your first email campaign to start communicating with users.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-4"
+                      onClick={() => recoverCampaigns.mutate()}
+                      disabled={recoverCampaigns.isPending}
+                    >
+                      {recoverCampaigns.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <RotateCcw className="h-4 w-4 mr-2" />
+                      )}
+                      Recover lost campaigns
+                    </Button>
                   </div>
                 ) : (
                   <Table>

@@ -205,6 +205,37 @@ export function useSendCampaign() {
   });
 }
 
+// POST /api/admin/campaigns/recover
+export function useRecoverCampaigns() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation<
+    { recovered: number; campaigns: Array<{ id: number; name: string; subject: string; totalRecipients: number }>; message?: string },
+    Error,
+    void
+  >({
+    mutationFn: () =>
+      fetchJson(`${CAMPAIGNS_KEY}/recover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [CAMPAIGNS_KEY] });
+      queryClient.invalidateQueries({ queryKey: [DASHBOARD_KEY] });
+      if (data.recovered > 0) {
+        toast({ title: "Campaigns recovered", description: `Recovered ${data.recovered} campaign(s) from recipient data.` });
+      } else {
+        toast({ title: "No campaigns to recover", description: data.message || "No orphaned recipient data found." });
+      }
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    },
+  });
+}
+
 // POST /api/admin/campaigns/:id/cancel
 export function useCancelCampaign() {
   const queryClient = useQueryClient();

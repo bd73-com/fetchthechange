@@ -2309,6 +2309,141 @@ export async function registerRoutes(
     }
   });
 
+  // Recover campaigns whose rows were lost but whose recipients still exist.
+  // Uses Resend API to fetch subject/body from a sample recipient's resend_id,
+  // then reconstructs the campaign row with accurate counters.
+  app.post("/api/admin/campaigns/recover", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
+      const user = await authStorage.getUser(userId);
+      if (!user || user.tier !== "power") return res.status(403).json({ message: "Admin access required" });
+      if (userId !== APP_OWNER_ID) return res.status(403).json({ message: "Owner access required" });
+
+      // Find campaign IDs referenced by recipients but missing from campaigns table
+      const orphanRows = await db.execute(sql`
+        SELECT DISTINCT cr.campaign_id
+        FROM campaign_recipients cr
+        LEFT JOIN campaigns c ON c.id = cr.campaign_id
+        WHERE c.id IS NULL
+      `);
+
+      const orphanedIds = (orphanRows.rows as { campaign_id: number }[]).map(r => r.campaign_id);
+      if (orphanedIds.length === 0) {
+        return res.json({ recovered: 0, campaigns: [], message: "No orphaned recipients found — campaign data appears intact." });
+      }
+
+      const resend = getResendClient();
+      const recovered: Array<{ id: number; name: string; subject: string; totalRecipients: number }> = [];
+
+      for (const campaignId of orphanedIds) {
+        // Aggregate counters from recipient rows
+        const statsResult = await db.execute(sql`
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE status IN ('sent','delivered','opened','clicked'))::int AS sent,
+            COUNT(*) FILTER (WHERE status = 'failed' OR status = 'bounced' OR status = 'complained')::int AS failed,
+            COUNT(*) FILTER (WHERE status IN ('delivered','opened','clicked'))::int AS delivered,
+            COUNT(*) FILTER (WHERE status IN ('opened','clicked'))::int AS opened,
+            COUNT(*) FILTER (WHERE status = 'clicked')::int AS clicked,
+            MIN(sent_at) AS first_sent,
+            MAX(sent_at) AS last_sent
+          FROM campaign_recipients
+          WHERE campaign_id = ${campaignId}
+        `);
+
+        const stats = statsResult.rows[0] as any;
+
+        // Try to recover subject/body from Resend API using a sample resend_id
+        let subject = `Recovered Campaign #${campaignId}`;
+        let htmlBody = "<p>(Email body could not be recovered)</p>";
+
+        if (resend) {
+          const sampleRow = await db.execute(sql`
+            SELECT resend_id FROM campaign_recipients
+            WHERE campaign_id = ${campaignId} AND resend_id IS NOT NULL
+            LIMIT 1
+          `);
+
+          const sampleResendId = (sampleRow.rows[0] as { resend_id: string } | undefined)?.resend_id;
+          if (sampleResendId) {
+            try {
+              const emailData = await resend.emails.get(sampleResendId);
+              if (emailData.data) {
+                subject = emailData.data.subject ?? subject;
+                htmlBody = emailData.data.html ?? htmlBody;
+              }
+            } catch (e) {
+              console.warn(`[CampaignRecover] Could not fetch sample email for campaign ${campaignId}:`, e instanceof Error ? e.message : "unknown error");
+            }
+          }
+        }
+
+        // Determine status from counters
+        const sentCount = Number(stats.sent);
+        const failedCount = Number(stats.failed);
+        const totalCount = Number(stats.total);
+        let status: string;
+        if (sentCount === 0 && failedCount === 0) {
+          status = "draft";
+        } else if (failedCount > 0) {
+          status = "partially_sent";
+        } else {
+          status = "sent";
+        }
+
+        // Re-insert the campaign row with its original ID using raw SQL
+        // so that the foreign key from campaign_recipients is satisfied again.
+        // ON CONFLICT DO NOTHING makes retries safe if a prior attempt partially completed.
+        const insertResult = await db.execute(sql`
+          INSERT INTO campaigns (id, name, subject, html_body, status, type, total_recipients,
+            sent_count, failed_count, delivered_count, opened_count, clicked_count,
+            created_at, sent_at, completed_at)
+          VALUES (
+            ${campaignId},
+            ${`Recovered Campaign #${campaignId}`},
+            ${subject},
+            ${htmlBody},
+            ${status},
+            'manual',
+            ${Number(stats.total)},
+            ${Number(stats.sent)},
+            ${Number(stats.failed)},
+            ${Number(stats.delivered)},
+            ${Number(stats.opened)},
+            ${Number(stats.clicked)},
+            COALESCE(${stats.first_sent}::timestamptz, NOW()),
+            ${stats.first_sent ?? null}::timestamptz,
+            ${stats.last_sent ?? null}::timestamptz
+          )
+          ON CONFLICT (id) DO NOTHING
+        `);
+
+        // Skip if already recovered (idempotent retry)
+        if (insertResult.rowCount === 0) continue;
+
+        recovered.push({
+          id: campaignId,
+          name: `Recovered Campaign #${campaignId}`,
+          subject,
+          totalRecipients: Number(stats.total),
+        });
+      }
+
+      // Advance the serial sequence past all recovered IDs so future inserts don't collide
+      if (recovered.length > 0) {
+        await db.execute(sql`
+          SELECT setval('campaigns_id_seq', (SELECT MAX(id) FROM campaigns))
+        `);
+      }
+
+      res.json({ recovered: recovered.length, campaigns: recovered });
+    } catch (error: any) {
+      console.error("Error recovering campaigns:", error instanceof Error ? error.message : "unknown error");
+      res.status(500).json({ message: "Failed to recover campaigns" });
+    }
+  });
+
   // Public unsubscribe endpoint (no auth required)
   // GET shows a confirmation page; POST performs the actual unsubscribe.
   // This prevents link prefetchers / email scanners from triggering unsubscribes.
