@@ -10,3 +10,4 @@ dist/
 extension/node_modules/
 extension/build/
 extension/*.zip
+insights-report.html
