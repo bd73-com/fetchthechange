@@ -59,7 +59,7 @@ describe("useAuth", () => {
     expect(result.current.user).toBeNull();
   });
 
-  it("throws on unexpected server errors", async () => {
+  it("exposes isError and error on server errors", async () => {
     server.use(
       http.get("/api/auth/user", () =>
         HttpResponse.json({ message: "Internal error" }, { status: 500 })
@@ -75,6 +75,10 @@ describe("useAuth", () => {
     // On 500, fetchUser throws so user remains undefined (not null)
     expect(result.current.user).toBeUndefined();
     expect(result.current.isAuthenticated).toBe(false);
+    // Callers can now distinguish auth failure from network error
+    expect(result.current.isError).toBe(true);
+    expect(result.current.error).toBeDefined();
+    expect(result.current.error?.message).toContain("500");
   });
 
   it("exposes logout function", async () => {

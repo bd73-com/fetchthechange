@@ -111,6 +111,28 @@ describe("useCreateTag", () => {
     expect(capturedBody).toMatchObject({ name: "New", colour: "green" });
   });
 
+  it("handles non-JSON error responses gracefully", async () => {
+    server.use(
+      http.post(api.tags.create.path, () =>
+        new HttpResponse("<html>502 Bad Gateway</html>", {
+          status: 502,
+          headers: { "Content-Type": "text/html" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useCreateTag(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ name: "Test", colour: "red" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Failed to create tag");
+  });
+
   it("surfaces creation errors", async () => {
     server.use(
       http.post(api.tags.create.path, () =>
@@ -158,6 +180,28 @@ describe("useUpdateTag", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(patchedId).toBe("1");
     expect(capturedBody).toMatchObject({ name: "Updated" });
+  });
+
+  it("handles non-JSON error responses gracefully", async () => {
+    server.use(
+      http.patch(api.tags.update.path, () =>
+        new HttpResponse("<html>503 Service Unavailable</html>", {
+          status: 503,
+          headers: { "Content-Type": "text/html" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useUpdateTag(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ id: 1, name: "Updated" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Failed to update tag");
   });
 
   it("surfaces update errors", async () => {
@@ -244,6 +288,28 @@ describe("useSetMonitorTags", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(capturedBody).toMatchObject({ tagIds: [1, 2] });
+  });
+
+  it("handles non-JSON error responses gracefully", async () => {
+    server.use(
+      http.put(api.monitors.setTags.path, () =>
+        new HttpResponse("<html>502 Bad Gateway</html>", {
+          status: 502,
+          headers: { "Content-Type": "text/html" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useSetMonitorTags(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ monitorId: 1, tagIds: [1] });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Failed to update tags");
   });
 
   it("surfaces tag assignment errors", async () => {
