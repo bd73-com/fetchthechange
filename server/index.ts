@@ -254,9 +254,15 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         }
       }
     }
-    console.error("[CRITICAL] Scheduler failed to start after all retries — monitoring is disabled");
-    await ErrorLogger.error("scheduler", "Scheduler failed to start after all retries — monitoring is disabled", null, { maxRetries });
-  })();
+    console.error("[CRITICAL] Scheduler failed to start after all retries — monitoring is disabled. Exiting so the platform restarts the process.");
+    try {
+      await ErrorLogger.error("scheduler", "Scheduler failed to start after all retries — monitoring is disabled", null, { maxRetries });
+    } catch { /* DB may be down — already logged to stderr */ }
+    process.exit(1);
+  })().catch((err) => {
+    console.error("[CRITICAL] Scheduler IIFE unhandled error:", err);
+    process.exit(1);
+  });
 
   // Start Stripe initialization in the background AFTER registerRoutes()
   // completes — the ensure* migrations release their DB connections first,
