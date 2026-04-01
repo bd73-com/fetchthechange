@@ -152,21 +152,8 @@ export async function registerRoutes(
   // Scheduler startup is deferred to index.ts (after registerRoutes completes)
   // to avoid DB pool exhaustion during migrations.
 
-  // Bootstrap welcome campaign: one-time send for early adopters, then schedule takes over
-  if (campaignConfigsReady) {
-    (async () => {
-      try {
-        const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
-        await bootstrapWelcomeCampaign();
-      } catch (err) {
-        console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
-        await ErrorLogger.error("scheduler", "Welcome campaign bootstrap failed",
-          err instanceof Error ? err : null,
-          { errorMessage: err instanceof Error ? err.message : String(err) }
-        ).catch(() => {});
-      }
-    })();
-  }
+  // Welcome campaign bootstrap is deferred to index.ts (after registerRoutes completes)
+  // to avoid DB pool exhaustion during cold starts.
 
   // Debug Browserless Endpoint (admin-only, SSRF-validated)
   app.post("/api/debug/browserless", isAuthenticated, async (req: any, res) => {

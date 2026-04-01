@@ -232,6 +232,29 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   // Register API Routes (runs ensure* migrations that need DB connections)
   await registerRoutes(httpServer, app);
 
+  // Bootstrap welcome campaign AFTER registerRoutes() completes —
+  // sequenced before scheduler/Stripe to avoid DB pool exhaustion on cold starts.
+  // The campaign_configs table is guaranteed to exist (ensured in registerRoutes).
+  // If it somehow failed, the try/catch below handles the error gracefully.
+  const BOOTSTRAP_TIMEOUT_MS = 15_000;
+  try {
+    const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
+    let timer: ReturnType<typeof setTimeout>;
+    await Promise.race([
+      bootstrapWelcomeCampaign(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Welcome campaign bootstrap timed out")), BOOTSTRAP_TIMEOUT_MS);
+      }),
+    ]).finally(() => clearTimeout(timer!));
+  } catch (err) {
+    const { ErrorLogger } = await import("./services/logger");
+    console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
+    await ErrorLogger.error("scheduler", "Welcome campaign bootstrap failed",
+      err instanceof Error ? err : null,
+      { errorMessage: err instanceof Error ? err.message : String(err) }
+    ).catch(() => {});
+  }
+
   // Start scheduler in the background AFTER registerRoutes() completes —
   // the ensure* migrations release their DB connections first, preventing
   // pool exhaustion that causes connection timeouts.

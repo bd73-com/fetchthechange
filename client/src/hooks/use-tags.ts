@@ -29,7 +29,7 @@ export function useCreateTag() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to create tag");
       }
       return await res.json();
@@ -60,7 +60,7 @@ export function useUpdateTag() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to update tag");
       }
       return await res.json();
@@ -120,7 +120,7 @@ export function useSetMonitorTags() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to update tags");
       }
       return await res.json();
