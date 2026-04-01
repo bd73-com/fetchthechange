@@ -280,6 +280,69 @@ describe("useUpdateMonitor", () => {
     expect(patchedId).toBe("1");
     expect(capturedBody).toMatchObject({ name: "Updated" });
   });
+
+  it("handles non-JSON error responses gracefully", async () => {
+    server.use(
+      http.patch(api.monitors.update.path, () =>
+        new HttpResponse("<html>502 Bad Gateway</html>", {
+          status: 502,
+          headers: { "Content-Type": "text/html" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useUpdateMonitor(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ id: 1, name: "Updated" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Failed to update monitor");
+  });
+
+  it("surfaces server error messages from JSON error responses", async () => {
+    server.use(
+      http.patch(api.monitors.update.path, () =>
+        HttpResponse.json({ message: "Monitor not found" }, { status: 404 })
+      )
+    );
+
+    const { result } = renderHook(() => useUpdateMonitor(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ id: 999, name: "Updated" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Monitor not found");
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.patch(api.monitors.update.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useUpdateMonitor(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ id: 1, name: "Updated" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
 });
 
 describe("useDeleteMonitor", () => {
@@ -406,6 +469,50 @@ describe("useCheckMonitorSilent", () => {
       currentValue: "$100",
     });
   });
+
+  it("handles non-JSON error responses gracefully", async () => {
+    server.use(
+      http.post(api.monitors.check.path, () =>
+        new HttpResponse("<html>502 Bad Gateway</html>", {
+          status: 502,
+          headers: { "Content-Type": "text/html" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useCheckMonitorSilent(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate(1);
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Failed to check monitor");
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.post(api.monitors.check.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useCheckMonitorSilent(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate(1);
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
 });
 
 describe("useSuggestSelectors", () => {
@@ -441,6 +548,50 @@ describe("useSuggestSelectors", () => {
 });
 
 describe("useUpdateMonitorSilent", () => {
+  it("handles non-JSON error responses gracefully", async () => {
+    server.use(
+      http.patch(api.monitors.update.path, () =>
+        new HttpResponse("<html>502 Bad Gateway</html>", {
+          status: 502,
+          headers: { "Content-Type": "text/html" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useUpdateMonitorSilent(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ id: 1, selector: ".new-selector" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Failed to update monitor");
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.patch(api.monitors.update.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useUpdateMonitorSilent(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ id: 1, selector: ".new-selector" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("calls PATCH /api/monitors/:id silently", async () => {
     let patchedId: string | undefined;
 

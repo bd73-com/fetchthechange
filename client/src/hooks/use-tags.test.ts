@@ -133,6 +133,28 @@ describe("useCreateTag", () => {
     expect(result.current.error?.message).toBe("Failed to create tag");
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.post(api.tags.create.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useCreateTag(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ name: "Test", colour: "red" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("surfaces creation errors", async () => {
     server.use(
       http.post(api.tags.create.path, () =>
@@ -202,6 +224,28 @@ describe("useUpdateTag", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toBe("Failed to update tag");
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.patch(api.tags.update.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useUpdateTag(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ id: 1, name: "Updated" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
   });
 
   it("surfaces update errors", async () => {
@@ -310,6 +354,28 @@ describe("useSetMonitorTags", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toBe("Failed to update tags");
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.put(api.monitors.setTags.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useSetMonitorTags(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ monitorId: 1, tagIds: [1] });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
   });
 
   it("surfaces tag assignment errors", async () => {
