@@ -511,6 +511,53 @@ export function classifyOuterError(error: unknown): { userMessage: string; logCo
   return { userMessage: "Failed to fetch or parse the page. Verify the URL is accessible and the selector is correct.", logContext: "unclassified error" };
 }
 
+/** Permanent error patterns that should never trigger auto-retry.
+ * Includes sanitized messages from classifyHttpStatus for permanent HTTP errors
+ * (401, 403, 404, 410, other 4xx except 429 which is transient). */
+const PERMANENT_ERROR_RE = /ENOTFOUND|certificate|ssl|tls|SSRF blocked|Could not resolve|SSL\/TLS error|URL is not allowed|Access denied.*HTTP 40[13]|Page not found.*HTTP 404|Page no longer exists.*HTTP 410|rejected the request.*HTTP 4/i;
+
+/**
+ * Schedule a single auto-retry 35 minutes from now for transient scrape errors.
+ * Skips if the monitor was just paused, has a pending retry, the error is permanent,
+ * or the next normal check is imminent (within 45 minutes).
+ */
+async function maybeScheduleAutoRetry(
+  monitor: Monitor,
+  errorMessage: string,
+  wasPaused: boolean,
+): Promise<void> {
+  if (
+    !monitor.active ||
+    wasPaused ||
+    monitor.pendingRetryAt ||
+    PERMANENT_ERROR_RE.test(errorMessage)
+  ) {
+    return;
+  }
+
+  const frequencyMinutes = monitor.frequency === "hourly" ? 60 : 1440;
+  // Use Date.now() as the effective lastChecked since handleMonitorFailure
+  // already updated it in the DB — avoids using the stale in-memory value.
+  const minsUntilNormal = frequencyMinutes - 0; // just checked → full interval ahead
+  // More precisely: since we just failed, lastChecked was just set to now,
+  // so the next normal check is ~frequencyMinutes from now.
+
+  if (minsUntilNormal > 45) {
+    try {
+      const retryAt = new Date(Date.now() + 35 * 60 * 1000);
+      await db.update(monitors)
+        .set({ pendingRetryAt: retryAt })
+        .where(eq(monitors.id, monitor.id));
+      console.log(`[AutoRetry] Monitor ${monitor.id} — retry scheduled at ${retryAt.toISOString()}`);
+    } catch (err) {
+      console.error(`[AutoRetry] Failed to set pendingRetryAt for monitor ${monitor.id}:`,
+        err instanceof Error ? err.message : err);
+    }
+  } else {
+    console.log(`[AutoRetry] Monitor ${monitor.id} — skipped (next normal check in ${Math.round(minsUntilNormal)} min)`);
+  }
+}
+
 async function recordMetric(
   monitorId: number,
   stage: string,
@@ -1344,6 +1391,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           lastStatus: finalStatus,
           lastError: null,
           consecutiveFailures: 0,
+          pendingRetryAt: null,
         });
       } catch (dbError) {
         // Retry once after a short delay for transient DB errors.
@@ -1355,6 +1403,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             lastStatus: finalStatus,
             lastError: null,
             consecutiveFailures: 0,
+            pendingRetryAt: null,
           });
         } catch (retryError) {
           // Both attempts failed. Transient DB errors (connection drops) are
@@ -1459,10 +1508,17 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         error: null
       };
     } else {
+      let wasPaused = false;
       try {
-        await handleMonitorFailure(monitor, finalStatus, finalError!, browserlessInfraFailure);
+        const result = await handleMonitorFailure(monitor, finalStatus, finalError!, browserlessInfraFailure);
+        wasPaused = result.paused;
       } catch (failureErr) {
         console.error(`[Scraper] handleMonitorFailure threw for monitor ${monitor.id}:`, failureErr);
+      }
+
+      // Self-heal: schedule a single auto-retry for transient errors
+      if (finalStatus === "error") {
+        await maybeScheduleAutoRetry(monitor, finalError ?? "", wasPaused);
       }
 
       return {
@@ -1496,11 +1552,16 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       ).catch(() => {});
     }
 
+    let wasPaused = false;
     try {
-      await handleMonitorFailure(monitor, "error", userMessage, false);
+      const result = await handleMonitorFailure(monitor, "error", userMessage, false);
+      wasPaused = result.paused;
     } catch (failureErr) {
       console.error(`[Scraper] handleMonitorFailure threw in outer catch for monitor ${monitor.id}:`, failureErr);
     }
+
+    // Self-heal: schedule a single auto-retry for transient errors
+    await maybeScheduleAutoRetry(monitor, userMessage, wasPaused);
 
     return {
       changed: false,

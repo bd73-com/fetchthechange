@@ -27,6 +27,7 @@ export const monitors = pgTable("monitors", {
   pauseReason: text("pause_reason"),
   healthAlertSentAt: timestamp("health_alert_sent_at"),
   lastHealthyAt: timestamp("last_healthy_at"),
+  pendingRetryAt: timestamp("pending_retry_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -476,6 +477,7 @@ export const insertMonitorSchema = createInsertSchema(monitors).omit({
   pauseReason: true,
   healthAlertSentAt: true,
   lastHealthyAt: true,
+  pendingRetryAt: true,
   createdAt: true
 });
 

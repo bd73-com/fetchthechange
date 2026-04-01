@@ -10,7 +10,8 @@ import { ensureMonitorConditionsTable } from "./ensureTables";
 import { processAutomatedCampaigns } from "./automatedCampaigns";
 import { isTransientDbError } from "../utils/dbErrors";
 import { db } from "../db";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { monitors } from "@shared/schema";
 
 // Keep below DB pool max (3, see db.ts) to leave headroom for cron jobs and
 // API requests. Browser POOL_MAX is 1 (browserPool.ts), so the second
@@ -110,9 +111,17 @@ async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]): P
     console.debug(`[Scheduler] Concurrency limit reached, deferring monitor ${monitor.id}`);
     return false;
   }
+
+  const hadPendingRetry = !!(
+    monitor.pendingRetryAt && new Date(monitor.pendingRetryAt) <= new Date()
+  );
+
   activeChecks++;
   try {
     await checkMonitor(monitor);
+    if (hadPendingRetry) {
+      console.log(`[AutoRetry] Monitor ${monitor.id} — retry completed`);
+    }
     return true;
   } catch (error) {
     await ErrorLogger.error("scheduler", `"${monitor.name}" — scheduled check failed. This is usually a temporary issue. If it persists, verify the URL is still valid and the selector matches the page.`, error instanceof Error ? error : null, {
@@ -124,6 +133,16 @@ async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]): P
     return true;
   } finally {
     activeChecks--;
+    if (hadPendingRetry) {
+      try {
+        await db.update(monitors)
+          .set({ pendingRetryAt: null })
+          .where(eq(monitors.id, monitor.id));
+      } catch (err: unknown) {
+        console.error(`[AutoRetry] Failed to clear pendingRetryAt for monitor ${monitor.id}:`,
+          err instanceof Error ? err.message : err);
+      }
+    }
   }
 }
 
@@ -216,6 +235,11 @@ export async function startScheduler() {
             } else if (!monitor.lastChecked) {
               shouldCheck = true;
             }
+          }
+
+          // Auto-retry: fire if pendingRetryAt window has elapsed
+          if (!shouldCheck && monitor.pendingRetryAt && new Date(monitor.pendingRetryAt) <= now) {
+            shouldCheck = true;
           }
 
           if (shouldCheck) {

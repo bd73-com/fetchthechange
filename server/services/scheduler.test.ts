@@ -8,6 +8,7 @@ const {
   mockGetAllActiveMonitors,
   mockCleanupPollutedValues,
   mockDbExecute,
+  mockDbUpdateSet,
   cronCallbacks,
   mockMonitorsNeedingRetry,
   mockDeliverWebhook,
@@ -16,6 +17,7 @@ const {
   mockGetAllActiveMonitors: vi.fn().mockResolvedValue([]),
   mockCleanupPollutedValues: vi.fn().mockResolvedValue(undefined),
   mockDbExecute: vi.fn().mockResolvedValue({ rowCount: 0 }),
+  mockDbUpdateSet: vi.fn(),
   cronCallbacks: {} as Record<string, Array<() => Promise<void>>>,
   mockMonitorsNeedingRetry: new Set<number>(),
   mockDeliverWebhook: vi.fn().mockResolvedValue({ success: true, statusCode: 200 }),
@@ -60,6 +62,14 @@ vi.mock("./logger", () => ({
 vi.mock("../db", () => ({
   db: {
     execute: (...args: any[]) => mockDbExecute(...args),
+    update: vi.fn().mockReturnValue({
+      set: (...args: any[]) => {
+        mockDbUpdateSet(...args);
+        const whereResult = Promise.resolve();
+        const whereFn = vi.fn().mockReturnValue(whereResult);
+        return { where: whereFn };
+      },
+    }),
   },
 }));
 
@@ -163,6 +173,7 @@ function makeMonitor(overrides: Partial<Monitor> = {}): Monitor {
     pauseReason: null,
     healthAlertSentAt: null,
     lastHealthyAt: null,
+    pendingRetryAt: null,
     createdAt: new Date(),
     ...overrides,
   };
@@ -398,6 +409,75 @@ describe("startScheduler", () => {
     // Clean up: resolve the hanging check and flush microtask so .finally() decrements activeChecks
     resolver!();
     await Promise.resolve();
+  });
+
+  // -----------------------------------------------------------------------
+  // auto-retry scheduler pickup (pendingRetryAt)
+  // -----------------------------------------------------------------------
+
+  it("triggers check for monitor with pendingRetryAt <= now", async () => {
+    const monitor = makeMonitor({
+      frequency: "hourly",
+      lastChecked: new Date(Date.now() - 30 * 60 * 1000), // 30 min ago — not normally due
+      pendingRetryAt: new Date(Date.now() - 1000), // 1 second in the past
+    });
+    mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
+
+    await startScheduler();
+    await runCron("* * * * *");
+    await vi.advanceTimersByTimeAsync(31000);
+
+    expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);
+  });
+
+  it("does NOT trigger check for monitor with pendingRetryAt in the future", async () => {
+    const monitor = makeMonitor({
+      frequency: "hourly",
+      lastChecked: new Date(Date.now() - 30 * 60 * 1000), // 30 min ago — not normally due
+      pendingRetryAt: new Date(Date.now() + 30 * 60 * 1000), // 30 min in the future
+    });
+    mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
+
+    await startScheduler();
+    await runCron("* * * * *");
+    await vi.advanceTimersByTimeAsync(31000);
+
+    expect(mockCheckMonitor).not.toHaveBeenCalled();
+  });
+
+  it("clears pendingRetryAt after retry fires (success path)", async () => {
+    const monitor = makeMonitor({
+      frequency: "hourly",
+      lastChecked: new Date(Date.now() - 30 * 60 * 1000),
+      pendingRetryAt: new Date(Date.now() - 1000),
+    });
+    mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
+
+    await startScheduler();
+    await runCron("* * * * *");
+    await vi.advanceTimersByTimeAsync(31000);
+
+    expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);
+    // The finally block should clear pendingRetryAt
+    expect(mockDbUpdateSet).toHaveBeenCalledWith({ pendingRetryAt: null });
+  });
+
+  it("clears pendingRetryAt after retry fires (failure path)", async () => {
+    mockCheckMonitor.mockRejectedValueOnce(new Error("Scrape failed"));
+    const monitor = makeMonitor({
+      frequency: "hourly",
+      lastChecked: new Date(Date.now() - 30 * 60 * 1000),
+      pendingRetryAt: new Date(Date.now() - 1000),
+    });
+    mockGetAllActiveMonitors.mockResolvedValueOnce([monitor]);
+
+    await startScheduler();
+    await runCron("* * * * *");
+    await vi.advanceTimersByTimeAsync(31000);
+
+    expect(mockCheckMonitor).toHaveBeenCalledWith(monitor);
+    // Even on failure, pendingRetryAt should be cleared
+    expect(mockDbUpdateSet).toHaveBeenCalledWith({ pendingRetryAt: null });
   });
 });
 
@@ -1290,3 +1370,4 @@ describe("webhook retry cumulative backoff", () => {
     }));
   });
 });
+

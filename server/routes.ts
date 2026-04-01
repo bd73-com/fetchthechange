@@ -20,7 +20,7 @@ import { notificationTablesExist, channelTablesExist } from "./services/notifica
 import { seedDefaultEmailChannel } from "./services/notification";
 import { BrowserlessUsageTracker, getMonthResetDate } from "./services/browserlessTracker";
 import { ResendUsageTracker, getResendResetDate } from "./services/resendTracker";
-import { errorLogs, monitorMetrics } from "@shared/schema";
+import { errorLogs, monitorMetrics, monitors } from "@shared/schema";
 import {
   generalRateLimiter,
   createMonitorRateLimiter,
@@ -249,6 +249,7 @@ export async function registerRoutes(
         pauseReason: null,
         healthAlertSentAt: null,
         lastHealthyAt: null,
+        pendingRetryAt: null,
         createdAt: new Date()
       };
 
@@ -590,6 +591,16 @@ export async function registerRoutes(
       const existing = await storage.getMonitor(id);
       if (!existing) return res.status(404).json({ message: "Not found" });
       if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
+
+      // Clear any pending auto-retry before the manual check to prevent
+      // a narrow race where the scheduler cron fires a duplicate check.
+      await db.update(monitors)
+        .set({ pendingRetryAt: null })
+        .where(eq(monitors.id, id))
+        .catch((err: unknown) => {
+          console.error(`[AutoRetry] Failed to clear pendingRetryAt for monitor ${id}:`,
+            err instanceof Error ? err.message : err);
+        });
 
       const result = await checkMonitor(existing);
       res.json(result);
