@@ -36,7 +36,7 @@ import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encry
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable } from "./services/ensureTables";
+import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn } from "./services/ensureTables";
 
 
 // ------------------------------------------------------------------
@@ -74,6 +74,10 @@ export async function registerRoutes(
   const healthColumnsReady = await ensureMonitorHealthColumns();
   if (!healthColumnsReady) {
     console.error("CRITICAL: Monitor health columns missing — health alerts and recovery emails will be disabled");
+  }
+  const pendingRetryReady = await ensureMonitorPendingRetryColumn();
+  if (!pendingRetryReady) {
+    console.error("CRITICAL: monitors.pending_retry_at column missing — auto-retry scheduling will fail");
   }
   await ensureErrorLogColumns();
   const apiKeysReady = await ensureApiKeysTable();

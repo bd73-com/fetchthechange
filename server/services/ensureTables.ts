@@ -186,6 +186,21 @@ export async function ensureAutomatedCampaignConfigsTable(): Promise<boolean> {
 }
 
 /**
+ * Ensures the monitors.pending_retry_at column exists (added in PR #302).
+ * Without this, db.select().from(monitors) fails when the schema
+ * references columns the database doesn't have yet.
+ */
+export async function ensureMonitorPendingRetryColumn(): Promise<boolean> {
+  try {
+    await db.execute(sql`ALTER TABLE monitors ADD COLUMN IF NOT EXISTS pending_retry_at TIMESTAMP`);
+    return true;
+  } catch (e) {
+    console.error("Could not ensure monitors.pending_retry_at column:", e);
+    return false;
+  }
+}
+
+/**
  * Ensures tags and monitor_tags tables exist (added in PR #86).
  * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
  */

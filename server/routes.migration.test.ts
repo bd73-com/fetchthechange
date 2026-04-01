@@ -401,10 +401,11 @@ describe("error_logs dedup column migration at startup", () => {
   it("logs error and continues when notification channel table creation fails", async () => {
     vi.clearAllMocks();
     const channelError = new Error("permission denied for schema public");
-    // monitor health ALTERs succeed (2), error_logs ALTERs succeed (3), api_keys succeed (2), then channel tables fail
+    // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs ALTERs succeed (3), api_keys succeed (2), then channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitors pending_retry_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 1
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 2
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 3
@@ -440,10 +441,11 @@ describe("error_logs dedup column migration at startup", () => {
   it("registers channel routes even when notification channel tables fail to create", async () => {
     vi.clearAllMocks();
     const channelError = new Error("connection timeout");
-    // monitor health ALTERs succeed (2), error_logs and api_keys succeed, channel tables fail
+    // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs and api_keys succeed, channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitors pending_retry_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 1
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 2
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 3
