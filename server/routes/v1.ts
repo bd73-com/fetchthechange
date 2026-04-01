@@ -109,6 +109,13 @@ router.post("/monitors", async (req: any, res) => {
       userId: req.apiUser.id,
     } as any);
 
+    // Seed default email channel (mirrors server/routes.ts monitor creation)
+    try {
+      await storage.upsertMonitorChannel(monitor.id, "email", true, {});
+    } catch (err) {
+      console.warn(`[notification] Failed to seed default email channel for monitor ${monitor.id}:`, err instanceof Error ? err.message : err);
+    }
+
     res.status(201).json(formatMonitor(monitor));
   } catch (err) {
     if (err instanceof z.ZodError) {
