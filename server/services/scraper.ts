@@ -1344,6 +1344,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           lastStatus: finalStatus,
           lastError: null,
           consecutiveFailures: 0,
+          pendingRetryAt: null,
         });
       } catch (dbError) {
         // Retry once after a short delay for transient DB errors.
@@ -1355,6 +1356,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             lastStatus: finalStatus,
             lastError: null,
             consecutiveFailures: 0,
+            pendingRetryAt: null,
           });
         } catch (retryError) {
           // Both attempts failed. Transient DB errors (connection drops) are
@@ -1465,6 +1467,36 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         console.error(`[Scraper] handleMonitorFailure threw for monitor ${monitor.id}:`, failureErr);
       }
 
+      // Self-heal: schedule a single auto-retry for transient errors
+      // Check both raw error patterns and sanitized user-facing messages
+      if (
+        finalStatus === "error" &&
+        monitor.active &&
+        !monitor.pendingRetryAt &&
+        !/ENOTFOUND|certificate|ssl|tls|SSRF blocked|Could not resolve|SSL\/TLS error|URL is not allowed/i.test(finalError ?? "")
+      ) {
+        const frequencyMinutes = monitor.frequency === "hourly" ? 60 : 1440;
+        const minsUntilNormal =
+          ((monitor.lastChecked ? new Date(monitor.lastChecked).getTime() : 0)
+            + frequencyMinutes * 60 * 1000
+            - Date.now()) / (60 * 1000);
+
+        if (minsUntilNormal > 45) {
+          try {
+            const retryAt = new Date(Date.now() + 35 * 60 * 1000);
+            await db.update(monitors)
+              .set({ pendingRetryAt: retryAt })
+              .where(eq(monitors.id, monitor.id));
+            console.log(`[AutoRetry] Monitor ${monitor.id} — retry scheduled at ${retryAt.toISOString()}`);
+          } catch (err) {
+            console.error(`[AutoRetry] Failed to set pendingRetryAt for monitor ${monitor.id}:`,
+              err instanceof Error ? err.message : err);
+          }
+        } else {
+          console.log(`[AutoRetry] Monitor ${monitor.id} — skipped (next normal check in ${Math.round(minsUntilNormal)} min)`);
+        }
+      }
+
       return {
         changed: false,
         currentValue: oldValue,
@@ -1500,6 +1532,35 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       await handleMonitorFailure(monitor, "error", userMessage, false);
     } catch (failureErr) {
       console.error(`[Scraper] handleMonitorFailure threw in outer catch for monitor ${monitor.id}:`, failureErr);
+    }
+
+    // Self-heal: schedule a single auto-retry for transient errors
+    // Check both raw error patterns and sanitized user-facing messages
+    if (
+      monitor.active &&
+      !monitor.pendingRetryAt &&
+      !/ENOTFOUND|certificate|ssl|tls|SSRF blocked|Could not resolve|SSL\/TLS error|URL is not allowed/i.test(userMessage)
+    ) {
+      const frequencyMinutes = monitor.frequency === "hourly" ? 60 : 1440;
+      const minsUntilNormal =
+        ((monitor.lastChecked ? new Date(monitor.lastChecked).getTime() : 0)
+          + frequencyMinutes * 60 * 1000
+          - Date.now()) / (60 * 1000);
+
+      if (minsUntilNormal > 45) {
+        try {
+          const retryAt = new Date(Date.now() + 35 * 60 * 1000);
+          await db.update(monitors)
+            .set({ pendingRetryAt: retryAt })
+            .where(eq(monitors.id, monitor.id));
+          console.log(`[AutoRetry] Monitor ${monitor.id} — retry scheduled at ${retryAt.toISOString()}`);
+        } catch (err) {
+          console.error(`[AutoRetry] Failed to set pendingRetryAt for monitor ${monitor.id}:`,
+            err instanceof Error ? err.message : err);
+        }
+      } else {
+        console.log(`[AutoRetry] Monitor ${monitor.id} — skipped (next normal check in ${Math.round(minsUntilNormal)} min)`);
+      }
     }
 
     return {

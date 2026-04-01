@@ -161,6 +161,7 @@ function makeMonitor(overrides: Partial<Monitor> = {}): Monitor {
     pauseReason: null,
     healthAlertSentAt: null,
     lastHealthyAt: null,
+    pendingRetryAt: null,
     createdAt: new Date(),
     ...overrides,
   };
@@ -6278,5 +6279,206 @@ describe("updateLastHealthyAt on success", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// auto-retry scheduling (pendingRetryAt)
+// ---------------------------------------------------------------------------
+describe("auto-retry scheduling (pendingRetryAt)", () => {
+  const mockStorage = storage as unknown as {
+    updateMonitor: ReturnType<typeof vi.fn>;
+    addMonitorChange: ReturnType<typeof vi.fn>;
+    getUser: ReturnType<typeof vi.fn>;
+  };
+  const mockDb = db as unknown as {
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+
+  // Track calls to db.update().set() so we can inspect pendingRetryAt writes
+  let dbUpdateSetCalls: any[];
+
+  function mockDbUpdateChain(returnedFailureCount: number, returnedActive = true) {
+    dbUpdateSetCalls = [];
+    const returningFn = vi.fn().mockResolvedValue([{
+      consecutiveFailures: returnedFailureCount,
+      active: returnedActive,
+    }]);
+    const whereFn = vi.fn().mockReturnValue({ returning: returningFn });
+    const setFn = vi.fn().mockImplementation((args: any) => {
+      dbUpdateSetCalls.push(args);
+      return { where: whereFn, returning: returningFn };
+    });
+    mockDb.update.mockReturnValue({ set: setFn });
+    return { setFn, whereFn, returningFn };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    delete process.env.BROWSERLESS_TOKEN;
+    mockDbUpdateChain(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function runWithTimers(monitor: Monitor) {
+    const promise = checkMonitor(monitor);
+    await vi.advanceTimersByTimeAsync(3000);
+    return promise;
+  }
+
+  it("sets pendingRetryAt ~35 min after a transient 'error' result", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failure"));
+
+    // daily monitor checked 2 hours ago — next normal check is ~22h away (> 45 min)
+    const monitor = makeMonitor({
+      frequency: "daily",
+      lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    // Should have set pendingRetryAt via db.update
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt !== undefined && c.pendingRetryAt !== null);
+    expect(retrySetCall).toBeDefined();
+    const retryAt = retrySetCall.pendingRetryAt as Date;
+    // Should be ~35 minutes from now
+    const diffMinutes = (retryAt.getTime() - Date.now()) / (60 * 1000);
+    expect(diffMinutes).toBeGreaterThan(34);
+    expect(diffMinutes).toBeLessThan(36);
+  });
+
+  it("does NOT set pendingRetryAt for 'blocked' status", async () => {
+    const html = `<html><head><title>Access Denied</title></head><body>Forbidden</body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(html, { status: 200 })
+    );
+
+    const monitor = makeMonitor({
+      frequency: "daily",
+      lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("blocked");
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt instanceof Date);
+    expect(retrySetCall).toBeUndefined();
+  });
+
+  it("does NOT set pendingRetryAt for 'selector_missing' status", async () => {
+    const html = `<html><body><p>No match</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(html, { status: 200 }))
+      .mockResolvedValueOnce(new Response(html, { status: 200 }));
+
+    const monitor = makeMonitor({
+      selector: ".missing",
+      frequency: "daily",
+      lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("selector_missing");
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt instanceof Date);
+    expect(retrySetCall).toBeUndefined();
+  });
+
+  it("does NOT set pendingRetryAt when error contains ENOTFOUND", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("getaddrinfo ENOTFOUND example.invalid"));
+
+    const monitor = makeMonitor({
+      frequency: "daily",
+      lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt instanceof Date);
+    expect(retrySetCall).toBeUndefined();
+  });
+
+  it("does NOT set pendingRetryAt when error contains 'certificate'", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("certificate has expired"));
+
+    const monitor = makeMonitor({
+      frequency: "daily",
+      lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt instanceof Date);
+    expect(retrySetCall).toBeUndefined();
+  });
+
+  it("does NOT set pendingRetryAt when monitor.active is false", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failure"));
+
+    const monitor = makeMonitor({
+      active: false,
+      frequency: "daily",
+      lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt instanceof Date);
+    expect(retrySetCall).toBeUndefined();
+  });
+
+  it("does NOT set pendingRetryAt when pendingRetryAt is already set on monitor", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failure"));
+
+    const monitor = makeMonitor({
+      frequency: "daily",
+      lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000),
+      pendingRetryAt: new Date(Date.now() + 30 * 60 * 1000), // already set
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt instanceof Date);
+    expect(retrySetCall).toBeUndefined();
+  });
+
+  it("does NOT set pendingRetryAt when next normal check is within 45 minutes", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failure"));
+
+    // hourly monitor checked 30 minutes ago — next normal check in ~30 min (< 45 min)
+    const monitor = makeMonitor({
+      frequency: "hourly",
+      lastChecked: new Date(Date.now() - 30 * 60 * 1000),
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt instanceof Date);
+    expect(retrySetCall).toBeUndefined();
+  });
+
+  it("clears pendingRetryAt (null) on successful check via storage.updateMonitor", async () => {
+    const html = `<html><body><span class="price">$5.00</span></body></html>`;
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(html, { status: 200 })
+    );
+
+    const monitor = makeMonitor({
+      currentValue: "$5.00",
+      pendingRetryAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+    await runWithTimers(monitor);
+
+    expect(mockStorage.updateMonitor).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        pendingRetryAt: null,
+      })
+    );
   });
 });

@@ -19,7 +19,7 @@ import { ErrorLogger } from "./services/logger";
 import { notificationTablesExist, channelTablesExist } from "./services/notificationReady";
 import { BrowserlessUsageTracker, getMonthResetDate } from "./services/browserlessTracker";
 import { ResendUsageTracker, getResendResetDate } from "./services/resendTracker";
-import { errorLogs, monitorMetrics } from "@shared/schema";
+import { errorLogs, monitorMetrics, monitors } from "@shared/schema";
 import {
   generalRateLimiter,
   createMonitorRateLimiter,
@@ -248,6 +248,7 @@ export async function registerRoutes(
         pauseReason: null,
         healthAlertSentAt: null,
         lastHealthyAt: null,
+        pendingRetryAt: null,
         createdAt: new Date()
       };
 
@@ -586,6 +587,13 @@ export async function registerRoutes(
       if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
       const result = await checkMonitor(existing);
+
+      // Clear any pending auto-retry since the user triggered a manual check
+      await db.update(monitors)
+        .set({ pendingRetryAt: null })
+        .where(eq(monitors.id, id))
+        .catch(() => {}); // best-effort
+
       res.json(result);
     } catch (error: any) {
       console.error("[Check Monitor] Error:", error.message);
