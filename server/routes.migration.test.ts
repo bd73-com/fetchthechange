@@ -191,6 +191,7 @@ describe("error_logs dedup column migration at startup", () => {
     expect(callStrings.some((s: string) => s.includes("notification_queue") && s.includes("attempts"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("notification_queue") && s.includes("permanently_failed"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("automated_campaign_configs"))).toBe(true);
+    expect(callStrings.some((s: string) => s.includes("pending_retry_at"))).toBe(true);
   });
 
   it("still registers all route groups when migration succeeds", async () => {
