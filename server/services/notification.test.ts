@@ -1703,3 +1703,98 @@ describe("missing email channel row observability", () => {
     );
   });
 });
+
+describe("digest email delivery log", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+  });
+
+  it("writes a success delivery log entry for digest email via channel rows", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "email", enabled: true, config: {}, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockSendDigestEmail.mockResolvedValueOnce({ success: true });
+
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 }), makeChange({ id: 11 })]);
+
+    await processDigestBatch(makeMonitor(), makePrefs({ digestMode: true }));
+
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        monitorId: 1,
+        channel: "email",
+        status: "success",
+        response: expect.objectContaining({ digestCount: 2 }),
+      })
+    );
+  });
+
+  it("writes a failure delivery log entry for digest email via channel rows", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "email", enabled: true, config: {}, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockSendDigestEmail.mockResolvedValueOnce({ success: false, error: "rate limited" });
+
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processDigestBatch(makeMonitor(), makePrefs({ digestMode: true }));
+
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        monitorId: 1,
+        channel: "email",
+        status: "failed",
+        deliveredAt: null,
+        response: expect.objectContaining({ error: "rate limited", digestCount: 1 }),
+      })
+    );
+  });
+
+  it("writes a delivery log entry for digest email via backwards-compat path (no channel rows)", async () => {
+    mockGetMonitorChannels.mockResolvedValue([]);
+    mockSendDigestEmail.mockResolvedValueOnce({ success: true });
+
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    await processDigestBatch(makeMonitor({ emailEnabled: true }), makePrefs({ digestMode: true }));
+
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        monitorId: 1,
+        changeId: 10,
+        channel: "email",
+        status: "success",
+        response: expect.objectContaining({ digestCount: 1 }),
+      })
+    );
+  });
+
+  it("backwards-compat digest email delivery log is resilient to addDeliveryLog failure", async () => {
+    mockGetMonitorChannels.mockResolvedValue([]);
+    mockSendDigestEmail.mockResolvedValueOnce({ success: true });
+    mockAddDeliveryLog.mockRejectedValueOnce(new Error("DB write failed"));
+
+    const entries = [
+      { id: 1, monitorId: 1, changeId: 10, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false },
+    ];
+    mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
+    mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
+
+    // Should not throw even if delivery log write fails
+    const result = await processDigestBatch(makeMonitor({ emailEnabled: true }), makePrefs({ digestMode: true }));
+    expect(result).toEqual({ success: true });
+  });
+});
