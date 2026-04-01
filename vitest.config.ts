@@ -8,6 +8,8 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "client", "src"),
       "@shared": path.resolve(__dirname, "shared"),
+      "msw/node": path.resolve(__dirname, "node_modules/msw/lib/node/index.mjs"),
+      "msw": path.resolve(__dirname, "node_modules/msw/lib/core/index.mjs"),
     },
   },
   test: {
