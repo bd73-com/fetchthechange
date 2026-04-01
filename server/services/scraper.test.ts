@@ -6432,6 +6432,37 @@ describe("auto-retry scheduling (pendingRetryAt)", () => {
     expect(retrySetCall).toBeUndefined();
   });
 
+  it("does NOT set pendingRetryAt when SSRF validation blocks the URL", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("SSRF blocked: URL is not allowed"));
+
+    const monitor = makeMonitor({
+      frequency: "daily",
+      lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt instanceof Date);
+    expect(retrySetCall).toBeUndefined();
+  });
+
+  it("does NOT set pendingRetryAt for permanent HTTP 404 errors", async () => {
+    // Simulate a 404 response — the scraper classifies this as a permanent error
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("Not Found", { status: 404 })
+    );
+
+    const monitor = makeMonitor({
+      frequency: "daily",
+      lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt instanceof Date);
+    expect(retrySetCall).toBeUndefined();
+  });
+
   it("does NOT set pendingRetryAt when pendingRetryAt is already set on monitor", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failure"));
 

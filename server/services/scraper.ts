@@ -511,8 +511,10 @@ export function classifyOuterError(error: unknown): { userMessage: string; logCo
   return { userMessage: "Failed to fetch or parse the page. Verify the URL is accessible and the selector is correct.", logContext: "unclassified error" };
 }
 
-/** Permanent error patterns that should never trigger auto-retry. */
-const PERMANENT_ERROR_RE = /ENOTFOUND|certificate|ssl|tls|SSRF blocked|Could not resolve|SSL\/TLS error|URL is not allowed/i;
+/** Permanent error patterns that should never trigger auto-retry.
+ * Includes sanitized messages from classifyHttpStatus for permanent HTTP errors
+ * (401, 403, 404, 410, other 4xx except 429 which is transient). */
+const PERMANENT_ERROR_RE = /ENOTFOUND|certificate|ssl|tls|SSRF blocked|Could not resolve|SSL\/TLS error|URL is not allowed|Access denied.*HTTP 40[13]|Page not found.*HTTP 404|Page no longer exists.*HTTP 410|rejected the request.*HTTP 4/i;
 
 /**
  * Schedule a single auto-retry 35 minutes from now for transient scrape errors.
