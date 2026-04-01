@@ -58,7 +58,7 @@ export function useCreateMonitor() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({}));
         if (res.status === 429) {
           throw new Error(errorData.message || "Too many requests. Please try again later.");
         }
