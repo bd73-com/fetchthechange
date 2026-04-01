@@ -12,7 +12,7 @@
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
-import { createWrapper } from "./test-wrapper";
+import { createWrapper } from "../test/test-utils";
 import {
   useMonitors,
   useMonitor,
@@ -158,7 +158,7 @@ describe("useCreateMonitor", () => {
         name: "New monitor",
         url: "https://example.com",
         selector: "h1",
-      } as any);
+      });
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -187,7 +187,7 @@ describe("useCreateMonitor", () => {
         name: "New monitor",
         url: "https://example.com",
         selector: "h1",
-      } as any);
+      });
     });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
@@ -216,7 +216,7 @@ describe("useUpdateMonitor", () => {
     });
 
     act(() => {
-      result.current.mutate({ id: 1, name: "Updated" } as any);
+      result.current.mutate({ id: 1, name: "Updated" });
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -402,7 +402,7 @@ describe("useUpdateMonitorSilent", () => {
     });
 
     act(() => {
-      result.current.mutate({ id: 1, selector: ".new-selector" } as any);
+      result.current.mutate({ id: 1, selector: ".new-selector" });
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));

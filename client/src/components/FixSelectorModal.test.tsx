@@ -6,11 +6,11 @@
  *
  * @vitest-environment happy-dom
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "../test/server";
+import { renderWithProviders } from "../test/test-utils";
 import { FixSelectorModal } from "./FixSelectorModal";
 import type { Monitor } from "@shared/schema";
 
@@ -35,20 +35,6 @@ const mockMonitor: Monitor = {
   pendingRetryAt: null,
   createdAt: new Date("2024-01-01"),
 } as any;
-
-function renderWithProviders(ui: React.ReactElement) {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, gcTime: 0 },
-      mutations: { retry: false },
-    },
-  });
-  return render(ui, {
-    wrapper: ({ children }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    ),
-  });
-}
 
 beforeAll(() => server.listen());
 afterEach(() => server.resetHandlers());

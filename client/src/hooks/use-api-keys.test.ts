@@ -8,7 +8,7 @@
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
-import { createWrapper } from "./test-wrapper";
+import { createWrapper } from "../test/test-utils";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "./use-api-keys";
 
 const mockKeys = [
@@ -86,7 +86,7 @@ describe("useCreateApiKey", () => {
           id: 3,
           name: "New key",
           keyPrefix: "ftc_ghi",
-          key: "ftc_ghi_full_secret_key_here",
+          key: "test_fake_key_not_real_000000",
           createdAt: "2024-03-01T00:00:00.000Z",
         })
       )
@@ -103,7 +103,7 @@ describe("useCreateApiKey", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toMatchObject({
       keyPrefix: "ftc_ghi",
-      key: "ftc_ghi_full_secret_key_here",
+      key: "test_fake_key_not_real_000000",
     });
   });
 

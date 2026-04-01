@@ -31,5 +31,18 @@ export function renderWithProviders(
   return { ...render(ui, { wrapper: Wrapper, ...options }), queryClient };
 }
 
+/**
+ * Returns a wrapper component providing a fresh QueryClient for renderHook() calls.
+ * Use this instead of renderWithProviders when testing hooks directly.
+ */
+export function createWrapper() {
+  const queryClient = createTestQueryClient();
+  return function Wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+  };
+}
+
 export { default as userEvent } from "@testing-library/user-event";
 export * from "@testing-library/react";
