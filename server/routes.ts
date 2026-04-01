@@ -473,6 +473,17 @@ export async function registerRoutes(
         userId,
       } as any);
 
+      // Seed default email channel so the notification dispatcher always has an
+      // explicit channel row. Without this, adding a second channel (e.g. Slack)
+      // later would bypass the legacy emailEnabled fallback and silently skip email.
+      try {
+        await storage.upsertMonitorChannel(monitor.id, "email", true, {});
+      } catch (err) {
+        // Non-fatal — the legacy emailEnabled fallback will still work if no
+        // channel rows exist at all. Log so we can investigate if it persists.
+        console.warn(`[notification] Failed to seed default email channel for monitor ${monitor.id}:`, err instanceof Error ? err.message : err);
+      }
+
       // Run the first check asynchronously but capture a quick static validation
       // to return an early warning to the user if the selector is likely wrong.
       checkMonitor(monitor).catch(console.error);

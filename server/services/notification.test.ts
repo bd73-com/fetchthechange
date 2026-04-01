@@ -1589,3 +1589,117 @@ describe("delivery-log write failure does not convert successful sends to failur
     expect(mockIncrementQueueEntryAttempts).not.toHaveBeenCalled();
   });
 });
+
+describe("missing email channel row observability", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
+  });
+
+  it("logs a failed delivery entry when channels exist but email row is missing", async () => {
+    // Monitor has emailEnabled=true but only a Slack channel row — no email row
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 2, monitorId: 1, channel: "slack", enabled: true, config: { channelId: "C123", channelName: "general" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockGetSlackConnection.mockResolvedValue({ id: 1, userId: "user1", teamId: "T1", teamName: "Team", botToken: "enc", scope: "chat:write", createdAt: new Date(), updatedAt: new Date() });
+    mockSlackDeliver.mockResolvedValue({ success: true, slackTs: "ts1" });
+
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange();
+
+    await processChangeNotification(monitor, change, false);
+
+    // Email should NOT be attempted (no channel row)
+    expect(mockSendNotificationEmail).not.toHaveBeenCalled();
+
+    // But a failed delivery log entry should be written for observability
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        monitorId: 1,
+        channel: "email",
+        status: "failed",
+        response: expect.objectContaining({ error: expect.stringContaining("email channel row missing") }),
+      })
+    );
+
+    // Slack should still have been delivered
+    expect(mockSlackDeliver).toHaveBeenCalled();
+  });
+
+  it("does not log a missing-email entry when emailEnabled is false", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 2, monitorId: 1, channel: "slack", enabled: true, config: { channelId: "C123", channelName: "general" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockGetSlackConnection.mockResolvedValue({ id: 1, userId: "user1", teamId: "T1", teamName: "Team", botToken: "enc", scope: "chat:write", createdAt: new Date(), updatedAt: new Date() });
+    mockSlackDeliver.mockResolvedValue({ success: true, slackTs: "ts1" });
+
+    const monitor = makeMonitor({ emailEnabled: false });
+    const change = makeChange();
+
+    await processChangeNotification(monitor, change, false);
+
+    // No delivery log entry for email — emailEnabled is false, user doesn't want email
+    const emailLogCalls = mockAddDeliveryLog.mock.calls.filter(
+      (call: any[]) => call[0]?.channel === "email"
+    );
+    expect(emailLogCalls).toHaveLength(0);
+  });
+
+  it("does not log a missing-email entry when email channel row exists", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 1, monitorId: 1, channel: "email", enabled: true, config: {}, createdAt: new Date(), updatedAt: new Date() },
+      { id: 2, monitorId: 1, channel: "slack", enabled: true, config: { channelId: "C123", channelName: "general" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockGetSlackConnection.mockResolvedValue({ id: 1, userId: "user1", teamId: "T1", teamName: "Team", botToken: "enc", scope: "chat:write", createdAt: new Date(), updatedAt: new Date() });
+    mockSlackDeliver.mockResolvedValue({ success: true, slackTs: "ts1" });
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange();
+
+    await processChangeNotification(monitor, change, false);
+
+    // Email should be sent normally
+    expect(mockSendNotificationEmail).toHaveBeenCalled();
+
+    // Delivery log should have a success entry, not a "missing row" failure
+    const emailLogCalls = mockAddDeliveryLog.mock.calls.filter(
+      (call: any[]) => call[0]?.channel === "email"
+    );
+    expect(emailLogCalls).toHaveLength(1);
+    expect(emailLogCalls[0][0].status).toBe("success");
+  });
+
+  it("digest path logs a failed delivery entry when email row is missing", async () => {
+    mockGetMonitorChannels.mockResolvedValue([
+      { id: 2, monitorId: 1, channel: "slack", enabled: true, config: { channelId: "C123", channelName: "general" }, createdAt: new Date(), updatedAt: new Date() },
+    ]);
+    mockGetSlackConnection.mockResolvedValue({ id: 1, userId: "user1", teamId: "T1", teamName: "Team", botToken: "enc", scope: "chat:write", createdAt: new Date(), updatedAt: new Date() });
+    mockSlackDeliver.mockResolvedValue({ success: true, slackTs: "ts1" });
+
+    const monitor = makeMonitor({ emailEnabled: true });
+    const changes = [makeChange({ id: 1 }), makeChange({ id: 2 })];
+    const prefs = makePrefs({ digestMode: true, timezone: "UTC" });
+
+    mockGetPendingDigestEntries.mockResolvedValue([
+      { id: 1, monitorId: 1, changeId: 1, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false },
+      { id: 2, monitorId: 1, changeId: 2, reason: "digest", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date(), attempts: 0, permanentlyFailed: false },
+    ]);
+    mockGetMonitorChangesByIds.mockResolvedValue(changes);
+
+    await processDigestBatch(monitor, prefs);
+
+    // Email should NOT be attempted
+    expect(mockSendDigestEmail).not.toHaveBeenCalled();
+
+    // But a failed delivery log entry should be written
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "email",
+        status: "failed",
+        response: expect.objectContaining({ error: expect.stringContaining("email channel row missing") }),
+      })
+    );
+  });
+});

@@ -198,6 +198,22 @@ async function deliverToChannels(
     return result;
   }
 
+  // Observability: if email is expected (emailEnabled=true) but no email channel row exists,
+  // log a delivery entry so the gap is visible rather than silently skipped.
+  const hasEmailRow = channels.some((c) => c.channel === "email");
+  if (!hasEmailRow && monitor.emailEnabled) {
+    console.warn(`[notification] Email channel row missing for monitor ${monitor.id} — email skipped. Add an email channel row to enable delivery.`);
+    try {
+      await storage.addDeliveryLog({
+        monitorId: monitor.id,
+        changeId: change.id,
+        channel: "email",
+        status: "failed",
+        response: { error: "No email channel configured — email channel row missing from notification_channels" },
+      });
+    } catch { /* delivery log table may not exist yet */ }
+  }
+
   const enabledChannels = channels.filter((c) => c.enabled);
   const deliveries = enabledChannels.map(async (ch) => {
     try {
@@ -318,6 +334,22 @@ async function deliverDigestToChannels(
       result.email = await sendDigestEmail(monitor, changes, emailOverride);
     }
     return result;
+  }
+
+  // Observability: if email is expected (emailEnabled=true) but no email channel row exists,
+  // log a delivery entry so the gap is visible rather than silently skipped.
+  const hasEmailRow = channels.some((c) => c.channel === "email");
+  if (!hasEmailRow && monitor.emailEnabled && changes.length > 0) {
+    console.warn(`[notification] Email channel row missing for monitor ${monitor.id} — digest email skipped. Add an email channel row to enable delivery.`);
+    try {
+      await storage.addDeliveryLog({
+        monitorId: monitor.id,
+        changeId: changes[0].id,
+        channel: "email",
+        status: "failed",
+        response: { error: "No email channel configured — email channel row missing from notification_channels" },
+      });
+    } catch { /* delivery log table may not exist yet */ }
   }
 
   const enabledChannels = channels.filter((c) => c.enabled);
