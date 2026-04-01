@@ -14,11 +14,11 @@ describe("useIsMobile", () => {
   beforeEach(() => {
     listeners = [];
 
-    // Mock matchMedia
+    // Mock matchMedia — matches should reflect innerWidth for consistency
     Object.defineProperty(window, "matchMedia", {
       writable: true,
       value: vi.fn().mockImplementation((query: string) => ({
-        matches: false,
+        matches: window.innerWidth < 768,
         media: query,
         onchange: null,
         addListener: vi.fn(),

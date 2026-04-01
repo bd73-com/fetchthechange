@@ -73,6 +73,17 @@ describe("useAuth", () => {
     // The hook uses retry: false, so it should error quickly
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     // On 500, fetchUser throws so user remains undefined (not null)
+    expect(result.current.user).toBeUndefined();
     expect(result.current.isAuthenticated).toBe(false);
+  });
+
+  it("exposes logout function", async () => {
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(typeof result.current.logout).toBe("function");
+    expect(result.current.isLoggingOut).toBe(false);
   });
 });

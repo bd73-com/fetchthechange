@@ -52,6 +52,24 @@ describe("useTags", () => {
     expect(result.current.data![0].name).toBe("Important");
   });
 
+  it("parses response through Zod schema", async () => {
+    server.use(
+      http.get(api.tags.list.path, () =>
+        HttpResponse.json([mockTag])
+      )
+    );
+
+    const { result } = renderHook(() => useTags(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    // Verify the parsed result has the expected shape (Zod validates this)
+    expect(result.current.data![0]).toHaveProperty("id");
+    expect(result.current.data![0]).toHaveProperty("name");
+    expect(result.current.data![0]).toHaveProperty("colour");
+  });
+
   it("surfaces API errors", async () => {
     server.use(
       http.get(api.tags.list.path, () =>

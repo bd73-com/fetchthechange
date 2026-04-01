@@ -498,6 +498,6 @@ describe("useTriggerAutomatedCampaign", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data.skipped).toBe(true);
+    expect(result.current.data!.skipped).toBe(true);
   });
 });
