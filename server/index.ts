@@ -235,9 +235,16 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   // Bootstrap welcome campaign AFTER registerRoutes() completes —
   // sequenced before scheduler/Stripe to avoid DB pool exhaustion on cold starts.
   // The campaign_configs table is guaranteed to exist (ensured in registerRoutes).
+  // If it somehow failed, the try/catch below handles the error gracefully.
+  const BOOTSTRAP_TIMEOUT_MS = 15_000;
   try {
     const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
-    await bootstrapWelcomeCampaign();
+    await Promise.race([
+      bootstrapWelcomeCampaign(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Welcome campaign bootstrap timed out")), BOOTSTRAP_TIMEOUT_MS)
+      ),
+    ]);
   } catch (err) {
     const { ErrorLogger } = await import("./services/logger");
     console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
