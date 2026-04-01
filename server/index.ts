@@ -234,13 +234,10 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   // Bootstrap welcome campaign AFTER registerRoutes() completes —
   // sequenced before scheduler/Stripe to avoid DB pool exhaustion on cold starts.
+  // The campaign_configs table is guaranteed to exist (ensured in registerRoutes).
   try {
-    const { ensureAutomatedCampaignConfigsTable } = await import("./services/ensureTables");
-    const campaignConfigsReady = await ensureAutomatedCampaignConfigsTable();
-    if (campaignConfigsReady) {
-      const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
-      await bootstrapWelcomeCampaign();
-    }
+    const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
+    await bootstrapWelcomeCampaign();
   } catch (err) {
     const { ErrorLogger } = await import("./services/logger");
     console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
