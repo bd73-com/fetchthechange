@@ -15,6 +15,7 @@ import {
   safeHostname,
 } from "../services/monitorValidation";
 import { checkMonitor as scraperCheckMonitor } from "../services/scraper";
+import { seedDefaultEmailChannel } from "../services/notification";
 
 async function checkMonitor(monitor: any) {
   console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
@@ -95,6 +96,9 @@ router.post("/monitors", extensionAuth, createMonitorRateLimiter, async (req: an
       ...input,
       userId,
     } as any);
+
+    // Seed default email channel (mirrors server/routes.ts monitor creation)
+    await seedDefaultEmailChannel(monitor.id);
 
     // Run first check asynchronously
     checkMonitor(monitor).catch(console.error);

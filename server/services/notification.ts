@@ -7,6 +7,19 @@ import { decryptToken } from "../utils/encryption";
 import { ErrorLogger } from "./logger";
 import { evaluateConditions } from "./conditions";
 
+/**
+ * Seed a default email channel row for a newly created monitor.
+ * Non-fatal: if the insert fails, the legacy emailEnabled fallback still works
+ * as long as no other channel rows exist.
+ */
+export async function seedDefaultEmailChannel(monitorId: number): Promise<void> {
+  try {
+    await storage.upsertMonitorChannel(monitorId, "email", true, {});
+  } catch (err) {
+    console.warn(`[notification] Failed to seed default email channel for monitor ${monitorId}:`, err instanceof Error ? err.message : err);
+  }
+}
+
 /** Maximum number of delivery attempts before a queue entry is marked permanently failed. */
 const MAX_QUEUE_ATTEMPTS = 5;
 
@@ -198,6 +211,22 @@ async function deliverToChannels(
     return result;
   }
 
+  // Observability: if email is expected (emailEnabled=true) but no email channel row exists,
+  // log a delivery entry so the gap is visible rather than silently skipped.
+  const hasEmailRow = channels.some((c) => c.channel === "email");
+  if (!hasEmailRow && monitor.emailEnabled) {
+    console.warn(`[notification] Email channel row missing for monitor ${monitor.id} — email skipped. Add an email channel row to enable delivery.`);
+    try {
+      await storage.addDeliveryLog({
+        monitorId: monitor.id,
+        changeId: change.id,
+        channel: "email",
+        status: "failed",
+        response: { error: "No email channel configured — email channel row missing from notification_channels" },
+      });
+    } catch { /* delivery log table may not exist yet */ }
+  }
+
   const enabledChannels = channels.filter((c) => c.enabled);
   const deliveries = enabledChannels.map(async (ch) => {
     try {
@@ -320,6 +349,22 @@ async function deliverDigestToChannels(
     return result;
   }
 
+  // Observability: if email is expected (emailEnabled=true) but no email channel row exists,
+  // log a delivery entry so the gap is visible rather than silently skipped.
+  const hasEmailRow = channels.some((c) => c.channel === "email");
+  if (!hasEmailRow && monitor.emailEnabled && changes.length > 0) {
+    console.warn(`[notification] Email channel row missing for monitor ${monitor.id} — digest email skipped (${changes.length} change(s)). Add an email channel row to enable delivery.`);
+    try {
+      await storage.addDeliveryLog({
+        monitorId: monitor.id,
+        changeId: changes[0].id,
+        channel: "email",
+        status: "failed",
+        response: { error: `No email channel configured — email channel row missing from notification_channels (digest batch: ${changes.length} change(s))` },
+      });
+    } catch { /* delivery log table may not exist yet */ }
+  }
+
   const enabledChannels = channels.filter((c) => c.enabled);
   const deliveries = enabledChannels.map(async (ch) => {
     try {
@@ -433,7 +478,13 @@ async function hasActiveChannels(monitor: Monitor): Promise<boolean> {
   if (channels.length === 0) {
     return monitor.emailEnabled;
   }
-  return channels.some((c) => c.enabled);
+  const hasEnabledChannel = channels.some((c) => c.enabled);
+  // Treat a missing email channel row as active when emailEnabled=true so the
+  // observability log in deliverToChannels is reachable (otherwise the caller
+  // bails out early and the silent-drop is never recorded).
+  const missingLegacyEmailRow =
+    monitor.emailEnabled && !channels.some((c) => c.channel === "email");
+  return hasEnabledChannel || missingLegacyEmailRow;
 }
 
 export async function processChangeNotification(

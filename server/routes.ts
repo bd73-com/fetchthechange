@@ -17,6 +17,7 @@ import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
 import { notificationTablesExist, channelTablesExist } from "./services/notificationReady";
+import { seedDefaultEmailChannel } from "./services/notification";
 import { BrowserlessUsageTracker, getMonthResetDate } from "./services/browserlessTracker";
 import { ResendUsageTracker, getResendResetDate } from "./services/resendTracker";
 import { errorLogs, monitorMetrics } from "@shared/schema";
@@ -473,6 +474,11 @@ export async function registerRoutes(
         userId,
       } as any);
 
+      // Seed default email channel so the notification dispatcher always has an
+      // explicit channel row. Without this, adding a second channel (e.g. Slack)
+      // later would bypass the legacy emailEnabled fallback and silently skip email.
+      await seedDefaultEmailChannel(monitor.id);
+
       // Run the first check asynchronously but capture a quick static validation
       // to return an early warning to the user if the selector is likely wrong.
       checkMonitor(monitor).catch(console.error);
@@ -777,6 +783,9 @@ export async function registerRoutes(
     if (!monitor) return res.status(404).json({ message: "Not found" });
     if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
     await storage.deleteMonitorChannel(id, channel);
+    if (channel === "email" && monitor.emailEnabled) {
+      console.warn(`[notification] Email channel deleted for monitor ${id} while emailEnabled=true — email delivery will stop unless channel is re-added`);
+    }
     res.status(204).send();
   });
 
