@@ -4,7 +4,7 @@
  *
  * @vitest-environment happy-dom
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { reducer } from "./use-toast";
 
 const makeToast = (id: string, title: string) => ({
@@ -15,6 +15,9 @@ const makeToast = (id: string, title: string) => ({
 });
 
 describe("toast reducer", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("ADD_TOAST adds a toast to the list", () => {
     const state = { toasts: [] };
     const toast = makeToast("1", "Hello");

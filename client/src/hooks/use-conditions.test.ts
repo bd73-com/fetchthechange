@@ -30,10 +30,13 @@ afterAll(() => server.close());
 
 describe("useMonitorConditions", () => {
   it("returns conditions from GET /api/monitors/:id/conditions", async () => {
+    let capturedId: string | undefined;
+
     server.use(
-      http.get(api.monitors.conditions.list.path, () =>
-        HttpResponse.json([mockCondition])
-      )
+      http.get(api.monitors.conditions.list.path, ({ params }) => {
+        capturedId = params.id as string;
+        return HttpResponse.json([mockCondition]);
+      })
     );
 
     const { result } = renderHook(() => useMonitorConditions(1), {
@@ -41,6 +44,7 @@ describe("useMonitorConditions", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(capturedId).toBe("1");
     expect(result.current.data).toHaveLength(1);
     expect(result.current.data![0].type).toBe("contains");
   });

@@ -69,6 +69,9 @@ describe("useNotificationPreferences", () => {
     });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe(
+      "Failed to fetch notification preferences"
+    );
   });
 });
 

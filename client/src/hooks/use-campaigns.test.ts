@@ -262,15 +262,18 @@ describe("useDeleteCampaign", () => {
 
 describe("usePreviewRecipients", () => {
   it("returns preview count and users", async () => {
+    let capturedBody: unknown;
+
     server.use(
-      http.post(`${CAMPAIGNS}/:id/preview`, () =>
-        HttpResponse.json({
+      http.post(`${CAMPAIGNS}/:id/preview`, async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json({
           count: 2,
           users: [
             { id: "u1", email: "a@b.com", firstName: "A", tier: "free", monitorCount: 1 },
           ],
-        })
-      )
+        });
+      })
     );
 
     const { result } = renderHook(() => usePreviewRecipients(), {
@@ -283,15 +286,19 @@ describe("usePreviewRecipients", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data!.count).toBe(2);
+    expect(capturedBody).toMatchObject({ filters: { tier: "free" } });
   });
 });
 
 describe("useSendTestCampaign", () => {
   it("sends a test email", async () => {
+    let capturedBody: unknown;
+
     server.use(
-      http.post(`${CAMPAIGNS}/:id/send-test`, () =>
-        HttpResponse.json({ sentTo: "test@example.com" })
-      )
+      http.post(`${CAMPAIGNS}/:id/send-test`, async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json({ sentTo: "test@example.com" });
+      })
     );
 
     const { result } = renderHook(() => useSendTestCampaign(), {
@@ -303,6 +310,7 @@ describe("useSendTestCampaign", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(capturedBody).toMatchObject({ testEmail: "test@example.com" });
   });
 });
 

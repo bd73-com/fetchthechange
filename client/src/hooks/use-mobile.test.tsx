@@ -40,6 +40,22 @@ describe("useIsMobile", () => {
     expect(result.current).toBe(false);
   });
 
+  it("returns false at exact breakpoint (768)", () => {
+    Object.defineProperty(window, "innerWidth", { writable: true, value: 768 });
+
+    const { result } = renderHook(() => useIsMobile());
+
+    expect(result.current).toBe(false);
+  });
+
+  it("returns true just below breakpoint (767)", () => {
+    Object.defineProperty(window, "innerWidth", { writable: true, value: 767 });
+
+    const { result } = renderHook(() => useIsMobile());
+
+    expect(result.current).toBe(true);
+  });
+
   it("returns true for mobile viewport", () => {
     Object.defineProperty(window, "innerWidth", { writable: true, value: 375 });
 

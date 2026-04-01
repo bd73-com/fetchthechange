@@ -263,4 +263,18 @@ describe("useDeliveryLog", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(requestUrl).toContain("?channel=webhook");
   });
+
+  it("surfaces fetch errors", async () => {
+    server.use(
+      http.get(api.monitors.channels.deliveries.path, () =>
+        HttpResponse.json({ message: "Server error" }, { status: 500 })
+      )
+    );
+
+    const { result } = renderHook(() => useDeliveryLog(1), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+  });
 });
