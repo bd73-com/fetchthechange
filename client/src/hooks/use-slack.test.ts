@@ -106,18 +106,29 @@ describe("useSlackChannels", () => {
   });
 
   it("does not fetch channels when Slack is disconnected", async () => {
+    let channelsRequested = false;
+
     server.use(
       http.get(api.integrations.slack.status.path, () =>
         HttpResponse.json(mockStatusDisconnected)
-      )
+      ),
+      http.get(api.integrations.slack.channels.path, () => {
+        channelsRequested = true;
+        return HttpResponse.json([]);
+      })
     );
 
-    const { result } = renderHook(() => useSlackChannels(), {
-      wrapper: createWrapper(),
-    });
+    const wrapper = createWrapper();
 
-    // Wait for status to load, then check channels query is idle
-    await waitFor(() => expect(result.current.fetchStatus).toBe("idle"));
+    // Render status hook to confirm the disconnected response actually loaded
+    const { result: statusResult } = renderHook(() => useSlackStatus(), { wrapper });
+    await waitFor(() => expect(statusResult.current.isSuccess).toBe(true));
+    expect(statusResult.current.data!.connected).toBe(false);
+
+    // Now verify channels query stays idle and never fires
+    const { result } = renderHook(() => useSlackChannels(), { wrapper });
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(channelsRequested).toBe(false);
   });
 });
 
