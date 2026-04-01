@@ -44,9 +44,9 @@ describe("db pool configuration", () => {
 
     expect(poolConstructorArgs).toHaveLength(1);
     const config = poolConstructorArgs[0];
-    expect(config.max).toBe(3);
+    expect(config.max).toBe(5);
     expect(config.idleTimeoutMillis).toBe(15_000);
-    expect(config.connectionTimeoutMillis).toBe(5_000);
+    expect(config.connectionTimeoutMillis).toBe(10_000);
   });
 
   it("registers an error handler on the pool", async () => {

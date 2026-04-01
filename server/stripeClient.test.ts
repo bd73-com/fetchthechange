@@ -8,6 +8,26 @@ describe("getStripeSync concurrency", () => {
     process.env.DATABASE_URL = "postgres://localhost/test";
   });
 
+  it("passes pool config with 10s connection timeout", async () => {
+    let capturedConfig: any = null;
+    vi.doMock("stripe-replit-sync", () => ({
+      StripeSync: class {
+        postgresClient = { pool: { end: vi.fn().mockResolvedValue(undefined) } };
+        constructor(opts: any) {
+          capturedConfig = opts.poolConfig;
+        }
+      },
+    }));
+
+    const { getStripeSync } = await import("./stripeClient");
+    await getStripeSync();
+
+    expect(capturedConfig).toBeDefined();
+    expect(capturedConfig.max).toBe(1);
+    expect(capturedConfig.connectionTimeoutMillis).toBe(10_000);
+    expect(capturedConfig.idleTimeoutMillis).toBe(15_000);
+  });
+
   it("returns the same instance when called concurrently", async () => {
     let constructCount = 0;
     vi.doMock("stripe-replit-sync", () => ({
