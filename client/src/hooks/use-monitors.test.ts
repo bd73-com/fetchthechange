@@ -7,7 +7,7 @@
  *               POST /api/monitors, PATCH /api/monitors/:id, DELETE /api/monitors/:id,
  *               POST /api/monitors/:id/check, POST /api/monitors/:id/suggest-selectors
  *
- * @vitest-environment happy-dom
+ * @vitest-environment jsdom
  */
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";

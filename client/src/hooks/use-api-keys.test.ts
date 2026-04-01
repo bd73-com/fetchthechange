@@ -3,7 +3,7 @@
  * Coverage: useApiKeys, useCreateApiKey, useRevokeApiKey
  * MSW handlers: GET /api/keys, POST /api/keys, DELETE /api/keys/:id
  *
- * @vitest-environment happy-dom
+ * @vitest-environment jsdom
  */
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";

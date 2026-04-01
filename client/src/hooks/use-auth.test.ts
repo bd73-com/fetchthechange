@@ -2,7 +2,7 @@
  * Tests: use-auth hook
  * Coverage: useAuth — user fetch, authenticated state, null on 401
  *
- * @vitest-environment happy-dom
+ * @vitest-environment jsdom
  */
 import { renderHook, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
