@@ -239,12 +239,13 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   const BOOTSTRAP_TIMEOUT_MS = 15_000;
   try {
     const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
+    let timer: ReturnType<typeof setTimeout>;
     await Promise.race([
       bootstrapWelcomeCampaign(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Welcome campaign bootstrap timed out")), BOOTSTRAP_TIMEOUT_MS)
-      ),
-    ]);
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Welcome campaign bootstrap timed out")), BOOTSTRAP_TIMEOUT_MS);
+      }),
+    ]).finally(() => clearTimeout(timer!));
   } catch (err) {
     const { ErrorLogger } = await import("./services/logger");
     console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
