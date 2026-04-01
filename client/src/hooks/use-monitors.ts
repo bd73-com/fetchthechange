@@ -63,10 +63,10 @@ export function useCreateMonitor() {
           throw new Error(errorData.message || "Too many requests. Please try again later.");
         }
         if (res.status === 403 && errorData.code === "TIER_LIMIT_REACHED") {
-          throw new Error(errorData.message);
+          throw new Error(errorData.message || "Monitor limit reached");
         }
         if (res.status === 400) {
-          throw new Error(errorData.message);
+          throw new Error(errorData.message || "Invalid monitor configuration");
         }
         throw new Error("Failed to create monitor");
       }

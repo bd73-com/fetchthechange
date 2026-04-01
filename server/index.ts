@@ -234,18 +234,24 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   // Bootstrap welcome campaign AFTER registerRoutes() completes —
   // sequenced before scheduler/Stripe to avoid DB pool exhaustion on cold starts.
-  // The campaign_configs table is guaranteed to exist (ensured in registerRoutes).
-  // If it somehow failed, the try/catch below handles the error gracefully.
+  // Only attempt if the campaign_configs table is ready (ensureAutomatedCampaignConfigsTable
+  // is idempotent and fast — just checks if the table exists).
   const BOOTSTRAP_TIMEOUT_MS = 15_000;
   try {
-    const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
-    let timer: ReturnType<typeof setTimeout>;
-    await Promise.race([
-      bootstrapWelcomeCampaign(),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Welcome campaign bootstrap timed out")), BOOTSTRAP_TIMEOUT_MS);
-      }),
-    ]).finally(() => clearTimeout(timer!));
+    const { ensureAutomatedCampaignConfigsTable } = await import("./services/ensureTables");
+    const campaignConfigsReady = await ensureAutomatedCampaignConfigsTable();
+    if (campaignConfigsReady) {
+      const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
+      let timer: ReturnType<typeof setTimeout>;
+      await Promise.race([
+        bootstrapWelcomeCampaign(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("Welcome campaign bootstrap timed out")), BOOTSTRAP_TIMEOUT_MS);
+        }),
+      ]).finally(() => clearTimeout(timer!));
+    } else {
+      console.warn("[Bootstrap] Skipping welcome campaign — campaign_configs table not ready");
+    }
   } catch (err) {
     const { ErrorLogger } = await import("./services/logger");
     console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
