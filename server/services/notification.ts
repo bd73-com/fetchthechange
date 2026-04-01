@@ -478,7 +478,13 @@ async function hasActiveChannels(monitor: Monitor): Promise<boolean> {
   if (channels.length === 0) {
     return monitor.emailEnabled;
   }
-  return channels.some((c) => c.enabled);
+  const hasEnabledChannel = channels.some((c) => c.enabled);
+  // Treat a missing email channel row as active when emailEnabled=true so the
+  // observability log in deliverToChannels is reachable (otherwise the caller
+  // bails out early and the silent-drop is never recorded).
+  const missingLegacyEmailRow =
+    monitor.emailEnabled && !channels.some((c) => c.channel === "email");
+  return hasEnabledChannel || missingLegacyEmailRow;
 }
 
 export async function processChangeNotification(

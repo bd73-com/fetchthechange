@@ -31,9 +31,11 @@ async function main() {
 
   try {
     // Find monitors that have at least one channel row but no email row.
+    // Join monitors table to read emailEnabled so we preserve the user's opt-out preference.
     const monitorsNeedingEmail = await db.execute(sql`
-      SELECT DISTINCT nc.monitor_id
+      SELECT DISTINCT nc.monitor_id, m.email_enabled
       FROM notification_channels nc
+      JOIN monitors m ON m.id = nc.monitor_id
       WHERE NOT EXISTS (
         SELECT 1 FROM notification_channels nc2
         WHERE nc2.monitor_id = nc.monitor_id AND nc2.channel = 'email'
@@ -48,39 +50,41 @@ async function main() {
       await pool.end();
       process.exit(1);
     }
-    const monitorIds: number[] = rows.map((r: any) => r.monitor_id);
+    const monitorsToBackfill: { monitorId: number; emailEnabled: boolean }[] = rows.map(
+      (r: any) => ({ monitorId: r.monitor_id, emailEnabled: r.email_enabled ?? true })
+    );
 
-    if (monitorIds.length === 0) {
+    if (monitorsToBackfill.length === 0) {
       console.log("No monitors need backfilling — all monitors with channels already have an email row.");
       await pool.end();
       process.exit(0);
     }
 
-    console.log(`Found ${monitorIds.length} monitor(s) missing an email channel row: [${monitorIds.join(", ")}]`);
+    console.log(`Found ${monitorsToBackfill.length} monitor(s) missing an email channel row: [${monitorsToBackfill.map(m => m.monitorId).join(", ")}]`);
 
     let inserted = 0;
     // Process in batches of 100 to avoid long-held table locks on large datasets.
     const BATCH_SIZE = 100;
-    for (let i = 0; i < monitorIds.length; i += BATCH_SIZE) {
-      const batch = monitorIds.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < monitorsToBackfill.length; i += BATCH_SIZE) {
+      const batch = monitorsToBackfill.slice(i, i + BATCH_SIZE);
       await db.transaction(async (tx) => {
-        for (const monitorId of batch) {
+        for (const { monitorId, emailEnabled } of batch) {
           const result = await tx.execute(sql`
             INSERT INTO notification_channels (monitor_id, channel, enabled, config, created_at, updated_at)
-            VALUES (${monitorId}, 'email', true, '{}', NOW(), NOW())
+            VALUES (${monitorId}, 'email', ${emailEnabled}, '{}', NOW(), NOW())
             ON CONFLICT (monitor_id, channel) DO NOTHING
           `);
           const rowCount = (result as any).rowCount ?? 0;
           if (rowCount > 0) {
-            console.log(`  Inserted email channel row for monitor ${monitorId}`);
+            console.log(`  Inserted email channel row for monitor ${monitorId} (enabled=${emailEnabled})`);
             inserted++;
           } else {
             console.log(`  Skipped monitor ${monitorId} — email row already exists (race condition or re-run)`);
           }
         }
       });
-      if (i + BATCH_SIZE < monitorIds.length) {
-        console.log(`  Batch ${Math.floor(i / BATCH_SIZE) + 1} complete (${Math.min(i + BATCH_SIZE, monitorIds.length)}/${monitorIds.length})`);
+      if (i + BATCH_SIZE < monitorsToBackfill.length) {
+        console.log(`  Batch ${Math.floor(i / BATCH_SIZE) + 1} complete (${Math.min(i + BATCH_SIZE, monitorsToBackfill.length)}/${monitorsToBackfill.length})`);
       }
     }
 
