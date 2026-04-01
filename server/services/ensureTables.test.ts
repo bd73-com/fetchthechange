@@ -10,7 +10,7 @@ vi.mock("../db", () => ({
   },
 }));
 
-import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable } from "./ensureTables";
+import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn } from "./ensureTables";
 
 describe("ensureMonitorHealthColumns", () => {
   beforeEach(() => {
@@ -251,6 +251,44 @@ describe("ensureAutomatedCampaignConfigsTable", () => {
     await ensureAutomatedCampaignConfigsTable();
     expect(errorSpy).toHaveBeenCalledWith(
       "Could not ensure automated_campaign_configs table:",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
+});
+
+describe("ensureMonitorPendingRetryColumn", () => {
+  beforeEach(() => {
+    mockExecute.mockReset();
+  });
+
+  it("executes 1 ALTER TABLE statement and returns true", async () => {
+    mockExecute.mockResolvedValue([]);
+    const result = await ensureMonitorPendingRetryColumn();
+    expect(result).toBe(true);
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits correct DDL for pending_retry_at", async () => {
+    mockExecute.mockResolvedValue([]);
+    await ensureMonitorPendingRetryColumn();
+    const stmt = JSON.stringify(mockExecute.mock.calls[0][0]);
+    expect(stmt).toContain("pending_retry_at");
+    expect(stmt).toContain("TIMESTAMP");
+  });
+
+  it("returns false and does not throw on error", async () => {
+    mockExecute.mockRejectedValue(new Error("permission denied"));
+    const result = await ensureMonitorPendingRetryColumn();
+    expect(result).toBe(false);
+  });
+
+  it("logs error when ALTER TABLE fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockExecute.mockRejectedValue(new Error("permission denied"));
+    await ensureMonitorPendingRetryColumn();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Could not ensure monitors.pending_retry_at column:",
       expect.any(Error),
     );
     errorSpy.mockRestore();
