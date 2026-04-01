@@ -70,7 +70,9 @@ export function useCreateMonitor() {
         }
         throw new Error("Failed to create monitor");
       }
-      const json = await res.json();
+      const json = await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
       const result = api.monitors.create.responses[201].parse(json);
       return { monitor: result, selectorWarning: result.selectorWarning };
     },

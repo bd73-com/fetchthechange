@@ -197,6 +197,32 @@ describe("useCreateMonitor", () => {
     expect(result.current.error?.message).toBe("Failed to create monitor");
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.post(api.monitors.create.path, () =>
+        new HttpResponse("OK", {
+          status: 201,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useCreateMonitor(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({
+        name: "Test",
+        url: "https://example.com",
+        selector: "h1",
+      });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("surfaces tier limit errors", async () => {
     server.use(
       http.post(api.monitors.create.path, () =>
