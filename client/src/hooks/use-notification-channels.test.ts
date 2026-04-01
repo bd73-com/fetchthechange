@@ -3,7 +3,7 @@
  * Coverage: useNotificationChannels, useUpsertNotificationChannel, useDeleteNotificationChannel,
  *           useRevealWebhookSecret, useDeliveryLog
  *
- * @vitest-environment happy-dom
+ * @vitest-environment jsdom
  */
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";

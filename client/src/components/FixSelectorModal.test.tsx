@@ -4,7 +4,7 @@
  * MSW handlers: POST /api/monitors/:id/suggest-selectors, PATCH /api/monitors/:id,
  *               POST /api/monitors/:id/check
  *
- * @vitest-environment happy-dom
+ * @vitest-environment jsdom
  */
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

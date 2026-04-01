@@ -2,7 +2,7 @@
  * Tests: use-conditions hooks
  * Coverage: useMonitorConditions, useAddCondition, useDeleteCondition
  *
- * @vitest-environment happy-dom
+ * @vitest-environment jsdom
  */
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";

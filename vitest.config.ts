@@ -17,7 +17,7 @@ export default defineConfig({
     exclude: ["node_modules", "dist", ".cache"],
     setupFiles: ["./client/src/test/setup.ts"],
     environmentMatchGlobs: [
-      ["client/**", "happy-dom"],
+      ["client/**", "jsdom"],
     ],
     pool: "forks",
     maxWorkers: 1,

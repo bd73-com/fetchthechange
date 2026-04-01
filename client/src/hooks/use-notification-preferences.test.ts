@@ -2,7 +2,7 @@
  * Tests: use-notification-preferences hooks
  * Coverage: useNotificationPreferences, useUpdateNotificationPreferences, useDeleteNotificationPreferences
  *
- * @vitest-environment happy-dom
+ * @vitest-environment jsdom
  */
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";

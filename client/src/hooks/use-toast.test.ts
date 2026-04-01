@@ -2,7 +2,7 @@
  * Tests: use-toast reducer and toast function
  * Coverage: reducer (ADD_TOAST, UPDATE_TOAST, DISMISS_TOAST, REMOVE_TOAST)
  *
- * @vitest-environment happy-dom
+ * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { reducer } from "./use-toast";
