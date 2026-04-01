@@ -134,13 +134,14 @@ async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]): P
   } finally {
     activeChecks--;
     if (hadPendingRetry) {
-      db.update(monitors)
-        .set({ pendingRetryAt: null })
-        .where(eq(monitors.id, monitor.id))
-        .catch((err: unknown) => {
-          console.error(`[AutoRetry] Failed to clear pendingRetryAt for monitor ${monitor.id}:`,
-            err instanceof Error ? err.message : err);
-        });
+      try {
+        await db.update(monitors)
+          .set({ pendingRetryAt: null })
+          .where(eq(monitors.id, monitor.id));
+      } catch (err: unknown) {
+        console.error(`[AutoRetry] Failed to clear pendingRetryAt for monitor ${monitor.id}:`,
+          err instanceof Error ? err.message : err);
+      }
     }
   }
 }

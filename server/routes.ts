@@ -586,14 +586,17 @@ export async function registerRoutes(
       if (!existing) return res.status(404).json({ message: "Not found" });
       if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
-      const result = await checkMonitor(existing);
-
-      // Clear any pending auto-retry since the user triggered a manual check
+      // Clear any pending auto-retry before the manual check to prevent
+      // a narrow race where the scheduler cron fires a duplicate check.
       await db.update(monitors)
         .set({ pendingRetryAt: null })
         .where(eq(monitors.id, id))
-        .catch(() => {}); // best-effort
+        .catch((err: unknown) => {
+          console.error(`[AutoRetry] Failed to clear pendingRetryAt for monitor ${id}:`,
+            err instanceof Error ? err.message : err);
+        });
 
+      const result = await checkMonitor(existing);
       res.json(result);
     } catch (error: any) {
       console.error("[Check Monitor] Error:", error.message);

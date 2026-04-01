@@ -511,6 +511,51 @@ export function classifyOuterError(error: unknown): { userMessage: string; logCo
   return { userMessage: "Failed to fetch or parse the page. Verify the URL is accessible and the selector is correct.", logContext: "unclassified error" };
 }
 
+/** Permanent error patterns that should never trigger auto-retry. */
+const PERMANENT_ERROR_RE = /ENOTFOUND|certificate|ssl|tls|SSRF blocked|Could not resolve|SSL\/TLS error|URL is not allowed/i;
+
+/**
+ * Schedule a single auto-retry 35 minutes from now for transient scrape errors.
+ * Skips if the monitor was just paused, has a pending retry, the error is permanent,
+ * or the next normal check is imminent (within 45 minutes).
+ */
+async function maybeScheduleAutoRetry(
+  monitor: Monitor,
+  errorMessage: string,
+  wasPaused: boolean,
+): Promise<void> {
+  if (
+    !monitor.active ||
+    wasPaused ||
+    monitor.pendingRetryAt ||
+    PERMANENT_ERROR_RE.test(errorMessage)
+  ) {
+    return;
+  }
+
+  const frequencyMinutes = monitor.frequency === "hourly" ? 60 : 1440;
+  // Use Date.now() as the effective lastChecked since handleMonitorFailure
+  // already updated it in the DB — avoids using the stale in-memory value.
+  const minsUntilNormal = frequencyMinutes - 0; // just checked → full interval ahead
+  // More precisely: since we just failed, lastChecked was just set to now,
+  // so the next normal check is ~frequencyMinutes from now.
+
+  if (minsUntilNormal > 45) {
+    try {
+      const retryAt = new Date(Date.now() + 35 * 60 * 1000);
+      await db.update(monitors)
+        .set({ pendingRetryAt: retryAt })
+        .where(eq(monitors.id, monitor.id));
+      console.log(`[AutoRetry] Monitor ${monitor.id} — retry scheduled at ${retryAt.toISOString()}`);
+    } catch (err) {
+      console.error(`[AutoRetry] Failed to set pendingRetryAt for monitor ${monitor.id}:`,
+        err instanceof Error ? err.message : err);
+    }
+  } else {
+    console.log(`[AutoRetry] Monitor ${monitor.id} — skipped (next normal check in ${Math.round(minsUntilNormal)} min)`);
+  }
+}
+
 async function recordMetric(
   monitorId: number,
   stage: string,
@@ -1461,40 +1506,17 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         error: null
       };
     } else {
+      let wasPaused = false;
       try {
-        await handleMonitorFailure(monitor, finalStatus, finalError!, browserlessInfraFailure);
+        const result = await handleMonitorFailure(monitor, finalStatus, finalError!, browserlessInfraFailure);
+        wasPaused = result.paused;
       } catch (failureErr) {
         console.error(`[Scraper] handleMonitorFailure threw for monitor ${monitor.id}:`, failureErr);
       }
 
       // Self-heal: schedule a single auto-retry for transient errors
-      // Check both raw error patterns and sanitized user-facing messages
-      if (
-        finalStatus === "error" &&
-        monitor.active &&
-        !monitor.pendingRetryAt &&
-        !/ENOTFOUND|certificate|ssl|tls|SSRF blocked|Could not resolve|SSL\/TLS error|URL is not allowed/i.test(finalError ?? "")
-      ) {
-        const frequencyMinutes = monitor.frequency === "hourly" ? 60 : 1440;
-        const minsUntilNormal =
-          ((monitor.lastChecked ? new Date(monitor.lastChecked).getTime() : 0)
-            + frequencyMinutes * 60 * 1000
-            - Date.now()) / (60 * 1000);
-
-        if (minsUntilNormal > 45) {
-          try {
-            const retryAt = new Date(Date.now() + 35 * 60 * 1000);
-            await db.update(monitors)
-              .set({ pendingRetryAt: retryAt })
-              .where(eq(monitors.id, monitor.id));
-            console.log(`[AutoRetry] Monitor ${monitor.id} — retry scheduled at ${retryAt.toISOString()}`);
-          } catch (err) {
-            console.error(`[AutoRetry] Failed to set pendingRetryAt for monitor ${monitor.id}:`,
-              err instanceof Error ? err.message : err);
-          }
-        } else {
-          console.log(`[AutoRetry] Monitor ${monitor.id} — skipped (next normal check in ${Math.round(minsUntilNormal)} min)`);
-        }
+      if (finalStatus === "error") {
+        await maybeScheduleAutoRetry(monitor, finalError ?? "", wasPaused);
       }
 
       return {
@@ -1528,40 +1550,16 @@ export async function checkMonitor(monitor: Monitor): Promise<{
       ).catch(() => {});
     }
 
+    let wasPaused = false;
     try {
-      await handleMonitorFailure(monitor, "error", userMessage, false);
+      const result = await handleMonitorFailure(monitor, "error", userMessage, false);
+      wasPaused = result.paused;
     } catch (failureErr) {
       console.error(`[Scraper] handleMonitorFailure threw in outer catch for monitor ${monitor.id}:`, failureErr);
     }
 
     // Self-heal: schedule a single auto-retry for transient errors
-    // Check both raw error patterns and sanitized user-facing messages
-    if (
-      monitor.active &&
-      !monitor.pendingRetryAt &&
-      !/ENOTFOUND|certificate|ssl|tls|SSRF blocked|Could not resolve|SSL\/TLS error|URL is not allowed/i.test(userMessage)
-    ) {
-      const frequencyMinutes = monitor.frequency === "hourly" ? 60 : 1440;
-      const minsUntilNormal =
-        ((monitor.lastChecked ? new Date(monitor.lastChecked).getTime() : 0)
-          + frequencyMinutes * 60 * 1000
-          - Date.now()) / (60 * 1000);
-
-      if (minsUntilNormal > 45) {
-        try {
-          const retryAt = new Date(Date.now() + 35 * 60 * 1000);
-          await db.update(monitors)
-            .set({ pendingRetryAt: retryAt })
-            .where(eq(monitors.id, monitor.id));
-          console.log(`[AutoRetry] Monitor ${monitor.id} — retry scheduled at ${retryAt.toISOString()}`);
-        } catch (err) {
-          console.error(`[AutoRetry] Failed to set pendingRetryAt for monitor ${monitor.id}:`,
-            err instanceof Error ? err.message : err);
-        }
-      } else {
-        console.log(`[AutoRetry] Monitor ${monitor.id} — skipped (next normal check in ${Math.round(minsUntilNormal)} min)`);
-      }
-    }
+    await maybeScheduleAutoRetry(monitor, userMessage, wasPaused);
 
     return {
       changed: false,

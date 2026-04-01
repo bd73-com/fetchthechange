@@ -6447,13 +6447,33 @@ describe("auto-retry scheduling (pendingRetryAt)", () => {
     expect(retrySetCall).toBeUndefined();
   });
 
-  it("does NOT set pendingRetryAt when next normal check is within 45 minutes", async () => {
+  it("sets pendingRetryAt for hourly monitors (next check > 45 min after failure)", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failure"));
 
-    // hourly monitor checked 30 minutes ago — next normal check in ~30 min (< 45 min)
+    // hourly monitor — after failure, handleMonitorFailure updates lastChecked to now,
+    // so next normal check is 60 min away (> 45 min threshold)
     const monitor = makeMonitor({
       frequency: "hourly",
       lastChecked: new Date(Date.now() - 30 * 60 * 1000),
+    });
+    const result = await runWithTimers(monitor);
+
+    expect(result.status).toBe("error");
+    const retrySetCall = dbUpdateSetCalls.find((c: any) => c.pendingRetryAt instanceof Date);
+    expect(retrySetCall).toBeDefined();
+  });
+
+  it("does NOT set pendingRetryAt when monitor was just auto-paused", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failure"));
+
+    // Simulate a monitor at the pause threshold — handleMonitorFailure returns paused: true
+    // The mockDbUpdateChain returns active: false to indicate the monitor was paused
+    mockDbUpdateChain(5, false); // returnedActive = false → paused
+
+    const monitor = makeMonitor({
+      frequency: "daily",
+      lastChecked: new Date(Date.now() - 2 * 60 * 60 * 1000),
+      consecutiveFailures: 4,
     });
     const result = await runWithTimers(monitor);
 

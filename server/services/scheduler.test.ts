@@ -65,10 +65,8 @@ vi.mock("../db", () => ({
     update: vi.fn().mockReturnValue({
       set: (...args: any[]) => {
         mockDbUpdateSet(...args);
-        const whereFn = vi.fn().mockReturnValue({
-          catch: vi.fn().mockReturnValue(Promise.resolve()),
-          then: (resolve: any) => Promise.resolve().then(resolve),
-        });
+        const whereResult = Promise.resolve();
+        const whereFn = vi.fn().mockReturnValue(whereResult);
         return { where: whereFn };
       },
     }),
