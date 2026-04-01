@@ -383,16 +383,18 @@ async function deliverDigestToChannels(
       switch (ch.channel) {
         case "email": {
           result.email = await sendDigestEmail(monitor, changes, emailOverride);
-          await storage.addDeliveryLog({
-            monitorId: monitor.id,
-            changeId: changes[0].id,
-            channel: "email",
-            status: result.email.success ? "success" : "failed",
-            deliveredAt: result.email.success ? new Date() : null,
-            response: result.email.success
-              ? { digestCount: changes.length }
-              : { error: result.email.error || "unknown", digestCount: changes.length },
-          });
+          try {
+            await storage.addDeliveryLog({
+              monitorId: monitor.id,
+              changeId: changes[0].id,
+              channel: "email",
+              status: result.email?.success ? "success" : "failed",
+              deliveredAt: result.email?.success ? new Date() : null,
+              response: result.email?.success
+                ? { digestCount: changes.length }
+                : { error: result.email?.error || "unknown", digestCount: changes.length },
+            });
+          } catch { /* delivery log write failure must not mask a successful send */ }
           break;
         }
         case "webhook": {
