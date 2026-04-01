@@ -40,9 +40,15 @@ async function main() {
       )
     `);
 
-    const monitorIds: number[] = (monitorsNeedingEmail as any).rows.map(
-      (r: any) => r.monitor_id
-    );
+    // Drizzle execute() returns { rows: Row[] } for node-postgres driver.
+    // Access via .rows with a fallback to the result itself (array-like in some versions).
+    const rows = (monitorsNeedingEmail as any).rows ?? monitorsNeedingEmail;
+    if (!Array.isArray(rows)) {
+      console.error("Unexpected query result shape — cannot extract monitor IDs. Aborting.");
+      await pool.end();
+      process.exit(1);
+    }
+    const monitorIds: number[] = rows.map((r: any) => r.monitor_id);
 
     if (monitorIds.length === 0) {
       console.log("No monitors need backfilling — all monitors with channels already have an email row.");
@@ -53,23 +59,30 @@ async function main() {
     console.log(`Found ${monitorIds.length} monitor(s) missing an email channel row: [${monitorIds.join(", ")}]`);
 
     let inserted = 0;
-    // Use a transaction so all inserts succeed or none do.
-    await db.transaction(async (tx) => {
-      for (const monitorId of monitorIds) {
-        const result = await tx.execute(sql`
-          INSERT INTO notification_channels (monitor_id, channel, enabled, config, created_at, updated_at)
-          VALUES (${monitorId}, 'email', true, '{}', NOW(), NOW())
-          ON CONFLICT (monitor_id, channel) DO NOTHING
-        `);
-        const rowCount = (result as any).rowCount ?? 0;
-        if (rowCount > 0) {
-          console.log(`  Inserted email channel row for monitor ${monitorId}`);
-          inserted++;
-        } else {
-          console.log(`  Skipped monitor ${monitorId} — email row already exists (race condition or re-run)`);
+    // Process in batches of 100 to avoid long-held table locks on large datasets.
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < monitorIds.length; i += BATCH_SIZE) {
+      const batch = monitorIds.slice(i, i + BATCH_SIZE);
+      await db.transaction(async (tx) => {
+        for (const monitorId of batch) {
+          const result = await tx.execute(sql`
+            INSERT INTO notification_channels (monitor_id, channel, enabled, config, created_at, updated_at)
+            VALUES (${monitorId}, 'email', true, '{}', NOW(), NOW())
+            ON CONFLICT (monitor_id, channel) DO NOTHING
+          `);
+          const rowCount = (result as any).rowCount ?? 0;
+          if (rowCount > 0) {
+            console.log(`  Inserted email channel row for monitor ${monitorId}`);
+            inserted++;
+          } else {
+            console.log(`  Skipped monitor ${monitorId} — email row already exists (race condition or re-run)`);
+          }
         }
+      });
+      if (i + BATCH_SIZE < monitorIds.length) {
+        console.log(`  Batch ${Math.floor(i / BATCH_SIZE) + 1} complete (${Math.min(i + BATCH_SIZE, monitorIds.length)}/${monitorIds.length})`);
       }
-    });
+    }
 
     console.log(`\nBackfill complete: inserted ${inserted} email channel row(s).`);
   } catch (err) {

@@ -15,6 +15,7 @@ import {
   safeHostname,
 } from "../services/monitorValidation";
 import { checkMonitor as scraperCheckMonitor } from "../services/scraper";
+import { seedDefaultEmailChannel } from "../services/notification";
 
 async function checkMonitor(monitor: any) {
   console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
@@ -97,11 +98,7 @@ router.post("/monitors", extensionAuth, createMonitorRateLimiter, async (req: an
     } as any);
 
     // Seed default email channel (mirrors server/routes.ts monitor creation)
-    try {
-      await storage.upsertMonitorChannel(monitor.id, "email", true, {});
-    } catch (err) {
-      console.warn(`[notification] Failed to seed default email channel for monitor ${monitor.id}:`, err instanceof Error ? err.message : err);
-    }
+    await seedDefaultEmailChannel(monitor.id);
 
     // Run first check asynchronously
     checkMonitor(monitor).catch(console.error);

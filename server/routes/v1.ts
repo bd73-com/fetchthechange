@@ -16,6 +16,7 @@ import {
   apiV1UpdateMonitorSchema,
 } from "@shared/routes";
 import { openApiSpec } from "../openapi";
+import { seedDefaultEmailChannel } from "../services/notification";
 
 const router = Router();
 
@@ -110,11 +111,7 @@ router.post("/monitors", async (req: any, res) => {
     } as any);
 
     // Seed default email channel (mirrors server/routes.ts monitor creation)
-    try {
-      await storage.upsertMonitorChannel(monitor.id, "email", true, {});
-    } catch (err) {
-      console.warn(`[notification] Failed to seed default email channel for monitor ${monitor.id}:`, err instanceof Error ? err.message : err);
-    }
+    await seedDefaultEmailChannel(monitor.id);
 
     res.status(201).json(formatMonitor(monitor));
   } catch (err) {

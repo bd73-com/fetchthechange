@@ -33,6 +33,11 @@ vi.mock("../services/scraper", () => ({
   checkMonitor: (...args: any[]) => mockScraperCheckMonitor(...args),
 }));
 
+// Mock notification (seedDefaultEmailChannel)
+vi.mock("../services/notification", () => ({
+  seedDefaultEmailChannel: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Mock isAuthenticated — just calls next()
 vi.mock("../replit_integrations/auth", () => ({
   isAuthenticated: (_req: any, _res: any, next: any) => next(),
