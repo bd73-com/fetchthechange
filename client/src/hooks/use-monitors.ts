@@ -103,8 +103,13 @@ export function useUpdateMonitor() {
         credentials: "include",
       });
 
-      if (!res.ok) throw new Error("Failed to update monitor");
-      return api.monitors.update.responses[200].parse(await res.json());
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to update monitor");
+      }
+      return api.monitors.update.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
@@ -193,8 +198,13 @@ export function useCheckMonitorSilent() {
         method: api.monitors.check.method,
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to check monitor");
-      return api.monitors.check.responses[200].parse(await res.json());
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to check monitor");
+      }
+      return api.monitors.check.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
@@ -237,8 +247,13 @@ export function useUpdateMonitorSilent() {
         body: JSON.stringify(updates),
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to update monitor");
-      return api.monitors.update.responses[200].parse(await res.json());
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to update monitor");
+      }
+      return api.monitors.update.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });

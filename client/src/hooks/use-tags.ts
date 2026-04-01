@@ -32,7 +32,9 @@ export function useCreateTag() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to create tag");
       }
-      return await res.json();
+      return await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.tags.list.path] });
@@ -63,7 +65,9 @@ export function useUpdateTag() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to update tag");
       }
-      return await res.json();
+      return await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.tags.list.path] });
@@ -123,7 +127,9 @@ export function useSetMonitorTags() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to update tags");
       }
-      return await res.json();
+      return await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
