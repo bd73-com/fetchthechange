@@ -13,7 +13,7 @@ import { db } from "../db";
 import { eq, sql } from "drizzle-orm";
 import { monitors } from "@shared/schema";
 
-// Keep below DB pool max (3, see db.ts) to leave headroom for cron jobs and
+// Keep below DB pool max (5, see db.ts) to leave headroom for cron jobs and
 // API requests. Browser POOL_MAX is 1 (browserPool.ts), so the second
 // concurrent check creates an ephemeral browser connection if needed.
 const MAX_CONCURRENT_CHECKS = 2;

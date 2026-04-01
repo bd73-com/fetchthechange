@@ -232,6 +232,32 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   // Register API Routes (runs ensure* migrations that need DB connections)
   await registerRoutes(httpServer, app);
 
+  // Start scheduler in the background AFTER registerRoutes() completes —
+  // the ensure* migrations release their DB connections first, preventing
+  // pool exhaustion that causes connection timeouts.
+  const { startScheduler } = await import("./services/scheduler");
+  const { ErrorLogger } = await import("./services/logger");
+  (async () => {
+    const maxRetries = 5;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await startScheduler();
+        console.log("Scheduler started successfully");
+        return;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[CRITICAL] Scheduler startup failed (attempt ${attempt}/${maxRetries}): ${msg}`);
+        if (attempt < maxRetries) {
+          const delayMs = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+          console.log(`[Scheduler] Retrying in ${delayMs / 1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+    console.error("[CRITICAL] Scheduler failed to start after all retries — monitoring is disabled");
+    await ErrorLogger.error("scheduler", "Scheduler failed to start after all retries — monitoring is disabled", null, { maxRetries });
+  })();
+
   // Start Stripe initialization in the background AFTER registerRoutes()
   // completes — the ensure* migrations release their DB connections first,
   // preventing pool exhaustion that causes connection timeouts.

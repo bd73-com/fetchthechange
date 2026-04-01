@@ -9,7 +9,7 @@ import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./replit_integrations/auth";
 import { authStorage } from "./replit_integrations/auth/storage";
 import { TIER_LIMITS, TAG_LIMITS, TAG_ASSIGNMENT_LIMITS, BROWSERLESS_CAPS, RESEND_CAPS, PAUSE_THRESHOLDS, type UserTier } from "@shared/models/auth";
-import { startScheduler } from "./services/scheduler";
+// startScheduler is called from index.ts after registerRoutes completes
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import { sql, asc, desc, eq, and, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
@@ -149,27 +149,8 @@ export async function registerRoutes(
 
   registerAuthRoutes(app);
 
-  // Start Scheduler with retry on failure
-  (async () => {
-    const maxRetries = 5;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        await startScheduler();
-        console.log("Scheduler started successfully");
-        return;
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        console.error(`[CRITICAL] Scheduler startup failed (attempt ${attempt}/${maxRetries}): ${msg}`);
-        if (attempt < maxRetries) {
-          const delayMs = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
-          console.log(`[Scheduler] Retrying in ${delayMs / 1000}s...`);
-          await new Promise(resolve => setTimeout(resolve, delayMs));
-        }
-      }
-    }
-    console.error("[CRITICAL] Scheduler failed to start after all retries — monitoring is disabled");
-    await ErrorLogger.error("scheduler", "Scheduler failed to start after all retries — monitoring is disabled", null, { maxRetries });
-  })();
+  // Scheduler startup is deferred to index.ts (after registerRoutes completes)
+  // to avoid DB pool exhaustion during migrations.
 
   // Bootstrap welcome campaign: one-time send for early adopters, then schedule takes over
   if (campaignConfigsReady) {
