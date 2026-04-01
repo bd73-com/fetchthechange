@@ -23,7 +23,7 @@ export default defineConfig({
     maxWorkers: 1,
     server: {
       deps: {
-        inline: ["@testing-library/jest-dom"],
+        inline: ["@testing-library/jest-dom", "msw"],
       },
     },
   },
