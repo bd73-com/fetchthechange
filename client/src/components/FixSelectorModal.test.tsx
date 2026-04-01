@@ -9,6 +9,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
+import { api } from "@shared/routes";
 import { server } from "../test/server";
 import { renderWithProviders } from "../test/test-utils";
 import { FixSelectorModal } from "./FixSelectorModal";
@@ -64,7 +65,7 @@ describe("FixSelectorModal", () => {
     const user = userEvent.setup();
 
     server.use(
-      http.post("/api/monitors/:id/suggest-selectors", () =>
+      http.post(api.monitors.suggestSelectors.path, () =>
         HttpResponse.json({
           currentSelector: { selector: ".old-price", count: 0, valid: false },
           suggestions: [
@@ -97,7 +98,7 @@ describe("FixSelectorModal", () => {
     const user = userEvent.setup();
 
     server.use(
-      http.post("/api/monitors/:id/suggest-selectors", () =>
+      http.post(api.monitors.suggestSelectors.path, () =>
         HttpResponse.json({
           currentSelector: { selector: ".old-price", count: 0, valid: false },
           suggestions: [],
@@ -124,7 +125,7 @@ describe("FixSelectorModal", () => {
     let patchedSelector: string | undefined;
 
     server.use(
-      http.post("/api/monitors/:id/suggest-selectors", () =>
+      http.post(api.monitors.suggestSelectors.path, () =>
         HttpResponse.json({
           currentSelector: { selector: ".old-price", count: 0, valid: false },
           suggestions: [
@@ -132,7 +133,7 @@ describe("FixSelectorModal", () => {
           ],
         })
       ),
-      http.patch("/api/monitors/:id", async ({ request }) => {
+      http.patch(api.monitors.update.path, async ({ request }) => {
         const body = (await request.json()) as Record<string, unknown>;
         patchedSelector = body.selector as string;
         return HttpResponse.json({
@@ -140,7 +141,7 @@ describe("FixSelectorModal", () => {
           selector: patchedSelector,
         });
       }),
-      http.post("/api/monitors/:id/check", () =>
+      http.post(api.monitors.check.path, () =>
         HttpResponse.json({
           changed: false,
           currentValue: "$90.00",
@@ -177,7 +178,7 @@ describe("FixSelectorModal", () => {
     const user = userEvent.setup();
 
     server.use(
-      http.post("/api/monitors/:id/suggest-selectors", () =>
+      http.post(api.monitors.suggestSelectors.path, () =>
         HttpResponse.json({
           currentSelector: { selector: ".old-price", count: 0, valid: false },
           suggestions: [
@@ -185,7 +186,7 @@ describe("FixSelectorModal", () => {
           ],
         })
       ),
-      http.patch("/api/monitors/:id", () =>
+      http.patch(api.monitors.update.path, () =>
         HttpResponse.json(
           { message: "Failed to update" },
           { status: 500 }
@@ -217,7 +218,7 @@ describe("FixSelectorModal", () => {
     const user = userEvent.setup();
 
     server.use(
-      http.post("/api/monitors/:id/suggest-selectors", () =>
+      http.post(api.monitors.suggestSelectors.path, () =>
         HttpResponse.json(
           { message: "Page could not be loaded" },
           { status: 500 }
@@ -243,7 +244,7 @@ describe("FixSelectorModal", () => {
     const user = userEvent.setup();
 
     server.use(
-      http.post("/api/monitors/:id/suggest-selectors", () =>
+      http.post(api.monitors.suggestSelectors.path, () =>
         HttpResponse.json({
           currentSelector: { selector: ".price", count: 1, valid: true },
           suggestions: [

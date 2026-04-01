@@ -11,6 +11,7 @@
  */
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
+import { api } from "@shared/routes";
 import { server } from "../test/server";
 import { createWrapper } from "../test/test-utils";
 import {
@@ -55,7 +56,7 @@ afterAll(() => server.close());
 describe("useMonitors", () => {
   it("returns monitors list from GET /api/monitors", async () => {
     server.use(
-      http.get("/api/monitors", () => HttpResponse.json([mockMonitor]))
+      http.get(api.monitors.list.path, () => HttpResponse.json([mockMonitor]))
     );
 
     const { result } = renderHook(() => useMonitors(), {
@@ -69,7 +70,7 @@ describe("useMonitors", () => {
 
   it("surfaces API errors through the hook", async () => {
     server.use(
-      http.get("/api/monitors", () =>
+      http.get(api.monitors.list.path, () =>
         HttpResponse.json({ message: "Unauthorized" }, { status: 401 })
       )
     );
@@ -79,13 +80,14 @@ describe("useMonitors", () => {
     });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Failed to fetch monitors");
   });
 });
 
 describe("useMonitor", () => {
   it("returns a single monitor from GET /api/monitors/:id", async () => {
     server.use(
-      http.get("/api/monitors/:id", ({ params }) => {
+      http.get(api.monitors.get.path, ({ params }) => {
         if (params.id === "1") return HttpResponse.json(mockMonitor);
         return HttpResponse.json({ message: "Not found" }, { status: 404 });
       })
@@ -120,7 +122,7 @@ describe("useMonitorHistory", () => {
     };
 
     server.use(
-      http.get("/api/monitors/:id/history", () =>
+      http.get(api.monitors.history.path, () =>
         HttpResponse.json([mockChange])
       )
     );
@@ -140,7 +142,7 @@ describe("useCreateMonitor", () => {
     let capturedBody: unknown;
 
     server.use(
-      http.post("/api/monitors", async ({ request }) => {
+      http.post(api.monitors.create.path, async ({ request }) => {
         capturedBody = await request.json();
         return HttpResponse.json(
           { ...mockMonitor, id: 2, name: "New monitor" },
@@ -170,7 +172,7 @@ describe("useCreateMonitor", () => {
 
   it("surfaces tier limit errors", async () => {
     server.use(
-      http.post("/api/monitors", () =>
+      http.post(api.monitors.create.path, () =>
         HttpResponse.json(
           { message: "Monitor limit reached", code: "TIER_LIMIT_REACHED" },
           { status: 403 }
@@ -193,6 +195,34 @@ describe("useCreateMonitor", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toBe("Monitor limit reached");
   });
+
+  it("surfaces SSRF rejection from the server", async () => {
+    server.use(
+      http.post(api.monitors.create.path, () =>
+        HttpResponse.json(
+          { message: "URL is not allowed (private network)" },
+          { status: 400 }
+        )
+      )
+    );
+
+    const { result } = renderHook(() => useCreateMonitor(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({
+        name: "SSRF attempt",
+        url: "http://169.254.169.254/latest/meta-data",
+        selector: "body",
+      });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe(
+      "URL is not allowed (private network)"
+    );
+  });
 });
 
 describe("useUpdateMonitor", () => {
@@ -201,7 +231,7 @@ describe("useUpdateMonitor", () => {
     let patchedId: string | undefined;
 
     server.use(
-      http.patch("/api/monitors/:id", async ({ params, request }) => {
+      http.patch(api.monitors.update.path, async ({ params, request }) => {
         patchedId = params.id as string;
         capturedBody = await request.json();
         return HttpResponse.json({
@@ -230,7 +260,7 @@ describe("useDeleteMonitor", () => {
     let deletedId: string | undefined;
 
     server.use(
-      http.delete("/api/monitors/:id", ({ params }) => {
+      http.delete(api.monitors.delete.path, ({ params }) => {
         deletedId = params.id as string;
         return new HttpResponse(null, { status: 204 });
       })
@@ -250,7 +280,7 @@ describe("useDeleteMonitor", () => {
 
   it("surfaces deletion errors", async () => {
     server.use(
-      http.delete("/api/monitors/:id", () =>
+      http.delete(api.monitors.delete.path, () =>
         HttpResponse.json(
           { message: "Monitor not found" },
           { status: 404 }
@@ -274,7 +304,7 @@ describe("useDeleteMonitor", () => {
 describe("useCheckMonitor", () => {
   it("returns check result with changed flag", async () => {
     server.use(
-      http.post("/api/monitors/:id/check", () =>
+      http.post(api.monitors.check.path, () =>
         HttpResponse.json({
           changed: true,
           currentValue: "$90",
@@ -301,7 +331,7 @@ describe("useCheckMonitor", () => {
 
   it("surfaces rate limit errors", async () => {
     server.use(
-      http.post("/api/monitors/:id/check", () =>
+      http.post(api.monitors.check.path, () =>
         HttpResponse.json(
           { message: "Rate limit reached" },
           { status: 429 }
@@ -325,7 +355,7 @@ describe("useCheckMonitor", () => {
 describe("useCheckMonitorSilent", () => {
   it("returns check result without toast side effects", async () => {
     server.use(
-      http.post("/api/monitors/:id/check", () =>
+      http.post(api.monitors.check.path, () =>
         HttpResponse.json({
           changed: false,
           currentValue: "$100",
@@ -356,7 +386,7 @@ describe("useSuggestSelectors", () => {
     let capturedBody: unknown;
 
     server.use(
-      http.post("/api/monitors/:id/suggest-selectors", async ({ request }) => {
+      http.post(api.monitors.suggestSelectors.path, async ({ request }) => {
         capturedBody = await request.json();
         return HttpResponse.json({
           currentSelector: { selector: ".price", count: 0, valid: false },
@@ -388,7 +418,7 @@ describe("useUpdateMonitorSilent", () => {
     let patchedId: string | undefined;
 
     server.use(
-      http.patch("/api/monitors/:id", ({ params }) => {
+      http.patch(api.monitors.update.path, ({ params }) => {
         patchedId = params.id as string;
         return HttpResponse.json({
           ...mockMonitor,

@@ -7,6 +7,7 @@
  */
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
+import { apiV1 } from "@shared/routes";
 import { server } from "../test/server";
 import { createWrapper } from "../test/test-utils";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "./use-api-keys";
@@ -35,7 +36,7 @@ afterAll(() => server.close());
 describe("useApiKeys", () => {
   it("lists active keys from GET /api/keys", async () => {
     server.use(
-      http.get("/api/keys", () => HttpResponse.json(mockKeys))
+      http.get(apiV1.keys.list.path, () => HttpResponse.json(mockKeys))
     );
 
     const { result } = renderHook(() => useApiKeys(), {
@@ -50,7 +51,7 @@ describe("useApiKeys", () => {
 
   it("returns empty array on 403 (non-Power tier)", async () => {
     server.use(
-      http.get("/api/keys", () =>
+      http.get(apiV1.keys.list.path, () =>
         HttpResponse.json({ message: "Forbidden" }, { status: 403 })
       )
     );
@@ -65,7 +66,7 @@ describe("useApiKeys", () => {
 
   it("surfaces non-403 errors", async () => {
     server.use(
-      http.get("/api/keys", () =>
+      http.get(apiV1.keys.list.path, () =>
         HttpResponse.json({ message: "Internal Server Error" }, { status: 500 })
       )
     );
@@ -75,13 +76,14 @@ describe("useApiKeys", () => {
     });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Failed to fetch API keys");
   });
 });
 
 describe("useCreateApiKey", () => {
   it("returns the full key in the mutation response", async () => {
     server.use(
-      http.post("/api/keys", () =>
+      http.post(apiV1.keys.create.path, () =>
         HttpResponse.json({
           id: 3,
           name: "New key",
@@ -109,7 +111,7 @@ describe("useCreateApiKey", () => {
 
   it("surfaces creation errors", async () => {
     server.use(
-      http.post("/api/keys", () =>
+      http.post(apiV1.keys.create.path, () =>
         HttpResponse.json(
           { message: "Max API keys reached" },
           { status: 400 }
@@ -135,7 +137,7 @@ describe("useRevokeApiKey", () => {
     let deletedId: string | undefined;
 
     server.use(
-      http.delete("/api/keys/:id", ({ params }) => {
+      http.delete(apiV1.keys.revoke.path, ({ params }) => {
         deletedId = params.id as string;
         return new HttpResponse(null, { status: 204 });
       })
@@ -157,11 +159,11 @@ describe("useRevokeApiKey", () => {
     let fetchCount = 0;
 
     server.use(
-      http.get("/api/keys", () => {
+      http.get(apiV1.keys.list.path, () => {
         fetchCount++;
         return HttpResponse.json(mockKeys);
       }),
-      http.delete("/api/keys/:id", () =>
+      http.delete(apiV1.keys.revoke.path, () =>
         new HttpResponse(null, { status: 204 })
       )
     );
@@ -191,7 +193,7 @@ describe("useRevokeApiKey", () => {
 
   it("surfaces revocation errors", async () => {
     server.use(
-      http.delete("/api/keys/:id", () =>
+      http.delete(apiV1.keys.revoke.path, () =>
         HttpResponse.json(
           { message: "Key not found" },
           { status: 404 }
