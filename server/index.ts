@@ -234,7 +234,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   // Bootstrap welcome campaign AFTER registerRoutes() completes —
   // sequenced before scheduler/Stripe to avoid DB pool exhaustion on cold starts.
-  // Only attempt if the campaign_configs table is ready (ensureAutomatedCampaignConfigsTable
+  // Only attempt if the automated_campaign_configs table is ready (ensureAutomatedCampaignConfigsTable
   // is idempotent and fast — just checks if the table exists).
   const BOOTSTRAP_TIMEOUT_MS = 15_000;
   try {
@@ -250,7 +250,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         }),
       ]).finally(() => clearTimeout(timer!));
     } else {
-      console.warn("[Bootstrap] Skipping welcome campaign — campaign_configs table not ready");
+      console.warn("[Bootstrap] Skipping welcome campaign — automated_campaign_configs table not ready");
     }
   } catch (err) {
     const { ErrorLogger } = await import("./services/logger");
