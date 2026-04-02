@@ -34,7 +34,7 @@ export default function ExtensionAuth() {
           window.close();
         }, 1500);
       } catch (err) {
-        console.error("Extension token fetch failed:", err);
+        console.error("Extension token fetch failed:", err instanceof Error ? err.message : String(err));
         setError("Something went wrong. Please try again.");
       }
     })();
