@@ -33,7 +33,8 @@ export default function ExtensionAuth() {
         setTimeout(() => {
           window.close();
         }, 1500);
-      } catch {
+      } catch (err) {
+        console.error("Extension token fetch failed:", err);
         setError("Something went wrong. Please try again.");
       }
     })();
