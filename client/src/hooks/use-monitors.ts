@@ -63,14 +63,16 @@ export function useCreateMonitor() {
           throw new Error(errorData.message || "Too many requests. Please try again later.");
         }
         if (res.status === 403 && errorData.code === "TIER_LIMIT_REACHED") {
-          throw new Error(errorData.message);
+          throw new Error(errorData.message || "Monitor limit reached");
         }
         if (res.status === 400) {
-          throw new Error(errorData.message);
+          throw new Error(errorData.message || "Invalid monitor configuration");
         }
         throw new Error("Failed to create monitor");
       }
-      const json = await res.json();
+      const json = await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
       const result = api.monitors.create.responses[201].parse(json);
       return { monitor: result, selectorWarning: result.selectorWarning };
     },
@@ -103,8 +105,13 @@ export function useUpdateMonitor() {
         credentials: "include",
       });
 
-      if (!res.ok) throw new Error("Failed to update monitor");
-      return api.monitors.update.responses[200].parse(await res.json());
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to update monitor");
+      }
+      return api.monitors.update.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
@@ -193,8 +200,13 @@ export function useCheckMonitorSilent() {
         method: api.monitors.check.method,
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to check monitor");
-      return api.monitors.check.responses[200].parse(await res.json());
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to check monitor");
+      }
+      return api.monitors.check.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
@@ -237,8 +249,13 @@ export function useUpdateMonitorSilent() {
         body: JSON.stringify(updates),
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to update monitor");
-      return api.monitors.update.responses[200].parse(await res.json());
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to update monitor");
+      }
+      return api.monitors.update.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
