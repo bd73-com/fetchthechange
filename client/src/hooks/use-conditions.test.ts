@@ -49,6 +49,24 @@ describe("useMonitorConditions", () => {
     expect(result.current.data![0].type).toBe("contains");
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(api.monitors.conditions.list.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useMonitorConditions(1), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("is disabled when monitorId is 0", () => {
     const { result } = renderHook(() => useMonitorConditions(0), {
       wrapper: createWrapper(),
@@ -105,6 +123,33 @@ describe("useAddCondition", () => {
       value: "$90",
       groupIndex: 0,
     });
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.post(api.monitors.conditions.create.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useAddCondition(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({
+        monitorId: 1,
+        type: "contains",
+        value: "test",
+        groupIndex: 0,
+      });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
   });
 
   it("surfaces creation errors", async () => {

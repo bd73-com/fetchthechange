@@ -69,7 +69,7 @@ export function stopRouteTimers(): void {
 export async function registerRoutes(
   httpServer: Server,
   app: Express
-): Promise<Server> {
+): Promise<{ httpServer: Server; campaignConfigsReady: boolean }> {
 
   const healthColumnsReady = await ensureMonitorHealthColumns();
   if (!healthColumnsReady) {
@@ -2927,5 +2927,5 @@ export async function registerRoutes(
     res.status(err.status || 500).json({ message: "Internal server error" });
   });
 
-  return httpServer;
+  return { httpServer, campaignConfigsReady };
 }

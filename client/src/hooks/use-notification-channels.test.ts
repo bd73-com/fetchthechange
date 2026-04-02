@@ -58,6 +58,24 @@ describe("useNotificationChannels", () => {
     expect(result.current.data![0].channel).toBe("webhook");
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(api.monitors.channels.list.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useNotificationChannels(1), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("is disabled when monitorId is 0", () => {
     const { result } = renderHook(() => useNotificationChannels(0), {
       wrapper: createWrapper(),
@@ -110,6 +128,33 @@ describe("useUpsertNotificationChannel", () => {
       enabled: true,
       config: { url: "https://hooks.example.com/notify" },
     });
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.put(api.monitors.channels.put.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useUpsertNotificationChannel(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({
+        monitorId: 1,
+        channel: "webhook",
+        enabled: true,
+        config: {},
+      });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
   });
 
   it("surfaces upsert errors", async () => {
@@ -201,6 +246,28 @@ describe("useRevealWebhookSecret", () => {
     expect(result.current.data).toMatchObject({ secret: "whsec_abc123" });
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.post(api.monitors.channels.revealSecret.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useRevealWebhookSecret(1), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate();
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("surfaces reveal errors", async () => {
     server.use(
       http.post(api.monitors.channels.revealSecret.path, () =>
@@ -236,6 +303,24 @@ describe("useDeliveryLog", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(1);
     expect(result.current.data![0].status).toBe("delivered");
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(api.monitors.channels.deliveries.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useDeliveryLog(1), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
   });
 
   it("is disabled when monitorId is 0", () => {

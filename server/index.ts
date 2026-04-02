@@ -230,15 +230,13 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   });
 
   // Register API Routes (runs ensure* migrations that need DB connections)
-  await registerRoutes(httpServer, app);
+  const { campaignConfigsReady } = await registerRoutes(httpServer, app);
 
   // Bootstrap welcome campaign in the background (fire-and-forget) —
   // non-blocking so scheduler/Stripe initialization is not delayed on cold starts.
   (async () => {
     const BOOTSTRAP_TIMEOUT_MS = 5_000;
     try {
-      const { ensureAutomatedCampaignConfigsTable } = await import("./services/ensureTables");
-      const campaignConfigsReady = await ensureAutomatedCampaignConfigsTable();
       if (campaignConfigsReady) {
         const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
         let timer: ReturnType<typeof setTimeout>;
@@ -252,14 +250,18 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         console.warn("[Bootstrap] Skipping welcome campaign — automated_campaign_configs table not ready");
       }
     } catch (err) {
-      const { ErrorLogger } = await import("./services/logger");
       console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
-      await ErrorLogger.error("scheduler", "Welcome campaign bootstrap failed",
-        err instanceof Error ? err : null,
-        { errorMessage: err instanceof Error ? err.message : String(err) }
-      ).catch(() => {});
+      try {
+        const { ErrorLogger } = await import("./services/logger");
+        await ErrorLogger.error("scheduler", "Welcome campaign bootstrap failed",
+          err instanceof Error ? err : null,
+          { errorMessage: err instanceof Error ? err.message : String(err) }
+        ).catch(() => {});
+      } catch {
+        // Logger import failed — already logged to console above
+      }
     }
-  })();
+  })().catch((err) => console.error("[Bootstrap] Unhandled bootstrap error:", err));
 
   // Start scheduler in the background AFTER registerRoutes() completes —
   // the ensure* migrations release their DB connections first, preventing
