@@ -14,7 +14,11 @@ async function fetchUser(): Promise<User | null> {
     throw new Error(`${response.status}: ${response.statusText}`);
   }
 
-  return response.json();
+  try {
+    return await response.json();
+  } catch {
+    throw new Error("Failed to parse user response as JSON");
+  }
 }
 
 async function logout(): Promise<void> {

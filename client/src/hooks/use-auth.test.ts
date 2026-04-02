@@ -81,6 +81,25 @@ describe("useAuth", () => {
     expect(result.current.error?.message).toContain("500");
   });
 
+  it("exposes isError when response body is not valid JSON", async () => {
+    server.use(
+      http.get("/api/auth/user", () =>
+        new HttpResponse("not-json", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isError).toBe(true);
+    expect(result.current.error?.message).toContain("Failed to parse user response as JSON");
+  });
+
   it("exposes logout function", async () => {
     const { result } = renderHook(() => useAuth(), {
       wrapper: createWrapper(),
