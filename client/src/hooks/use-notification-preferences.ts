@@ -12,7 +12,9 @@ export function useNotificationPreferences(monitorId: number) {
       const url = buildUrl(api.monitors.notificationPreferences.get.path, { id: monitorId });
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch notification preferences");
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     enabled: !!monitorId,
   });
@@ -35,7 +37,9 @@ export function useUpdateNotificationPreferences() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to update notification preferences");
       }
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: [PREFS_KEY, variables.monitorId] });

@@ -19,7 +19,9 @@ export function useSlackStatus() {
     queryFn: async (): Promise<SlackStatus> => {
       const res = await fetch(api.integrations.slack.status.path, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch Slack status");
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
   });
 }
@@ -32,7 +34,9 @@ export function useSlackChannels() {
     queryFn: async (): Promise<SlackChannel[]> => {
       const res = await fetch(api.integrations.slack.channels.path, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch Slack channels");
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     enabled: !!status?.connected,
   });

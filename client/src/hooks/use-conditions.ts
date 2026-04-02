@@ -12,7 +12,9 @@ export function useMonitorConditions(monitorId: number) {
       const url = buildUrl(api.monitors.conditions.list.path, { id: monitorId });
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch conditions");
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     enabled: !!monitorId,
   });
@@ -45,7 +47,9 @@ export function useAddCondition() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.error || errorData.message || "Failed to add condition");
       }
-      return res.json() as Promise<MonitorCondition>;
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }) as Promise<MonitorCondition>;
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: [CONDITIONS_KEY, variables.monitorId] });
