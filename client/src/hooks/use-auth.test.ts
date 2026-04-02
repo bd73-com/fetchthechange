@@ -97,7 +97,7 @@ describe("useAuth", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.isError).toBe(true);
-    expect(result.current.error?.message).toContain("Failed to parse user response as JSON");
+    expect(result.current.error?.message).toContain("Unexpected response format from server");
   });
 
   it("exposes logout function", async () => {
