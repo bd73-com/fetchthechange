@@ -98,6 +98,8 @@ describe("useAuth", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.isError).toBe(true);
     expect(result.current.error?.message).toContain("Unexpected response format from server");
+    expect(result.current.user).toBeUndefined();
+    expect(result.current.isAuthenticated).toBe(false);
   });
 
   it("exposes logout function", async () => {
