@@ -38,7 +38,9 @@ export const getQueryFn: <T>(options: {
     }
 
     await throwIfResNotOk(res);
-    return await res.json();
+    return await res.json().catch(() => {
+      throw new Error("Unexpected response format from server");
+    });
   };
 
 export const queryClient = new QueryClient({

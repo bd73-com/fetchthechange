@@ -15,7 +15,7 @@ export default function DashboardNav() {
     queryFn: async () => {
       const res = await fetch("/api/admin/error-logs/count", { credentials: "include" });
       if (!res.ok) return { count: 0 };
-      return res.json();
+      return res.json().catch(() => ({ count: 0 }));
     },
     enabled: user?.tier === "power",
     refetchInterval: 60000,
