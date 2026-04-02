@@ -240,14 +240,20 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       if (campaignConfigsReady) {
         const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
         const campaignPromise = bootstrapWelcomeCampaign();
-        // Attach a no-op .catch() so the underlying promise doesn't become an
-        // unhandled rejection if the timeout fires first and the campaign later fails.
-        campaignPromise.catch(() => {});
+        let timedOut = false;
+        // Log outcome if the underlying promise fails after timeout fires.
+        campaignPromise.catch((err) => {
+          if (!timedOut) return; // Already handled by outer catch
+          console.warn("[Bootstrap] Welcome campaign failed after timeout:", err instanceof Error ? err.message : String(err));
+        });
         let timer: ReturnType<typeof setTimeout>;
         await Promise.race([
           campaignPromise,
           new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error("Welcome campaign bootstrap timed out")), BOOTSTRAP_TIMEOUT_MS);
+            timer = setTimeout(() => {
+              timedOut = true;
+              reject(new Error("Welcome campaign bootstrap timed out"));
+            }, BOOTSTRAP_TIMEOUT_MS);
           }),
         ]).finally(() => clearTimeout(timer!));
       } else {

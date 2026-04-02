@@ -14,7 +14,9 @@ async function fetchUser(): Promise<User | null> {
     throw new Error(`${response.status}: ${response.statusText}`);
   }
 
-  return response.json();
+  return response.json().catch(() => {
+    throw new Error("Unexpected response format from server");
+  });
 }
 
 async function logout(): Promise<void> {
