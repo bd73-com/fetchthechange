@@ -13,7 +13,9 @@ export function useNotificationChannels(monitorId: number) {
       const url = buildUrl(api.monitors.channels.list.path, { id: monitorId });
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch notification channels");
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     enabled: !!monitorId,
   });
@@ -46,7 +48,9 @@ export function useUpsertNotificationChannel() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to update channel");
       }
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: [CHANNELS_KEY, variables.monitorId] });
@@ -98,7 +102,9 @@ export function useRevealWebhookSecret(monitorId: number) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.message || "Failed to reveal secret");
       }
-      return res.json() as Promise<{ secret: string }>;
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }) as Promise<{ secret: string }>;
     },
     onError: (err) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -114,7 +120,9 @@ export function useDeliveryLog(monitorId: number, channel?: string) {
       if (channel) url += `?channel=${channel}`;
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch delivery log");
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     enabled: !!monitorId,
   });

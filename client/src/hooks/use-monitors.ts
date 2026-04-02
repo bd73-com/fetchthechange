@@ -10,7 +10,9 @@ export function useMonitors() {
     queryFn: async () => {
       const res = await fetch(api.monitors.list.path, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch monitors");
-      return api.monitors.list.responses[200].parse(await res.json());
+      return api.monitors.list.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
   });
 }
@@ -23,7 +25,9 @@ export function useMonitor(id: number) {
       const url = buildUrl(api.monitors.get.path, { id });
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch monitor details");
-      return api.monitors.get.responses[200].parse(await res.json());
+      return api.monitors.get.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
     enabled: !!id,
   });
@@ -37,7 +41,9 @@ export function useMonitorHistory(id: number) {
       const url = buildUrl(api.monitors.history.path, { id });
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch history");
-      return api.monitors.history.responses[200].parse(await res.json());
+      return api.monitors.history.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
     enabled: !!id,
   });
@@ -170,7 +176,9 @@ export function useCheckMonitor() {
         }
         throw new Error(errorData.message || "Failed to check monitor");
       }
-      return api.monitors.check.responses[200].parse(await res.json());
+      return api.monitors.check.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
     onSuccess: (data, id) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
@@ -231,7 +239,9 @@ export function useSuggestSelectors() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || "Failed to get selector suggestions");
       }
-      return api.monitors.suggestSelectors.responses[200].parse(await res.json());
+      return api.monitors.suggestSelectors.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
     },
   });
 }

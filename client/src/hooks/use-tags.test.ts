@@ -70,6 +70,24 @@ describe("useTags", () => {
     expect(result.current.data![0]).toHaveProperty("colour");
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(api.tags.list.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useTags(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("surfaces API errors", async () => {
     server.use(
       http.get(api.tags.list.path, () =>

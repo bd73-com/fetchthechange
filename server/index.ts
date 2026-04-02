@@ -230,36 +230,42 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   });
 
   // Register API Routes (runs ensure* migrations that need DB connections)
-  await registerRoutes(httpServer, app);
+  const { campaignConfigsReady } = await registerRoutes(httpServer, app);
 
-  // Bootstrap welcome campaign AFTER registerRoutes() completes —
-  // sequenced before scheduler/Stripe to avoid DB pool exhaustion on cold starts.
-  // Only attempt if the automated_campaign_configs table is ready (ensureAutomatedCampaignConfigsTable
-  // is idempotent and fast — just checks if the table exists).
-  const BOOTSTRAP_TIMEOUT_MS = 15_000;
-  try {
-    const { ensureAutomatedCampaignConfigsTable } = await import("./services/ensureTables");
-    const campaignConfigsReady = await ensureAutomatedCampaignConfigsTable();
-    if (campaignConfigsReady) {
-      const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
-      let timer: ReturnType<typeof setTimeout>;
-      await Promise.race([
-        bootstrapWelcomeCampaign(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("Welcome campaign bootstrap timed out")), BOOTSTRAP_TIMEOUT_MS);
-        }),
-      ]).finally(() => clearTimeout(timer!));
-    } else {
-      console.warn("[Bootstrap] Skipping welcome campaign — automated_campaign_configs table not ready");
+  // Bootstrap welcome campaign in the background (fire-and-forget) —
+  // non-blocking so scheduler/Stripe initialization is not delayed on cold starts.
+  (async () => {
+    const BOOTSTRAP_TIMEOUT_MS = 5_000;
+    try {
+      if (campaignConfigsReady) {
+        const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
+        const campaignPromise = bootstrapWelcomeCampaign();
+        // Attach a no-op .catch() so the underlying promise doesn't become an
+        // unhandled rejection if the timeout fires first and the campaign later fails.
+        campaignPromise.catch(() => {});
+        let timer: ReturnType<typeof setTimeout>;
+        await Promise.race([
+          campaignPromise,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Welcome campaign bootstrap timed out")), BOOTSTRAP_TIMEOUT_MS);
+          }),
+        ]).finally(() => clearTimeout(timer!));
+      } else {
+        console.warn("[Bootstrap] Skipping welcome campaign — automated_campaign_configs table not ready");
+      }
+    } catch (err) {
+      console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
+      try {
+        const { ErrorLogger } = await import("./services/logger");
+        await ErrorLogger.error("scheduler", "Welcome campaign bootstrap failed",
+          err instanceof Error ? err : null,
+          { errorMessage: err instanceof Error ? err.message : String(err) }
+        ).catch(() => {});
+      } catch {
+        // Logger import failed — already logged to console above
+      }
     }
-  } catch (err) {
-    const { ErrorLogger } = await import("./services/logger");
-    console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
-    await ErrorLogger.error("scheduler", "Welcome campaign bootstrap failed",
-      err instanceof Error ? err : null,
-      { errorMessage: err instanceof Error ? err.message : String(err) }
-    ).catch(() => {});
-  }
+  })().catch((err) => console.error("[Bootstrap] Unhandled bootstrap error:", err));
 
   // Start scheduler in the background AFTER registerRoutes() completes —
   // the ensure* migrations release their DB connections first, preventing

@@ -26,7 +26,9 @@ export function useApiKeys() {
       const res = await fetch(API_KEYS_PATH, { credentials: "include" });
       if (res.status === 403) return [];
       if (!res.ok) throw new Error("Failed to fetch API keys");
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
   });
 }
@@ -47,7 +49,9 @@ export function useCreateApiKey() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.message || "Failed to create API key");
       }
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [API_KEYS_PATH] });

@@ -49,6 +49,24 @@ describe("useNotificationPreferences", () => {
     expect(result.current.data!.timezone).toBe("America/New_York");
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(api.monitors.notificationPreferences.get.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useNotificationPreferences(1), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("is disabled when monitorId is 0", () => {
     const { result } = renderHook(() => useNotificationPreferences(0), {
       wrapper: createWrapper(),
@@ -105,6 +123,28 @@ describe("useUpdateNotificationPreferences", () => {
       digestMode: true,
       quietHoursStart: "22:00",
     });
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.put(api.monitors.notificationPreferences.put.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useUpdateNotificationPreferences(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ monitorId: 1, digestMode: true });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
   });
 
   it("surfaces update errors", async () => {

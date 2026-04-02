@@ -68,6 +68,24 @@ describe("useMonitors", () => {
     expect(result.current.data![0].name).toBe("Price check");
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(api.monitors.list.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useMonitors(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("surfaces API errors through the hook", async () => {
     server.use(
       http.get(api.monitors.list.path, () =>
@@ -102,6 +120,24 @@ describe("useMonitor", () => {
     expect(result.current.data!.name).toBe("Price check");
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(api.monitors.get.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useMonitor(1), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("is disabled when id is 0", () => {
     const { result } = renderHook(() => useMonitor(0), {
       wrapper: createWrapper(),
@@ -134,6 +170,24 @@ describe("useMonitorHistory", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(1);
     expect(result.current.data![0].newValue).toBe("$90");
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(api.monitors.history.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useMonitorHistory(1), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
   });
 });
 
@@ -445,6 +499,28 @@ describe("useCheckMonitor", () => {
     });
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.post(api.monitors.check.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useCheckMonitor(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate(1);
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("surfaces rate limit errors", async () => {
     server.use(
       http.post(api.monitors.check.path, () =>
@@ -570,6 +646,28 @@ describe("useSuggestSelectors", () => {
     expect(result.current.data!.suggestions).toHaveLength(1);
     expect(result.current.data!.suggestions[0].selector).toBe(".new-price");
     expect(result.current.data!.currentSelector.valid).toBe(false);
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.post(api.monitors.suggestSelectors.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useSuggestSelectors(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ id: 1, expectedText: "$90" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
   });
 });
 

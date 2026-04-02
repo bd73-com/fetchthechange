@@ -12,7 +12,9 @@ async function fetchJson(url: string, options?: RequestInit) {
     throw new Error(data.message || `Request failed (${res.status})`);
   }
   if (res.status === 204) return null;
-  return res.json();
+  return res.json().catch(() => {
+    throw new Error("Unexpected response format from server");
+  });
 }
 
 // GET /api/admin/campaigns

@@ -55,6 +55,24 @@ describe("useSlackStatus", () => {
     expect(result.current.data!.teamName).toBe("TestWorkspace");
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(api.integrations.slack.status.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useSlackStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("returns disconnected status", async () => {
     server.use(
       http.get(api.integrations.slack.status.path, () =>
@@ -103,6 +121,27 @@ describe("useSlackChannels", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveLength(2);
     expect(result.current.data![0].name).toBe("general");
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(api.integrations.slack.status.path, () =>
+        HttpResponse.json(mockStatusConnected)
+      ),
+      http.get(api.integrations.slack.channels.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useSlackChannels(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
   });
 
   it("does not fetch channels when Slack is disconnected", async () => {

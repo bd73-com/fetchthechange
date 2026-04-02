@@ -49,6 +49,24 @@ describe("useApiKeys", () => {
     expect(result.current.data![1].keyPrefix).toBe("ftc_def");
   });
 
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.get(apiV1.keys.list.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useApiKeys(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
+  });
+
   it("returns empty array on 403 (non-Power tier)", async () => {
     server.use(
       http.get(apiV1.keys.list.path, () =>
@@ -107,6 +125,28 @@ describe("useCreateApiKey", () => {
       keyPrefix: "ftc_ghi",
       key: "test_fake_key_not_real_000000",
     });
+  });
+
+  it("handles non-JSON success responses gracefully", async () => {
+    server.use(
+      http.post(apiV1.keys.create.path, () =>
+        new HttpResponse("OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useCreateApiKey(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate({ name: "New key" });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe("Unexpected response format from server");
   });
 
   it("surfaces creation errors", async () => {
