@@ -39,7 +39,9 @@ export function UpgradeDialog({ currentTier, children }: UpgradeDialogProps) {
   const checkoutMutation = useMutation({
     mutationFn: async (priceId: string) => {
       const res = await apiRequest("POST", "/api/stripe/checkout", { priceId });
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     onSuccess: (data) => {
       if (data.url) {

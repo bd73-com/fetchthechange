@@ -410,7 +410,9 @@ function ContactForm() {
   const mutation = useMutation({
     mutationFn: async (data: ContactFormValues) => {
       const res = await apiRequest("POST", "/api/support/contact", data);
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     onSuccess: (data: { message: string }) => {
       toast({ title: "Message Sent", description: data.message });

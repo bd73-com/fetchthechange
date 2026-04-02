@@ -22,7 +22,9 @@ export default function ExtensionAuth() {
           setError("Failed to generate token. Please try again.");
           return;
         }
-        const data = await res.json();
+        const data = await res.json().catch(() => {
+          throw new Error("Unexpected response format from server");
+        });
         window.postMessage(
           { type: "FTC_EXTENSION_TOKEN", token: data.token, expiresAt: data.expiresAt },
           window.location.origin,

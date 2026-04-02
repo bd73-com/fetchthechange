@@ -94,7 +94,9 @@ export default function AdminErrors() {
     queryFn: async () => {
       const res = await fetch("/api/admin/browserless-usage", { credentials: "include" });
       if (!res.ok) return null;
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     refetchInterval: 60000,
   });
@@ -104,7 +106,9 @@ export default function AdminErrors() {
     queryFn: async () => {
       const res = await fetch("/api/admin/resend-usage", { credentials: "include" });
       if (!res.ok) return null;
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     refetchInterval: 60000,
   });
@@ -119,7 +123,9 @@ export default function AdminErrors() {
         throw err;
       }
       if (!res.ok) return null;
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     retry: (_count, error) => (error as any)?.status !== 403,
     refetchInterval: (query) =>
@@ -138,7 +144,9 @@ export default function AdminErrors() {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to fetch logs");
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     refetchInterval: 30000,
   });
@@ -155,7 +163,9 @@ export default function AdminErrors() {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to finalize deletion");
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     onSuccess: (data) => {
       invalidateAll();
@@ -176,7 +186,9 @@ export default function AdminErrors() {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to restore entries");
-      return res.json();
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
     },
     onSuccess: (data) => {
       invalidateAll();
@@ -247,7 +259,9 @@ export default function AdminErrors() {
         const err = await res.json().catch(() => null);
         throw new Error(err?.message || "Failed to delete entries");
       }
-      return res.json() as Promise<{ count: number; hasMore?: boolean }>;
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }) as Promise<{ count: number; hasMore?: boolean }>;
     },
     onSuccess: (data) => {
       invalidateAll();
