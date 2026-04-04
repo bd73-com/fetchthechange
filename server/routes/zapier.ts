@@ -79,7 +79,9 @@ router.post("/subscribe", async (req: any, res) => {
 // DELETE /unsubscribe — Zapier calls this when a Zap is paused or deleted
 router.delete("/unsubscribe", async (req: any, res) => {
   try {
-    const body = zapierUnsubscribeSchema.parse(req.body);
+    // Accept id from body (Zapier standard) or query param (fallback for proxies that strip DELETE bodies)
+    const source = req.body && typeof req.body === "object" && req.body.id != null ? req.body : req.query;
+    const body = zapierUnsubscribeSchema.parse(source);
     const deactivated = await storage.deactivateAutomationSubscription(body.id, req.apiUser.id);
     if (!deactivated) {
       return res.status(404).json({ error: "Subscription not found", code: "NOT_FOUND" });
@@ -154,7 +156,7 @@ router.get("/changes", async (req: any, res) => {
         oldValue: c.oldValue,
         newValue: c.newValue,
         detectedAt: c.detectedAt.toISOString(),
-        timestamp: new Date().toISOString(),
+        timestamp: c.detectedAt.toISOString(),
       };
     });
 

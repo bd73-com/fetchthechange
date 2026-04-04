@@ -221,6 +221,8 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_user_idx ON automation_subscriptions(user_id)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_platform_idx ON automation_subscriptions(platform)`);
+    // Enforce dedup at DB level: one active subscription per (user, platform, hookUrl, monitorId)
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_uniq ON automation_subscriptions(user_id, platform, hook_url, COALESCE(monitor_id, 0)) WHERE active = true`);
     return true;
   } catch (e) {
     console.error("Could not ensure automation_subscriptions table:", e);

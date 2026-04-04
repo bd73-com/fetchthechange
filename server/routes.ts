@@ -87,7 +87,10 @@ export async function registerRoutes(
     console.error("CRITICAL: notification_queue columns missing — notification cron queries will fail");
   }
   await ensureTagTables();
-  await ensureAutomationSubscriptionsTable();
+  const automationSubsReady = await ensureAutomationSubscriptionsTable();
+  if (!automationSubsReady) {
+    console.error("CRITICAL: automation_subscriptions table missing — Zapier endpoints and automation delivery will fail");
+  }
   let campaignConfigsReady = await ensureAutomatedCampaignConfigsTable();
   if (!campaignConfigsReady) {
     console.error("CRITICAL: automated_campaign_configs table missing — campaign bootstrap and admin routes will fail");
