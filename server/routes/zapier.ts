@@ -8,6 +8,7 @@ import {
   zapierUnsubscribeSchema,
   zapierChangesQuerySchema,
 } from "@shared/routes";
+import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
 import { monitorChanges, monitors } from "@shared/schema";
 import { db } from "../db";
 import { eq, desc, and } from "drizzle-orm";
@@ -28,6 +29,15 @@ router.post("/subscribe", async (req: any, res) => {
         hookUrlHostname: hostname,
       });
       return res.status(422).json({ error: "Hook URL targets a private network", code: "SSRF_BLOCKED" });
+    }
+
+    // Enforce subscription limit
+    const activeCount = await storage.countActiveAutomationSubscriptions(req.apiUser.id);
+    if (activeCount >= AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser) {
+      return res.status(422).json({
+        error: `Maximum of ${AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser} active automation subscriptions reached`,
+        code: "SUBSCRIPTION_LIMIT_REACHED",
+      });
     }
 
     // Verify monitor ownership if provided
@@ -55,7 +65,6 @@ router.post("/subscribe", async (req: any, res) => {
 
     res.status(201).json({
       id: subscription.id,
-      hookUrl: subscription.hookUrl,
       monitorId: subscription.monitorId,
       createdAt: subscription.createdAt,
     });

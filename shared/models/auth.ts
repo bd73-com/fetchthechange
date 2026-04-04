@@ -64,6 +64,11 @@ export const API_RATE_LIMITS = {
   maxKeysPerUser: 5,
 } as const;
 
+export const AUTOMATION_SUBSCRIPTION_LIMITS = {
+  /** Maximum active automation subscriptions per user. */
+  maxPerUser: 25,
+} as const;
+
 // User storage table.
 // (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
 export const users = pgTable("users", {

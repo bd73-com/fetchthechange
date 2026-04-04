@@ -61,6 +61,7 @@ export interface IStorage {
   downgradeHourlyMonitors(userId: string): Promise<{ count: number; monitorNames: string[] }>;
 
   // Automation subscriptions
+  countActiveAutomationSubscriptions(userId: string): Promise<number>;
   createAutomationSubscription(userId: string, platform: string, hookUrl: string, monitorId: number | null): Promise<AutomationSubscription>;
   deactivateAutomationSubscription(id: number, userId: string): Promise<boolean>;
   getActiveAutomationSubscriptions(userId: string, monitorId: number): Promise<AutomationSubscription[]>;
@@ -648,7 +649,37 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Automation subscriptions
+  async countActiveAutomationSubscriptions(userId: string): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` })
+      .from(automationSubscriptions)
+      .where(and(eq(automationSubscriptions.userId, userId), eq(automationSubscriptions.active, true)));
+    return Number(result[0]?.count ?? 0);
+  }
+
   async createAutomationSubscription(userId: string, platform: string, hookUrl: string, monitorId: number | null): Promise<AutomationSubscription> {
+    // Reactivate existing matching subscription if one exists (dedup)
+    const [existing] = await db.select().from(automationSubscriptions)
+      .where(and(
+        eq(automationSubscriptions.userId, userId),
+        eq(automationSubscriptions.platform, platform),
+        eq(automationSubscriptions.hookUrl, hookUrl),
+        monitorId !== null
+          ? eq(automationSubscriptions.monitorId, monitorId)
+          : isNull(automationSubscriptions.monitorId),
+      ))
+      .limit(1);
+
+    if (existing) {
+      if (!existing.active) {
+        const [reactivated] = await db.update(automationSubscriptions)
+          .set({ active: true })
+          .where(eq(automationSubscriptions.id, existing.id))
+          .returning();
+        return reactivated;
+      }
+      return existing;
+    }
+
     const [sub] = await db.insert(automationSubscriptions)
       .values({ userId, platform, hookUrl, monitorId, active: true })
       .returning();
