@@ -479,6 +479,13 @@ export const automationSubscriptions = pgTable("automation_subscriptions", {
 }, (table) => ({
   userIdx: index("automation_subscriptions_user_idx").on(table.userId),
   platformIdx: index("automation_subscriptions_platform_idx").on(table.platform),
+  // Dedup: one active sub per (user, platform, hookUrl, monitorId) — split into two partial indexes
+  dedupWithMonitor: uniqueIndex("automation_subscriptions_dedup_with_monitor")
+    .on(table.userId, table.platform, table.hookUrl, table.monitorId)
+    .where(sql`active = true AND monitor_id IS NOT NULL`),
+  dedupGlobal: uniqueIndex("automation_subscriptions_dedup_global")
+    .on(table.userId, table.platform, table.hookUrl)
+    .where(sql`active = true AND monitor_id IS NULL`),
 }));
 
 export const automationSubscriptionsRelations = relations(automationSubscriptions, ({ one }) => ({
