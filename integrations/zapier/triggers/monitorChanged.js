@@ -72,6 +72,7 @@ module.exports = {
     performList: getFallbackChanges,
     sample: {
       id: 1,
+      event: 'change.detected',
       monitorId: 42,
       monitorName: 'Competitor pricing page',
       url: 'https://example.com/pricing',
