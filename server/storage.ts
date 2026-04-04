@@ -117,6 +117,11 @@ export class DatabaseStorage implements IStorage {
         }
       }
       await tx.delete(monitorConditions).where(eq(monitorConditions.monitorId, id));
+      try {
+        await tx.delete(automationSubscriptions).where(eq(automationSubscriptions.monitorId, id));
+      } catch (err: any) {
+        if (err?.code !== "42P01") throw err;
+      }
       await tx.delete(monitorTags).where(eq(monitorTags.monitorId, id));
       await tx.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
       await tx.delete(monitorMetrics).where(eq(monitorMetrics.monitorId, id));

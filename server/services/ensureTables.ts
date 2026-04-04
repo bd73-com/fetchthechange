@@ -201,6 +201,34 @@ export async function ensureMonitorPendingRetryColumn(): Promise<boolean> {
 }
 
 /**
+ * Ensures automation_subscriptions table exists (Zapier REST Hooks).
+ * Without this, Zapier subscribe/unsubscribe endpoints and deliverToAutomationSubscriptions
+ * crash with: relation "automation_subscriptions" does not exist.
+ */
+export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS automation_subscriptions (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        platform TEXT NOT NULL,
+        hook_url TEXT NOT NULL,
+        monitor_id INTEGER REFERENCES monitors(id) ON DELETE CASCADE,
+        active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        last_delivered_at TIMESTAMP
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_user_idx ON automation_subscriptions(user_id)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_platform_idx ON automation_subscriptions(platform)`);
+    return true;
+  } catch (e) {
+    console.error("Could not ensure automation_subscriptions table:", e);
+    return false;
+  }
+}
+
+/**
  * Ensures tags and monitor_tags tables exist (added in PR #86).
  * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
  */

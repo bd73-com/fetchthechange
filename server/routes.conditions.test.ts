@@ -179,6 +179,7 @@ vi.mock("./services/ensureTables", () => ({
   ensureMonitorConditionsTable: vi.fn().mockResolvedValue(true),
   ensureAutomatedCampaignConfigsTable: vi.fn().mockResolvedValue(true),
   ensureMonitorPendingRetryColumn: vi.fn().mockResolvedValue(true),
+  ensureAutomationSubscriptionsTable: vi.fn().mockResolvedValue(true),
 }));
 
 // ---------------------------------------------------------------------------

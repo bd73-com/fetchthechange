@@ -34,12 +34,8 @@ export async function deliverToAutomationSubscriptions(
       });
 
       if (response.ok) {
-        await ErrorLogger.info("scheduler", `Automation delivery succeeded for monitor "${monitor.name}"`, {
-          subscriptionId: sub.id,
-          monitorId: monitor.id,
-          platform: sub.platform,
-          statusCode: response.status,
-        });
+        const hookDomain = new URL(sub.hookUrl).hostname;
+        console.log(`[Automation] Delivered successfully (monitorId=${monitor.id}, platform=${sub.platform}, domain=${hookDomain}, status=${response.status})`);
         // Fire-and-forget lastDeliveredAt update
         storage.touchAutomationSubscription(sub.id).catch(() => {});
       } else {

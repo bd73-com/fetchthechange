@@ -122,17 +122,18 @@ describe("deliverToAutomationSubscriptions", () => {
     expect(mockTouchAutomationSubscription).toHaveBeenCalledWith(7);
   });
 
-  it("logs info on success", async () => {
+  it("logs success via console.log, not ErrorLogger", async () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub()]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: true, status: 200 });
 
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
-    expect(mockLoggerInfo).toHaveBeenCalledWith(
-      "scheduler",
-      expect.stringContaining("Automation delivery succeeded"),
-      expect.objectContaining({ platform: "zapier", statusCode: 200 }),
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[Automation] Delivered successfully"),
     );
+    expect(mockLoggerInfo).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
   });
 
   it("logs warning on non-2xx response", async () => {

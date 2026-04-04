@@ -11,7 +11,7 @@ import {
 import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
 import { monitorChanges, monitors } from "@shared/schema";
 import { db } from "../db";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, inArray } from "drizzle-orm";
 
 const router = Router();
 
@@ -135,27 +135,14 @@ router.get("/changes", async (req: any, res) => {
 
     const monitorMap = new Map(userMonitors.map((m) => [m.id, m]));
 
-    // Query recent changes across the user's monitors
-    const conditions = query.monitorId
-      ? [eq(monitorChanges.monitorId, query.monitorId)]
-      : userMonitors.length === 1
-        ? [eq(monitorChanges.monitorId, userMonitors[0].id)]
-        : []; // For multiple monitors, we filter in JS after fetch
-
-    let changes;
-    if (conditions.length > 0) {
-      changes = await db.select().from(monitorChanges)
-        .where(and(...conditions))
-        .orderBy(desc(monitorChanges.detectedAt))
-        .limit(query.limit);
-    } else {
-      // Fetch from all user monitors by joining
-      const { inArray } = await import("drizzle-orm");
-      changes = await db.select().from(monitorChanges)
-        .where(inArray(monitorChanges.monitorId, monitorIds))
-        .orderBy(desc(monitorChanges.detectedAt))
-        .limit(query.limit);
-    }
+    const changes = await db.select().from(monitorChanges)
+      .where(
+        monitorIds.length === 1
+          ? eq(monitorChanges.monitorId, monitorIds[0])
+          : inArray(monitorChanges.monitorId, monitorIds),
+      )
+      .orderBy(desc(monitorChanges.detectedAt))
+      .limit(query.limit);
 
     const result = changes.map((c) => {
       const mon = monitorMap.get(c.monitorId);
