@@ -9,9 +9,6 @@ import {
   zapierChangesQuerySchema,
 } from "@shared/routes";
 import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
-import { monitorChanges } from "@shared/schema";
-import { db } from "../db";
-import { eq, desc, and, inArray } from "drizzle-orm";
 
 const router = Router();
 
@@ -150,14 +147,7 @@ router.get("/changes", async (req: any, res) => {
 
     const monitorMap = new Map(userMonitors.map((m) => [m.id, m]));
 
-    const changes = await db.select().from(monitorChanges)
-      .where(
-        monitorIds.length === 1
-          ? eq(monitorChanges.monitorId, monitorIds[0])
-          : inArray(monitorChanges.monitorId, monitorIds),
-      )
-      .orderBy(desc(monitorChanges.detectedAt))
-      .limit(query.limit);
+    const changes = await storage.getRecentChangesForMonitors(monitorIds, query.limit);
 
     const result = changes.map((c) => {
       const mon = monitorMap.get(c.monitorId);
