@@ -36,7 +36,7 @@ import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encry
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn } from "./services/ensureTables";
+import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable } from "./services/ensureTables";
 
 
 // ------------------------------------------------------------------
@@ -87,6 +87,10 @@ export async function registerRoutes(
     console.error("CRITICAL: notification_queue columns missing — notification cron queries will fail");
   }
   await ensureTagTables();
+  const automationSubsReady = await ensureAutomationSubscriptionsTable();
+  if (!automationSubsReady) {
+    console.error("CRITICAL: automation_subscriptions table missing — Zapier endpoints and automation delivery will fail");
+  }
   let campaignConfigsReady = await ensureAutomatedCampaignConfigsTable();
   if (!campaignConfigsReady) {
     console.error("CRITICAL: automated_campaign_configs table missing — campaign bootstrap and admin routes will fail");

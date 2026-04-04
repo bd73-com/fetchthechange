@@ -488,6 +488,29 @@ print("Recent changes:", changes["data"])`}</CodeBlock>
               . Import it into tools like Postman, Insomnia, or any OpenAPI-compatible client to explore the API interactively.
             </p>
           </section>
+
+          <Separator />
+
+          {/* Integration docs */}
+          <section>
+            <h2 className="text-2xl font-display font-bold mb-4">
+              Integration guides
+            </h2>
+            <ul className="list-disc list-inside space-y-2 text-muted-foreground">
+              <li>
+                <Link href="/docs/webhooks" className="text-primary hover:underline">Webhooks</Link>{" "}
+                — receive HMAC-signed HTTP POST payloads on your own server
+              </li>
+              <li>
+                <Link href="/docs/zapier" className="text-primary hover:underline">Zapier</Link>{" "}
+                — connect FTC to 7,000+ apps without running a server (Power plan)
+              </li>
+              <li>
+                <Link href="/docs/make" className="text-primary hover:underline">Make (Integromat)</Link>{" "}
+                — use FTC webhooks with Make's Custom Webhook module
+              </li>
+            </ul>
+          </section>
         </div>
       </div>
     </div>

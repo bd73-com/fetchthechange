@@ -1,0 +1,16 @@
+{
+  "name": "fetchthechange-zapier-app",
+  "version": "1.0.0",
+  "description": "FetchTheChange Zapier integration — trigger Zaps when a monitored value changes",
+  "main": "index.js",
+  "scripts": {
+    "test": "zapier test"
+  },
+  "dependencies": {
+    "zapier-platform-core": "16.x"
+  },
+  "devDependencies": {},
+  "zapier": {
+    "appId": "REPLACE_WITH_ZAPIER_APP_ID"
+  }
+}

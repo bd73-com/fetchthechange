@@ -21,6 +21,8 @@ import BlogNoCode from "@/pages/BlogNoCode";
 import Pricing from "@/pages/Pricing";
 import Support from "@/pages/Support";
 import DocsWebhooks from "@/pages/DocsWebhooks";
+import DocsZapier from "@/pages/DocsZapier";
+import DocsMake from "@/pages/DocsMake";
 import Privacy from "@/pages/Privacy";
 import Changelog from "@/pages/Changelog";
 import AdminErrors from "@/pages/AdminErrors";
@@ -87,6 +89,8 @@ function Router() {
       <Route path="/support" component={Support} />
       <Route path="/changelog" component={Changelog} />
       <Route path="/docs/webhooks" component={DocsWebhooks} />
+      <Route path="/docs/zapier" component={DocsZapier} />
+      <Route path="/docs/make" component={DocsMake} />
       <Route path="/privacy" component={Privacy} />
       <Route path="/extension-auth" component={ExtensionAuth} />
       <Route path="/developer" component={() => <ProtectedRoute component={Developer} requiredTier="power" />} />

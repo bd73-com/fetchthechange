@@ -100,6 +100,7 @@ export function UpgradeDialog({ currentTier, children }: UpgradeDialogProps) {
         "Change sensitivity threshold",
         "Monitor health alerts & recovery emails",
         "REST API access (300 req/min)",
+        "Zapier integration (7,000+ apps)",
         "JavaScript-rendered pages",
         "Fix Selector tool",
         "Full change history",

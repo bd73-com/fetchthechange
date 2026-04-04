@@ -6,6 +6,7 @@ import { deliver as deliverSlack } from "./slackDelivery";
 import { decryptToken } from "../utils/encryption";
 import { ErrorLogger } from "./logger";
 import { evaluateConditions } from "./conditions";
+import { deliverToAutomationSubscriptions } from "./automationDelivery";
 
 /**
  * Seed a default email channel row for a newly created monitor.
@@ -516,11 +517,6 @@ export async function processChangeNotification(
   change: MonitorChange,
   isFirstChange: boolean
 ): Promise<EmailResult | null> {
-  // Check if any channel is active (backwards compat: falls back to emailEnabled)
-  if (!(await hasActiveChannels(monitor))) {
-    return null;
-  }
-
   // Evaluate conditions — skip notification if conditions exist and none pass
   let conditions: Awaited<ReturnType<typeof storage.getMonitorConditions>> = [];
   try {
@@ -543,6 +539,18 @@ export async function processChangeNotification(
       );
       return null;
     }
+  }
+
+  // Fan out to automation subscriptions (Zapier etc.) — fire and forget.
+  // This runs independently of channel checks so Zapier still fires even when
+  // all traditional channels (email/webhook/slack) are disabled.
+  deliverToAutomationSubscriptions(monitor, change).catch((err) => {
+    ErrorLogger.warning("scheduler", `Automation delivery failed for monitor "${monitor.name}"`, { monitorId: monitor.id, error: err instanceof Error ? err.message : String(err) }).catch(() => {});
+  });
+
+  // Check if any traditional channel is active (backwards compat: falls back to emailEnabled)
+  if (!(await hasActiveChannels(monitor))) {
+    return null;
   }
 
   let prefs: NotificationPreference | undefined;

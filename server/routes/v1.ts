@@ -17,6 +17,7 @@ import {
 } from "@shared/routes";
 import { openApiSpec } from "../openapi";
 import { seedDefaultEmailChannel } from "../services/notification";
+import zapierRouter from "./zapier";
 
 const router = Router();
 
@@ -43,6 +44,11 @@ router.use(apiKeyAuth);
 // Apply rate limiting to all authenticated routes
 // -------------------------------------------------------------------
 router.use(apiRateLimit);
+
+// -------------------------------------------------------------------
+// Zapier REST Hooks
+// -------------------------------------------------------------------
+router.use("/zapier", zapierRouter);
 
 // -------------------------------------------------------------------
 // Ping — validates key and rate-limited
