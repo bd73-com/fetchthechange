@@ -81,5 +81,16 @@ module.exports = {
       detectedAt: new Date().toISOString(),
       timestamp: new Date().toISOString(),
     },
+    outputFields: [
+      { key: 'id', label: 'Change ID', type: 'integer' },
+      { key: 'event', label: 'Event Type', type: 'string' },
+      { key: 'monitorId', label: 'Monitor ID', type: 'integer' },
+      { key: 'monitorName', label: 'Monitor Name', type: 'string' },
+      { key: 'url', label: 'Monitored URL', type: 'string' },
+      { key: 'oldValue', label: 'Previous Value', type: 'string' },
+      { key: 'newValue', label: 'New Value', type: 'string' },
+      { key: 'detectedAt', label: 'Detected At', type: 'datetime' },
+      { key: 'timestamp', label: 'Delivery Timestamp', type: 'datetime' },
+    ],
   },
 };
