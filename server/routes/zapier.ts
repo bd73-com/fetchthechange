@@ -84,16 +84,15 @@ router.delete("/unsubscribe", async (req: any, res) => {
     const source = req.body && typeof req.body === "object" && req.body.id != null ? req.body : req.query;
     const body = zapierUnsubscribeSchema.parse(source);
     const deactivated = await storage.deactivateAutomationSubscription(body.id, req.apiUser.id);
-    if (!deactivated) {
-      return res.status(404).json({ error: "Subscription not found", code: "NOT_FOUND" });
+
+    if (deactivated) {
+      await ErrorLogger.info("api", "Automation subscription deactivated", {
+        id: body.id,
+        userId: req.apiUser.id,
+        platform: "zapier",
+      });
     }
-
-    await ErrorLogger.info("api", "Automation subscription deactivated", {
-      id: body.id,
-      userId: req.apiUser.id,
-      platform: "zapier",
-    });
-
+    // Return 204 for idempotent unsubscribe — Zapier expects success even if already deactivated
     res.status(204).send();
   } catch (err) {
     if (err instanceof z.ZodError) {

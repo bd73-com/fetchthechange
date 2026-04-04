@@ -64,6 +64,7 @@ export interface IStorage {
   countActiveAutomationSubscriptions(userId: string): Promise<number>;
   createAutomationSubscription(userId: string, platform: string, hookUrl: string, monitorId: number | null): Promise<AutomationSubscription>;
   deactivateAutomationSubscription(id: number, userId: string): Promise<boolean>;
+  deactivateAllUserAutomationSubscriptions(userId: string): Promise<number>;
   getActiveAutomationSubscriptions(userId: string, monitorId: number): Promise<AutomationSubscription[]>;
   touchAutomationSubscription(id: number): Promise<void>;
   incrementAutomationSubscriptionFailures(id: number): Promise<number>;
@@ -720,6 +721,13 @@ export class DatabaseStorage implements IStorage {
     return ((result as any).rowCount ?? 0) > 0;
   }
 
+  async deactivateAllUserAutomationSubscriptions(userId: string): Promise<number> {
+    const result = await db.update(automationSubscriptions)
+      .set({ active: false, deactivatedAt: new Date() })
+      .where(and(eq(automationSubscriptions.userId, userId), eq(automationSubscriptions.active, true)));
+    return (result as any).rowCount ?? 0;
+  }
+
   async getActiveAutomationSubscriptions(userId: string, monitorId: number): Promise<AutomationSubscription[]> {
     return await db.select().from(automationSubscriptions)
       .where(and(
@@ -753,10 +761,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async cleanupStaleAutomationSubscriptions(olderThan: Date): Promise<number> {
+    // Clean up inactive subscriptions where either deactivatedAt or createdAt is old enough.
+    // deactivatedAt may be NULL for rows deactivated before the column was added.
     const result = await db.delete(automationSubscriptions)
       .where(and(
         eq(automationSubscriptions.active, false),
-        lt(automationSubscriptions.deactivatedAt, olderThan),
+        or(
+          lt(automationSubscriptions.deactivatedAt, olderThan),
+          and(isNull(automationSubscriptions.deactivatedAt), lt(automationSubscriptions.createdAt, olderThan)),
+        ),
       ));
     return (result as any).rowCount ?? 0;
   }

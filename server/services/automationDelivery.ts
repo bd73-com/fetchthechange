@@ -39,14 +39,15 @@ export async function deliverToAutomationSubscriptions(
         console.log(`[Automation] Delivered successfully (monitorId=${monitor.id}, platform=${sub.platform}, domain=${hookDomain}, status=${response.status})`);
         // Fire-and-forget lastDeliveredAt + failure counter reset
         storage.touchAutomationSubscription(sub.id).catch(() => {});
-        if (sub.consecutiveFailures > 0) {
-          storage.resetAutomationSubscriptionFailures(sub.id).catch(() => {});
-        }
+        storage.resetAutomationSubscriptionFailures(sub.id).catch(() => {});
       } else {
         await handleDeliveryFailure(sub.id, monitor, sub.platform, `HTTP ${response.status}`);
       }
     } catch (err) {
-      await handleDeliveryFailure(sub.id, monitor, sub.platform, err instanceof Error ? err.message : String(err));
+      // Sanitize error to avoid leaking hookUrl secrets in logs
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      const safeError = rawMsg.replace(/https?:\/\/[^\s)]+/g, "[redacted-url]");
+      await handleDeliveryFailure(sub.id, monitor, sub.platform, safeError);
     }
   });
 

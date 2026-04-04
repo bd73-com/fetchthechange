@@ -110,6 +110,15 @@ export class WebhookHandlers {
       } catch (error) {
         await ErrorLogger.error("stripe", `Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error : null, { userId: user.id });
       }
+      // Deactivate automation subscriptions (Power-only feature)
+      try {
+        const deactivated = await storage.deactivateAllUserAutomationSubscriptions(user.id);
+        if (deactivated > 0) {
+          console.log(`[Stripe] Deactivated ${deactivated} automation subscription(s) for user ${user.id}`);
+        }
+      } catch (error) {
+        await ErrorLogger.error("stripe", `Failed to deactivate automation subscriptions for user ${user.id}`, error instanceof Error ? error : null, { userId: user.id });
+      }
       console.log(`[Stripe] User ${user.id} subscription inactive, set to free tier`);
       return;
     }
@@ -158,6 +167,18 @@ export class WebhookHandlers {
       }
     }
 
+    // Deactivate automation subscriptions if downgraded from power tier
+    if (newTier !== 'power') {
+      try {
+        const deactivated = await storage.deactivateAllUserAutomationSubscriptions(user.id);
+        if (deactivated > 0) {
+          console.log(`[Stripe] Deactivated ${deactivated} automation subscription(s) for user ${user.id}`);
+        }
+      } catch (error) {
+        await ErrorLogger.error("stripe", `Failed to deactivate automation subscriptions for user ${user.id}`, error instanceof Error ? error : null, { userId: user.id, newTier });
+      }
+    }
+
     console.log(`[Stripe] Updated user ${user.id} to tier: ${newTier}`);
   }
 
@@ -183,6 +204,15 @@ export class WebhookHandlers {
       }
     } catch (error) {
       await ErrorLogger.error("stripe", `Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error : null, { userId: user.id });
+    }
+    // Deactivate automation subscriptions (Power-only feature)
+    try {
+      const deactivated = await storage.deactivateAllUserAutomationSubscriptions(user.id);
+      if (deactivated > 0) {
+        console.log(`[Stripe] Deactivated ${deactivated} automation subscription(s) for user ${user.id}`);
+      }
+    } catch (error) {
+      await ErrorLogger.error("stripe", `Failed to deactivate automation subscriptions for user ${user.id}`, error instanceof Error ? error : null, { userId: user.id });
     }
 
     console.log(`[Stripe] User ${user.id} downgraded to free tier`);

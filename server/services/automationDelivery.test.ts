@@ -131,24 +131,14 @@ describe("deliverToAutomationSubscriptions", () => {
     expect(mockTouchAutomationSubscription).toHaveBeenCalledWith(7);
   });
 
-  it("resets consecutive failures on successful delivery when count > 0", async () => {
-    const sub = makeSub({ id: 7, consecutiveFailures: 3 });
-    mockGetActiveAutomationSubscriptions.mockResolvedValue([sub]);
-    mockSsrfSafeFetch.mockResolvedValue({ ok: true, status: 200 });
-
-    await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
-
-    expect(mockResetAutomationSubscriptionFailures).toHaveBeenCalledWith(7);
-  });
-
-  it("does not reset consecutive failures on success when count is 0", async () => {
+  it("always resets consecutive failures on successful delivery", async () => {
     const sub = makeSub({ id: 7, consecutiveFailures: 0 });
     mockGetActiveAutomationSubscriptions.mockResolvedValue([sub]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: true, status: 200 });
 
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
-    expect(mockResetAutomationSubscriptionFailures).not.toHaveBeenCalled();
+    expect(mockResetAutomationSubscriptionFailures).toHaveBeenCalledWith(7);
   });
 
   it("logs success via console.log, not ErrorLogger", async () => {
@@ -192,6 +182,17 @@ describe("deliverToAutomationSubscriptions", () => {
       expect.stringContaining("Automation delivery failed"),
       expect.objectContaining({ error: "ECONNREFUSED", consecutiveFailures: 1 }),
     );
+  });
+
+  it("sanitizes URLs from error messages to avoid leaking hookUrl secrets", async () => {
+    mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub({ id: 3 })]);
+    mockSsrfSafeFetch.mockRejectedValue(new Error("SSRF blocked: https://hooks.zapier.com/secret123"));
+
+    await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
+
+    const loggedError = mockLoggerWarning.mock.calls[0][2].error;
+    expect(loggedError).not.toContain("hooks.zapier.com");
+    expect(loggedError).toContain("[redacted-url]");
   });
 
   it("deactivates subscription after reaching failure threshold", async () => {

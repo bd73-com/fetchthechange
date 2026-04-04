@@ -69,6 +69,8 @@ export const AUTOMATION_SUBSCRIPTION_LIMITS = {
   maxPerUser: 25,
   /** Deactivate subscription after this many consecutive delivery failures. */
   failureThreshold: 5,
+  /** Hard-delete inactive subscriptions older than this many days. */
+  cleanupRetentionDays: 90,
 } as const;
 
 // User storage table.
