@@ -485,6 +485,21 @@ export const apiV1CreateKeySchema = z.object({
   name: z.string().min(1, "Name is required").max(64, "Name must be 64 characters or fewer"),
 });
 
+// Zapier REST Hooks schemas
+export const zapierSubscribeSchema = z.object({
+  hookUrl: z.string().url(),
+  monitorId: z.number().int().positive().optional(),
+});
+
+export const zapierUnsubscribeSchema = z.object({
+  id: z.number().int().positive(),
+});
+
+export const zapierChangesQuerySchema = z.object({
+  monitorId: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().min(1).max(10).default(3),
+});
+
 export const apiV1 = {
   ping: { method: 'GET' as const, path: '/api/v1/ping' },
   openapi: { method: 'GET' as const, path: '/api/v1/openapi.json' },
@@ -500,6 +515,12 @@ export const apiV1 = {
     list: { method: 'GET' as const, path: '/api/keys' },
     create: { method: 'POST' as const, path: '/api/keys' },
     revoke: { method: 'DELETE' as const, path: '/api/keys/:id' },
+  },
+  zapier: {
+    subscribe: { method: 'POST' as const, path: '/api/v1/zapier/subscribe' },
+    unsubscribe: { method: 'DELETE' as const, path: '/api/v1/zapier/unsubscribe' },
+    monitors: { method: 'GET' as const, path: '/api/v1/zapier/monitors' },
+    changes: { method: 'GET' as const, path: '/api/v1/zapier/changes' },
   },
 };
 

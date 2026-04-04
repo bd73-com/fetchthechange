@@ -6,6 +6,7 @@ import { deliver as deliverSlack } from "./slackDelivery";
 import { decryptToken } from "../utils/encryption";
 import { ErrorLogger } from "./logger";
 import { evaluateConditions } from "./conditions";
+import { deliverToAutomationSubscriptions } from "./automationDelivery";
 
 /**
  * Seed a default email channel row for a newly created monitor.
@@ -544,6 +545,11 @@ export async function processChangeNotification(
       return null;
     }
   }
+
+  // Fan out to automation subscriptions (Zapier etc.) — fire and forget
+  deliverToAutomationSubscriptions(monitor, change).catch((err) => {
+    ErrorLogger.warning("scheduler", `Automation delivery failed for monitor "${monitor.name}"`, { monitorId: monitor.id, error: err instanceof Error ? err.message : String(err) }).catch(() => {});
+  });
 
   let prefs: NotificationPreference | undefined;
   try {

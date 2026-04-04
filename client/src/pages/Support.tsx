@@ -289,6 +289,42 @@ const faqSections: FAQSection[] = [
     ],
   },
   {
+    title: "Zapier & Make",
+    description: "Connecting FetchTheChange to Zapier and Make (Integromat).",
+    items: [
+      {
+        question: "Which plans include Zapier integration?",
+        answer:
+          "Zapier integration is available on the Power plan. It uses your FetchTheChange API key to authenticate. Make integration via webhooks is available on Pro and Power plans.",
+      },
+      {
+        question: "How do I connect FetchTheChange to Zapier?",
+        answer:
+          "In Zapier, create a new Zap and search for FetchTheChange as the trigger app. Select 'Monitor Value Changed', then paste your FetchTheChange API key when prompted. Full setup instructions are at /docs/zapier.",
+      },
+      {
+        question: "Can I trigger a Zap only when a specific monitor changes?",
+        answer:
+          "Yes. When setting up the FetchTheChange trigger in Zapier, you can select a specific monitor from the dropdown, or leave it blank to trigger on any monitor change.",
+      },
+      {
+        question: "Do alert conditions apply to Zapier triggers?",
+        answer:
+          "Yes. If you have alert conditions configured on a monitor, those conditions gate Zapier delivery too — a Zap only fires if the conditions pass. This prevents Zapier from being triggered by every minor change.",
+      },
+      {
+        question: "How do I connect FetchTheChange to Make (Integromat)?",
+        answer:
+          "Make works with FetchTheChange via webhooks. In Make, add a 'Custom Webhook' module and copy its URL, then add that URL as a webhook on your FetchTheChange monitor. Full instructions are at /docs/make.",
+      },
+      {
+        question: "What data does Zapier receive when a monitor changes?",
+        answer:
+          "Each trigger includes: the monitor ID and name, the monitored URL, the previous value, the new value, and timestamps for when the change was detected and when the event was sent. This is the same payload as the webhook system.",
+      },
+    ],
+  },
+  {
     title: "Troubleshooting",
     description: "Help with common issues",
     items: [

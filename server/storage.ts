@@ -1,4 +1,4 @@
-import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, apiKeys, tags, monitorTags, monitorConditions, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection, type ApiKey, type Tag, type MonitorCondition } from "@shared/schema";
+import { monitors, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, notificationPreferences, notificationQueue, notificationChannels, deliveryLog, slackConnections, apiKeys, tags, monitorTags, monitorConditions, automationSubscriptions, type Monitor, type InsertMonitor, type MonitorChange, type NotificationPreference, type NotificationQueueEntry, type NotificationChannel, type DeliveryLogEntry, type SlackConnection, type ApiKey, type Tag, type MonitorCondition, type AutomationSubscription } from "@shared/schema";
 import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
 import { eq, desc, asc, and, or, isNull, lte, lt, gte, sql, inArray } from "drizzle-orm";
@@ -59,6 +59,12 @@ export interface IStorage {
   deleteMonitorCondition(id: number, monitorId: number): Promise<void>;
   countMonitorConditions(monitorId: number): Promise<number>;
   downgradeHourlyMonitors(userId: string): Promise<{ count: number; monitorNames: string[] }>;
+
+  // Automation subscriptions
+  createAutomationSubscription(userId: string, platform: string, hookUrl: string, monitorId: number | null): Promise<AutomationSubscription>;
+  deactivateAutomationSubscription(id: number, userId: string): Promise<boolean>;
+  getActiveAutomationSubscriptions(userId: string, monitorId: number): Promise<AutomationSubscription[]>;
+  touchAutomationSubscription(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -639,6 +645,39 @@ export class DatabaseStorage implements IStorage {
       .from(monitorConditions)
       .where(eq(monitorConditions.monitorId, monitorId));
     return Number(result[0]?.count ?? 0);
+  }
+
+  // Automation subscriptions
+  async createAutomationSubscription(userId: string, platform: string, hookUrl: string, monitorId: number | null): Promise<AutomationSubscription> {
+    const [sub] = await db.insert(automationSubscriptions)
+      .values({ userId, platform, hookUrl, monitorId, active: true })
+      .returning();
+    return sub;
+  }
+
+  async deactivateAutomationSubscription(id: number, userId: string): Promise<boolean> {
+    const result = await db.update(automationSubscriptions)
+      .set({ active: false })
+      .where(and(eq(automationSubscriptions.id, id), eq(automationSubscriptions.userId, userId), eq(automationSubscriptions.active, true)));
+    return ((result as any).rowCount ?? 0) > 0;
+  }
+
+  async getActiveAutomationSubscriptions(userId: string, monitorId: number): Promise<AutomationSubscription[]> {
+    return await db.select().from(automationSubscriptions)
+      .where(and(
+        eq(automationSubscriptions.userId, userId),
+        eq(automationSubscriptions.active, true),
+        or(
+          isNull(automationSubscriptions.monitorId),
+          eq(automationSubscriptions.monitorId, monitorId),
+        ),
+      ));
+  }
+
+  async touchAutomationSubscription(id: number): Promise<void> {
+    await db.update(automationSubscriptions)
+      .set({ lastDeliveredAt: new Date() })
+      .where(eq(automationSubscriptions.id, id));
   }
 
   async downgradeHourlyMonitors(userId: string): Promise<{ count: number; monitorNames: string[] }> {

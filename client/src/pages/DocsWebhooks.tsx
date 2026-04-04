@@ -237,6 +237,27 @@ func verifySignature(rawBody []byte, signature, secret string) bool {
             </p>
           </section>
 
+          {/* Integration links */}
+          <div className="bg-secondary/50 rounded-lg p-4 border border-border">
+            <p className="text-muted-foreground">
+              Don't want to run your own server?{" "}
+              <Link
+                href="/docs/zapier"
+                className="text-primary hover:underline"
+              >
+                Connect to 7,000+ apps via Zapier
+              </Link>{" "}
+              or{" "}
+              <Link
+                href="/docs/make"
+                className="text-primary hover:underline"
+              >
+                use Make (Integromat) with webhooks
+              </Link>
+              .
+            </p>
+          </div>
+
           {/* Footer CTA */}
           <Separator className="my-10" />
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">

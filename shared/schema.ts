@@ -51,6 +51,7 @@ export const monitorsRelations = relations(monitors, ({ one, many }) => ({
   deliveryLogs: many(deliveryLog),
   monitorTags: many(monitorTags),
   monitorConditions: many(monitorConditions),
+  automationSubscriptions: many(automationSubscriptions),
 }));
 
 export const monitorChangesRelations = relations(monitorChanges, ({ one }) => ({
@@ -464,6 +465,29 @@ export const monitorConditionsRelations = relations(monitorConditions, ({ one })
 
 export type MonitorCondition = typeof monitorConditions.$inferSelect;
 export type InsertMonitorCondition = typeof monitorConditions.$inferInsert;
+
+// Automation subscriptions — Zapier REST Hooks and future platform integrations
+export const automationSubscriptions = pgTable("automation_subscriptions", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  platform: text("platform").notNull(), // 'zapier'
+  hookUrl: text("hook_url").notNull(),
+  monitorId: integer("monitor_id").references(() => monitors.id, { onDelete: "cascade" }),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastDeliveredAt: timestamp("last_delivered_at"),
+}, (table) => ({
+  userIdx: index("automation_subscriptions_user_idx").on(table.userId),
+  platformIdx: index("automation_subscriptions_platform_idx").on(table.platform),
+}));
+
+export const automationSubscriptionsRelations = relations(automationSubscriptions, ({ one }) => ({
+  user: one(users, { fields: [automationSubscriptions.userId], references: [users.id] }),
+  monitor: one(monitors, { fields: [automationSubscriptions.monitorId], references: [monitors.id] }),
+}));
+
+export type AutomationSubscription = typeof automationSubscriptions.$inferSelect;
+export type InsertAutomationSubscription = typeof automationSubscriptions.$inferInsert;
 
 export const insertMonitorSchema = createInsertSchema(monitors).omit({
   id: true,

@@ -201,9 +201,19 @@ describe("Support FAQ documentation accuracy", () => {
   });
 
   it("API Access section has 5 FAQ items", () => {
-    const section = sliceSection(supportSource, '"API Access"', '"Troubleshooting"');
+    const section = sliceSection(supportSource, '"API Access"', '"Zapier & Make"');
     const questionCount = (section.match(/question:/g) || []).length;
     expect(questionCount).toBe(5);
+  });
+
+  it("has a Zapier & Make FAQ section", () => {
+    expect(supportSource).toContain('"Zapier & Make"');
+  });
+
+  it("Zapier & Make section has 6 FAQ items", () => {
+    const section = sliceSection(supportSource, '"Zapier & Make"', '"Troubleshooting"');
+    const questionCount = (section.match(/question:/g) || []).length;
+    expect(questionCount).toBe(6);
   });
 
   it("references the correct signature header in FAQ", () => {
@@ -321,6 +331,17 @@ describe("Pricing page feature list accuracy", () => {
     expect(freeToPower).not.toContain("Monitor health alerts");
   });
 
+  it("Power plan lists Zapier integration", () => {
+    const powerStart = pricingSource.indexOf('"Power"');
+    const powerSection = pricingSource.slice(powerStart);
+    expect(powerSection).toContain("Zapier");
+  });
+
+  it("Free and Pro plans do not list Zapier integration", () => {
+    const freeToPower = pricingSource.slice(0, pricingSource.indexOf('"Power"'));
+    expect(freeToPower).not.toContain("Zapier");
+  });
+
   it("Free plan mentions 1 condition limit", () => {
     const freeSection = sliceSection(pricingSource, '"Free"', '"Pro"');
     expect(freeSection).toContain("condition");
@@ -375,6 +396,16 @@ describe("UpgradeDialog feature list consistency with Pricing", () => {
     expect(proSection).not.toContain("health alerts");
   });
 
+  it("power features include Zapier", () => {
+    const powerSection = sliceSection(upgradeSource, "power: [", "],");
+    expect(powerSection).toContain("Zapier");
+  });
+
+  it("pro features do not include Zapier", () => {
+    const proSection = sliceSection(upgradeSource, "pro: [", "],");
+    expect(proSection).not.toContain("Zapier");
+  });
+
   it("pro features include unlimited alert conditions", () => {
     const proSection = sliceSection(upgradeSource, "pro: [", "],");
     expect(proSection).toContain("conditions");
@@ -423,5 +454,19 @@ describe("App.tsx webhook docs route", () => {
   it("registers /docs/webhooks route", () => {
     expect(appSource).toContain('/docs/webhooks');
     expect(appSource).toContain("DocsWebhooks");
+  });
+});
+
+describe("App.tsx Zapier and Make docs routes", () => {
+  const appSource = readClientFile("App.tsx");
+
+  it("registers /docs/zapier route", () => {
+    expect(appSource).toContain('/docs/zapier');
+    expect(appSource).toContain("DocsZapier");
+  });
+
+  it("registers /docs/make route", () => {
+    expect(appSource).toContain('/docs/make');
+    expect(appSource).toContain("DocsMake");
   });
 });
