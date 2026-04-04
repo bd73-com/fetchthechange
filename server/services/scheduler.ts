@@ -432,6 +432,17 @@ export async function startScheduler() {
     } catch (error) {
       await logSchedulerError("notification_queue cleanup failed", error, { retentionDays: 7, table: "notification_queue" });
     }
+
+    // Automation subscriptions cleanup: hard-delete inactive subscriptions older than 90 days
+    try {
+      const olderThan = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+      const deleted = await withDbRetry(() => storage.cleanupStaleAutomationSubscriptions(olderThan));
+      if (deleted > 0) {
+        console.log(`[Cleanup] Pruned ${deleted} inactive automation_subscriptions rows older than 90 days`);
+      }
+    } catch (error) {
+      await logSchedulerError("automation_subscriptions cleanup failed", error, { retentionDays: 90, table: "automation_subscriptions" });
+    }
   }));
 
   // Automated campaigns: run at midnight UTC on the 1st and 15th of each month

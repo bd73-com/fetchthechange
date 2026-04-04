@@ -1,4 +1,5 @@
 import type { Monitor, MonitorChange } from "@shared/schema";
+import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
 import { storage } from "../storage";
 import { ssrfSafeFetch } from "../utils/ssrf";
 import { buildWebhookPayload } from "./webhookDelivery";
@@ -36,25 +37,46 @@ export async function deliverToAutomationSubscriptions(
       if (response.ok) {
         const hookDomain = new URL(sub.hookUrl).hostname;
         console.log(`[Automation] Delivered successfully (monitorId=${monitor.id}, platform=${sub.platform}, domain=${hookDomain}, status=${response.status})`);
-        // Fire-and-forget lastDeliveredAt update
+        // Fire-and-forget lastDeliveredAt + failure counter reset
         storage.touchAutomationSubscription(sub.id).catch(() => {});
+        if (sub.consecutiveFailures > 0) {
+          storage.resetAutomationSubscriptionFailures(sub.id).catch(() => {});
+        }
       } else {
-        await ErrorLogger.warning("scheduler", `Automation delivery failed for monitor "${monitor.name}"`, {
-          subscriptionId: sub.id,
-          monitorId: monitor.id,
-          platform: sub.platform,
-          error: `HTTP ${response.status}`,
-        });
+        await handleDeliveryFailure(sub.id, monitor, sub.platform, `HTTP ${response.status}`);
       }
     } catch (err) {
-      await ErrorLogger.warning("scheduler", `Automation delivery failed for monitor "${monitor.name}"`, {
-        subscriptionId: sub.id,
-        monitorId: monitor.id,
-        platform: sub.platform,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      await handleDeliveryFailure(sub.id, monitor, sub.platform, err instanceof Error ? err.message : String(err));
     }
   });
 
   await Promise.allSettled(deliveries);
+}
+
+async function handleDeliveryFailure(
+  subscriptionId: number,
+  monitor: Monitor,
+  platform: string,
+  error: string,
+): Promise<void> {
+  const failures = await storage.incrementAutomationSubscriptionFailures(subscriptionId);
+
+  if (failures >= AUTOMATION_SUBSCRIPTION_LIMITS.failureThreshold) {
+    await storage.deactivateAutomationSubscription(subscriptionId, monitor.userId);
+    await ErrorLogger.warning("scheduler", `Automation subscription auto-deactivated after ${failures} consecutive failures for monitor "${monitor.name}"`, {
+      subscriptionId,
+      monitorId: monitor.id,
+      platform,
+      consecutiveFailures: failures,
+      error,
+    });
+  } else {
+    await ErrorLogger.warning("scheduler", `Automation delivery failed for monitor "${monitor.name}"`, {
+      subscriptionId,
+      monitorId: monitor.id,
+      platform,
+      consecutiveFailures: failures,
+      error,
+    });
+  }
 }

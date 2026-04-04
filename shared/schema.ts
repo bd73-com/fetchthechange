@@ -474,7 +474,9 @@ export const automationSubscriptions = pgTable("automation_subscriptions", {
   hookUrl: text("hook_url").notNull(),
   monitorId: integer("monitor_id").references(() => monitors.id, { onDelete: "cascade" }),
   active: boolean("active").default(true).notNull(),
+  consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  deactivatedAt: timestamp("deactivated_at"),
   lastDeliveredAt: timestamp("last_delivered_at"),
 }, (table) => ({
   userIdx: index("automation_subscriptions_user_idx").on(table.userId),
