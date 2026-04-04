@@ -9,7 +9,7 @@ import {
   zapierChangesQuerySchema,
 } from "@shared/routes";
 import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
-import { monitorChanges, monitors } from "@shared/schema";
+import { monitorChanges } from "@shared/schema";
 import { db } from "../db";
 import { eq, desc, and, inArray } from "drizzle-orm";
 
