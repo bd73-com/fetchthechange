@@ -94,6 +94,8 @@ export async function ensureChannelTables(): Promise<void> {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       )
     `);
+    // Backfill: encrypt existing plaintext webhook URLs
+    await backfillNotificationChannelWebhookUrls();
   } catch (e) {
     console.error("Could not ensure notification channel tables:", e);
   }
@@ -256,7 +258,9 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
  */
 export async function ensureMonitorChangesIndexes(): Promise<void> {
   try {
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS monitor_changes_monitor_detected_idx ON monitor_changes(monitor_id, detected_at)`);
+    // Use CONCURRENTLY to avoid taking a SHARE lock that blocks writes on large tables.
+    // CONCURRENTLY cannot run inside a transaction — Drizzle's db.execute does not wrap in one.
+    await db.execute(sql`CREATE INDEX CONCURRENTLY IF NOT EXISTS monitor_changes_monitor_detected_idx ON monitor_changes(monitor_id, detected_at)`);
   } catch (e) {
     console.warn("Could not ensure monitor_changes indexes:", e);
   }
@@ -302,7 +306,8 @@ export async function ensureTagTables(): Promise<void> {
  */
 async function backfillAutomationSubscriptionUrls(): Promise<void> {
   try {
-    const rows = await db.execute(sql`SELECT id, hook_url FROM automation_subscriptions WHERE hook_url_hash IS NULL`);
+    // LIMIT 500 to bound startup time; FOR UPDATE SKIP LOCKED to prevent concurrent backfill races
+    const rows = await db.execute(sql`SELECT id, hook_url FROM automation_subscriptions WHERE hook_url_hash IS NULL LIMIT 500 FOR UPDATE SKIP LOCKED`);
     const toUpdate = (rows as any).rows as Array<{ id: number; hook_url: string }>;
     if (!toUpdate || toUpdate.length === 0) return;
 
@@ -315,5 +320,40 @@ async function backfillAutomationSubscriptionUrls(): Promise<void> {
     console.log(`[ensureTables] Backfilled ${toUpdate.length} automation subscription URLs`);
   } catch (e) {
     console.warn("Could not backfill automation subscription URLs:", e);
+  }
+}
+
+/**
+ * Backfills encryption for existing notification_channels webhook config.url
+ * and config.secret.  Rows with already-encrypted values (detected by
+ * isValidEncryptedToken) are skipped.  Processes in batches of 500.
+ */
+async function backfillNotificationChannelWebhookUrls(): Promise<void> {
+  try {
+    const rows = await db.execute(sql`SELECT id, config FROM notification_channels WHERE channel = 'webhook' LIMIT 500`);
+    const toUpdate = (rows as any).rows as Array<{ id: number; config: Record<string, unknown> }>;
+    if (!toUpdate || toUpdate.length === 0) return;
+
+    let updated = 0;
+    for (const row of toUpdate) {
+      const cfg = row.config;
+      if (!cfg) continue;
+      const url = cfg.url as string | undefined;
+      const secret = cfg.secret as string | undefined;
+      const urlNeedsEncrypt = url && !isValidEncryptedToken(url);
+      const secretNeedsEncrypt = secret && !isValidEncryptedToken(secret);
+      if (!urlNeedsEncrypt && !secretNeedsEncrypt) continue;
+
+      const newConfig = { ...cfg };
+      if (urlNeedsEncrypt) newConfig.url = encryptUrl(url);
+      if (secretNeedsEncrypt) newConfig.secret = encryptUrl(secret);
+      await db.execute(sql`UPDATE notification_channels SET config = ${JSON.stringify(newConfig)}::jsonb WHERE id = ${row.id}`);
+      updated++;
+    }
+    if (updated > 0) {
+      console.log(`[ensureTables] Backfilled ${updated} notification channel webhook URLs`);
+    }
+  } catch (e) {
+    console.warn("Could not backfill notification channel webhook URLs:", e);
   }
 }
