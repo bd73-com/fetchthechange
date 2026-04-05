@@ -16,7 +16,7 @@ import type { Request, Response, NextFunction } from 'express';
  * All exempt entries below must omit the /api prefix.
  */
 const EXEMPT_PATHS = new Set(['/stripe/webhook', '/webhooks/resend', '/v1/openapi.json', '/v1/ping', '/extension/monitors']);
-const EXEMPT_PREFIXES = ['/campaigns/unsubscribe/', '/campaigns/resubscribe/', '/v1/', '/extension/monitors/'];
+const EXEMPT_PREFIXES = ['/campaigns/unsubscribe/', '/campaigns/resubscribe/', '/v1/'];
 const STATE_CHANGING_METHODS = new Set(['POST', 'PATCH', 'DELETE', 'PUT']);
 
 export function csrfProtection(allowedOrigins: string[], isDev: boolean) {

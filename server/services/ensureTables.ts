@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken } from "../utils/encryption";
 
 /**
  * Ensures error_logs deduplication columns exist (added in PR #56).
@@ -93,6 +94,8 @@ export async function ensureChannelTables(): Promise<void> {
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       )
     `);
+    // Backfill: encrypt existing plaintext webhook URLs
+    await backfillNotificationChannelWebhookUrls();
   } catch (e) {
     console.error("Could not ensure notification channel tables:", e);
   }
@@ -224,21 +227,42 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
     // Add columns for existing tables that predate the consecutive failures / cleanup feature
     await db.execute(sql`ALTER TABLE automation_subscriptions ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0`);
     await db.execute(sql`ALTER TABLE automation_subscriptions ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP`);
+    // Add hook_url_hash column for dedup (replaces plaintext hook_url in unique indexes)
+    await db.execute(sql`ALTER TABLE automation_subscriptions ADD COLUMN IF NOT EXISTS hook_url_hash TEXT`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_user_idx ON automation_subscriptions(user_id)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_platform_idx ON automation_subscriptions(platform)`);
-    // Enforce dedup at DB level: one active subscription per (user, platform, hookUrl, monitorId).
+    // Enforce dedup at DB level: one active subscription per (user, platform, hookUrlHash, monitorId).
     // Split into two partial indexes to avoid COALESCE expression that confuses migration introspection.
-    // Drop the old COALESCE-based index only if it still exists (one-time migration).
-    const oldIdx = await db.execute(sql`SELECT 1 FROM pg_indexes WHERE indexname = 'automation_subscriptions_dedup_uniq' LIMIT 1`);
-    if ((oldIdx as any).rows?.length > 0) {
-      await db.execute(sql`DROP INDEX automation_subscriptions_dedup_uniq`);
+    // Drop legacy indexes that used plaintext hook_url for dedup.
+    for (const name of ['automation_subscriptions_dedup_uniq', 'automation_subscriptions_dedup_with_monitor', 'automation_subscriptions_dedup_global']) {
+      const old = await db.execute(sql`SELECT 1 FROM pg_indexes WHERE indexname = ${name} LIMIT 1`);
+      if ((old as any).rows?.length > 0) {
+        await db.execute(sql.raw(`DROP INDEX ${name}`));
+      }
     }
-    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_with_monitor ON automation_subscriptions(user_id, platform, hook_url, monitor_id) WHERE active = true AND monitor_id IS NOT NULL`);
-    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_global ON automation_subscriptions(user_id, platform, hook_url) WHERE active = true AND monitor_id IS NULL`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_with_monitor ON automation_subscriptions(user_id, platform, hook_url_hash, monitor_id) WHERE active = true AND monitor_id IS NOT NULL`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_global ON automation_subscriptions(user_id, platform, hook_url_hash) WHERE active = true AND monitor_id IS NULL`);
+    // Backfill: hash and encrypt any legacy plaintext hook_url rows
+    await backfillAutomationSubscriptionUrls();
     return true;
   } catch (e) {
     console.error("Could not ensure automation_subscriptions table:", e);
     return false;
+  }
+}
+
+/**
+ * Ensures the composite index on monitor_changes(monitor_id, detected_at) exists.
+ * Without this index, queries filtering by monitor_id with ORDER BY detected_at
+ * perform sequential scans as the table grows.
+ */
+export async function ensureMonitorChangesIndexes(): Promise<void> {
+  try {
+    // Use CONCURRENTLY to avoid taking a SHARE lock that blocks writes on large tables.
+    // CONCURRENTLY cannot run inside a transaction — Drizzle's db.execute does not wrap in one.
+    await db.execute(sql`CREATE INDEX CONCURRENTLY IF NOT EXISTS monitor_changes_monitor_detected_idx ON monitor_changes(monitor_id, detected_at)`);
+  } catch (e) {
+    console.warn("Could not ensure monitor_changes indexes:", e);
   }
 }
 
@@ -272,5 +296,75 @@ export async function ensureTagTables(): Promise<void> {
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS monitor_tags_monitor_tag_uniq ON monitor_tags(monitor_id, tag_id)`);
   } catch (e) {
     console.error("Could not ensure tag tables:", e);
+  }
+}
+
+/**
+ * Backfills hook_url_hash and encrypts plaintext hook_url values for
+ * existing automation_subscriptions rows.  Rows that already have a
+ * hook_url_hash are skipped (idempotent).
+ */
+async function backfillAutomationSubscriptionUrls(): Promise<void> {
+  try {
+    let totalUpdated = 0;
+    // Process in batches of 500 until no un-hashed rows remain
+    while (true) {
+      const rows = await db.execute(sql`SELECT id, hook_url FROM automation_subscriptions WHERE hook_url_hash IS NULL ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED`);
+      const toUpdate = (rows as any).rows as Array<{ id: number; hook_url: string }>;
+      if (!toUpdate || toUpdate.length === 0) break;
+
+      for (const row of toUpdate) {
+        const plainUrl = isValidEncryptedToken(row.hook_url) ? decryptToken(row.hook_url) : row.hook_url;
+        const hash = hashUrl(plainUrl);
+        const encrypted = encryptUrl(plainUrl);
+        await db.execute(sql`UPDATE automation_subscriptions SET hook_url_hash = ${hash}, hook_url = ${encrypted} WHERE id = ${row.id} AND hook_url_hash IS NULL`);
+      }
+      totalUpdated += toUpdate.length;
+    }
+    if (totalUpdated > 0) {
+      console.log(`[ensureTables] Backfilled ${totalUpdated} automation subscription URLs`);
+    }
+  } catch (e) {
+    console.warn("Could not backfill automation subscription URLs:", e);
+  }
+}
+
+/**
+ * Backfills encryption for existing notification_channels webhook config.url
+ * and config.secret.  Rows with already-encrypted values (detected by
+ * isValidEncryptedToken) are skipped.  Processes in batches of 500.
+ */
+async function backfillNotificationChannelWebhookUrls(): Promise<void> {
+  try {
+    let lastId = 0;
+    let updated = 0;
+    // Cursor-based pagination to process all webhook channels
+    while (true) {
+      const rows = await db.execute(sql`SELECT id, config FROM notification_channels WHERE channel = 'webhook' AND id > ${lastId} ORDER BY id LIMIT 500`);
+      const toUpdate = (rows as any).rows as Array<{ id: number; config: Record<string, unknown> }>;
+      if (!toUpdate || toUpdate.length === 0) break;
+      lastId = toUpdate[toUpdate.length - 1].id;
+
+      for (const row of toUpdate) {
+        const cfg = row.config;
+        if (!cfg) continue;
+        const url = cfg.url as string | undefined;
+        const secret = cfg.secret as string | undefined;
+        const urlNeedsEncrypt = url && !isValidEncryptedToken(url);
+        const secretNeedsEncrypt = secret && !isValidEncryptedToken(secret);
+        if (!urlNeedsEncrypt && !secretNeedsEncrypt) continue;
+
+        const newConfig = { ...cfg };
+        if (urlNeedsEncrypt) newConfig.url = encryptUrl(url);
+        if (secretNeedsEncrypt) newConfig.secret = encryptUrl(secret);
+        await db.execute(sql`UPDATE notification_channels SET config = ${JSON.stringify(newConfig)}::jsonb WHERE id = ${row.id}`);
+        updated++;
+      }
+    }
+    if (updated > 0) {
+      console.log(`[ensureTables] Backfilled ${updated} notification channel webhook URLs`);
+    }
+  } catch (e) {
+    console.warn("Could not backfill notification channel webhook URLs:", e);
   }
 }

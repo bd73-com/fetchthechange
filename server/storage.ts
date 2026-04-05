@@ -3,6 +3,7 @@ import { users, type User } from "@shared/models/auth";
 import { db } from "./db";
 import { eq, desc, asc, and, or, isNull, lte, lt, gte, sql, inArray } from "drizzle-orm";
 import { notificationTablesExist } from "./services/notificationReady";
+import { encryptUrl, decryptUrl, hashUrl } from "./utils/encryption";
 
 export const PENDING_WEBHOOK_RETRY_QUERY_LIMIT = 500;
 
@@ -353,18 +354,39 @@ export class DatabaseStorage implements IStorage {
 
   // Notification channels
   async getMonitorChannels(monitorId: number): Promise<NotificationChannel[]> {
-    return await db.select().from(notificationChannels)
+    const rows = await db.select().from(notificationChannels)
       .where(eq(notificationChannels.monitorId, monitorId));
+    return rows.map((ch) => {
+      if (ch.channel === "webhook" && ch.config) {
+        const cfg = ch.config as Record<string, unknown>;
+        const decrypted: Record<string, unknown> = { ...cfg };
+        if (cfg.url) decrypted.url = decryptUrl(cfg.url as string);
+        if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
+        return { ...ch, config: decrypted };
+      }
+      return ch;
+    });
   }
 
   async upsertMonitorChannel(monitorId: number, channel: string, enabled: boolean, config: Record<string, unknown>): Promise<NotificationChannel> {
+    const storedConfig = channel === "webhook" && config.url
+      ? { ...config, url: encryptUrl(config.url as string), ...(config.secret ? { secret: encryptUrl(config.secret as string) } : {}) }
+      : config;
     const [result] = await db.insert(notificationChannels)
-      .values({ monitorId, channel, enabled, config })
+      .values({ monitorId, channel, enabled, config: storedConfig })
       .onConflictDoUpdate({
         target: [notificationChannels.monitorId, notificationChannels.channel],
-        set: { enabled, config, updatedAt: new Date() },
+        set: { enabled, config: storedConfig, updatedAt: new Date() },
       })
       .returning();
+    // Return decrypted values to caller
+    if (result.channel === "webhook" && result.config) {
+      const cfg = result.config as Record<string, unknown>;
+      const decrypted: Record<string, unknown> = { ...cfg };
+      if (cfg.url) decrypted.url = decryptUrl(cfg.url as string);
+      if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
+      return { ...result, config: decrypted };
+    }
     return result;
   }
 
@@ -667,12 +689,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createAutomationSubscription(userId: string, platform: string, hookUrl: string, monitorId: number | null): Promise<AutomationSubscription> {
-    // Reactivate existing matching subscription if one exists (dedup)
+    const urlHash = hashUrl(hookUrl);
+    const encryptedUrl = encryptUrl(hookUrl);
+
+    // Reactivate existing matching subscription if one exists (dedup via hash)
     const [existing] = await db.select().from(automationSubscriptions)
       .where(and(
         eq(automationSubscriptions.userId, userId),
         eq(automationSubscriptions.platform, platform),
-        eq(automationSubscriptions.hookUrl, hookUrl),
+        eq(automationSubscriptions.hookUrlHash, urlHash),
         monitorId !== null
           ? eq(automationSubscriptions.monitorId, monitorId)
           : isNull(automationSubscriptions.monitorId),
@@ -682,19 +707,19 @@ export class DatabaseStorage implements IStorage {
     if (existing) {
       if (!existing.active) {
         const [reactivated] = await db.update(automationSubscriptions)
-          .set({ active: true, consecutiveFailures: 0, deactivatedAt: null })
+          .set({ active: true, consecutiveFailures: 0, deactivatedAt: null, hookUrl: encryptedUrl })
           .where(eq(automationSubscriptions.id, existing.id))
           .returning();
-        return reactivated;
+        return { ...reactivated, hookUrl: hookUrl };
       }
-      return existing;
+      return { ...existing, hookUrl: hookUrl };
     }
 
     try {
       const [sub] = await db.insert(automationSubscriptions)
-        .values({ userId, platform, hookUrl, monitorId, active: true })
+        .values({ userId, platform, hookUrl: encryptedUrl, hookUrlHash: urlHash, monitorId, active: true })
         .returning();
-      return sub;
+      return { ...sub, hookUrl: hookUrl };
     } catch (err: any) {
       // Handle concurrent insert race (unique constraint violation)
       if (err?.code === "23505") {
@@ -702,14 +727,14 @@ export class DatabaseStorage implements IStorage {
           .where(and(
             eq(automationSubscriptions.userId, userId),
             eq(automationSubscriptions.platform, platform),
-            eq(automationSubscriptions.hookUrl, hookUrl),
+            eq(automationSubscriptions.hookUrlHash, urlHash),
             monitorId !== null
               ? eq(automationSubscriptions.monitorId, monitorId)
               : isNull(automationSubscriptions.monitorId),
             eq(automationSubscriptions.active, true),
           ))
           .limit(1);
-        if (existing) return existing;
+        if (existing) return { ...existing, hookUrl: hookUrl };
       }
       throw err;
     }
@@ -731,7 +756,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getActiveAutomationSubscriptions(userId: string, monitorId: number): Promise<AutomationSubscription[]> {
-    return await db.select().from(automationSubscriptions)
+    const rows = await db.select().from(automationSubscriptions)
       .where(and(
         eq(automationSubscriptions.userId, userId),
         eq(automationSubscriptions.active, true),
@@ -740,6 +765,7 @@ export class DatabaseStorage implements IStorage {
           eq(automationSubscriptions.monitorId, monitorId),
         ),
       ));
+    return rows.map((row) => ({ ...row, hookUrl: decryptUrl(row.hookUrl) }));
   }
 
   async touchAutomationSubscription(id: number): Promise<void> {

@@ -311,7 +311,7 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF for POST /extension/monitors (prefix exemption)", () => {
+    it("bypasses CSRF for POST /extension/monitors (exact path exemption)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
@@ -352,6 +352,21 @@ describe("csrfProtection", () => {
       middleware(req, res, next);
 
       expect(next).toHaveBeenCalled();
+    });
+
+    it("does NOT exempt /extension/monitors-settings (no prefix over-match)", () => {
+      const middleware = csrfProtection(allowedOrigins, false);
+      const req = mockReq({
+        method: "POST",
+        path: "/extension/monitors-settings",
+        headers: {},
+      });
+      const res = mockRes();
+
+      middleware(req, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res._status).toBe(403);
     });
 
     it("does NOT exempt /campaigns/ (non-unsubscribe paths)", () => {

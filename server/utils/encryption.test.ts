@@ -70,3 +70,91 @@ describe("encryption", () => {
     expect(isValidEncryptedToken("only:two")).toBe(false);
   });
 });
+
+describe("isEncryptionAvailable", () => {
+  afterEach(() => {
+    delete process.env.SLACK_ENCRYPTION_KEY;
+    vi.resetModules();
+  });
+
+  it("returns true when key is set and valid", async () => {
+    process.env.SLACK_ENCRYPTION_KEY = "a".repeat(64);
+    const { isEncryptionAvailable } = await import("./encryption");
+    expect(isEncryptionAvailable()).toBe(true);
+  });
+
+  it("returns false when key is not set", async () => {
+    delete process.env.SLACK_ENCRYPTION_KEY;
+    const { isEncryptionAvailable } = await import("./encryption");
+    expect(isEncryptionAvailable()).toBe(false);
+  });
+
+  it("returns false when key is wrong length", async () => {
+    process.env.SLACK_ENCRYPTION_KEY = "abcd";
+    const { isEncryptionAvailable } = await import("./encryption");
+    expect(isEncryptionAvailable()).toBe(false);
+  });
+});
+
+describe("encryptUrl / decryptUrl", () => {
+  const VALID_KEY = "a".repeat(64);
+
+  beforeEach(() => {
+    process.env.SLACK_ENCRYPTION_KEY = VALID_KEY;
+  });
+
+  afterEach(() => {
+    delete process.env.SLACK_ENCRYPTION_KEY;
+    vi.resetModules();
+  });
+
+  it("encrypts and decrypts a URL round-trip", async () => {
+    const { encryptUrl, decryptUrl, isValidEncryptedToken } = await import("./encryption");
+    const url = "https://hooks.zapier.com/hooks/catch/123/abc";
+    const encrypted = encryptUrl(url);
+    expect(encrypted).not.toBe(url);
+    expect(isValidEncryptedToken(encrypted)).toBe(true);
+    expect(decryptUrl(encrypted)).toBe(url);
+  });
+
+  it("returns plaintext when encryption key is not set", async () => {
+    delete process.env.SLACK_ENCRYPTION_KEY;
+    const { encryptUrl } = await import("./encryption");
+    const url = "https://example.com/webhook";
+    expect(encryptUrl(url)).toBe(url);
+  });
+
+  it("decryptUrl returns plaintext URLs as-is (legacy rows)", async () => {
+    const { decryptUrl } = await import("./encryption");
+    const url = "https://example.com/webhook";
+    expect(decryptUrl(url)).toBe(url);
+  });
+
+  it("decryptUrl throws when value is encrypted but key is missing", async () => {
+    const { encryptUrl, decryptUrl } = await import("./encryption");
+    const url = "https://hooks.zapier.com/abc";
+    const encrypted = encryptUrl(url);
+    delete process.env.SLACK_ENCRYPTION_KEY;
+    expect(() => decryptUrl(encrypted)).toThrow("Cannot decrypt URL");
+  });
+});
+
+describe("hashUrl", () => {
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it("produces a deterministic SHA-256 hex hash", async () => {
+    const { hashUrl } = await import("./encryption");
+    const url = "https://hooks.zapier.com/abc";
+    const hash1 = hashUrl(url);
+    const hash2 = hashUrl(url);
+    expect(hash1).toBe(hash2);
+    expect(hash1).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("produces different hashes for different URLs", async () => {
+    const { hashUrl } = await import("./encryption");
+    expect(hashUrl("https://a.com")).not.toBe(hashUrl("https://b.com"));
+  });
+});

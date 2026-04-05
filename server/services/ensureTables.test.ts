@@ -10,7 +10,15 @@ vi.mock("../db", () => ({
   },
 }));
 
-import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable } from "./ensureTables";
+// Mock encryption utilities used by ensureAutomationSubscriptionsTable backfill
+vi.mock("../utils/encryption", () => ({
+  encryptUrl: (url: string) => `encrypted:${url}`,
+  decryptToken: (v: string) => v.replace("encrypted:", ""),
+  hashUrl: (url: string) => `hash:${url}`,
+  isValidEncryptedToken: (v: string) => v.startsWith("encrypted:"),
+}));
+
+import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes } from "./ensureTables";
 
 describe("ensureMonitorHealthColumns", () => {
   beforeEach(() => {
@@ -115,8 +123,8 @@ describe("ensureChannelTables", () => {
   it("executes all CREATE TABLE and CREATE INDEX statements without throwing", async () => {
     mockExecute.mockResolvedValue([]);
     await ensureChannelTables();
-    // 3 CREATE TABLE + 1 CREATE INDEX + 1 CREATE UNIQUE INDEX + 2 CREATE INDEX = 7
-    expect(mockExecute).toHaveBeenCalledTimes(7);
+    // 3 CREATE TABLE + 1 CREATE INDEX + 1 CREATE UNIQUE INDEX + 2 CREATE INDEX + 1 backfill SELECT = 8
+    expect(mockExecute).toHaveBeenCalledTimes(8);
   });
 
   it("emits CREATE INDEX for delivery_log_channel_status_attempt_idx", async () => {
@@ -295,21 +303,48 @@ describe("ensureMonitorPendingRetryColumn", () => {
   });
 });
 
+describe("ensureMonitorChangesIndexes", () => {
+  beforeEach(() => {
+    mockExecute.mockReset();
+  });
+
+  it("creates the composite index", async () => {
+    mockExecute.mockResolvedValue([]);
+    await ensureMonitorChangesIndexes();
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+    const stmt = JSON.stringify(mockExecute.mock.calls[0][0]);
+    expect(stmt).toContain("monitor_changes_monitor_detected_idx");
+    expect(stmt).toContain("monitor_id");
+    expect(stmt).toContain("detected_at");
+  });
+
+  it("does not throw on error", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockExecute.mockRejectedValue(new Error("permission denied"));
+    await expect(ensureMonitorChangesIndexes()).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Could not ensure monitor_changes indexes:",
+      expect.any(Error),
+    );
+    warnSpy.mockRestore();
+  });
+});
+
 describe("ensureAutomationSubscriptionsTable", () => {
   beforeEach(() => {
     mockExecute.mockReset();
   });
 
-  it("executes CREATE TABLE, indexes, pg_indexes check, and two partial unique indexes and returns true", async () => {
+  it("executes CREATE TABLE, indexes, pg_indexes checks, unique indexes, and backfill and returns true", async () => {
     mockExecute.mockResolvedValue({ rows: [] });
     const result = await ensureAutomationSubscriptionsTable();
     expect(result).toBe(true);
-    // 1 CREATE TABLE + 2 ALTER TABLE ADD COLUMN + 2 CREATE INDEX + 1 pg_indexes check + 2 CREATE UNIQUE INDEX = 8
-    expect(mockExecute).toHaveBeenCalledTimes(8);
+    // 1 CREATE TABLE + 3 ALTER TABLE ADD COLUMN + 2 CREATE INDEX + 3 pg_indexes checks + 2 CREATE UNIQUE INDEX + 1 backfill SELECT = 12
+    expect(mockExecute).toHaveBeenCalledTimes(12);
   });
 
-  it("drops the old COALESCE-based dedup index when it exists", async () => {
-    // Return a row from pg_indexes check to simulate old index existing
+  it("drops legacy dedup indexes when they exist", async () => {
+    // Return a row from pg_indexes check to simulate old indexes existing
     mockExecute.mockImplementation((...args: any[]) => {
       const stmt = JSON.stringify(args[0]);
       if (stmt.includes("pg_indexes")) return { rows: [{ "?column?": 1 }] };
@@ -320,9 +355,11 @@ describe("ensureAutomationSubscriptionsTable", () => {
       try { return JSON.stringify(arg); } catch { return String(arg); }
     });
     expect(statements.some((s: string) => s.includes("DROP INDEX automation_subscriptions_dedup_uniq"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("DROP INDEX automation_subscriptions_dedup_with_monitor"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("DROP INDEX automation_subscriptions_dedup_global"))).toBe(true);
   });
 
-  it("skips DROP when old index does not exist", async () => {
+  it("skips DROP when old indexes do not exist", async () => {
     mockExecute.mockResolvedValue({ rows: [] });
     await ensureAutomationSubscriptionsTable();
     const statements = mockExecute.mock.calls.map(([arg]: any) => {
@@ -373,7 +410,7 @@ describe("schema sync between ensureTables DDL and Drizzle schema", () => {
     slack_connections: ["id", "user_id", "team_id", "team_name", "bot_token", "scope", "created_at", "updated_at"],
     monitor_conditions: ["id", "monitor_id", "type", "value", "group_index", "created_at"],
     automated_campaign_configs: ["id", "key", "name", "subject", "html_body", "text_body", "enabled", "last_run_at", "next_run_at", "created_at", "updated_at"],
-    automation_subscriptions: ["id", "user_id", "platform", "hook_url", "monitor_id", "active", "consecutive_failures", "created_at", "deactivated_at", "last_delivered_at"],
+    automation_subscriptions: ["id", "user_id", "platform", "hook_url", "hook_url_hash", "monitor_id", "active", "consecutive_failures", "created_at", "deactivated_at", "last_delivered_at"],
   };
 
   function drizzleColumnNames(table: Parameters<typeof getTableColumns>[0]): string[] {
