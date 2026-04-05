@@ -10,6 +10,10 @@ import type { Request, Response, NextFunction } from 'express';
  *
  * Exempts paths that use their own authentication (e.g. Stripe webhooks with
  * signature verification).
+ *
+ * NOTE: This middleware is mounted at app.use("/api/", ...) in server/index.ts,
+ * so req.path is relative to /api/ (e.g. /v1/monitors, not /api/v1/monitors).
+ * All exempt entries below must omit the /api prefix.
  */
 const EXEMPT_PATHS = new Set(['/stripe/webhook', '/webhooks/resend', '/v1/openapi.json', '/v1/ping']);
 const EXEMPT_PREFIXES = ['/campaigns/unsubscribe/', '/campaigns/resubscribe/', '/v1/', '/extension/monitors'];
