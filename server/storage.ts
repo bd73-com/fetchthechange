@@ -364,11 +364,16 @@ export class DatabaseStorage implements IStorage {
       .where(eq(notificationChannels.monitorId, monitorId));
     return rows.map((ch) => {
       if (ch.channel === "webhook" && ch.config) {
-        const cfg = ch.config as Record<string, unknown>;
-        const decrypted: Record<string, unknown> = { ...cfg };
-        if (cfg.url) decrypted.url = decryptUrl(cfg.url as string);
-        if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
-        return { ...ch, config: decrypted };
+        try {
+          const cfg = ch.config as Record<string, unknown>;
+          const decrypted: Record<string, unknown> = { ...cfg };
+          if (cfg.url) decrypted.url = decryptUrl(cfg.url as string);
+          if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
+          return { ...ch, config: decrypted };
+        } catch {
+          // Return row with redacted config if decryption fails (key rotation, corruption)
+          return { ...ch, config: { url: "[decryption-failed]" } };
+        }
       }
       return ch;
     });

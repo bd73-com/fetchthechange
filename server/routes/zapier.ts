@@ -34,7 +34,7 @@ router.post("/subscribe", async (req: any, res) => {
         userId: req.apiUser.id,
         hookUrlHostname: hostname,
       });
-      return res.status(422).json({ error: "Hook URL targets a private network", code: "SSRF_BLOCKED" });
+      return res.status(422).json({ message: "Hook URL targets a private network", code: "SSRF_BLOCKED" });
     }
 
     // Enforce subscription limit (soft — concurrent requests may briefly exceed by 1-2;
@@ -51,7 +51,7 @@ router.post("/subscribe", async (req: any, res) => {
     if (body.monitorId) {
       const monitor = await storage.getMonitor(body.monitorId);
       if (!monitor || monitor.userId !== req.apiUser.id) {
-        return res.status(404).json({ error: "Monitor not found", code: "NOT_FOUND" });
+        return res.status(404).json({ message: "Monitor not found", code: "NOT_FOUND" });
       }
     }
 
@@ -87,7 +87,7 @@ router.post("/subscribe", async (req: any, res) => {
     });
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return res.status(422).json({ error: err.errors[0].message, code: "VALIDATION_ERROR" });
+      return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
     }
     throw err;
   }
@@ -112,7 +112,7 @@ router.delete("/unsubscribe", async (req: any, res) => {
     res.status(204).send();
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return res.status(422).json({ error: err.errors[0].message, code: "VALIDATION_ERROR" });
+      return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
     }
     throw err;
   }
@@ -140,7 +140,7 @@ router.get("/changes", async (req: any, res) => {
     if (query.monitorId) {
       const monitor = await storage.getMonitor(query.monitorId);
       if (!monitor || monitor.userId !== req.apiUser.id) {
-        return res.status(404).json({ error: "Monitor not found", code: "NOT_FOUND" });
+        return res.status(404).json({ message: "Monitor not found", code: "NOT_FOUND" });
       }
     }
 
@@ -176,7 +176,7 @@ router.get("/changes", async (req: any, res) => {
     res.json(result);
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return res.status(422).json({ error: err.errors[0].message, code: "VALIDATION_ERROR" });
+      return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
     }
     throw err;
   }
