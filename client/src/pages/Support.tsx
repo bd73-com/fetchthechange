@@ -320,7 +320,7 @@ const faqSections: FAQSection[] = [
       {
         question: "What data does Zapier receive when a monitor changes?",
         answer:
-          "Each trigger includes: the monitor ID and name, the monitored URL, the previous value, the new value, and timestamps for when the change was detected and when the event was sent. This is the same payload as the webhook system.",
+          "Each trigger includes the standard webhook fields (event, monitorId, monitorName, url, oldValue, newValue, detectedAt, timestamp) plus an id field for the change record.",
       },
       {
         question: "My Zap stopped triggering — what happened?",
