@@ -18,6 +18,7 @@ See `README.md` for project overview, tech stack, structure, and setup.
 - **Authentication**: Replit Auth with OpenID Connect via Passport.
 - **Database**: PostgreSQL with Drizzle ORM. Schema in `shared/schema.ts` and `shared/models/auth.ts`.
 - **Release labels**: PRs should carry one of: `feature`, `fix`, `breaking`, `chore`, `docs`, `security`. Auto-applied from PR title by release-drafter, but verify before merging.
+- **Chrome extension surface area**: The extension (`extension/`) depends on server and client files beyond its own source. When changing `server/routes/extension.ts`, `server/middleware/extensionAuth.ts`, `client/src/pages/ExtensionAuth.tsx`, or `server/utils/extensionToken.ts`, check whether the extension source needs matching updates and run `/extension-release`.
 
 ## Verification
 - `npm run check` — TypeScript type checking (tsc)
