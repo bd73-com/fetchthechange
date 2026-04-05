@@ -10,7 +10,15 @@ vi.mock("../db", () => ({
   },
 }));
 
-import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable } from "./ensureTables";
+// Mock encryption utilities used by ensureAutomationSubscriptionsTable backfill
+vi.mock("../utils/encryption", () => ({
+  encryptUrl: (url: string) => `encrypted:${url}`,
+  decryptToken: (v: string) => v.replace("encrypted:", ""),
+  hashUrl: (url: string) => `hash:${url}`,
+  isValidEncryptedToken: (v: string) => v.startsWith("encrypted:"),
+}));
+
+import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes } from "./ensureTables";
 
 describe("ensureMonitorHealthColumns", () => {
   beforeEach(() => {
@@ -292,6 +300,33 @@ describe("ensureMonitorPendingRetryColumn", () => {
       expect.any(Error),
     );
     errorSpy.mockRestore();
+  });
+});
+
+describe("ensureMonitorChangesIndexes", () => {
+  beforeEach(() => {
+    mockExecute.mockReset();
+  });
+
+  it("creates the composite index", async () => {
+    mockExecute.mockResolvedValue([]);
+    await ensureMonitorChangesIndexes();
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+    const stmt = JSON.stringify(mockExecute.mock.calls[0][0]);
+    expect(stmt).toContain("monitor_changes_monitor_detected_idx");
+    expect(stmt).toContain("monitor_id");
+    expect(stmt).toContain("detected_at");
+  });
+
+  it("does not throw on error", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockExecute.mockRejectedValue(new Error("permission denied"));
+    await expect(ensureMonitorChangesIndexes()).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Could not ensure monitor_changes indexes:",
+      expect.any(Error),
+    );
+    warnSpy.mockRestore();
   });
 });
 

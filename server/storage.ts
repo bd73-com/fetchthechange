@@ -357,8 +357,12 @@ export class DatabaseStorage implements IStorage {
     const rows = await db.select().from(notificationChannels)
       .where(eq(notificationChannels.monitorId, monitorId));
     return rows.map((ch) => {
-      if (ch.channel === "webhook" && ch.config && (ch.config as any).url) {
-        return { ...ch, config: { ...ch.config as object, url: decryptUrl((ch.config as any).url) } };
+      if (ch.channel === "webhook" && ch.config) {
+        const cfg = ch.config as Record<string, unknown>;
+        const decrypted: Record<string, unknown> = { ...cfg };
+        if (cfg.url) decrypted.url = decryptUrl(cfg.url as string);
+        if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
+        return { ...ch, config: decrypted };
       }
       return ch;
     });
@@ -366,7 +370,7 @@ export class DatabaseStorage implements IStorage {
 
   async upsertMonitorChannel(monitorId: number, channel: string, enabled: boolean, config: Record<string, unknown>): Promise<NotificationChannel> {
     const storedConfig = channel === "webhook" && config.url
-      ? { ...config, url: encryptUrl(config.url as string) }
+      ? { ...config, url: encryptUrl(config.url as string), ...(config.secret ? { secret: encryptUrl(config.secret as string) } : {}) }
       : config;
     const [result] = await db.insert(notificationChannels)
       .values({ monitorId, channel, enabled, config: storedConfig })
@@ -375,9 +379,13 @@ export class DatabaseStorage implements IStorage {
         set: { enabled, config: storedConfig, updatedAt: new Date() },
       })
       .returning();
-    // Return decrypted URL to caller
-    if (result.channel === "webhook" && result.config && (result.config as any).url) {
-      return { ...result, config: { ...result.config as object, url: decryptUrl((result.config as any).url) } };
+    // Return decrypted values to caller
+    if (result.channel === "webhook" && result.config) {
+      const cfg = result.config as Record<string, unknown>;
+      const decrypted: Record<string, unknown> = { ...cfg };
+      if (cfg.url) decrypted.url = decryptUrl(cfg.url as string);
+      if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
+      return { ...result, config: decrypted };
     }
     return result;
   }

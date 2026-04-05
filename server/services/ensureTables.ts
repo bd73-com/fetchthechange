@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-import { encryptUrl, hashUrl, isValidEncryptedToken } from "../utils/encryption";
+import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken } from "../utils/encryption";
 
 /**
  * Ensures error_logs deduplication columns exist (added in PR #56).
@@ -307,7 +307,7 @@ async function backfillAutomationSubscriptionUrls(): Promise<void> {
     if (!toUpdate || toUpdate.length === 0) return;
 
     for (const row of toUpdate) {
-      const plainUrl = isValidEncryptedToken(row.hook_url) ? row.hook_url : row.hook_url;
+      const plainUrl = isValidEncryptedToken(row.hook_url) ? decryptToken(row.hook_url) : row.hook_url;
       const hash = hashUrl(plainUrl);
       const encrypted = encryptUrl(plainUrl);
       await db.execute(sql`UPDATE automation_subscriptions SET hook_url_hash = ${hash}, hook_url = ${encrypted} WHERE id = ${row.id}`);

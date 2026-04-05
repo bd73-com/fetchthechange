@@ -62,20 +62,33 @@ export function isEncryptionAvailable(): boolean {
   return key.length === 32;
 }
 
+let _encryptUrlWarned = false;
+
 /**
- * Encrypt a URL if the encryption key is available; return plaintext otherwise.
+ * Encrypt a URL if the encryption key is available.
+ * Logs a warning on first call if the key is missing (URLs stored in plaintext).
  */
 export function encryptUrl(url: string): string {
-  if (!isEncryptionAvailable()) return url;
+  if (!isEncryptionAvailable()) {
+    if (!_encryptUrlWarned) {
+      _encryptUrlWarned = true;
+      console.warn("[encryption] SLACK_ENCRYPTION_KEY not set — webhook and hook URLs will be stored in plaintext. Set a 32-byte hex key to enable encryption at rest.");
+    }
+    return url;
+  }
   return encryptToken(url);
 }
 
 /**
  * Decrypt a URL if it looks encrypted; return as-is if plaintext (e.g. legacy rows).
+ * Throws if the value is encrypted but the key is unavailable — this surfaces
+ * key misconfiguration clearly instead of passing ciphertext to callers.
  */
 export function decryptUrl(value: string): string {
   if (!isValidEncryptedToken(value)) return value;
-  if (!isEncryptionAvailable()) return value;
+  if (!isEncryptionAvailable()) {
+    throw new Error("Cannot decrypt URL: SLACK_ENCRYPTION_KEY is not set but encrypted data exists in the database. Set the encryption key to restore access.");
+  }
   return decryptToken(value);
 }
 
