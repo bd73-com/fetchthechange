@@ -70,6 +70,7 @@ export interface IStorage {
   incrementAutomationSubscriptionFailures(id: number): Promise<number>;
   resetAutomationSubscriptionFailures(id: number): Promise<void>;
   cleanupStaleAutomationSubscriptions(olderThan: Date): Promise<number>;
+  getRecentChangesForMonitors(monitorIds: number[], limit: number): Promise<MonitorChange[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -715,10 +716,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deactivateAutomationSubscription(id: number, userId: string): Promise<boolean> {
-    const result = await db.update(automationSubscriptions)
+    const rows = await db.update(automationSubscriptions)
       .set({ active: false, deactivatedAt: new Date() })
-      .where(and(eq(automationSubscriptions.id, id), eq(automationSubscriptions.userId, userId), eq(automationSubscriptions.active, true)));
-    return ((result as any).rowCount ?? 0) > 0;
+      .where(and(eq(automationSubscriptions.id, id), eq(automationSubscriptions.userId, userId), eq(automationSubscriptions.active, true)))
+      .returning();
+    return rows.length > 0;
   }
 
   async deactivateAllUserAutomationSubscriptions(userId: string): Promise<number> {
@@ -772,6 +774,18 @@ export class DatabaseStorage implements IStorage {
         ),
       ));
     return (result as any).rowCount ?? 0;
+  }
+
+  async getRecentChangesForMonitors(monitorIds: number[], limit: number): Promise<MonitorChange[]> {
+    if (monitorIds.length === 0) return [];
+    return await db.select().from(monitorChanges)
+      .where(
+        monitorIds.length === 1
+          ? eq(monitorChanges.monitorId, monitorIds[0])
+          : inArray(monitorChanges.monitorId, monitorIds),
+      )
+      .orderBy(desc(monitorChanges.detectedAt))
+      .limit(limit);
   }
 
   async downgradeHourlyMonitors(userId: string): Promise<{ count: number; monitorNames: string[] }> {

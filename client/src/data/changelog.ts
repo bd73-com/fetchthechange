@@ -8,6 +8,506 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    "version": "1.23.0",
+    "date": "2026-04-04",
+    "body": "## What's Changed\n\n## Features\n\n* Zapier & Make integration — connect FTC changes to 7,000+ apps (#336) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.17...v1.23.0"
+  },
+  {
+    "version": "1.22.17",
+    "date": "2026-04-02",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: guard all res.json() calls and non-blocking campaign bootstrap (#333) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.16...v1.22.17"
+  },
+  {
+    "version": "1.22.16",
+    "date": "2026-04-02",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: guard all res.json() calls against non-JSON responses (#332) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.15...v1.22.16"
+  },
+  {
+    "version": "1.22.15",
+    "date": "2026-04-02",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: harden client JSON parsing and non-blocking campaign bootstrap (#330) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.14...v1.22.15"
+  },
+  {
+    "version": "1.22.14",
+    "date": "2026-04-02",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: non-blocking startup + safe JSON parsing in client hooks (#324) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.13...v1.22.14"
+  },
+  {
+    "version": "1.22.13",
+    "date": "2026-04-02",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: harden res.json() calls against non-JSON responses (#322) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.12...v1.22.13"
+  },
+  {
+    "version": "1.22.12",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: handle non-JSON errors, expose auth error state, sequence startup (#318) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.11...v1.22.12"
+  },
+  {
+    "version": "1.22.11",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: externalize msw in vitest for Replit compatibility (#317) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.10...v1.22.11"
+  },
+  {
+    "version": "1.22.10",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve msw import failures in Replit runner (#316) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.9...v1.22.10"
+  },
+  {
+    "version": "1.22.9",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve msw import failures in client test suites (#315) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.8...v1.22.9"
+  },
+  {
+    "version": "1.22.8",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: move msw and happy-dom to dependencies for Replit CI (#314) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.7...v1.22.8"
+  },
+  {
+    "version": "1.22.7",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: switch client tests from happy-dom to jsdom (#313) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.6...v1.22.7"
+  },
+  {
+    "version": "1.22.6",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: move happy-dom to dependencies for Replit compatibility (#312) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.5...v1.22.6"
+  },
+  {
+    "version": "1.22.5",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.4...v1.22.5"
+  },
+  {
+    "version": "1.22.4",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Maintenance\n\n* test: frontend hook tests with MSW + React Testing Library (#305) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.3...v1.22.4"
+  },
+  {
+    "version": "1.22.3",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix app startup DB connection timeouts (#307) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.2...v1.22.3"
+  },
+  {
+    "version": "1.22.2",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: add missing pending_retry_at column migration (#304) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.1...v1.22.2"
+  },
+  {
+    "version": "1.22.1",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: write delivery_log entries for digest email deliveries (#303) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.0...v1.22.1"
+  },
+  {
+    "version": "1.22.0",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Features\n\n* feat: self-healing monitor auto-retry after transient failures (#302) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.21.1...v1.22.0"
+  },
+  {
+    "version": "1.21.1",
+    "date": "2026-04-01",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: email notifications silently skipped when other channels exist (#300) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.21.0...v1.21.1"
+  },
+  {
+    "version": "1.21.0",
+    "date": "2026-03-30",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add git-based insights dashboard report (#299) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.20.2...v1.21.0"
+  },
+  {
+    "version": "1.20.2",
+    "date": "2026-03-28",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix AdminErrors camelCase mismatch (#296) (#298) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.20.1...v1.20.2"
+  },
+  {
+    "version": "1.20.1",
+    "date": "2026-03-27",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve 6 admin bugs with input validation and filter consistency (#297) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.20.0...v1.20.1"
+  },
+  {
+    "version": "1.20.0",
+    "date": "2026-03-27",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add campaign data recovery from orphaned recipients (#295) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.19.5...v1.20.0"
+  },
+  {
+    "version": "1.19.5",
+    "date": "2026-03-27",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: CSRF-safe test-email endpoint and bounded error log batch delete (#289) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.19.4...v1.19.5"
+  },
+  {
+    "version": "1.19.4",
+    "date": "2026-03-27",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.19.3...v1.19.4"
+  },
+  {
+    "version": "1.19.3",
+    "date": "2026-03-26",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve three open bugs (#278, #280, #281) (#285) @bd73-com\n* Fix email notification override cleared on login (#286) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.19.2...v1.19.3"
+  },
+  {
+    "version": "1.19.2",
+    "date": "2026-03-26",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve three bugs — email footer, bounce counter, batch-delete (#279) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.19.1...v1.19.2"
+  },
+  {
+    "version": "1.19.1",
+    "date": "2026-03-26",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: create missing automated_campaign_configs table at startup (#282) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.19.0...v1.19.1"
+  },
+  {
+    "version": "1.19.0",
+    "date": "2026-03-26",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add automated welcome campaign system (#275) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.44...v1.19.0"
+  },
+  {
+    "version": "1.18.44",
+    "date": "2026-03-26",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.43...v1.18.44"
+  },
+  {
+    "version": "1.18.43",
+    "date": "2026-03-26",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: reduce scraper and scheduler error log noise (#267) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.42...v1.18.43"
+  },
+  {
+    "version": "1.18.42",
+    "date": "2026-03-26",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix refresh token bugs: preserve on OIDC omission, deduplicate concurrent refreshes (#271) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.41...v1.18.42"
+  },
+  {
+    "version": "1.18.41",
+    "date": "2026-03-25",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix: persist refreshed OAuth tokens to session store (#266) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.40...v1.18.41"
+  },
+  {
+    "version": "1.18.40",
+    "date": "2026-03-25",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix extension stuck on login screen after sign-in (#264) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.39...v1.18.40"
+  },
+  {
+    "version": "1.18.39",
+    "date": "2026-03-25",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: prevent bot reviews from blocking /merge-pr (#263) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.38...v1.18.39"
+  },
+  {
+    "version": "1.18.38",
+    "date": "2026-03-24",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix: Add missing stripe and resend error log sources (#262) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.37...v1.18.38"
+  },
+  {
+    "version": "1.18.37",
+    "date": "2026-03-23",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: remove misspelled selector default and notify on monitor downgrade (#261) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.36...v1.18.37"
+  },
+  {
+    "version": "1.18.36",
+    "date": "2026-03-23",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: stop CodeRabbit and missing reviews from blocking merges (#258) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.35...v1.18.36"
+  },
+  {
+    "version": "1.18.35",
+    "date": "2026-03-23",
+    "body": "## What's Changed\n\n## Maintenance\n\n* Remove Edit/Write permission prompts (#257) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.34...v1.18.35"
+  },
+  {
+    "version": "1.18.34",
+    "date": "2026-03-23",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: auto-dismiss stale bot reviews in /merge-pr (#256) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.33...v1.18.34"
+  },
+  {
+    "version": "1.18.33",
+    "date": "2026-03-22",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: gate hourly frequency for free-tier users and downgrade on plan change (#255) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.32...v1.18.33"
+  },
+  {
+    "version": "1.18.32",
+    "date": "2026-03-22",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.31...v1.18.32"
+  },
+  {
+    "version": "1.18.31",
+    "date": "2026-03-22",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: auto-recover on merge-pr pre-flight failures (#249) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.30...v1.18.31"
+  },
+  {
+    "version": "1.18.30",
+    "date": "2026-03-22",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.29...v1.18.30"
+  },
+  {
+    "version": "1.18.29",
+    "date": "2026-03-19",
+    "body": "## What's Changed\n\n## Maintenance\n\n* chore: split /review-pr and /merge-pr into separate commands (#245) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.28...v1.18.29"
+  },
+  {
+    "version": "1.18.28",
+    "date": "2026-03-18",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: use exact pathname match for extension auth page (#241) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.27...v1.18.28"
+  },
+  {
+    "version": "1.18.27",
+    "date": "2026-03-18",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve 4 open bugs (#231, #232, #233, #234) (#239) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.26...v1.18.27"
+  },
+  {
+    "version": "1.18.26",
+    "date": "2026-03-17",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix(ci): draft release before uploading extension zip (#238) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.25...v1.18.26"
+  },
+  {
+    "version": "1.18.25",
+    "date": "2026-03-17",
+    "body": "## What's Changed\n\n* ci: attach extension zip to GitHub Releases (#237) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.24...v1.18.25"
+  },
+  {
+    "version": "1.18.24",
+    "date": "2026-03-17",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: bundle extension popup as IIFE for Brave compatibility (#236) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.23...v1.18.24"
+  },
+  {
+    "version": "1.18.23",
+    "date": "2026-03-17",
+    "body": "## What's Changed\n\n## Maintenance\n\n* docs: add extension README with build instructions (#235) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.22...v1.18.23"
+  },
+  {
+    "version": "1.18.22",
+    "date": "2026-03-17",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: serialize Stripe init after route registration (#229) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.21...v1.18.22"
+  },
+  {
+    "version": "1.18.21",
+    "date": "2026-03-17",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.20...v1.18.21"
+  },
+  {
+    "version": "1.18.20",
+    "date": "2026-03-17",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix campaign email race condition, constraints, and counter drift (#227) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.19...v1.18.20"
+  },
+  {
+    "version": "1.18.19",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve TOCTOU race in Resend webhook handler (#226) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.18...v1.18.19"
+  },
+  {
+    "version": "1.18.18",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix Resend webhook counter drift with atomic transactions (#222) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.17...v1.18.18"
+  },
+  {
+    "version": "1.18.17",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix: atomic Resend webhook recipient + counter updates (#221) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.16...v1.18.17"
+  },
+  {
+    "version": "1.18.16",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: guard REPLIT_DOMAINS and narrow webhook error classification (#217) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.15...v1.18.16"
+  },
+  {
+    "version": "1.18.15",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix getStripeSync() race condition leaking pg.Pool (#213) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.14...v1.18.15"
+  },
+  {
+    "version": "1.18.14",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix shutdown pool leak and browser inUse tracking (#210) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.13...v1.18.14"
+  },
+  {
+    "version": "1.18.13",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix server startup crash when lsof is unavailable (#212) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.12...v1.18.13"
+  },
+  {
+    "version": "1.18.12",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.11...v1.18.12"
+  },
+  {
+    "version": "1.18.11",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Maintenance\n\n* Tune connection pool settings to reduce ephemeral port sprawl (#209) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.10...v1.18.11"
+  },
+  {
+    "version": "1.18.10",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: add LIMIT to getPendingWebhookRetries query (#205) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.9...v1.18.10"
+  },
+  {
+    "version": "1.18.9",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: pool fetch() connections to stop Replit port exhaustion (#201) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.8...v1.18.9"
+  },
+  {
+    "version": "1.18.8",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.7...v1.18.8"
+  },
+  {
+    "version": "1.18.7",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix fetchWithCurl timeout and scheduler test failures (#202) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.6...v1.18.7"
+  },
+  {
+    "version": "1.18.6",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: harden scraper anti-bot evasion for retail sites (#198) @bd73-com\n\n## Security\n\n* fix: harden scraper anti-bot evasion for retail sites (#198) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.5...v1.18.6"
+  },
+  {
+    "version": "1.18.5",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve stale cancel count and webhook retry duplication (#195) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.4...v1.18.5"
+  },
+  {
+    "version": "1.18.4",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: add DB retry and re-entrancy guards to scheduler crons (#192) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.3...v1.18.4"
+  },
+  {
+    "version": "1.18.3",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.2...v1.18.3"
+  },
+  {
+    "version": "1.18.2",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: reduce ephemeral port usage to prevent Replit port exhaustion (#189) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.1...v1.18.2"
+  },
+  {
+    "version": "1.18.1",
+    "date": "2026-03-16",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix campaign failed_count, dashboard rate cap, CTA text, and cleanup atomicity (#184) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.18.0...v1.18.1"
+  },
+  {
+    "version": "1.18.0",
+    "date": "2026-03-15",
+    "body": "## What's Changed\n\n## Features\n\n* feat: add blog post — monitor website changes without writing code (#179) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.20...v1.18.0"
+  },
+  {
+    "version": "1.17.20",
+    "date": "2026-03-15",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Fix campaign dashboard avg open/click rate calculation (#181) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.19...v1.17.20"
+  },
+  {
+    "version": "1.17.19",
+    "date": "2026-03-15",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.18...v1.17.19"
+  },
+  {
+    "version": "1.17.18",
+    "date": "2026-03-15",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve Replit port exhaustion via pool cap and port cleanup (#178) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.17...v1.17.18"
+  },
+  {
+    "version": "1.17.17",
+    "date": "2026-03-15",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.16...v1.17.17"
+  },
+  {
+    "version": "1.17.16",
+    "date": "2026-03-15",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: graceful shutdown, FK cleanup, browser pool drain, webhook backoff (#175) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.15...v1.17.16"
+  },
+  {
+    "version": "1.17.15",
+    "date": "2026-03-14",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.14...v1.17.15"
+  },
+  {
+    "version": "1.17.14",
+    "date": "2026-03-14",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: scheduler resilience, query performance, and stale notification cleanup (#170) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.13...v1.17.14"
+  },
+  {
+    "version": "1.17.13",
+    "date": "2026-03-13",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.12...v1.17.13"
+  },
+  {
+    "version": "1.17.12",
+    "date": "2026-03-13",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve production errors (conditions table, stealth evasions, save retry) (#162) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.11...v1.17.12"
+  },
+  {
+    "version": "1.17.11",
+    "date": "2026-03-13",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve 4 notification system bugs (#158) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.10...v1.17.11"
+  },
+  {
+    "version": "1.17.10",
+    "date": "2026-03-13",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: harden notification delivery pipeline (#150, #151, #152) (#157) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.9...v1.17.10"
+  },
+  {
+    "version": "1.17.9",
+    "date": "2026-03-13",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve 4 open bugs (#138, #145, #146, #147) (#149) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.8...v1.17.9"
+  },
+  {
+    "version": "1.17.8",
+    "date": "2026-03-12",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.7...v1.17.8"
+  },
+  {
+    "version": "1.17.7",
+    "date": "2026-03-12",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: auto-delete branches after PR merge (#144) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.6...v1.17.7"
+  },
+  {
+    "version": "1.17.6",
+    "date": "2026-03-12",
+    "body": "## What's Changed\n\n* Add GitHub Copilot code review instructions (#143) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.5...v1.17.6"
+  },
+  {
+    "version": "1.17.5",
+    "date": "2026-03-12",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: use single Vitest fork to avoid Replit port exhaustion (#141) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.4...v1.17.5"
+  },
+  {
+    "version": "1.17.4",
+    "date": "2026-03-12",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.3...v1.17.4"
+  },
+  {
+    "version": "1.17.3",
+    "date": "2026-03-12",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.2...v1.17.3"
+  },
+  {
+    "version": "1.17.2",
+    "date": "2026-03-11",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: add helmet to esbuild bundle allowlist (#137) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.1...v1.17.2"
+  },
+  {
+    "version": "1.17.1",
+    "date": "2026-03-11",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: harden CORS, add helmet security headers, redact API key logs (#136) @bd73-com\n\n## Security\n\n* fix: harden CORS, add helmet security headers, redact API key logs (#136) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.17.0...v1.17.1"
+  },
+  {
+    "version": "1.17.0",
+    "date": "2026-03-10",
+    "body": "## What's Changed\n\n## Features\n\n* feat: surface bot-blocking state on monitor card and warn on creation (#135) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.16.5...v1.17.0"
+  },
+  {
+    "version": "1.16.5",
+    "date": "2026-03-10",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* Add bug-reporter agent to magicwand pipeline (#134) @bd73-com\n\n## Maintenance\n\n* Add bug-reporter agent to magicwand pipeline (#134) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.16.4...v1.16.5"
+  },
+  {
+    "version": "1.16.4",
+    "date": "2026-03-10",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.16.3...v1.16.4"
+  },
+  {
+    "version": "1.16.3",
+    "date": "2026-03-10",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.16.2...v1.16.3"
+  },
+  {
+    "version": "1.16.2",
+    "date": "2026-03-10",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.16.1...v1.16.2"
+  },
+  {
     "version": "1.16.1",
     "date": "2026-03-09",
     "body": "## What's Changed\n\n## Maintenance\n\n* Remove auto-merge from /magicwand pipeline (#130) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.16.0...v1.16.1"
@@ -333,4 +833,3 @@ export const changelog: ChangelogEntry[] = [
     "body": "## What's Changed\n\n## Breaking Changes\n\n* Remove refunds FAQ and add Support link to dashboard nav (#17) @bd73-com\n\n## Features\n\n* Add automated release tracking (#65) @bd73-com\n* Add per-monitor notification preferences (#64) @bd73-com\n* Add batch delete with undo for admin error logs (#59) @bd73-com\n* Add delete button to EventLog entries (#53) @bd73-com\n* Add email campaign system for user communication (#41) @bd73-com\n* Add selector validation, Browserless retry, and auto-heal recovery (#40) @bd73-com\n* Add monitor auto-pause, metrics tracking, and security hardening (#39) @bd73-com\n* Add admin User Overview section to Event Log page (#23) @bd73-com\n* Add support page with FAQ accordions and contact form (#16) @bd73-com\n\n## Bug Fixes\n\n* Fix empty Releases section by labeling PRs and adding workflow_dispatch (#66) @bd73-com\n* Fix Stripe webhook signature validation failure (#63) @bd73-com\n* Fix test email and campaign send using stale form data (#60) @bd73-com\n* Fix event log loading after schema migration (#57) @bd73-com\n* Fix timeout errors bypassing browserless fallback pipeline (#52) @bd73-com\n* Fix architecture issues: remove duplicate migrations, improve type safety, add tests (#48) @bd73-com\n* Fix /api/auth/user 500 crash from missing campaign columns (#44) @bd73-com\n* Fix review findings: safer type check, ARIA role, static import, deterministic sort (#43) @bd73-com\n* Fix code review findings and add comprehensive test coverage (#38) @bd73-com\n* Fix EventLog refresh button and remove drizzle-kit push from build (#35) @bd73-com\n* Fix deployment crash: add db:push to build step (#32) @bd73-com\n* Fix SSL security warnings by normalizing sslmode in DATABASE_URL (#30) @bd73-com\n* Fix scraper test suite crash from missing db and email mocks (#29) @bd73-com\n* Fix app crash from missing database columns by adding db:push to build (#27) @bd73-com\n* Fix support contact form silently succeeding without sending email (#22) @bd73-com\n* Fix support form 500 when SUPPORT_EMAIL unset (#21) @bd73-com\n* Fix support form email bounce and extract DashboardNav component (#20) @bd73-com\n* Fix all 10 security review findings (SSRF, info disclosure, CORS, session) (#14) @bd73-com\n* Fix review-pr and create-pr agent command implementations (#13) @bd73-com\n* Fix SSRF bypass via redirect following (#6) @bd73-com\n* Fix Stripe webhook signature verification vulnerability (#4) @bd73-com\n* Fix 4 critical security issues and improve test coverage (#2) @bd73-com\n\n## Security\n\n* Security: add missing rate limits, patch deps (#61) @bd73-com\n* Harden error-log endpoints and sanitize scraper errors (#55) @bd73-com\n\n## Maintenance\n\n* Add blog post: CSS Selectors Keep Breaking (#62) @bd73-com\n* Suppress expected console noise in test output (#58) @bd73-com\n* Deduplicate error logs, add notification badge on Event Log (#56) @bd73-com\n* Streamline docs: deduplicate CLAUDE.md, README.md, replit.md (#54) @bd73-com\n* Improve Claude Code session reliability and repo hygiene (#51) @bd73-com\n* Prepare repository for public visibility with AGPL-3.0 license (#50) @bd73-com\n* Change license from MIT to AGPL-3.0 (#49) @bd73-com\n* Increase free tier from 1 to 3 monitors (#47) @bd73-com\n* Increase free tier monitor limit from 1 to 3 (#46) @bd73-com\n* Add project README (#45) @bd73-com\n* Add monitor auto-pause, metrics tracking, and CodeRabbit config (#37) @bd73-com\n* Add monitor auto-pause on consecutive failures and fix EventLog refresh (#34) @bd73-com\n* Rename db:push to schema:push to prevent Replit auto-migration (#36) @bd73-com\n* Add SessionStart hook to auto-install gh CLI in web sessions (#33) @bd73-com\n* Add monitor auto-pause on consecutive failures with metrics tracking (#31) @bd73-com\n* Add monitor robustness: auto-pause, failure tracking, metrics, and jitter (#28) @bd73-com\n* Add email campaign system for user communication (#26) @bd73-com\n* Add SessionStart hook to auto-install gh CLI and dependencies (#25) @bd73-com\n* Improve monitor error messages with names and fix suggestions (#24) @bd73-com\n* Show dashboard nav on Support page for authenticated users (#19) @bd73-com\n* Make PublicNav auth-aware to prevent sign-out appearance (#18) @bd73-com\n* Add /interview skill for structured feature specification planning (#15) @bd73-com\n* Update /review-pr to include CodeRabbit feedback step (#12) @bd73-com\n* Validate Stripe metadata.tier against known tiers at runtime (#11) @bd73-com\n* Extract determineTierFromProduct and require merge confirmation in review-pr (#10) @bd73-com\n* Add test coverage for CSRF middleware, webhook handlers, routes, and schema (#9) @bd73-com\n* Claude/list project agents rpk ps (#8) @bd73-com\n* Add node_modules to .gitignore (#5) @bd73-com\n* Reduce false-positive blocked detections and fix diagnostic headers (#3) @bd73-com\n* Add comprehensive test suite for scraper service (#1) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/commits/v0.2.0"
   }
 ];
-

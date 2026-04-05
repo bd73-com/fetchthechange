@@ -1,8 +1,9 @@
 name: Sync Changelog
 
 on:
-  release:
-    types: [published, edited]
+  # Primary sync runs as a job in release.yml (GITHUB_TOKEN events don't
+  # trigger cross-workflow runs, so the release:published trigger never fired).
+  # Keep workflow_dispatch for manual catch-up runs.
   workflow_dispatch:
 
 permissions:
