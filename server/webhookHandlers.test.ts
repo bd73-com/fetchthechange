@@ -27,6 +27,7 @@ vi.mock("./services/logger", () => ({
 vi.mock("./storage", () => ({
   storage: {
     downgradeHourlyMonitors: vi.fn().mockResolvedValue({ count: 0, monitorNames: [] }),
+    deactivateAllUserAutomationSubscriptions: vi.fn().mockResolvedValue(0),
   },
 }));
 
@@ -584,5 +585,92 @@ describe("WebhookHandlers.handleSubscriptionChange", () => {
       stripeSubscriptionId: "sub_trial",
     });
     expect(mockStorage.downgradeHourlyMonitors).not.toHaveBeenCalled();
+  });
+
+  it("deactivates automation subscriptions when downgrading from power to non-power tier", async () => {
+    mockAuthStorage.getUserByStripeCustomerId.mockResolvedValue({
+      id: "user_10",
+      email: "test@example.com",
+      tier: "power",
+    } as any);
+
+    const mockStripe = {
+      prices: {
+        retrieve: vi.fn().mockResolvedValue({
+          product: { id: "prod_pro", metadata: { tier: "pro" }, name: "Pro Plan" },
+        }),
+      },
+    };
+    mockGetUncachableStripeClient.mockResolvedValue(mockStripe);
+
+    await WebhookHandlers.handleSubscriptionChange({
+      customer: "cus_downgrade",
+      status: "active",
+      id: "sub_downgrade",
+      items: { data: [{ price: { id: "price_pro_down" } }] },
+    });
+
+    expect(mockStorage.deactivateAllUserAutomationSubscriptions).toHaveBeenCalledWith("user_10");
+  });
+
+  it("does not deactivate automation subscriptions when upgrading to power tier", async () => {
+    mockAuthStorage.getUserByStripeCustomerId.mockResolvedValue({
+      id: "user_11",
+      email: "test@example.com",
+      tier: "pro",
+    } as any);
+
+    const mockStripe = {
+      prices: {
+        retrieve: vi.fn().mockResolvedValue({
+          product: { id: "prod_power", metadata: { tier: "power" }, name: "Power Plan" },
+        }),
+      },
+    };
+    mockGetUncachableStripeClient.mockResolvedValue(mockStripe);
+
+    await WebhookHandlers.handleSubscriptionChange({
+      customer: "cus_upgrade",
+      status: "active",
+      id: "sub_upgrade",
+      items: { data: [{ price: { id: "price_power_up" } }] },
+    });
+
+    expect(mockStorage.deactivateAllUserAutomationSubscriptions).not.toHaveBeenCalled();
+  });
+});
+
+describe("WebhookHandlers.handleSubscriptionDeleted — automation subscriptions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("deactivates automation subscriptions on subscription deletion", async () => {
+    mockAuthStorage.getUserByStripeCustomerId.mockResolvedValue({
+      id: "user_del",
+      email: "test@example.com",
+      tier: "power",
+    } as any);
+
+    await WebhookHandlers.handleSubscriptionDeleted({
+      customer: "cus_del",
+      id: "sub_del",
+    });
+
+    expect(mockStorage.deactivateAllUserAutomationSubscriptions).toHaveBeenCalledWith("user_del");
+  });
+
+  it("continues gracefully when automation deactivation throws", async () => {
+    mockAuthStorage.getUserByStripeCustomerId.mockResolvedValue({
+      id: "user_err",
+      email: "test@example.com",
+      tier: "power",
+    } as any);
+    mockStorage.deactivateAllUserAutomationSubscriptions.mockRejectedValueOnce(new Error("DB error"));
+
+    // Should not throw — error is caught and logged
+    await expect(
+      WebhookHandlers.handleSubscriptionDeleted({ customer: "cus_err", id: "sub_err" })
+    ).resolves.not.toThrow();
   });
 });

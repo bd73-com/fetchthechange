@@ -14,18 +14,43 @@ Check whether the Chrome extension needs rebuilding after a git pull, and if so,
    ```
    If the diff produces no output at all, print "No changes detected since last pull." and stop.
 
-3. Decide if the extension needs rebuilding. The extension needs rebuilding if **any** changed file matches one of these patterns:
+3. Decide if the extension needs rebuilding or review. Check the changed files against two categories:
+
+   **Direct changes** — require rebuild:
    - `extension/src/**`
    - `extension/manifest.json`
    - `extension/package.json`
    - `extension/tsconfig.json`
    - `extension/scripts/**`
 
-   If no extension files changed, print:
+   **Adjacent changes** — require review (the extension may need source updates):
+   - `server/routes/extension.ts`
+   - `server/middleware/extensionAuth.ts`
+   - `client/src/pages/ExtensionAuth.tsx`
+   - `server/utils/extensionToken.ts`
+   - `shared/routes.ts` (if extension API schemas changed)
+
+   If **direct changes** were found, proceed to step 4 (build).
+
+   If only **adjacent changes** were found, print:
+   ```
+   ⚠ Extension-adjacent files changed — review needed.
+
+   The following server/client files that the extension depends on were modified:
+     • <list of changed adjacent files>
+
+   The extension source was NOT changed. Review whether the extension
+   needs matching updates (e.g. new API fields, changed response shape,
+   auth flow changes). If updates are needed, make them and re-run
+   /extension-release.
+   ```
+   Then stop. Do not proceed further.
+
+   If **neither** category matched, print:
    ```
    ✓ Extension is up to date — no rebuild needed.
 
-   Changed files were all in the backend/frontend. The existing
+   Changed files were all outside the extension surface area. The existing
    fetchthechange-extension.zip is still valid.
    ```
    Then stop. Do not proceed further.

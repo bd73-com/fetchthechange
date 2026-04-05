@@ -15,7 +15,7 @@ import type { Request, Response, NextFunction } from 'express';
  * so req.path is relative to /api/ (e.g. /v1/monitors, not /api/v1/monitors).
  * All exempt entries below must omit the /api prefix.
  */
-const EXEMPT_PATHS = new Set(['/stripe/webhook', '/webhooks/resend', '/v1/openapi.json', '/v1/ping', '/extension/monitors']);
+const EXEMPT_PATHS = new Set(['/stripe/webhook', '/webhooks/resend', '/extension/monitors']);
 const EXEMPT_PREFIXES = ['/campaigns/unsubscribe/', '/campaigns/resubscribe/', '/v1/'];
 const STATE_CHANGING_METHODS = new Set(['POST', 'PATCH', 'DELETE', 'PUT']);
 

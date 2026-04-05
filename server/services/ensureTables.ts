@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken } from "../utils/encryption";
+import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken, isEncryptionAvailable } from "../utils/encryption";
 
 /**
  * Ensures error_logs deduplication columns exist (added in PR #56).
@@ -233,11 +233,13 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_platform_idx ON automation_subscriptions(platform)`);
     // Enforce dedup at DB level: one active subscription per (user, platform, hookUrlHash, monitorId).
     // Split into two partial indexes to avoid COALESCE expression that confuses migration introspection.
-    // Drop legacy indexes that used plaintext hook_url for dedup.
+    // Drop legacy indexes that used plaintext hook_url (not hook_url_hash) for dedup.
+    // Only drop if the index definition does NOT already reference hook_url_hash.
     for (const name of ['automation_subscriptions_dedup_uniq', 'automation_subscriptions_dedup_with_monitor', 'automation_subscriptions_dedup_global']) {
-      const old = await db.execute(sql`SELECT 1 FROM pg_indexes WHERE indexname = ${name} LIMIT 1`);
-      if ((old as any).rows?.length > 0) {
-        await db.execute(sql.raw(`DROP INDEX ${name}`));
+      const old = await db.execute(sql`SELECT indexdef FROM pg_indexes WHERE indexname = ${name} LIMIT 1`);
+      const row = (old as any).rows?.[0];
+      if (row && !row.indexdef?.includes('hook_url_hash')) {
+        await db.execute(sql.raw(`DROP INDEX IF EXISTS ${name}`));
       }
     }
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_with_monitor ON automation_subscriptions(user_id, platform, hook_url_hash, monitor_id) WHERE active = true AND monitor_id IS NOT NULL`);
@@ -305,6 +307,10 @@ export async function ensureTagTables(): Promise<void> {
  * hook_url_hash are skipped (idempotent).
  */
 async function backfillAutomationSubscriptionUrls(): Promise<void> {
+  if (!isEncryptionAvailable()) {
+    console.warn("[ensureTables] Skipping automation subscription backfill: encryption key not configured");
+    return;
+  }
   try {
     let totalUpdated = 0;
     // Process in batches of 500 until no un-hashed rows remain
@@ -335,6 +341,10 @@ async function backfillAutomationSubscriptionUrls(): Promise<void> {
  * isValidEncryptedToken) are skipped.  Processes in batches of 500.
  */
 async function backfillNotificationChannelWebhookUrls(): Promise<void> {
+  if (!isEncryptionAvailable()) {
+    console.warn("[ensureTables] Skipping webhook URL backfill: encryption key not configured");
+    return;
+  }
   try {
     let lastId = 0;
     let updated = 0;

@@ -62,20 +62,10 @@ export function isEncryptionAvailable(): boolean {
   return key.length === 32;
 }
 
-let _encryptUrlWarned = false;
-
 /**
- * Encrypt a URL if the encryption key is available.
- * Logs a warning on first call if the key is missing (URLs stored in plaintext).
+ * Encrypt a URL for storage at rest. Throws if encryption key is unavailable.
  */
 export function encryptUrl(url: string): string {
-  if (!isEncryptionAvailable()) {
-    if (!_encryptUrlWarned) {
-      _encryptUrlWarned = true;
-      console.warn("[encryption] SLACK_ENCRYPTION_KEY not set — webhook and hook URLs will be stored in plaintext. Set a 32-byte hex key to enable encryption at rest.");
-    }
-    return url;
-  }
   return encryptToken(url);
 }
 

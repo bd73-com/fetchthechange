@@ -117,11 +117,10 @@ describe("encryptUrl / decryptUrl", () => {
     expect(decryptUrl(encrypted)).toBe(url);
   });
 
-  it("returns plaintext when encryption key is not set", async () => {
+  it("throws when encryption key is not set", async () => {
     delete process.env.SLACK_ENCRYPTION_KEY;
     const { encryptUrl } = await import("./encryption");
-    const url = "https://example.com/webhook";
-    expect(encryptUrl(url)).toBe(url);
+    expect(() => encryptUrl("https://example.com/webhook")).toThrow("SLACK_ENCRYPTION_KEY");
   });
 
   it("decryptUrl returns plaintext URLs as-is (legacy rows)", async () => {

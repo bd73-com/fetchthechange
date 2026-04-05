@@ -90,7 +90,13 @@ async function init(): Promise<void> {
       return;
     }
 
-    userInfo = await res.json();
+    userInfo = await res.json().catch(() => null);
+    if (!userInfo || typeof userInfo.userId !== "string" || typeof userInfo.tier !== "string") {
+      await clearToken();
+      state = "unauthenticated";
+      render();
+      return;
+    }
     // Cache userInfo for offline fallback
     await chrome.storage.local.set({ cachedUserInfo: userInfo });
     state = "authenticated";

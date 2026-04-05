@@ -71,6 +71,11 @@ vi.mock("../utils/encryption", () => ({
   decryptToken: (...args: any[]) => mockDecryptToken(...args),
 }));
 
+const mockDeliverToAutomationSubscriptions = vi.fn().mockResolvedValue(undefined);
+vi.mock("./automationDelivery", () => ({
+  deliverToAutomationSubscriptions: (...args: any[]) => mockDeliverToAutomationSubscriptions(...args),
+}));
+
 import {
   isInQuietHours,
   meetsThreshold,
@@ -1091,6 +1096,60 @@ describe("multi-channel delivery", () => {
     // Should not throw even when log write fails
     await expect(processChangeNotification(monitor, change, false)).resolves.not.toThrow();
     expect(mockSendNotificationEmail).toHaveBeenCalled();
+  });
+});
+
+describe("processChangeNotification — automation delivery fan-out", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetMonitorChannels.mockResolvedValue([]);
+    mockAddDeliveryLog.mockResolvedValue({ id: 1 });
+    mockGetMonitorConditions.mockResolvedValue([]);
+  });
+
+  it("calls deliverToAutomationSubscriptions even when all traditional channels are disabled", async () => {
+    const monitor = makeMonitor({ emailEnabled: false });
+    const change = makeChange();
+    mockGetMonitorChannels.mockResolvedValue([]);
+
+    await processChangeNotification(monitor, change, false);
+
+    expect(mockDeliverToAutomationSubscriptions).toHaveBeenCalledWith(monitor, change);
+  });
+
+  it("calls deliverToAutomationSubscriptions alongside email delivery", async () => {
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange();
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+
+    await processChangeNotification(monitor, change, false);
+
+    expect(mockDeliverToAutomationSubscriptions).toHaveBeenCalledWith(monitor, change);
+    expect(mockSendNotificationEmail).toHaveBeenCalled();
+  });
+
+  it("does not call deliverToAutomationSubscriptions when conditions block", async () => {
+    mockGetMonitorConditions.mockResolvedValue([
+      { id: 1, monitorId: 1, type: "numeric_lt", value: "0", groupIndex: 0, createdAt: new Date() },
+    ]);
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange({ oldValue: "$49/mo", newValue: "$59/mo" });
+
+    await processChangeNotification(monitor, change, false);
+
+    expect(mockDeliverToAutomationSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it("continues email delivery even when automation delivery rejects", async () => {
+    mockDeliverToAutomationSubscriptions.mockRejectedValueOnce(new Error("Zapier down"));
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange();
+    mockSendNotificationEmail.mockResolvedValue({ success: true });
+
+    // fire-and-forget: rejection should not affect the main flow
+    const result = await processChangeNotification(monitor, change, false);
+    expect(mockDeliverToAutomationSubscriptions).toHaveBeenCalledWith(monitor, change);
+    expect(result).toEqual({ success: true });
   });
 });
 
