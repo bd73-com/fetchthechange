@@ -337,9 +337,12 @@ export class DatabaseStorage implements IStorage {
       // Wrap in transaction matching deleteMonitor pattern for consistency.
       await db.transaction(async (tx) => {
         for (const [table, col] of [[notificationQueue, notificationQueue.changeId], [deliveryLog, deliveryLog.changeId]] as const) {
+          await tx.execute(sql`SAVEPOINT sp_cleanup_optional`);
           try {
             await tx.delete(table).where(eq(col, h.id));
+            await tx.execute(sql`RELEASE SAVEPOINT sp_cleanup_optional`);
           } catch (err: any) {
+            await tx.execute(sql`ROLLBACK TO SAVEPOINT sp_cleanup_optional`);
             if (err?.code !== "42P01") throw err;
           }
         }

@@ -300,7 +300,10 @@ describe("DatabaseStorage", () => {
         const txChain: any = {
           where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
         };
-        const tx = { delete: vi.fn().mockReturnValue(txChain) };
+        const tx = {
+          delete: vi.fn().mockReturnValue(txChain),
+          execute: vi.fn().mockResolvedValue(undefined),
+        };
         await cb(tx);
       });
 
@@ -347,6 +350,7 @@ describe("DatabaseStorage", () => {
               where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
             };
           }),
+          execute: vi.fn().mockResolvedValue(undefined),
         };
         await cb(tx);
       });
@@ -386,7 +390,10 @@ describe("DatabaseStorage", () => {
         const txChain: any = {
           where: vi.fn().mockRejectedValue(fkError),
         };
-        const tx = { delete: vi.fn().mockReturnValue(txChain) };
+        const tx = {
+          delete: vi.fn().mockReturnValue(txChain),
+          execute: vi.fn().mockResolvedValue(undefined),
+        };
         await cb(tx);
       });
 
