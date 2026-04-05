@@ -306,18 +306,24 @@ export async function ensureTagTables(): Promise<void> {
  */
 async function backfillAutomationSubscriptionUrls(): Promise<void> {
   try {
-    // LIMIT 500 to bound startup time; FOR UPDATE SKIP LOCKED to prevent concurrent backfill races
-    const rows = await db.execute(sql`SELECT id, hook_url FROM automation_subscriptions WHERE hook_url_hash IS NULL LIMIT 500 FOR UPDATE SKIP LOCKED`);
-    const toUpdate = (rows as any).rows as Array<{ id: number; hook_url: string }>;
-    if (!toUpdate || toUpdate.length === 0) return;
+    let totalUpdated = 0;
+    // Process in batches of 500 until no un-hashed rows remain
+    while (true) {
+      const rows = await db.execute(sql`SELECT id, hook_url FROM automation_subscriptions WHERE hook_url_hash IS NULL ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED`);
+      const toUpdate = (rows as any).rows as Array<{ id: number; hook_url: string }>;
+      if (!toUpdate || toUpdate.length === 0) break;
 
-    for (const row of toUpdate) {
-      const plainUrl = isValidEncryptedToken(row.hook_url) ? decryptToken(row.hook_url) : row.hook_url;
-      const hash = hashUrl(plainUrl);
-      const encrypted = encryptUrl(plainUrl);
-      await db.execute(sql`UPDATE automation_subscriptions SET hook_url_hash = ${hash}, hook_url = ${encrypted} WHERE id = ${row.id}`);
+      for (const row of toUpdate) {
+        const plainUrl = isValidEncryptedToken(row.hook_url) ? decryptToken(row.hook_url) : row.hook_url;
+        const hash = hashUrl(plainUrl);
+        const encrypted = encryptUrl(plainUrl);
+        await db.execute(sql`UPDATE automation_subscriptions SET hook_url_hash = ${hash}, hook_url = ${encrypted} WHERE id = ${row.id} AND hook_url_hash IS NULL`);
+      }
+      totalUpdated += toUpdate.length;
     }
-    console.log(`[ensureTables] Backfilled ${toUpdate.length} automation subscription URLs`);
+    if (totalUpdated > 0) {
+      console.log(`[ensureTables] Backfilled ${totalUpdated} automation subscription URLs`);
+    }
   } catch (e) {
     console.warn("Could not backfill automation subscription URLs:", e);
   }
@@ -330,25 +336,30 @@ async function backfillAutomationSubscriptionUrls(): Promise<void> {
  */
 async function backfillNotificationChannelWebhookUrls(): Promise<void> {
   try {
-    const rows = await db.execute(sql`SELECT id, config FROM notification_channels WHERE channel = 'webhook' LIMIT 500`);
-    const toUpdate = (rows as any).rows as Array<{ id: number; config: Record<string, unknown> }>;
-    if (!toUpdate || toUpdate.length === 0) return;
-
+    let lastId = 0;
     let updated = 0;
-    for (const row of toUpdate) {
-      const cfg = row.config;
-      if (!cfg) continue;
-      const url = cfg.url as string | undefined;
-      const secret = cfg.secret as string | undefined;
-      const urlNeedsEncrypt = url && !isValidEncryptedToken(url);
-      const secretNeedsEncrypt = secret && !isValidEncryptedToken(secret);
-      if (!urlNeedsEncrypt && !secretNeedsEncrypt) continue;
+    // Cursor-based pagination to process all webhook channels
+    while (true) {
+      const rows = await db.execute(sql`SELECT id, config FROM notification_channels WHERE channel = 'webhook' AND id > ${lastId} ORDER BY id LIMIT 500`);
+      const toUpdate = (rows as any).rows as Array<{ id: number; config: Record<string, unknown> }>;
+      if (!toUpdate || toUpdate.length === 0) break;
+      lastId = toUpdate[toUpdate.length - 1].id;
 
-      const newConfig = { ...cfg };
-      if (urlNeedsEncrypt) newConfig.url = encryptUrl(url);
-      if (secretNeedsEncrypt) newConfig.secret = encryptUrl(secret);
-      await db.execute(sql`UPDATE notification_channels SET config = ${JSON.stringify(newConfig)}::jsonb WHERE id = ${row.id}`);
-      updated++;
+      for (const row of toUpdate) {
+        const cfg = row.config;
+        if (!cfg) continue;
+        const url = cfg.url as string | undefined;
+        const secret = cfg.secret as string | undefined;
+        const urlNeedsEncrypt = url && !isValidEncryptedToken(url);
+        const secretNeedsEncrypt = secret && !isValidEncryptedToken(secret);
+        if (!urlNeedsEncrypt && !secretNeedsEncrypt) continue;
+
+        const newConfig = { ...cfg };
+        if (urlNeedsEncrypt) newConfig.url = encryptUrl(url);
+        if (secretNeedsEncrypt) newConfig.secret = encryptUrl(secret);
+        await db.execute(sql`UPDATE notification_channels SET config = ${JSON.stringify(newConfig)}::jsonb WHERE id = ${row.id}`);
+        updated++;
+      }
     }
     if (updated > 0) {
       console.log(`[ensureTables] Backfilled ${updated} notification channel webhook URLs`);
