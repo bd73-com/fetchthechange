@@ -238,7 +238,9 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
     // Wrapped in a transaction with EXCLUSIVE lock to prevent duplicate inserts during the
     // window between dropping old indexes and creating new ones (fixes race in rolling deploys).
     await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
       await tx.execute(sql`LOCK TABLE automation_subscriptions IN EXCLUSIVE MODE`);
+      // SECURITY: index names must remain hardcoded literals — sql.raw() bypasses parameterization
       for (const name of ['automation_subscriptions_dedup_uniq', 'automation_subscriptions_dedup_with_monitor', 'automation_subscriptions_dedup_global']) {
         const old = await tx.execute(sql`SELECT indexdef FROM pg_indexes WHERE indexname = ${name} LIMIT 1`);
         const row = (old as any).rows?.[0];

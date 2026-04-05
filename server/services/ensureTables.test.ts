@@ -370,8 +370,24 @@ describe("ensureAutomationSubscriptionsTable", () => {
     mockExecute.mockResolvedValue({ rows: [] });
     const result = await ensureAutomationSubscriptionsTable();
     expect(result).toBe(true);
-    // 1 CREATE TABLE + 3 ALTER TABLE ADD COLUMN + 2 CREATE INDEX + 1 LOCK TABLE + 3 pg_indexes checks + 2 CREATE UNIQUE INDEX + 1 backfill SELECT = 13
-    expect(mockExecute).toHaveBeenCalledTimes(13);
+    // 1 CREATE TABLE + 3 ALTER TABLE ADD COLUMN + 2 CREATE INDEX + 1 SET LOCAL lock_timeout + 1 LOCK TABLE + 3 pg_indexes checks + 2 CREATE UNIQUE INDEX + 1 backfill SELECT = 14
+    expect(mockExecute).toHaveBeenCalledTimes(14);
+  });
+
+  it("sets lock_timeout and acquires EXCLUSIVE lock before dropping and recreating indexes", async () => {
+    mockExecute.mockResolvedValue({ rows: [] });
+    await ensureAutomationSubscriptionsTable();
+    const statements = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(statements.some((s: string) => s.includes("lock_timeout"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("LOCK TABLE automation_subscriptions IN EXCLUSIVE MODE"))).toBe(true);
+    // lock_timeout must come before LOCK TABLE, which must come before pg_indexes checks
+    const timeoutIdx = statements.findIndex((s: string) => s.includes("lock_timeout"));
+    const lockIdx = statements.findIndex((s: string) => s.includes("LOCK TABLE"));
+    const pgIdxIdx = statements.findIndex((s: string) => s.includes("pg_indexes"));
+    expect(timeoutIdx).toBeLessThan(lockIdx);
+    expect(lockIdx).toBeLessThan(pgIdxIdx);
   });
 
   it("drops legacy dedup indexes when they exist", async () => {

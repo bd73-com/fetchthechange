@@ -67,87 +67,98 @@ describe("DatabaseStorage", () => {
   });
 
   describe("deleteMonitor", () => {
+    // Helper: creates a mock tx with execute (for SAVEPOINT) and delete support
+    function makeMockTx(deleteFn?: (callNum: number) => any) {
+      let deleteCallNum = 0;
+      const defaultDelete = () => ({
+        where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
+      });
+      return {
+        execute: vi.fn().mockResolvedValue(undefined),
+        delete: vi.fn().mockImplementation((table: any) => {
+          deleteCallNum++;
+          return deleteFn ? deleteFn(deleteCallNum) : defaultDelete();
+        }),
+        _tables: [] as any[],
+      };
+    }
+
     it("wraps all deletes in a db.transaction call", async () => {
       mockTransaction.mockImplementation(async (cb) => {
-        const txChain: any = {
-          where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
-        };
-        const tx = { delete: vi.fn().mockReturnValue(txChain) };
-        await cb(tx);
+        await cb(makeMockTx());
       });
 
       await storage.deleteMonitor(42);
       expect(mockTransaction).toHaveBeenCalledTimes(1);
-      // db.delete should NOT be called directly
       expect(mockDbDelete).not.toHaveBeenCalled();
     });
 
     it("calls tx.delete for all required tables including monitorConditions and monitorTags", async () => {
       const deletedTables: any[] = [];
       mockTransaction.mockImplementation(async (cb) => {
-        const txChain: any = {
-          where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
-        };
-        const tx = {
-          delete: vi.fn().mockImplementation((table: any) => {
-            deletedTables.push(table);
-            return txChain;
-          }),
-        };
+        const tx = makeMockTx();
+        tx.delete = vi.fn().mockImplementation((table: any) => {
+          deletedTables.push(table);
+          return { where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }) };
+        });
         await cb(tx);
       });
 
       await storage.deleteMonitor(1);
 
-      // Should delete from at least 11 tables:
-      // notificationQueue, notificationPreferences, deliveryLog, notificationChannels,
-      // monitorConditions, monitorTags, monitorChanges, monitorMetrics,
-      // browserlessUsage, resendUsage, monitors
       expect(deletedTables.length).toBeGreaterThanOrEqual(11);
       expect(deletedTables).toEqual(
         expect.arrayContaining([monitorConditions, monitorTags, monitorChanges, monitorMetrics, browserlessUsage, resendUsage, monitors]),
       );
     });
 
-    it("catches 42P01 (undefined_table) errors for optional tables", async () => {
+    it("uses SAVEPOINTs around optional table deletes and catches 42P01", async () => {
       const pgError = new Error("relation does not exist") as any;
       pgError.code = "42P01";
 
-      let deleteCallNum = 0;
+      const executeCalls: string[] = [];
       mockTransaction.mockImplementation(async (cb) => {
+        let deleteCallNum = 0;
         const tx = {
+          execute: vi.fn().mockImplementation((...args: any[]) => {
+            const stmt = JSON.stringify(args[0]);
+            executeCalls.push(stmt);
+            return Promise.resolve(undefined);
+          }),
           delete: vi.fn().mockImplementation(() => {
             deleteCallNum++;
-            // 3rd and 4th calls are the for-loop over optional tables
-            if (deleteCallNum === 3 || deleteCallNum === 4) {
+            // Make the 3rd optional table delete fail with 42P01
+            if (deleteCallNum === 3) {
               return { where: vi.fn().mockRejectedValue(pgError) };
             }
-            return {
-              where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
-            };
+            return { where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }) };
           }),
         };
         await cb(tx);
       });
 
       await expect(storage.deleteMonitor(1)).resolves.toBeUndefined();
+      // Verify SAVEPOINTs are used
+      expect(executeCalls.some((s) => s.includes("SAVEPOINT sp_del_optional"))).toBe(true);
+      // On success: RELEASE SAVEPOINT; on 42P01: ROLLBACK TO SAVEPOINT
+      expect(executeCalls.some((s) => s.includes("RELEASE SAVEPOINT sp_del_optional"))).toBe(true);
+      expect(executeCalls.some((s) => s.includes("ROLLBACK TO SAVEPOINT sp_del_optional"))).toBe(true);
     });
 
     it("rethrows non-42P01 errors from optional table deletes", async () => {
       const connError = new Error("connection refused") as any;
       connError.code = "08006";
 
-      let deleteCallNum = 0;
       mockTransaction.mockImplementation(async (cb) => {
+        let deleteCallNum = 0;
         const tx = {
+          execute: vi.fn().mockResolvedValue(undefined),
           delete: vi.fn().mockImplementation(() => {
             deleteCallNum++;
             if (deleteCallNum === 3) {
               return { where: vi.fn().mockRejectedValue(connError) };
             }
-            return {
-              where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
-            };
+            return { where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }) };
           }),
         };
         await cb(tx);
@@ -157,21 +168,19 @@ describe("DatabaseStorage", () => {
     });
 
     it("does not swallow errors whose message happens to contain 'relation'", async () => {
-      // Pre-fix code checked err.message.includes("relation") which would swallow this
       const fkError = new Error("foreign key constraint on relation fk_monitor") as any;
       fkError.code = "23503"; // foreign_key_violation, not 42P01
 
-      let deleteCallNum = 0;
       mockTransaction.mockImplementation(async (cb) => {
+        let deleteCallNum = 0;
         const tx = {
+          execute: vi.fn().mockResolvedValue(undefined),
           delete: vi.fn().mockImplementation(() => {
             deleteCallNum++;
             if (deleteCallNum === 3) {
               return { where: vi.fn().mockRejectedValue(fkError) };
             }
-            return {
-              where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
-            };
+            return { where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }) };
           }),
         };
         await cb(tx);

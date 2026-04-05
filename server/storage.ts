@@ -113,20 +113,22 @@ export class DatabaseStorage implements IStorage {
         await tx.delete(notificationQueue).where(eq(notificationQueue.monitorId, id));
         await tx.delete(notificationPreferences).where(eq(notificationPreferences.monitorId, id));
       }
-      // Delete channel-related rows independently — in partially-migrated DBs
-      // one table may exist without the others, and delivery_log.changeId has a FK
-      // to monitorChanges without CASCADE, so we must clean it up if the table exists.
-      for (const [table, col] of [[deliveryLog, deliveryLog.monitorId], [notificationChannels, notificationChannels.monitorId]] as const) {
+      // Delete from tables that may not exist in partially-migrated DBs.
+      // Each delete is wrapped in a SAVEPOINT so that a 42P01 ("undefined_table")
+      // error does not poison the surrounding PostgreSQL transaction.
+      for (const [table, col] of [
+        [deliveryLog, deliveryLog.monitorId],
+        [notificationChannels, notificationChannels.monitorId],
+        [monitorConditions, monitorConditions.monitorId],
+        [automationSubscriptions, automationSubscriptions.monitorId],
+        [monitorTags, monitorTags.monitorId],
+      ] as const) {
+        await tx.execute(sql`SAVEPOINT sp_del_optional`);
         try {
           await tx.delete(table).where(eq(col, id));
+          await tx.execute(sql`RELEASE SAVEPOINT sp_del_optional`);
         } catch (err: any) {
-          if (err?.code !== "42P01") throw err;
-        }
-      }
-      for (const [table, col] of [[monitorConditions, monitorConditions.monitorId], [automationSubscriptions, automationSubscriptions.monitorId], [monitorTags, monitorTags.monitorId]] as const) {
-        try {
-          await tx.delete(table).where(eq(col, id));
-        } catch (err: any) {
+          await tx.execute(sql`ROLLBACK TO SAVEPOINT sp_del_optional`);
           if (err?.code !== "42P01") throw err;
         }
       }
