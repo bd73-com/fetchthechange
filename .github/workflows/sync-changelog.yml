@@ -12,6 +12,9 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    concurrency:
+      group: sync-changelog
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,7 +24,7 @@ jobs:
         with:
           node-version: 20
 
-      - run: npm ci
+      - run: npm install --no-save tsx@4.21.0
 
       - run: npx tsx script/sync-changelog.ts
         env:
@@ -35,4 +38,4 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "chore: sync changelog from GitHub releases"
           git pull --rebase origin main
-          git push origin HEAD:main
+          git push origin HEAD:main || (sleep 2 && git pull --rebase origin main && git push origin HEAD:main)
