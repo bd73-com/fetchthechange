@@ -233,10 +233,12 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_platform_idx ON automation_subscriptions(platform)`);
     // Enforce dedup at DB level: one active subscription per (user, platform, hookUrlHash, monitorId).
     // Split into two partial indexes to avoid COALESCE expression that confuses migration introspection.
-    // Drop legacy indexes that used plaintext hook_url for dedup.
+    // Drop legacy indexes that used plaintext hook_url (not hook_url_hash) for dedup.
+    // Only drop if the index definition does NOT already reference hook_url_hash.
     for (const name of ['automation_subscriptions_dedup_uniq', 'automation_subscriptions_dedup_with_monitor', 'automation_subscriptions_dedup_global']) {
-      const old = await db.execute(sql`SELECT 1 FROM pg_indexes WHERE indexname = ${name} LIMIT 1`);
-      if ((old as any).rows?.length > 0) {
+      const old = await db.execute(sql`SELECT indexdef FROM pg_indexes WHERE indexname = ${name} LIMIT 1`);
+      const row = (old as any).rows?.[0];
+      if (row && !row.indexdef?.includes('hook_url_hash')) {
         await db.execute(sql.raw(`DROP INDEX ${name}`));
       }
     }

@@ -473,7 +473,7 @@ export const automationSubscriptions = pgTable("automation_subscriptions", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id),
   platform: text("platform").notNull(), // 'zapier'
-  hookUrl: text("hook_url").notNull(), // encrypted with AES-256-GCM when SLACK_ENCRYPTION_KEY is set
+  hookUrl: text("hook_url").notNull(), // encrypted with AES-256-GCM (requires SLACK_ENCRYPTION_KEY)
   hookUrlHash: text("hook_url_hash"), // SHA-256 hash of plaintext URL for dedup
   monitorId: integer("monitor_id").references(() => monitors.id, { onDelete: "cascade" }),
   active: boolean("active").default(true).notNull(),

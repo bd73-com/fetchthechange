@@ -283,7 +283,7 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF for /v1/openapi.json (exact path exemption)", () => {
+    it("bypasses CSRF for /v1/openapi.json (prefix exemption)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
@@ -297,7 +297,7 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF for /v1/ping (exact path exemption)", () => {
+    it("bypasses CSRF for /v1/ping (prefix exemption)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
