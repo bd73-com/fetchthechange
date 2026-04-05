@@ -804,6 +804,7 @@ export class DatabaseStorage implements IStorage {
 
   async getRecentChangesForMonitors(monitorIds: number[], limit: number): Promise<MonitorChange[]> {
     if (monitorIds.length === 0) return [];
+    const safeLim = Math.min(Math.max(1, Math.trunc(limit)), 100);
     return await db.select().from(monitorChanges)
       .where(
         monitorIds.length === 1
@@ -811,7 +812,7 @@ export class DatabaseStorage implements IStorage {
           : inArray(monitorChanges.monitorId, monitorIds),
       )
       .orderBy(desc(monitorChanges.detectedAt))
-      .limit(limit);
+      .limit(safeLim);
   }
 
   async downgradeHourlyMonitors(userId: string): Promise<{ count: number; monitorNames: string[] }> {

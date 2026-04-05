@@ -487,7 +487,8 @@ export const apiV1CreateKeySchema = z.object({
 
 // Zapier REST Hooks schemas
 export const zapierSubscribeSchema = z.object({
-  hookUrl: z.string().url().max(2048, "Hook URL must be under 2048 characters"),
+  hookUrl: z.string().url().max(2048, "Hook URL must be under 2048 characters")
+    .refine((url) => url.startsWith("https://"), { message: "Hook URL must use HTTPS" }),
   monitorId: z.number().int().positive().optional(),
 });
 
