@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: 20
 
-      - run: npm install --no-save tsx@4
+      - run: npm install --no-save tsx@4.21.0
 
       - run: npx tsx script/sync-changelog.ts
         env:
