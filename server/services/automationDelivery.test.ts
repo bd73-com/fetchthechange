@@ -108,9 +108,8 @@ describe("deliverToAutomationSubscriptions", () => {
     expect(opts.headers["Content-Type"]).toBe("application/json");
     expect(opts.headers["User-Agent"]).toBe("FetchTheChange-Zapier/1.0");
 
-    // Verify HMAC signature header is present
-    expect(opts.headers["X-FTC-Signature-256"]).toBeDefined();
-    expect(opts.headers["X-FTC-Signature-256"]).toMatch(/^sha256=[0-9a-f]+$/);
+    // No HMAC signature — automation hook URLs are unguessable bearer tokens
+    expect(opts.headers["X-FTC-Signature-256"]).toBeUndefined();
 
     // Verify payload includes change id for Zapier dedup
     const body = JSON.parse(opts.body);

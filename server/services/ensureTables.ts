@@ -370,33 +370,41 @@ async function backfillNotificationChannelWebhookUrls(): Promise<void> {
   try {
     let lastId = 0;
     let updated = 0;
-    // Cursor-based pagination to process all webhook channels
+    // Cursor-based pagination to process all webhook channels.
+    // Each batch runs inside a transaction to prevent double-encryption races.
     while (true) {
-      const rows = await db.execute(sql`SELECT id, config FROM notification_channels WHERE channel = 'webhook' AND id > ${lastId} ORDER BY id LIMIT 500`);
-      const toUpdate = (rows as any).rows as Array<{ id: number; config: Record<string, unknown> }>;
-      if (!toUpdate || toUpdate.length === 0) break;
-      lastId = toUpdate[toUpdate.length - 1].id;
+      const batchResult = await db.transaction(async (tx) => {
+        const rows = await tx.execute(sql`SELECT id, config FROM notification_channels WHERE channel = 'webhook' AND id > ${lastId} ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED`);
+        const toUpdate = (rows as any).rows as Array<{ id: number; config: Record<string, unknown> }>;
+        if (!toUpdate || toUpdate.length === 0) return { batchUpdated: 0, batchSize: 0, newLastId: lastId };
 
-      for (const row of toUpdate) {
-        const cfg = row.config;
-        if (!cfg) continue;
-        const url = cfg.url as string | undefined;
-        const secret = cfg.secret as string | undefined;
-        const urlNeedsEncrypt = url && !isValidEncryptedToken(url);
-        const secretNeedsEncrypt = secret && !isValidEncryptedToken(secret);
-        if (!urlNeedsEncrypt && !secretNeedsEncrypt) continue;
+        let batchUpdated = 0;
+        const newLastId = toUpdate[toUpdate.length - 1].id;
+        for (const row of toUpdate) {
+          const cfg = row.config;
+          if (!cfg) continue;
+          const url = cfg.url as string | undefined;
+          const secret = cfg.secret as string | undefined;
+          const urlNeedsEncrypt = url && !isValidEncryptedToken(url);
+          const secretNeedsEncrypt = secret && !isValidEncryptedToken(secret);
+          if (!urlNeedsEncrypt && !secretNeedsEncrypt) continue;
 
-        // Validate that plaintext values look like URLs before encrypting
-        // to avoid double-encrypting corrupted/already-encrypted data
-        if (urlNeedsEncrypt && url && !/^https?:\/\//i.test(url)) continue;
-        if (secretNeedsEncrypt && secret && secret.startsWith("whsec_") === false && !/^https?:\/\//i.test(secret)) continue;
+          // Validate that plaintext values look like URLs/secrets before encrypting
+          // to avoid double-encrypting corrupted/already-encrypted data
+          if (urlNeedsEncrypt && url && !/^https?:\/\//i.test(url)) continue;
+          if (secretNeedsEncrypt && secret && !secret.startsWith("whsec_")) continue;
 
-        const newConfig = { ...cfg };
-        if (urlNeedsEncrypt) newConfig.url = encryptUrl(url);
-        if (secretNeedsEncrypt) newConfig.secret = encryptUrl(secret);
-        await db.execute(sql`UPDATE notification_channels SET config = ${JSON.stringify(newConfig)}::jsonb WHERE id = ${row.id}`);
-        updated++;
-      }
+          const newConfig = { ...cfg };
+          if (urlNeedsEncrypt) newConfig.url = encryptUrl(url);
+          if (secretNeedsEncrypt) newConfig.secret = encryptUrl(secret);
+          await tx.execute(sql`UPDATE notification_channels SET config = ${JSON.stringify(newConfig)}::jsonb WHERE id = ${row.id}`);
+          batchUpdated++;
+        }
+        return { batchUpdated, batchSize: toUpdate.length, newLastId };
+      });
+      if (batchResult.batchSize === 0) break;
+      lastId = batchResult.newLastId;
+      updated += batchResult.batchUpdated;
     }
     if (updated > 0) {
       console.log(`[ensureTables] Backfilled ${updated} notification channel webhook URLs`);
