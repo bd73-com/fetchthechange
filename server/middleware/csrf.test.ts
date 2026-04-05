@@ -5,7 +5,7 @@ import type { Request, Response, NextFunction } from "express";
 function mockReq(overrides: Partial<Request> = {}): Request {
   return {
     method: "GET",
-    path: "/api/monitors",
+    path: "/monitors",
     headers: {},
     ...overrides,
   } as unknown as Request;
@@ -143,11 +143,11 @@ describe("csrfProtection", () => {
   });
 
   describe("exempt paths", () => {
-    it("bypasses CSRF check for /api/stripe/webhook", () => {
+    it("bypasses CSRF check for /stripe/webhook", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/stripe/webhook",
+        path: "/stripe/webhook",
         headers: {},  // no origin
       });
       const res = mockRes();
@@ -161,7 +161,7 @@ describe("csrfProtection", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/stripe/webhook",
+        path: "/stripe/webhook",
         headers: { origin: "https://evil.com" },
       });
       const res = mockRes();
@@ -171,11 +171,11 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF check for /api/webhooks/resend", () => {
+    it("bypasses CSRF check for /webhooks/resend", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/webhooks/resend",
+        path: "/webhooks/resend",
         headers: {},
       });
       const res = mockRes();
@@ -185,11 +185,11 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF check for /api/webhooks/resend with bad origin", () => {
+    it("bypasses CSRF check for /webhooks/resend with bad origin", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/webhooks/resend",
+        path: "/webhooks/resend",
         headers: { origin: "https://evil.com" },
       });
       const res = mockRes();
@@ -203,7 +203,7 @@ describe("csrfProtection", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/campaigns/unsubscribe/some-uuid-token/confirm",
+        path: "/campaigns/unsubscribe/some-uuid-token/confirm",
         headers: {},
       });
       const res = mockRes();
@@ -217,7 +217,7 @@ describe("csrfProtection", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/campaigns/unsubscribe/token-123/confirm",
+        path: "/campaigns/unsubscribe/token-123/confirm",
         headers: { origin: "https://evil.com" },
       });
       const res = mockRes();
@@ -231,7 +231,7 @@ describe("csrfProtection", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/campaigns/resubscribe/some-uuid-token",
+        path: "/campaigns/resubscribe/some-uuid-token",
         headers: {},
       });
       const res = mockRes();
@@ -241,11 +241,11 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF for POST /api/v1/monitors (prefix exemption)", () => {
+    it("bypasses CSRF for POST /v1/monitors (prefix exemption)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/v1/monitors",
+        path: "/v1/monitors",
         headers: {},
       });
       const res = mockRes();
@@ -255,11 +255,11 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF for DELETE /api/v1/monitors/5 (prefix exemption)", () => {
+    it("bypasses CSRF for DELETE /v1/monitors/5 (prefix exemption)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "DELETE",
-        path: "/api/v1/monitors/5",
+        path: "/v1/monitors/5",
         headers: {},
       });
       const res = mockRes();
@@ -269,11 +269,11 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF for PATCH /api/v1/monitors/1 with bad origin", () => {
+    it("bypasses CSRF for PATCH /v1/monitors/1 with bad origin", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "PATCH",
-        path: "/api/v1/monitors/1",
+        path: "/v1/monitors/1",
         headers: { origin: "https://evil.com" },
       });
       const res = mockRes();
@@ -283,11 +283,11 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF for /api/v1/openapi.json (exact path exemption)", () => {
+    it("bypasses CSRF for /v1/openapi.json (exact path exemption)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/v1/openapi.json",
+        path: "/v1/openapi.json",
         headers: {},
       });
       const res = mockRes();
@@ -297,11 +297,11 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF for /api/v1/ping (exact path exemption)", () => {
+    it("bypasses CSRF for /v1/ping (exact path exemption)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/v1/ping",
+        path: "/v1/ping",
         headers: {},
       });
       const res = mockRes();
@@ -311,11 +311,11 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("bypasses CSRF for POST /api/extension/monitors (prefix exemption)", () => {
+    it("bypasses CSRF for POST /extension/monitors (prefix exemption)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/extension/monitors",
+        path: "/extension/monitors",
         headers: {},
       });
       const res = mockRes();
@@ -325,11 +325,11 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("does NOT exempt /api/extension/token (session-auth endpoint needs CSRF)", () => {
+    it("does NOT exempt /extension/token (session-auth endpoint needs CSRF)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/extension/token",
+        path: "/extension/token",
         headers: { origin: "chrome-extension://abcdef1234567890" },
       });
       const res = mockRes();
@@ -340,11 +340,11 @@ describe("csrfProtection", () => {
       expect(res._status).toBe(403);
     });
 
-    it("bypasses CSRF for /api/extension/monitors (Bearer-auth endpoint)", () => {
+    it("bypasses CSRF for /extension/monitors (Bearer-auth endpoint)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/extension/monitors",
+        path: "/extension/monitors",
         headers: { origin: "chrome-extension://abcdef1234567890" },
       });
       const res = mockRes();
@@ -354,11 +354,11 @@ describe("csrfProtection", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("does NOT exempt /api/campaigns/ (non-unsubscribe paths)", () => {
+    it("does NOT exempt /campaigns/ (non-unsubscribe paths)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/campaigns/",
+        path: "/campaigns/",
         headers: {},
       });
       const res = mockRes();
@@ -369,11 +369,11 @@ describe("csrfProtection", () => {
       expect(res._status).toBe(403);
     });
 
-    it("does NOT exempt /api/admin/campaigns (admin routes need CSRF)", () => {
+    it("does NOT exempt /admin/campaigns (admin routes need CSRF)", () => {
       const middleware = csrfProtection(allowedOrigins, false);
       const req = mockReq({
         method: "POST",
-        path: "/api/admin/campaigns",
+        path: "/admin/campaigns",
         headers: {},
       });
       const res = mockRes();
