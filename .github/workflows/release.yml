@@ -71,4 +71,5 @@ jobs:
   sync-changelog:
     needs: publish-release
     uses: ./.github/workflows/sync-changelog.yml
-    secrets: inherit
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
