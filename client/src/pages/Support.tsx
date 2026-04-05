@@ -310,7 +310,7 @@ const faqSections: FAQSection[] = [
       {
         question: "Do alert conditions apply to Zapier triggers?",
         answer:
-          "No. Zapier triggers fire on every real change, regardless of alert conditions. Alert conditions only filter traditional channels (email, webhook, Slack). This ensures your automation workflows always have access to the full change stream.",
+          "Yes. If you have alert conditions configured on a monitor, those conditions gate Zapier delivery too — a Zap only fires if the conditions pass. This prevents Zapier from being triggered by every minor change.",
       },
       {
         question: "How do I connect FetchTheChange to Make (Integromat)?",
