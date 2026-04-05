@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { encryptUrl, hashUrl, isValidEncryptedToken } from "../utils/encryption";
 
 /**
  * Ensures error_logs deduplication columns exist (added in PR #56).
@@ -224,21 +225,40 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
     // Add columns for existing tables that predate the consecutive failures / cleanup feature
     await db.execute(sql`ALTER TABLE automation_subscriptions ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0`);
     await db.execute(sql`ALTER TABLE automation_subscriptions ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP`);
+    // Add hook_url_hash column for dedup (replaces plaintext hook_url in unique indexes)
+    await db.execute(sql`ALTER TABLE automation_subscriptions ADD COLUMN IF NOT EXISTS hook_url_hash TEXT`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_user_idx ON automation_subscriptions(user_id)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_platform_idx ON automation_subscriptions(platform)`);
-    // Enforce dedup at DB level: one active subscription per (user, platform, hookUrl, monitorId).
+    // Enforce dedup at DB level: one active subscription per (user, platform, hookUrlHash, monitorId).
     // Split into two partial indexes to avoid COALESCE expression that confuses migration introspection.
-    // Drop the old COALESCE-based index only if it still exists (one-time migration).
-    const oldIdx = await db.execute(sql`SELECT 1 FROM pg_indexes WHERE indexname = 'automation_subscriptions_dedup_uniq' LIMIT 1`);
-    if ((oldIdx as any).rows?.length > 0) {
-      await db.execute(sql`DROP INDEX automation_subscriptions_dedup_uniq`);
+    // Drop legacy indexes that used plaintext hook_url for dedup.
+    for (const name of ['automation_subscriptions_dedup_uniq', 'automation_subscriptions_dedup_with_monitor', 'automation_subscriptions_dedup_global']) {
+      const old = await db.execute(sql`SELECT 1 FROM pg_indexes WHERE indexname = ${name} LIMIT 1`);
+      if ((old as any).rows?.length > 0) {
+        await db.execute(sql.raw(`DROP INDEX ${name}`));
+      }
     }
-    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_with_monitor ON automation_subscriptions(user_id, platform, hook_url, monitor_id) WHERE active = true AND monitor_id IS NOT NULL`);
-    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_global ON automation_subscriptions(user_id, platform, hook_url) WHERE active = true AND monitor_id IS NULL`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_with_monitor ON automation_subscriptions(user_id, platform, hook_url_hash, monitor_id) WHERE active = true AND monitor_id IS NOT NULL`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_global ON automation_subscriptions(user_id, platform, hook_url_hash) WHERE active = true AND monitor_id IS NULL`);
+    // Backfill: hash and encrypt any legacy plaintext hook_url rows
+    await backfillAutomationSubscriptionUrls();
     return true;
   } catch (e) {
     console.error("Could not ensure automation_subscriptions table:", e);
     return false;
+  }
+}
+
+/**
+ * Ensures the composite index on monitor_changes(monitor_id, detected_at) exists.
+ * Without this index, queries filtering by monitor_id with ORDER BY detected_at
+ * perform sequential scans as the table grows.
+ */
+export async function ensureMonitorChangesIndexes(): Promise<void> {
+  try {
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS monitor_changes_monitor_detected_idx ON monitor_changes(monitor_id, detected_at)`);
+  } catch (e) {
+    console.warn("Could not ensure monitor_changes indexes:", e);
   }
 }
 
@@ -272,5 +292,28 @@ export async function ensureTagTables(): Promise<void> {
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS monitor_tags_monitor_tag_uniq ON monitor_tags(monitor_id, tag_id)`);
   } catch (e) {
     console.error("Could not ensure tag tables:", e);
+  }
+}
+
+/**
+ * Backfills hook_url_hash and encrypts plaintext hook_url values for
+ * existing automation_subscriptions rows.  Rows that already have a
+ * hook_url_hash are skipped (idempotent).
+ */
+async function backfillAutomationSubscriptionUrls(): Promise<void> {
+  try {
+    const rows = await db.execute(sql`SELECT id, hook_url FROM automation_subscriptions WHERE hook_url_hash IS NULL`);
+    const toUpdate = (rows as any).rows as Array<{ id: number; hook_url: string }>;
+    if (!toUpdate || toUpdate.length === 0) return;
+
+    for (const row of toUpdate) {
+      const plainUrl = isValidEncryptedToken(row.hook_url) ? row.hook_url : row.hook_url;
+      const hash = hashUrl(plainUrl);
+      const encrypted = encryptUrl(plainUrl);
+      await db.execute(sql`UPDATE automation_subscriptions SET hook_url_hash = ${hash}, hook_url = ${encrypted} WHERE id = ${row.id}`);
+    }
+    console.log(`[ensureTables] Backfilled ${toUpdate.length} automation subscription URLs`);
+  } catch (e) {
+    console.warn("Could not backfill automation subscription URLs:", e);
   }
 }

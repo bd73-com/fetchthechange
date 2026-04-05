@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
@@ -50,4 +50,38 @@ export function decryptToken(encrypted: string): string {
   decipher.setAuthTag(tag);
   const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   return decrypted.toString("utf8");
+}
+
+/**
+ * Returns true if SLACK_ENCRYPTION_KEY is configured and valid.
+ */
+export function isEncryptionAvailable(): boolean {
+  const keyHex = process.env.SLACK_ENCRYPTION_KEY;
+  if (!keyHex) return false;
+  const key = Buffer.from(keyHex, "hex");
+  return key.length === 32;
+}
+
+/**
+ * Encrypt a URL if the encryption key is available; return plaintext otherwise.
+ */
+export function encryptUrl(url: string): string {
+  if (!isEncryptionAvailable()) return url;
+  return encryptToken(url);
+}
+
+/**
+ * Decrypt a URL if it looks encrypted; return as-is if plaintext (e.g. legacy rows).
+ */
+export function decryptUrl(value: string): string {
+  if (!isValidEncryptedToken(value)) return value;
+  if (!isEncryptionAvailable()) return value;
+  return decryptToken(value);
+}
+
+/**
+ * Deterministic SHA-256 hash of a URL for dedup index comparisons.
+ */
+export function hashUrl(url: string): string {
+  return createHash("sha256").update(url).digest("hex");
 }

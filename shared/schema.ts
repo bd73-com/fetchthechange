@@ -37,7 +37,9 @@ export const monitorChanges = pgTable("monitor_changes", {
   oldValue: text("old_value"),
   newValue: text("new_value"),
   detectedAt: timestamp("detected_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  monitorDetectedIdx: index("monitor_changes_monitor_detected_idx").on(table.monitorId, table.detectedAt),
+}));
 
 export const monitorsRelations = relations(monitors, ({ one, many }) => ({
   user: one(users, {
@@ -471,7 +473,8 @@ export const automationSubscriptions = pgTable("automation_subscriptions", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id),
   platform: text("platform").notNull(), // 'zapier'
-  hookUrl: text("hook_url").notNull(),
+  hookUrl: text("hook_url").notNull(), // encrypted with AES-256-GCM when SLACK_ENCRYPTION_KEY is set
+  hookUrlHash: text("hook_url_hash"), // SHA-256 hash of plaintext URL for dedup
   monitorId: integer("monitor_id").references(() => monitors.id, { onDelete: "cascade" }),
   active: boolean("active").default(true).notNull(),
   consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
@@ -481,12 +484,12 @@ export const automationSubscriptions = pgTable("automation_subscriptions", {
 }, (table) => ({
   userIdx: index("automation_subscriptions_user_idx").on(table.userId),
   platformIdx: index("automation_subscriptions_platform_idx").on(table.platform),
-  // Dedup: one active sub per (user, platform, hookUrl, monitorId) — split into two partial indexes
+  // Dedup: one active sub per (user, platform, hookUrlHash, monitorId) — split into two partial indexes
   dedupWithMonitor: uniqueIndex("automation_subscriptions_dedup_with_monitor")
-    .on(table.userId, table.platform, table.hookUrl, table.monitorId)
+    .on(table.userId, table.platform, table.hookUrlHash, table.monitorId)
     .where(sql`active = true AND monitor_id IS NOT NULL`),
   dedupGlobal: uniqueIndex("automation_subscriptions_dedup_global")
-    .on(table.userId, table.platform, table.hookUrl)
+    .on(table.userId, table.platform, table.hookUrlHash)
     .where(sql`active = true AND monitor_id IS NULL`),
 }));
 
