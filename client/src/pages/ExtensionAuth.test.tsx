@@ -89,6 +89,31 @@ describe("ExtensionAuth", () => {
     consoleSpy.mockRestore();
   });
 
+  it("shows error when 200 response has malformed token payload", async () => {
+    const postMessageSpy = vi.spyOn(window, "postMessage");
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    server.use(
+      http.post("/api/extension/token", () =>
+        HttpResponse.json({ unexpected: "shape" }),
+      ),
+    );
+
+    renderWithProviders(<ExtensionAuth />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Something went wrong. Please try again.")).toBeDefined();
+    });
+
+    // postMessage should NOT have been called with a token
+    expect(postMessageSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FTC_EXTENSION_TOKEN" }),
+      expect.anything(),
+    );
+
+    consoleSpy.mockRestore();
+  });
+
   it("posts token via postMessage and shows success on valid response", async () => {
     const postMessageSpy = vi.spyOn(window, "postMessage");
 

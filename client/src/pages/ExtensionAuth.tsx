@@ -24,6 +24,9 @@ export default function ExtensionAuth() {
         const data = await res.json().catch(() => {
           throw new Error("Unexpected response format from server");
         });
+        if (typeof data?.token !== "string" || typeof data?.expiresAt !== "string") {
+          throw new Error("Invalid token payload from server");
+        }
         window.postMessage(
           { type: "FTC_EXTENSION_TOKEN", token: data.token, expiresAt: data.expiresAt },
           window.location.origin,
