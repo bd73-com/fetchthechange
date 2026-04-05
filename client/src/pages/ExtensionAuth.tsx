@@ -16,7 +16,6 @@ export default function ExtensionAuth() {
         const res = await fetch("/api/extension/token", {
           method: "POST",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
         });
         if (!res.ok) {
           setError("Failed to generate token. Please try again.");
