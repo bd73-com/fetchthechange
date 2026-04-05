@@ -67,6 +67,10 @@ export const API_RATE_LIMITS = {
 export const AUTOMATION_SUBSCRIPTION_LIMITS = {
   /** Maximum active automation subscriptions per user. */
   maxPerUser: 25,
+  /** Deactivate subscription after this many consecutive delivery failures. */
+  failureThreshold: 5,
+  /** Hard-delete inactive subscriptions older than this many days. */
+  cleanupRetentionDays: 90,
 } as const;
 
 // User storage table.

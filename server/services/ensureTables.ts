@@ -215,10 +215,15 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
         hook_url TEXT NOT NULL,
         monitor_id INTEGER REFERENCES monitors(id) ON DELETE CASCADE,
         active BOOLEAN NOT NULL DEFAULT true,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        deactivated_at TIMESTAMP,
         last_delivered_at TIMESTAMP
       )
     `);
+    // Add columns for existing tables that predate the consecutive failures / cleanup feature
+    await db.execute(sql`ALTER TABLE automation_subscriptions ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE automation_subscriptions ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_user_idx ON automation_subscriptions(user_id)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS automation_subscriptions_platform_idx ON automation_subscriptions(platform)`);
     // Enforce dedup at DB level: one active subscription per (user, platform, hookUrl, monitorId).

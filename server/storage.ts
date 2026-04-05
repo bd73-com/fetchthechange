@@ -64,8 +64,12 @@ export interface IStorage {
   countActiveAutomationSubscriptions(userId: string): Promise<number>;
   createAutomationSubscription(userId: string, platform: string, hookUrl: string, monitorId: number | null): Promise<AutomationSubscription>;
   deactivateAutomationSubscription(id: number, userId: string): Promise<boolean>;
+  deactivateAllUserAutomationSubscriptions(userId: string): Promise<number>;
   getActiveAutomationSubscriptions(userId: string, monitorId: number): Promise<AutomationSubscription[]>;
   touchAutomationSubscription(id: number): Promise<void>;
+  incrementAutomationSubscriptionFailures(id: number): Promise<number>;
+  resetAutomationSubscriptionFailures(id: number): Promise<void>;
+  cleanupStaleAutomationSubscriptions(olderThan: Date): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -677,7 +681,7 @@ export class DatabaseStorage implements IStorage {
     if (existing) {
       if (!existing.active) {
         const [reactivated] = await db.update(automationSubscriptions)
-          .set({ active: true })
+          .set({ active: true, consecutiveFailures: 0, deactivatedAt: null })
           .where(eq(automationSubscriptions.id, existing.id))
           .returning();
         return reactivated;
@@ -712,9 +716,16 @@ export class DatabaseStorage implements IStorage {
 
   async deactivateAutomationSubscription(id: number, userId: string): Promise<boolean> {
     const result = await db.update(automationSubscriptions)
-      .set({ active: false })
+      .set({ active: false, deactivatedAt: new Date() })
       .where(and(eq(automationSubscriptions.id, id), eq(automationSubscriptions.userId, userId), eq(automationSubscriptions.active, true)));
     return ((result as any).rowCount ?? 0) > 0;
+  }
+
+  async deactivateAllUserAutomationSubscriptions(userId: string): Promise<number> {
+    const result = await db.update(automationSubscriptions)
+      .set({ active: false, deactivatedAt: new Date() })
+      .where(and(eq(automationSubscriptions.userId, userId), eq(automationSubscriptions.active, true)));
+    return (result as any).rowCount ?? 0;
   }
 
   async getActiveAutomationSubscriptions(userId: string, monitorId: number): Promise<AutomationSubscription[]> {
@@ -733,6 +744,34 @@ export class DatabaseStorage implements IStorage {
     await db.update(automationSubscriptions)
       .set({ lastDeliveredAt: new Date() })
       .where(eq(automationSubscriptions.id, id));
+  }
+
+  async incrementAutomationSubscriptionFailures(id: number): Promise<number> {
+    const [updated] = await db.update(automationSubscriptions)
+      .set({ consecutiveFailures: sql`${automationSubscriptions.consecutiveFailures} + 1` })
+      .where(eq(automationSubscriptions.id, id))
+      .returning({ consecutiveFailures: automationSubscriptions.consecutiveFailures });
+    return updated?.consecutiveFailures ?? 0;
+  }
+
+  async resetAutomationSubscriptionFailures(id: number): Promise<void> {
+    await db.update(automationSubscriptions)
+      .set({ consecutiveFailures: 0 })
+      .where(eq(automationSubscriptions.id, id));
+  }
+
+  async cleanupStaleAutomationSubscriptions(olderThan: Date): Promise<number> {
+    // Clean up inactive subscriptions where either deactivatedAt or createdAt is old enough.
+    // deactivatedAt may be NULL for rows deactivated before the column was added.
+    const result = await db.delete(automationSubscriptions)
+      .where(and(
+        eq(automationSubscriptions.active, false),
+        or(
+          lt(automationSubscriptions.deactivatedAt, olderThan),
+          and(isNull(automationSubscriptions.deactivatedAt), lt(automationSubscriptions.createdAt, olderThan)),
+        ),
+      ));
+    return (result as any).rowCount ?? 0;
   }
 
   async downgradeHourlyMonitors(userId: string): Promise<{ count: number; monitorNames: string[] }> {

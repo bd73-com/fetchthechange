@@ -9,7 +9,9 @@
   "dependencies": {
     "zapier-platform-core": "16.x"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "zapier-platform-cli": "18.x"
+  },
   "zapier": {
     "appId": "REPLACE_WITH_ZAPIER_APP_ID"
   }

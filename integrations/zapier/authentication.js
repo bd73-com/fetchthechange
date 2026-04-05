@@ -16,8 +16,5 @@ module.exports = {
       Authorization: 'Bearer {{bundle.authData.api_key}}',
     },
   },
-  connectionLabel: (z, bundle) => {
-    const key = bundle.authData.api_key || '';
-    return `FetchTheChange (${key.substring(0, 12)}...)`;
-  },
+  connectionLabel: () => 'FetchTheChange',
 };

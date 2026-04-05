@@ -304,8 +304,8 @@ describe("ensureAutomationSubscriptionsTable", () => {
     mockExecute.mockResolvedValue({ rows: [] });
     const result = await ensureAutomationSubscriptionsTable();
     expect(result).toBe(true);
-    // 1 CREATE TABLE + 2 CREATE INDEX + 1 pg_indexes check + 2 CREATE UNIQUE INDEX = 6
-    expect(mockExecute).toHaveBeenCalledTimes(6);
+    // 1 CREATE TABLE + 2 ALTER TABLE ADD COLUMN + 2 CREATE INDEX + 1 pg_indexes check + 2 CREATE UNIQUE INDEX = 8
+    expect(mockExecute).toHaveBeenCalledTimes(8);
   });
 
   it("drops the old COALESCE-based dedup index when it exists", async () => {
@@ -373,7 +373,7 @@ describe("schema sync between ensureTables DDL and Drizzle schema", () => {
     slack_connections: ["id", "user_id", "team_id", "team_name", "bot_token", "scope", "created_at", "updated_at"],
     monitor_conditions: ["id", "monitor_id", "type", "value", "group_index", "created_at"],
     automated_campaign_configs: ["id", "key", "name", "subject", "html_body", "text_body", "enabled", "last_run_at", "next_run_at", "created_at", "updated_at"],
-    automation_subscriptions: ["id", "user_id", "platform", "hook_url", "monitor_id", "active", "created_at", "last_delivered_at"],
+    automation_subscriptions: ["id", "user_id", "platform", "hook_url", "monitor_id", "active", "consecutive_failures", "created_at", "deactivated_at", "last_delivered_at"],
   };
 
   function drizzleColumnNames(table: Parameters<typeof getTableColumns>[0]): string[] {

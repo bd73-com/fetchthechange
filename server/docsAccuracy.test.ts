@@ -210,10 +210,10 @@ describe("Support FAQ documentation accuracy", () => {
     expect(supportSource).toContain('"Zapier & Make"');
   });
 
-  it("Zapier & Make section has 6 FAQ items", () => {
+  it("Zapier & Make section has 7 FAQ items", () => {
     const section = sliceSection(supportSource, '"Zapier & Make"', '"Troubleshooting"');
     const questionCount = (section.match(/question:/g) || []).length;
-    expect(questionCount).toBe(6);
+    expect(questionCount).toBe(7);
   });
 
   it("references the correct signature header in FAQ", () => {

@@ -227,6 +227,18 @@ export default function DocsZapier() {
                   the monitor.
                 </p>
               </div>
+              <div>
+                <h3 className="text-lg font-semibold mb-1">
+                  My Zap stopped triggering unexpectedly
+                </h3>
+                <p className="text-muted-foreground">
+                  If a Zapier hook URL fails to accept deliveries 5 times in a
+                  row, FetchTheChange automatically deactivates the
+                  subscription to prevent wasted requests. Re-enable it by
+                  turning the Zap off and back on in Zapier, which sends a
+                  fresh subscribe request.
+                </p>
+              </div>
             </div>
           </section>
 

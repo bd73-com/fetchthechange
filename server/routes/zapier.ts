@@ -56,6 +56,16 @@ router.post("/subscribe", async (req: any, res) => {
       body.monitorId ?? null,
     );
 
+    // Post-create limit check to close the count-then-create race window
+    const postCount = await storage.countActiveAutomationSubscriptions(req.apiUser.id);
+    if (postCount > AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser) {
+      await storage.deactivateAutomationSubscription(subscription.id, req.apiUser.id);
+      return res.status(422).json({
+        error: `Maximum of ${AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser} active automation subscriptions reached`,
+        code: "SUBSCRIPTION_LIMIT_REACHED",
+      });
+    }
+
     const hookUrlDomain = new URL(body.hookUrl).hostname;
     await ErrorLogger.info("api", "Automation subscription created", {
       userId: req.apiUser.id,
@@ -84,16 +94,15 @@ router.delete("/unsubscribe", async (req: any, res) => {
     const source = req.body && typeof req.body === "object" && req.body.id != null ? req.body : req.query;
     const body = zapierUnsubscribeSchema.parse(source);
     const deactivated = await storage.deactivateAutomationSubscription(body.id, req.apiUser.id);
-    if (!deactivated) {
-      return res.status(404).json({ error: "Subscription not found", code: "NOT_FOUND" });
+
+    if (deactivated) {
+      await ErrorLogger.info("api", "Automation subscription deactivated", {
+        id: body.id,
+        userId: req.apiUser.id,
+        platform: "zapier",
+      });
     }
-
-    await ErrorLogger.info("api", "Automation subscription deactivated", {
-      id: body.id,
-      userId: req.apiUser.id,
-      platform: "zapier",
-    });
-
+    // Return 204 for idempotent unsubscribe — Zapier expects success even if already deactivated
     res.status(204).send();
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -113,7 +122,10 @@ router.get("/monitors", async (req: any, res) => {
   );
 });
 
-// GET /changes — Polling fallback for Zap testing
+// GET /changes — Polling fallback for Zap testing.
+// Returns raw changes without evaluating alert conditions because this is a
+// Zapier test/sample endpoint. Conditions are evaluated at delivery time in
+// deliverToAutomationSubscriptions, so production Zaps only fire when conditions pass.
 router.get("/changes", async (req: any, res) => {
   try {
     const query = zapierChangesQuerySchema.parse(req.query);

@@ -9,6 +9,7 @@ import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { ensureMonitorConditionsTable } from "./ensureTables";
 import { processAutomatedCampaigns } from "./automatedCampaigns";
 import { isTransientDbError } from "../utils/dbErrors";
+import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
 import { db } from "../db";
 import { eq, sql } from "drizzle-orm";
 import { monitors } from "@shared/schema";
@@ -431,6 +432,18 @@ export async function startScheduler() {
       }
     } catch (error) {
       await logSchedulerError("notification_queue cleanup failed", error, { retentionDays: 7, table: "notification_queue" });
+    }
+
+    // Automation subscriptions cleanup: hard-delete inactive subscriptions older than retention period
+    try {
+      const retentionDays = AUTOMATION_SUBSCRIPTION_LIMITS.cleanupRetentionDays;
+      const olderThan = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+      const deleted = await withDbRetry(() => storage.cleanupStaleAutomationSubscriptions(olderThan));
+      if (deleted > 0) {
+        console.log(`[Cleanup] Pruned ${deleted} inactive automation_subscriptions rows older than ${retentionDays} days`);
+      }
+    } catch (error) {
+      await logSchedulerError("automation_subscriptions cleanup failed", error, { retentionDays: AUTOMATION_SUBSCRIPTION_LIMITS.cleanupRetentionDays, table: "automation_subscriptions" });
     }
   }));
 
