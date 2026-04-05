@@ -32,7 +32,11 @@ export interface WebhookPayload {
 
 function truncateValue(value: string | null): { value: string | null; truncated: boolean } {
   if (value === null || value.length <= MAX_VALUE_LENGTH) return { value, truncated: false };
-  return { value: value.slice(0, MAX_VALUE_LENGTH), truncated: true };
+  let end = MAX_VALUE_LENGTH;
+  // Avoid splitting a UTF-16 surrogate pair at the boundary
+  const code = value.charCodeAt(end - 1);
+  if (code >= 0xD800 && code <= 0xDBFF) end--;
+  return { value: value.slice(0, end), truncated: true };
 }
 
 export function buildWebhookPayload(monitor: Monitor, change: MonitorChange): WebhookPayload {

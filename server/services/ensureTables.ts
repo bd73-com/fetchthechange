@@ -322,8 +322,9 @@ export async function ensureTagTables(): Promise<void> {
  * hook_url_hash are skipped (idempotent).
  */
 async function backfillAutomationSubscriptionUrls(): Promise<void> {
+  // Skip backfill when encryption key is unavailable — populating hook_url_hash
+  // while hook_url stays plaintext would mark the row as "done" permanently.
   if (!isEncryptionAvailable()) {
-    console.warn("[ensureTables] Skipping automation subscription backfill: encryption key not configured");
     return;
   }
   try {
@@ -338,7 +339,14 @@ async function backfillAutomationSubscriptionUrls(): Promise<void> {
         if (!toUpdate || toUpdate.length === 0) return 0;
 
         for (const row of toUpdate) {
-          const plainUrl = isValidEncryptedToken(row.hook_url) ? decryptToken(row.hook_url) : row.hook_url;
+          let plainUrl: string;
+          try {
+            plainUrl = isValidEncryptedToken(row.hook_url) ? decryptToken(row.hook_url) : row.hook_url;
+          } catch (decryptErr) {
+            // Skip row if decryption fails (e.g. key rotation) — don't abort the batch
+            console.warn(`[ensureTables] Skipping automation subscription ${row.id}: decryption failed`, decryptErr);
+            continue;
+          }
           const hash = hashUrl(plainUrl);
           const encrypted = encryptUrl(plainUrl);
           await tx.execute(sql`UPDATE automation_subscriptions SET hook_url_hash = ${hash}, hook_url = ${encrypted} WHERE id = ${row.id} AND hook_url_hash IS NULL`);
@@ -391,8 +399,14 @@ async function backfillNotificationChannelWebhookUrls(): Promise<void> {
 
           // Validate that plaintext values look like URLs/secrets before encrypting
           // to avoid double-encrypting corrupted/already-encrypted data
-          if (urlNeedsEncrypt && url && !/^https?:\/\//i.test(url)) continue;
-          if (secretNeedsEncrypt && secret && !secret.startsWith("whsec_")) continue;
+          if (urlNeedsEncrypt && url && !/^https?:\/\//i.test(url)) {
+            console.warn(`[ensureTables] Skipping notification channel ${row.id}: URL does not look like a valid http(s) URL`);
+            continue;
+          }
+          if (secretNeedsEncrypt && secret && !secret.startsWith("whsec_")) {
+            console.warn(`[ensureTables] Skipping notification channel ${row.id}: secret does not start with whsec_ prefix`);
+            continue;
+          }
 
           const newConfig = { ...cfg };
           if (urlNeedsEncrypt) newConfig.url = encryptUrl(url);
