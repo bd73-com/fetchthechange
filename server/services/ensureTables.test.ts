@@ -7,6 +7,11 @@ const mockExecute = vi.fn();
 vi.mock("../db", () => ({
   db: {
     execute: (...args: any[]) => mockExecute(...args),
+    transaction: async (fn: (tx: any) => Promise<any>) => {
+      // Provide a tx object that delegates to the same mockExecute
+      const tx = { execute: (...args: any[]) => mockExecute(...args) };
+      return fn(tx);
+    },
   },
 }));
 
@@ -310,13 +315,38 @@ describe("ensureMonitorChangesIndexes", () => {
   });
 
   it("creates the composite index", async () => {
-    mockExecute.mockResolvedValue([]);
+    // First call checks pg_index for existing index (returns no rows), second call creates the index
+    mockExecute.mockResolvedValue({ rows: [] });
     await ensureMonitorChangesIndexes();
-    expect(mockExecute).toHaveBeenCalledTimes(1);
-    const stmt = JSON.stringify(mockExecute.mock.calls[0][0]);
+    expect(mockExecute).toHaveBeenCalledTimes(2);
+    const stmt = JSON.stringify(mockExecute.mock.calls[1][0]);
     expect(stmt).toContain("monitor_changes_monitor_detected_idx");
     expect(stmt).toContain("monitor_id");
     expect(stmt).toContain("detected_at");
+  });
+
+  it("skips CREATE INDEX when a valid index already exists", async () => {
+    // First call returns a valid index row
+    mockExecute.mockResolvedValueOnce({ rows: [{ indisvalid: true }] });
+    await ensureMonitorChangesIndexes();
+    // Only the pg_index check should be called, no CREATE INDEX
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops invalid index before creating a new one", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // First call: pg_index check returns invalid index
+    mockExecute.mockResolvedValueOnce({ rows: [{ indisvalid: false }] });
+    // Second call: DROP INDEX
+    mockExecute.mockResolvedValueOnce({ rows: [] });
+    // Third call: CREATE INDEX CONCURRENTLY
+    mockExecute.mockResolvedValueOnce({ rows: [] });
+    await ensureMonitorChangesIndexes();
+    expect(mockExecute).toHaveBeenCalledTimes(3);
+    const dropStmt = JSON.stringify(mockExecute.mock.calls[1][0]);
+    expect(dropStmt).toContain("DROP INDEX");
+    expect(dropStmt).toContain("monitor_changes_monitor_detected_idx");
+    warnSpy.mockRestore();
   });
 
   it("does not throw on error", async () => {

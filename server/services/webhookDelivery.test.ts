@@ -235,4 +235,65 @@ describe("webhookDelivery", () => {
       expect(body.newValue).toBeNull();
     });
   });
+
+  describe("buildWebhookPayload — truncation", () => {
+    it("does not truncate values under 100KB", () => {
+      const change = makeChange();
+      change.oldValue = "a".repeat(100_000);
+      change.newValue = "b".repeat(50_000);
+      const payload = buildWebhookPayload(makeMonitor(), change);
+      expect(payload.oldValue).toBe(change.oldValue);
+      expect(payload.newValue).toBe(change.newValue);
+      expect(payload.oldValueTruncated).toBeUndefined();
+      expect(payload.newValueTruncated).toBeUndefined();
+    });
+
+    it("truncates values over 100KB and sets truncated flags", () => {
+      const change = makeChange();
+      change.oldValue = "a".repeat(200_000);
+      change.newValue = "b".repeat(300_000);
+      const payload = buildWebhookPayload(makeMonitor(), change);
+      expect(payload.oldValue!.length).toBe(100_000);
+      expect(payload.newValue!.length).toBe(100_000);
+      expect(payload.oldValueTruncated).toBe(true);
+      expect(payload.newValueTruncated).toBe(true);
+    });
+
+    it("does not set truncated flag for null values", () => {
+      const change = makeChange();
+      change.oldValue = null;
+      change.newValue = null;
+      const payload = buildWebhookPayload(makeMonitor(), change);
+      expect(payload.oldValue).toBeNull();
+      expect(payload.newValue).toBeNull();
+      expect(payload.oldValueTruncated).toBeUndefined();
+      expect(payload.newValueTruncated).toBeUndefined();
+    });
+
+    it("truncates only the value that exceeds the limit", () => {
+      const change = makeChange();
+      change.oldValue = "short";
+      change.newValue = "x".repeat(200_000);
+      const payload = buildWebhookPayload(makeMonitor(), change);
+      expect(payload.oldValue).toBe("short");
+      expect(payload.oldValueTruncated).toBeUndefined();
+      expect(payload.newValue!.length).toBe(100_000);
+      expect(payload.newValueTruncated).toBe(true);
+    });
+
+    it("does not split UTF-16 surrogate pairs at truncation boundary", () => {
+      const change = makeChange();
+      // U+1F600 (😀) is encoded as two UTF-16 code units (\uD83D\uDE00)
+      const emoji = "\uD83D\uDE00";
+      change.oldValue = "a".repeat(99_999) + emoji; // 100,001 code units
+      const payload = buildWebhookPayload(makeMonitor(), change);
+      // Should trim to 99,999 to avoid orphaning the high surrogate
+      expect(payload.oldValue!.length).toBe(99_999);
+      expect(payload.oldValueTruncated).toBe(true);
+      // Verify no orphaned high surrogate at the end
+      const lastCode = payload.oldValue!.charCodeAt(payload.oldValue!.length - 1);
+      const isHighSurrogate = lastCode >= 0xD800 && lastCode <= 0xDBFF;
+      expect(isHighSurrogate).toBe(false);
+    });
+  });
 });

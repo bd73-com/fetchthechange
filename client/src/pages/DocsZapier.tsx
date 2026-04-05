@@ -232,7 +232,7 @@ export default function DocsZapier() {
                   My Zap stopped triggering unexpectedly
                 </h3>
                 <p className="text-muted-foreground">
-                  If a Zapier hook URL fails to accept deliveries 5 times in a
+                  If a Zapier hook URL fails to accept deliveries 15 times in a
                   row, FetchTheChange automatically deactivates the
                   subscription to prevent wasted requests. Re-enable it by
                   turning the Zap off and back on in Zapier, which sends a

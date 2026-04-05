@@ -9,6 +9,7 @@ import {
   zapierChangesQuerySchema,
 } from "@shared/routes";
 import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
+import { isEncryptionAvailable } from "../utils/encryption";
 
 const router = Router();
 
@@ -16,6 +17,14 @@ const router = Router();
 router.post("/subscribe", async (req: any, res) => {
   try {
     const body = zapierSubscribeSchema.parse(req.body);
+
+    // Refuse subscriptions when encryption key is unavailable — hook URLs are bearer tokens
+    if (!isEncryptionAvailable()) {
+      return res.status(503).json({
+        error: "Automation subscriptions are temporarily unavailable (encryption not configured)",
+        code: "ENCRYPTION_UNAVAILABLE",
+      });
+    }
 
     // SSRF check on hookUrl
     const ssrfError = await isPrivateUrl(body.hookUrl);
