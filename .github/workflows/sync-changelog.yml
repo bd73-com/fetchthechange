@@ -1,9 +1,7 @@
 name: Sync Changelog
 
 on:
-  # Primary sync runs as a job in release.yml (GITHUB_TOKEN events don't
-  # trigger cross-workflow runs, so the release:published trigger never fired).
-  # Keep workflow_dispatch for manual catch-up runs.
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -40,6 +38,7 @@ jobs:
             FILE_META=$(gh api repos/${{ github.repository }}/contents/client/src/data/changelog.ts \
               --jq '{sha: .sha, content: .content}')
             FILE_SHA=$(echo "$FILE_META" | jq -r '.sha')
+            # GitHub returns base64 with embedded newlines; strip them for comparison
             REMOTE_CONTENT=$(echo "$FILE_META" | jq -r '.content' | tr -d '\n')
             if [ "$NEW_CONTENT" = "$REMOTE_CONTENT" ]; then
               echo "No changelog changes needed"
@@ -50,7 +49,7 @@ jobs:
               -f message="chore: sync changelog from GitHub releases" \
               -f content="$NEW_CONTENT" \
               -f sha="$FILE_SHA" \
-              -f branch="main" > /dev/null 2>&1 && { echo "Changelog committed successfully"; exit 0; }
+              -f branch="main" > /dev/null && { echo "Changelog committed successfully"; exit 0; }
             echo "API commit failed (attempt $attempt), retrying..."
             sleep $((attempt * 2))
           done
