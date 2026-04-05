@@ -1,9 +1,7 @@
 name: Sync Changelog
 
 on:
-  # Primary sync runs as a job in release.yml (GITHUB_TOKEN events don't
-  # trigger cross-workflow runs, so the release:published trigger never fired).
-  # Keep workflow_dispatch for manual catch-up runs.
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -26,21 +24,52 @@ jobs:
 
       - run: npm install --no-save tsx@4.21.0
 
-      - name: Generate and push changelog
+      - name: Generate changelog
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx tsx script/sync-changelog.ts
+
+      # Requires contents:write permission. If branch protection on main
+      # blocks the GITHUB_TOKEN, add github-actions[bot] to the bypass list
+      # or use a fine-grained PAT with "bypass branch protections" permission.
+      - name: Commit via GitHub API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          LOCAL_SHA=$(git hash-object client/src/data/changelog.ts)
+          NEW_CONTENT=$(base64 -w0 client/src/data/changelog.ts)
           for attempt in 1 2 3; do
-            git fetch origin main
-            git reset --hard origin/main
-            npx tsx script/sync-changelog.ts
-            git add client/src/data/changelog.ts
-            git diff --cached --quiet && echo "No changes" && exit 0
-            git commit -m "chore: sync changelog from GitHub releases"
-            git push origin HEAD:main && exit 0
-            echo "Push failed (attempt $attempt), retrying..."
+            FILE_META=$(gh api repos/${{ github.repository }}/contents/client/src/data/changelog.ts \
+              --jq '{sha: .sha}' 2>/dev/null) || {
+              echo "Failed to fetch file metadata (attempt $attempt)"
+              sleep $((attempt * 2))
+              continue
+            }
+            FILE_SHA=$(echo "$FILE_META" | jq -r '.sha')
+            if [ -z "$FILE_SHA" ] || [ "$FILE_SHA" = "null" ]; then
+              echo "Invalid file SHA (attempt $attempt)"
+              sleep $((attempt * 2))
+              continue
+            fi
+            # GitHub blob SHA is git hash-object of the file content
+            if [ "$LOCAL_SHA" = "$FILE_SHA" ]; then
+              echo "No changelog changes needed"
+              exit 0
+            fi
+            ERROR_FILE=$(mktemp)
+            gh api repos/${{ github.repository }}/contents/client/src/data/changelog.ts \
+              -X PUT \
+              -f message="chore: sync changelog from GitHub releases" \
+              -f content="$NEW_CONTENT" \
+              -f sha="$FILE_SHA" \
+              -f branch="main" > /dev/null 2>"$ERROR_FILE" && {
+              echo "Changelog committed successfully"
+              rm -f "$ERROR_FILE"
+              exit 0
+            }
+            echo "API commit failed (attempt $attempt):"
+            cat "$ERROR_FILE"
+            rm -f "$ERROR_FILE"
             sleep $((attempt * 2))
           done
           echo "Failed after 3 attempts" && exit 1
