@@ -127,4 +127,8 @@ describe("SENSITIVE_LOG_PATHS", () => {
     expect(SENSITIVE_LOG_PATHS).toContain("/api/login");
     expect(SENSITIVE_LOG_PATHS).toContain("/api/keys");
   });
+
+  it("includes /api/extension/token to prevent JWT logging (#348)", () => {
+    expect(SENSITIVE_LOG_PATHS).toContain("/api/extension/token");
+  });
 });

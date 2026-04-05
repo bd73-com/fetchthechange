@@ -145,6 +145,7 @@ function makeMockApp() {
     delete: makeRegistrar("delete"),
     use: vi.fn(),
     set: vi.fn(),
+    param: vi.fn(),
   };
 }
 

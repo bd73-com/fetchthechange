@@ -2,7 +2,7 @@
  * CORS origin validation logic, extracted for testability.
  */
 
-export const SENSITIVE_LOG_PATHS = ['/api/stripe/', '/api/admin/', '/api/callback', '/api/login', '/api/keys'];
+export const SENSITIVE_LOG_PATHS = ['/api/stripe/', '/api/admin/', '/api/callback', '/api/login', '/api/keys', '/api/extension/token'];
 
 type CorsCallback = (err: Error | null, allow?: boolean) => void;
 

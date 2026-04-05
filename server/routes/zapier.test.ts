@@ -163,8 +163,7 @@ describe("Zapier route logic", () => {
       const result = zapierSubscribeSchema.safeParse({
         hookUrl: "http://hooks.zapier.com/abc",
       });
-      // http URLs are valid URLs, so this should pass (SSRF check handles private IPs separately)
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
     });
 
     it("zapierSubscribeSchema rejects hookUrl over 2048 chars", async () => {
