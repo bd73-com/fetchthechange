@@ -370,8 +370,8 @@ describe("ensureAutomationSubscriptionsTable", () => {
     mockExecute.mockResolvedValue({ rows: [] });
     const result = await ensureAutomationSubscriptionsTable();
     expect(result).toBe(true);
-    // 1 CREATE TABLE + 3 ALTER TABLE ADD COLUMN + 2 CREATE INDEX + 3 pg_indexes checks + 2 CREATE UNIQUE INDEX + 1 backfill SELECT = 12
-    expect(mockExecute).toHaveBeenCalledTimes(12);
+    // 1 CREATE TABLE + 3 ALTER TABLE ADD COLUMN + 2 CREATE INDEX + 1 LOCK TABLE + 3 pg_indexes checks + 2 CREATE UNIQUE INDEX + 1 backfill SELECT = 13
+    expect(mockExecute).toHaveBeenCalledTimes(13);
   });
 
   it("drops legacy dedup indexes when they exist", async () => {

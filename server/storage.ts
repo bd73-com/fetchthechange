@@ -123,13 +123,13 @@ export class DatabaseStorage implements IStorage {
           if (err?.code !== "42P01") throw err;
         }
       }
-      await tx.delete(monitorConditions).where(eq(monitorConditions.monitorId, id));
-      try {
-        await tx.delete(automationSubscriptions).where(eq(automationSubscriptions.monitorId, id));
-      } catch (err: any) {
-        if (err?.code !== "42P01") throw err;
+      for (const [table, col] of [[monitorConditions, monitorConditions.monitorId], [automationSubscriptions, automationSubscriptions.monitorId], [monitorTags, monitorTags.monitorId]] as const) {
+        try {
+          await tx.delete(table).where(eq(col, id));
+        } catch (err: any) {
+          if (err?.code !== "42P01") throw err;
+        }
       }
-      await tx.delete(monitorTags).where(eq(monitorTags.monitorId, id));
       await tx.delete(monitorChanges).where(eq(monitorChanges.monitorId, id));
       await tx.delete(monitorMetrics).where(eq(monitorMetrics.monitorId, id));
       await tx.delete(browserlessUsage).where(eq(browserlessUsage.monitorId, id));
