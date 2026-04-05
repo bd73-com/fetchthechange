@@ -154,6 +154,16 @@ export async function registerRoutes(
 
   registerAuthRoutes(app);
 
+  // Validate :id route params — reject non-numeric IDs with 400 instead of
+  // letting NaN propagate into DB queries and causing 500 errors (#346).
+  app.param("id", (req, res, next, value) => {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n <= 0) {
+      return res.status(400).json({ message: "Invalid monitor ID" });
+    }
+    next();
+  });
+
   // Scheduler startup is deferred to index.ts (after registerRoutes completes)
   // to avoid DB pool exhaustion during migrations.
 
