@@ -16,6 +16,7 @@ vi.mock("../utils/encryption", () => ({
   decryptToken: (v: string) => v.replace("encrypted:", ""),
   hashUrl: (url: string) => `hash:${url}`,
   isValidEncryptedToken: (v: string) => v.startsWith("encrypted:"),
+  isEncryptionAvailable: () => true,
 }));
 
 import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes } from "./ensureTables";

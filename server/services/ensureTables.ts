@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken } from "../utils/encryption";
+import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken, isEncryptionAvailable } from "../utils/encryption";
 
 /**
  * Ensures error_logs deduplication columns exist (added in PR #56).
@@ -307,6 +307,10 @@ export async function ensureTagTables(): Promise<void> {
  * hook_url_hash are skipped (idempotent).
  */
 async function backfillAutomationSubscriptionUrls(): Promise<void> {
+  if (!isEncryptionAvailable()) {
+    console.warn("[ensureTables] Skipping automation subscription backfill: encryption key not configured");
+    return;
+  }
   try {
     let totalUpdated = 0;
     // Process in batches of 500 until no un-hashed rows remain
@@ -337,6 +341,10 @@ async function backfillAutomationSubscriptionUrls(): Promise<void> {
  * isValidEncryptedToken) are skipped.  Processes in batches of 500.
  */
 async function backfillNotificationChannelWebhookUrls(): Promise<void> {
+  if (!isEncryptionAvailable()) {
+    console.warn("[ensureTables] Skipping webhook URL backfill: encryption key not configured");
+    return;
+  }
   try {
     let lastId = 0;
     let updated = 0;
