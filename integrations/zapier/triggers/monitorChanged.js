@@ -24,14 +24,6 @@ const unsubscribeHook = async (z, bundle) => {
   });
 };
 
-const getMonitors = async (z, bundle) => {
-  const response = await z.request({
-    url: 'https://ftc.bd73.com/api/v1/zapier/monitors',
-    headers: { Authorization: `Bearer ${bundle.authData.api_key}` },
-  });
-  return response.data;
-};
-
 const getFallbackChanges = async (z, bundle) => {
   const params = { limit: 3 };
   if (bundle.inputData.monitor_id) {
@@ -61,7 +53,7 @@ module.exports = {
         label: 'Monitor (optional)',
         helpText:
           'Choose a specific monitor to watch, or leave blank to trigger on any monitor change.',
-        dynamic: 'monitor_changed.id.name',
+        dynamic: 'monitor_list.id.name',
         required: false,
         altersDynamicFields: false,
       },

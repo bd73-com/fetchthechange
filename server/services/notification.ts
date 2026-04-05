@@ -534,7 +534,7 @@ export async function processChangeNotification(
     if (!passes) {
       await ErrorLogger.info(
         "scheduler",
-        `Conditions blocked notification for monitor ${monitor.id}`,
+        `Conditions blocked notification for monitor ${monitor.id} (includes automation subscriptions)`,
         { monitorId: monitor.id, conditionCount: conditions.length },
       );
       return null;

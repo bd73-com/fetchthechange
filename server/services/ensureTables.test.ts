@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { getTableColumns } from "drizzle-orm";
-import { notificationChannels, deliveryLog, slackConnections, monitorConditions, automatedCampaignConfigs } from "@shared/schema";
+import { notificationChannels, deliveryLog, slackConnections, monitorConditions, automatedCampaignConfigs, automationSubscriptions } from "@shared/schema";
 
 const mockExecute = vi.fn();
 
@@ -10,7 +10,7 @@ vi.mock("../db", () => ({
   },
 }));
 
-import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn } from "./ensureTables";
+import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable } from "./ensureTables";
 
 describe("ensureMonitorHealthColumns", () => {
   beforeEach(() => {
@@ -295,6 +295,70 @@ describe("ensureMonitorPendingRetryColumn", () => {
   });
 });
 
+describe("ensureAutomationSubscriptionsTable", () => {
+  beforeEach(() => {
+    mockExecute.mockReset();
+  });
+
+  it("executes CREATE TABLE, indexes, pg_indexes check, and two partial unique indexes and returns true", async () => {
+    mockExecute.mockResolvedValue({ rows: [] });
+    const result = await ensureAutomationSubscriptionsTable();
+    expect(result).toBe(true);
+    // 1 CREATE TABLE + 2 CREATE INDEX + 1 pg_indexes check + 2 CREATE UNIQUE INDEX = 6
+    expect(mockExecute).toHaveBeenCalledTimes(6);
+  });
+
+  it("drops the old COALESCE-based dedup index when it exists", async () => {
+    // Return a row from pg_indexes check to simulate old index existing
+    mockExecute.mockImplementation((...args: any[]) => {
+      const stmt = JSON.stringify(args[0]);
+      if (stmt.includes("pg_indexes")) return { rows: [{ "?column?": 1 }] };
+      return { rows: [] };
+    });
+    await ensureAutomationSubscriptionsTable();
+    const statements = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(statements.some((s: string) => s.includes("DROP INDEX automation_subscriptions_dedup_uniq"))).toBe(true);
+  });
+
+  it("skips DROP when old index does not exist", async () => {
+    mockExecute.mockResolvedValue({ rows: [] });
+    await ensureAutomationSubscriptionsTable();
+    const statements = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(statements.some((s: string) => s.includes("DROP INDEX"))).toBe(false);
+  });
+
+  it("creates two partial unique indexes instead of COALESCE index", async () => {
+    mockExecute.mockResolvedValue({ rows: [] });
+    await ensureAutomationSubscriptionsTable();
+    const statements = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(statements.some((s: string) => s.includes("automation_subscriptions_dedup_with_monitor"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("automation_subscriptions_dedup_global"))).toBe(true);
+  });
+
+  it("returns false and does not throw on error", async () => {
+    mockExecute.mockRejectedValue(new Error("connection refused"));
+    const result = await ensureAutomationSubscriptionsTable();
+    expect(result).toBe(false);
+  });
+
+  it("logs error when table creation fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockExecute.mockRejectedValue(new Error("connection refused"));
+    await ensureAutomationSubscriptionsTable();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Could not ensure automation_subscriptions table:",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Schema sync guard — ensures ensureTables.ts DDL stays in sync with Drizzle.
 // If a column is added/removed in shared/schema.ts, this test fails and
@@ -309,6 +373,7 @@ describe("schema sync between ensureTables DDL and Drizzle schema", () => {
     slack_connections: ["id", "user_id", "team_id", "team_name", "bot_token", "scope", "created_at", "updated_at"],
     monitor_conditions: ["id", "monitor_id", "type", "value", "group_index", "created_at"],
     automated_campaign_configs: ["id", "key", "name", "subject", "html_body", "text_body", "enabled", "last_run_at", "next_run_at", "created_at", "updated_at"],
+    automation_subscriptions: ["id", "user_id", "platform", "hook_url", "monitor_id", "active", "created_at", "last_delivered_at"],
   };
 
   function drizzleColumnNames(table: Parameters<typeof getTableColumns>[0]): string[] {
@@ -333,5 +398,9 @@ describe("schema sync between ensureTables DDL and Drizzle schema", () => {
 
   it("automated_campaign_configs columns match Drizzle schema", () => {
     expect(DDL_COLUMNS.automated_campaign_configs.sort()).toEqual(drizzleColumnNames(automatedCampaignConfigs));
+  });
+
+  it("automation_subscriptions columns match Drizzle schema", () => {
+    expect(DDL_COLUMNS.automation_subscriptions.sort()).toEqual(drizzleColumnNames(automationSubscriptions));
   });
 });
