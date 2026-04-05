@@ -114,25 +114,34 @@ describe("ExtensionAuth", () => {
   });
 
   it("includes credentials in the token request", async () => {
-    // We can't directly inspect credentials from MSW, but we can verify
-    // the request reaches the handler (which means credentials: "include"
-    // didn't prevent it from being sent in same-origin context)
-    let requestReceived = false;
+    const originalFetch = window.fetch;
+    let fetchOptions: RequestInit | undefined;
+
+    // Spy on window.fetch to capture the actual options passed
+    const fetchSpy = vi.spyOn(window, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : (input as Request).url;
+      if (url.includes("/api/extension/token")) {
+        fetchOptions = init;
+      }
+      return originalFetch(input, init);
+    });
 
     server.use(
-      http.post("/api/extension/token", () => {
-        requestReceived = true;
-        return HttpResponse.json({
+      http.post("/api/extension/token", () =>
+        HttpResponse.json({
           token: "jwt-test",
           expiresAt: "2099-01-01T00:00:00.000Z",
-        });
-      }),
+        }),
+      ),
     );
 
     renderWithProviders(<ExtensionAuth />);
 
     await waitFor(() => {
-      expect(requestReceived).toBe(true);
+      expect(fetchOptions).toBeDefined();
     });
+
+    expect(fetchOptions!.credentials).toBe("include");
+    fetchSpy.mockRestore();
   });
 });
