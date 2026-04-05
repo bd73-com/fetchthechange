@@ -104,13 +104,13 @@ jobs:
               echo "No changelog changes needed"
               exit 0
             fi
-            RESPONSE=$(gh api repos/${{ github.repository }}/contents/client/src/data/changelog.ts \
+            gh api repos/${{ github.repository }}/contents/client/src/data/changelog.ts \
               -X PUT \
               -f message="chore: sync changelog from GitHub releases" \
               -f content="$NEW_CONTENT" \
               -f sha="$FILE_SHA" \
-              -f branch="main" 2>&1) && { echo "Changelog committed successfully"; exit 0; }
-            echo "API commit failed (attempt $attempt): $RESPONSE"
+              -f branch="main" > /dev/null 2>&1 && { echo "Changelog committed successfully"; exit 0; }
+            echo "API commit failed (attempt $attempt), retrying..."
             sleep $((attempt * 2))
           done
           echo "Failed after 3 attempts" && exit 1
