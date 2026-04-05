@@ -499,3 +499,115 @@ describe("#287: POST /api/test-email masks email in log output", () => {
     consoleSpy.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #346 — app.param("id") validation rejects non-numeric IDs
+// ---------------------------------------------------------------------------
+describe("app.param id validation (#346)", () => {
+  it("registers a param handler for 'id' during route setup", async () => {
+    await ensureRoutes();
+    const app = makeMockApp();
+    const { registerRoutes } = await import("./routes");
+    const mockHttpServer = {} as any;
+    await registerRoutes(mockHttpServer, app as any);
+    expect(app.param).toHaveBeenCalledWith("id", expect.any(Function));
+  });
+
+  it("rejects non-numeric id with 400", async () => {
+    await ensureRoutes();
+    const app = makeMockApp();
+    const { registerRoutes } = await import("./routes");
+    const mockHttpServer = {} as any;
+    await registerRoutes(mockHttpServer, app as any);
+
+    // Extract the param callback
+    const paramCall = (app.param as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: any[]) => c[0] === "id"
+    );
+    expect(paramCall).toBeDefined();
+    const paramHandler = paramCall![1];
+
+    const res = makeRes();
+    const next = vi.fn();
+    paramHandler({}, res, next, "abc");
+    expect(res._status).toBe(400);
+    expect(res._json).toEqual({ message: "Invalid ID parameter" });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects negative id with 400", async () => {
+    await ensureRoutes();
+    const app = makeMockApp();
+    const { registerRoutes } = await import("./routes");
+    const mockHttpServer = {} as any;
+    await registerRoutes(mockHttpServer, app as any);
+
+    const paramCall = (app.param as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: any[]) => c[0] === "id"
+    );
+    const paramHandler = paramCall![1];
+
+    const res = makeRes();
+    const next = vi.fn();
+    paramHandler({}, res, next, "-5");
+    expect(res._status).toBe(400);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("rejects zero id with 400", async () => {
+    await ensureRoutes();
+    const app = makeMockApp();
+    const { registerRoutes } = await import("./routes");
+    const mockHttpServer = {} as any;
+    await registerRoutes(mockHttpServer, app as any);
+
+    const paramCall = (app.param as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: any[]) => c[0] === "id"
+    );
+    const paramHandler = paramCall![1];
+
+    const res = makeRes();
+    const next = vi.fn();
+    paramHandler({}, res, next, "0");
+    expect(res._status).toBe(400);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("allows valid positive integer id", async () => {
+    await ensureRoutes();
+    const app = makeMockApp();
+    const { registerRoutes } = await import("./routes");
+    const mockHttpServer = {} as any;
+    await registerRoutes(mockHttpServer, app as any);
+
+    const paramCall = (app.param as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: any[]) => c[0] === "id"
+    );
+    const paramHandler = paramCall![1];
+
+    const res = makeRes();
+    const next = vi.fn();
+    paramHandler({}, res, next, "42");
+    expect(next).toHaveBeenCalled();
+    expect(res._status).toBe(200); // unchanged from default
+  });
+
+  it("rejects float id with 400", async () => {
+    await ensureRoutes();
+    const app = makeMockApp();
+    const { registerRoutes } = await import("./routes");
+    const mockHttpServer = {} as any;
+    await registerRoutes(mockHttpServer, app as any);
+
+    const paramCall = (app.param as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: any[]) => c[0] === "id"
+    );
+    const paramHandler = paramCall![1];
+
+    const res = makeRes();
+    const next = vi.fn();
+    paramHandler({}, res, next, "3.14");
+    expect(res._status).toBe(400);
+    expect(next).not.toHaveBeenCalled();
+  });
+});

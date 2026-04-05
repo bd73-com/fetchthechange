@@ -156,10 +156,12 @@ export async function registerRoutes(
 
   // Validate :id route params — reject non-numeric IDs with 400 instead of
   // letting NaN propagate into DB queries and causing 500 errors (#346).
+  // NOTE: This only covers routes registered directly on `app`. Sub-routers
+  // (v1, extension, keys) must validate IDs themselves (v1 uses parseId()).
   app.param("id", (req, res, next, value) => {
     const n = Number(value);
     if (!Number.isInteger(n) || n <= 0) {
-      return res.status(400).json({ message: "Invalid monitor ID" });
+      return res.status(400).json({ message: "Invalid ID parameter" });
     }
     next();
   });
@@ -935,6 +937,9 @@ export async function registerRoutes(
     if (!(await requireConditionsReady(res))) return;
     const id = Number(req.params.id);
     const conditionId = Number(req.params.conditionId);
+    if (!Number.isInteger(conditionId) || conditionId <= 0) {
+      return res.status(400).json({ message: "Invalid condition ID" });
+    }
     const monitor = await storage.getMonitor(id);
     if (!monitor) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
     if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
