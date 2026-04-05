@@ -14,6 +14,9 @@ export interface WebhookDeliveryResult {
   error?: string;
 }
 
+/** Maximum length for oldValue/newValue in webhook payloads (100KB). */
+const MAX_VALUE_LENGTH = 100_000;
+
 export interface WebhookPayload {
   event: "change.detected";
   monitorId: number;
@@ -21,18 +24,29 @@ export interface WebhookPayload {
   url: string;
   oldValue: string | null;
   newValue: string | null;
+  oldValueTruncated?: boolean;
+  newValueTruncated?: boolean;
   detectedAt: string;
   timestamp: string;
 }
 
+function truncateValue(value: string | null): { value: string | null; truncated: boolean } {
+  if (value === null || value.length <= MAX_VALUE_LENGTH) return { value, truncated: false };
+  return { value: value.slice(0, MAX_VALUE_LENGTH), truncated: true };
+}
+
 export function buildWebhookPayload(monitor: Monitor, change: MonitorChange): WebhookPayload {
+  const old = truncateValue(change.oldValue);
+  const cur = truncateValue(change.newValue);
   return {
     event: "change.detected",
     monitorId: monitor.id,
     monitorName: monitor.name,
     url: monitor.url,
-    oldValue: change.oldValue,
-    newValue: change.newValue,
+    oldValue: old.value,
+    newValue: cur.value,
+    ...(old.truncated && { oldValueTruncated: true }),
+    ...(cur.truncated && { newValueTruncated: true }),
     detectedAt: change.detectedAt.toISOString(),
     timestamp: new Date().toISOString(),
   };

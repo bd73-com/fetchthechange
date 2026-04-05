@@ -68,6 +68,7 @@ export interface IStorage {
   deactivateAllUserAutomationSubscriptions(userId: string): Promise<number>;
   getActiveAutomationSubscriptions(userId: string, monitorId: number): Promise<AutomationSubscription[]>;
   touchAutomationSubscription(id: number): Promise<void>;
+  touchAndResetAutomationSubscription(id: number): Promise<void>;
   incrementAutomationSubscriptionFailures(id: number): Promise<number>;
   resetAutomationSubscriptionFailures(id: number): Promise<void>;
   cleanupStaleAutomationSubscriptions(olderThan: Date): Promise<number>;
@@ -771,6 +772,12 @@ export class DatabaseStorage implements IStorage {
   async touchAutomationSubscription(id: number): Promise<void> {
     await db.update(automationSubscriptions)
       .set({ lastDeliveredAt: new Date() })
+      .where(eq(automationSubscriptions.id, id));
+  }
+
+  async touchAndResetAutomationSubscription(id: number): Promise<void> {
+    await db.update(automationSubscriptions)
+      .set({ lastDeliveredAt: new Date(), consecutiveFailures: 0 })
       .where(eq(automationSubscriptions.id, id));
   }
 

@@ -532,10 +532,12 @@ export async function processChangeNotification(
   if (conditions.length > 0) {
     const passes = evaluateConditions(conditions, change.oldValue, change.newValue);
     if (!passes) {
+      // Log with monitor name and explicit mention that automation (Zapier) delivery
+      // was also blocked so users investigating silent Zaps can find this entry.
       await ErrorLogger.info(
         "scheduler",
-        `Conditions blocked notification for monitor ${monitor.id} (includes automation subscriptions)`,
-        { monitorId: monitor.id, conditionCount: conditions.length },
+        `Conditions blocked notification for monitor "${monitor.name}" (ID ${monitor.id}) — automation subscriptions (Zapier) also skipped`,
+        { monitorId: monitor.id, monitorName: monitor.name, conditionCount: conditions.length, automationBlocked: true },
       );
       return null;
     }

@@ -24,6 +24,9 @@ export async function deliverToAutomationSubscriptions(
 
   const deliveries = subscriptions.map(async (sub) => {
     try {
+      // Automation hook URLs (e.g. Zapier) are unguessable bearer tokens.
+      // No HMAC signature header — the hookUrl itself authenticates the request.
+      // Webhook channels use X-FTC-Signature-256 with a per-channel secret.
       const response = await ssrfSafeFetch(sub.hookUrl, {
         method: "POST",
         headers: {
@@ -35,16 +38,12 @@ export async function deliverToAutomationSubscriptions(
       });
 
       if (response.ok) {
-        const hookDomain = new URL(sub.hookUrl).hostname;
+        let hookDomain: string;
+        try { hookDomain = new URL(sub.hookUrl).hostname; } catch { hookDomain = "unknown"; }
         console.log(`[Automation] Delivered successfully (monitorId=${monitor.id}, platform=${sub.platform}, domain=${hookDomain}, status=${response.status})`);
-        // Fire-and-forget lastDeliveredAt + failure counter reset
-        storage.touchAutomationSubscription(sub.id).catch((e: unknown) => {
-          const msg = e instanceof Error ? e.message : String(e);
-          console.warn("[Automation] Failed to touch subscription:", msg);
-        });
-        storage.resetAutomationSubscriptionFailures(sub.id).catch((e: unknown) => {
-          const msg = e instanceof Error ? e.message : String(e);
-          console.warn("[Automation] Failed to reset failure counter:", msg);
+        // Atomic touch + failure counter reset in a single UPDATE
+        storage.touchAndResetAutomationSubscription(sub.id).catch((err) => {
+          console.warn(`[Automation] Failed to reset failure counter for subscription ${sub.id}`, err);
         });
       } else {
         await handleDeliveryFailure(sub.id, monitor, sub.platform, `HTTP ${response.status}`);

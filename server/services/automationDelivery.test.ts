@@ -2,16 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock storage
 const mockGetActiveAutomationSubscriptions = vi.fn();
-const mockTouchAutomationSubscription = vi.fn().mockResolvedValue(undefined);
+const mockTouchAndResetAutomationSubscription = vi.fn().mockResolvedValue(undefined);
 const mockIncrementAutomationSubscriptionFailures = vi.fn().mockResolvedValue(1);
-const mockResetAutomationSubscriptionFailures = vi.fn().mockResolvedValue(undefined);
 const mockDeactivateAutomationSubscription = vi.fn().mockResolvedValue(true);
 vi.mock("../storage", () => ({
   storage: {
     getActiveAutomationSubscriptions: (...args: any[]) => mockGetActiveAutomationSubscriptions(...args),
-    touchAutomationSubscription: (...args: any[]) => mockTouchAutomationSubscription(...args),
+    touchAndResetAutomationSubscription: (...args: any[]) => mockTouchAndResetAutomationSubscription(...args),
     incrementAutomationSubscriptionFailures: (...args: any[]) => mockIncrementAutomationSubscriptionFailures(...args),
-    resetAutomationSubscriptionFailures: (...args: any[]) => mockResetAutomationSubscriptionFailures(...args),
     deactivateAutomationSubscription: (...args: any[]) => mockDeactivateAutomationSubscription(...args),
   },
 }));
@@ -110,8 +108,9 @@ describe("deliverToAutomationSubscriptions", () => {
     expect(opts.headers["Content-Type"]).toBe("application/json");
     expect(opts.headers["User-Agent"]).toBe("FetchTheChange-Zapier/1.0");
 
-    // Verify no HMAC signature header
-    expect(opts.headers["X-FTC-Signature-256"]).toBeUndefined();
+    // Verify HMAC signature header is present
+    expect(opts.headers["X-FTC-Signature-256"]).toBeDefined();
+    expect(opts.headers["X-FTC-Signature-256"]).toMatch(/^sha256=[0-9a-f]+$/);
 
     // Verify payload includes change id for Zapier dedup
     const body = JSON.parse(opts.body);
@@ -121,24 +120,14 @@ describe("deliverToAutomationSubscriptions", () => {
     expect(body.event).toBe("change.detected");
   });
 
-  it("calls touchAutomationSubscription on success", async () => {
+  it("atomically touches and resets failures on success", async () => {
     const sub = makeSub({ id: 7 });
     mockGetActiveAutomationSubscriptions.mockResolvedValue([sub]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: true, status: 200 });
 
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
-    expect(mockTouchAutomationSubscription).toHaveBeenCalledWith(7);
-  });
-
-  it("always resets consecutive failures on successful delivery", async () => {
-    const sub = makeSub({ id: 7, consecutiveFailures: 0 });
-    mockGetActiveAutomationSubscriptions.mockResolvedValue([sub]);
-    mockSsrfSafeFetch.mockResolvedValue({ ok: true, status: 200 });
-
-    await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
-
-    expect(mockResetAutomationSubscriptionFailures).toHaveBeenCalledWith(7);
+    expect(mockTouchAndResetAutomationSubscription).toHaveBeenCalledWith(7);
   });
 
   it("logs success via console.log, not ErrorLogger", async () => {
@@ -167,7 +156,7 @@ describe("deliverToAutomationSubscriptions", () => {
       expect.stringContaining("Automation delivery failed"),
       expect.objectContaining({ error: "HTTP 500", consecutiveFailures: 1 }),
     );
-    expect(mockTouchAutomationSubscription).not.toHaveBeenCalled();
+    expect(mockTouchAndResetAutomationSubscription).not.toHaveBeenCalled();
   });
 
   it("increments consecutive failures on network error", async () => {
@@ -196,7 +185,7 @@ describe("deliverToAutomationSubscriptions", () => {
   });
 
   it("deactivates subscription after reaching failure threshold", async () => {
-    mockIncrementAutomationSubscriptionFailures.mockResolvedValue(5); // equals threshold
+    mockIncrementAutomationSubscriptionFailures.mockResolvedValue(15); // equals threshold
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub({ id: 9 })]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: false, status: 410 });
 
@@ -206,12 +195,12 @@ describe("deliverToAutomationSubscriptions", () => {
     expect(mockLoggerWarning).toHaveBeenCalledWith(
       "scheduler",
       expect.stringContaining("auto-deactivated"),
-      expect.objectContaining({ consecutiveFailures: 5 }),
+      expect.objectContaining({ consecutiveFailures: 15 }),
     );
   });
 
   it("does not deactivate subscription below failure threshold", async () => {
-    mockIncrementAutomationSubscriptionFailures.mockResolvedValue(4); // below threshold of 5
+    mockIncrementAutomationSubscriptionFailures.mockResolvedValue(14); // below threshold of 15
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub({ id: 9 })]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: false, status: 500 });
 
@@ -240,6 +229,6 @@ describe("deliverToAutomationSubscriptions", () => {
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
     expect(mockSsrfSafeFetch).toHaveBeenCalledTimes(2);
-    expect(mockTouchAutomationSubscription).toHaveBeenCalledWith(2);
+    expect(mockTouchAndResetAutomationSubscription).toHaveBeenCalledWith(2);
   });
 });

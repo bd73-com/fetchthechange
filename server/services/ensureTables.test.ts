@@ -7,6 +7,11 @@ const mockExecute = vi.fn();
 vi.mock("../db", () => ({
   db: {
     execute: (...args: any[]) => mockExecute(...args),
+    transaction: async (fn: (tx: any) => Promise<any>) => {
+      // Provide a tx object that delegates to the same mockExecute
+      const tx = { execute: (...args: any[]) => mockExecute(...args) };
+      return fn(tx);
+    },
   },
 }));
 
@@ -310,10 +315,11 @@ describe("ensureMonitorChangesIndexes", () => {
   });
 
   it("creates the composite index", async () => {
-    mockExecute.mockResolvedValue([]);
+    // First call checks pg_index for existing index (returns no rows), second call creates the index
+    mockExecute.mockResolvedValue({ rows: [] });
     await ensureMonitorChangesIndexes();
-    expect(mockExecute).toHaveBeenCalledTimes(1);
-    const stmt = JSON.stringify(mockExecute.mock.calls[0][0]);
+    expect(mockExecute).toHaveBeenCalledTimes(2);
+    const stmt = JSON.stringify(mockExecute.mock.calls[1][0]);
     expect(stmt).toContain("monitor_changes_monitor_detected_idx");
     expect(stmt).toContain("monitor_id");
     expect(stmt).toContain("detected_at");

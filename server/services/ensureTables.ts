@@ -260,6 +260,21 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
  */
 export async function ensureMonitorChangesIndexes(): Promise<void> {
   try {
+    // Check if a valid index already exists — skip DDL entirely if so.
+    const existing = await db.execute(sql`
+      SELECT i.indisvalid
+      FROM pg_indexes ix
+      JOIN pg_class c ON c.relname = ix.indexname
+      JOIN pg_index i ON i.indexrelid = c.oid
+      WHERE ix.indexname = 'monitor_changes_monitor_detected_idx'
+    `);
+    const rows = (existing as any).rows as Array<{ indisvalid: boolean }> | undefined;
+    if (rows && rows.length > 0) {
+      if (rows[0].indisvalid) return; // Valid index exists — nothing to do
+      // Invalid index left from interrupted CREATE CONCURRENTLY — drop it first
+      console.warn("[ensureTables] Dropping invalid index monitor_changes_monitor_detected_idx");
+      await db.execute(sql`DROP INDEX IF EXISTS monitor_changes_monitor_detected_idx`);
+    }
     // Use CONCURRENTLY to avoid taking a SHARE lock that blocks writes on large tables.
     // CONCURRENTLY cannot run inside a transaction — Drizzle's db.execute does not wrap in one.
     await db.execute(sql`CREATE INDEX CONCURRENTLY IF NOT EXISTS monitor_changes_monitor_detected_idx ON monitor_changes(monitor_id, detected_at)`);
@@ -313,19 +328,25 @@ async function backfillAutomationSubscriptionUrls(): Promise<void> {
   }
   try {
     let totalUpdated = 0;
-    // Process in batches of 500 until no un-hashed rows remain
+    // Process in batches of 500 until no un-hashed rows remain.
+    // Each batch runs inside an explicit transaction so FOR UPDATE SKIP LOCKED
+    // actually holds locks until the UPDATE completes (fixes autocommit issue).
     while (true) {
-      const rows = await db.execute(sql`SELECT id, hook_url FROM automation_subscriptions WHERE hook_url_hash IS NULL ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED`);
-      const toUpdate = (rows as any).rows as Array<{ id: number; hook_url: string }>;
-      if (!toUpdate || toUpdate.length === 0) break;
+      const batchCount = await db.transaction(async (tx) => {
+        const rows = await tx.execute(sql`SELECT id, hook_url FROM automation_subscriptions WHERE hook_url_hash IS NULL ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED`);
+        const toUpdate = (rows as any).rows as Array<{ id: number; hook_url: string }>;
+        if (!toUpdate || toUpdate.length === 0) return 0;
 
-      for (const row of toUpdate) {
-        const plainUrl = isValidEncryptedToken(row.hook_url) ? decryptToken(row.hook_url) : row.hook_url;
-        const hash = hashUrl(plainUrl);
-        const encrypted = encryptUrl(plainUrl);
-        await db.execute(sql`UPDATE automation_subscriptions SET hook_url_hash = ${hash}, hook_url = ${encrypted} WHERE id = ${row.id} AND hook_url_hash IS NULL`);
-      }
-      totalUpdated += toUpdate.length;
+        for (const row of toUpdate) {
+          const plainUrl = isValidEncryptedToken(row.hook_url) ? decryptToken(row.hook_url) : row.hook_url;
+          const hash = hashUrl(plainUrl);
+          const encrypted = encryptUrl(plainUrl);
+          await tx.execute(sql`UPDATE automation_subscriptions SET hook_url_hash = ${hash}, hook_url = ${encrypted} WHERE id = ${row.id} AND hook_url_hash IS NULL`);
+        }
+        return toUpdate.length;
+      });
+      if (batchCount === 0) break;
+      totalUpdated += batchCount;
     }
     if (totalUpdated > 0) {
       console.log(`[ensureTables] Backfilled ${totalUpdated} automation subscription URLs`);
@@ -341,8 +362,9 @@ async function backfillAutomationSubscriptionUrls(): Promise<void> {
  * isValidEncryptedToken) are skipped.  Processes in batches of 500.
  */
 async function backfillNotificationChannelWebhookUrls(): Promise<void> {
+  // Skip backfill entirely when encryption key is unavailable — encrypting
+  // with a missing/rotated key would silently store plaintext or corrupt data.
   if (!isEncryptionAvailable()) {
-    console.warn("[ensureTables] Skipping webhook URL backfill: encryption key not configured");
     return;
   }
   try {
@@ -363,6 +385,11 @@ async function backfillNotificationChannelWebhookUrls(): Promise<void> {
         const urlNeedsEncrypt = url && !isValidEncryptedToken(url);
         const secretNeedsEncrypt = secret && !isValidEncryptedToken(secret);
         if (!urlNeedsEncrypt && !secretNeedsEncrypt) continue;
+
+        // Validate that plaintext values look like URLs before encrypting
+        // to avoid double-encrypting corrupted/already-encrypted data
+        if (urlNeedsEncrypt && url && !/^https?:\/\//i.test(url)) continue;
+        if (secretNeedsEncrypt && secret && secret.startsWith("whsec_") === false && !/^https?:\/\//i.test(secret)) continue;
 
         const newConfig = { ...cfg };
         if (urlNeedsEncrypt) newConfig.url = encryptUrl(url);
