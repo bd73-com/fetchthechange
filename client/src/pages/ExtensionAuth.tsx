@@ -16,7 +16,6 @@ export default function ExtensionAuth() {
         const res = await fetch("/api/extension/token", {
           method: "POST",
           credentials: "include",
-          headers: { "Content-Type": "application/json" },
         });
         if (!res.ok) {
           setError("Failed to generate token. Please try again.");
@@ -25,6 +24,9 @@ export default function ExtensionAuth() {
         const data = await res.json().catch(() => {
           throw new Error("Unexpected response format from server");
         });
+        if (typeof data?.token !== "string" || typeof data?.expiresAt !== "string") {
+          throw new Error("Invalid token payload from server");
+        }
         window.postMessage(
           { type: "FTC_EXTENSION_TOKEN", token: data.token, expiresAt: data.expiresAt },
           window.location.origin,
@@ -38,7 +40,7 @@ export default function ExtensionAuth() {
         setError("Something went wrong. Please try again.");
       }
     })();
-  }, [user, tokenSent]);
+  }, [user, tokenSent, error]);
 
   if (isLoading) {
     return (
