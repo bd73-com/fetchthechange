@@ -235,4 +235,50 @@ describe("webhookDelivery", () => {
       expect(body.newValue).toBeNull();
     });
   });
+
+  describe("buildWebhookPayload — truncation", () => {
+    it("does not truncate values under 100KB", () => {
+      const change = makeChange();
+      change.oldValue = "a".repeat(100_000);
+      change.newValue = "b".repeat(50_000);
+      const payload = buildWebhookPayload(makeMonitor(), change);
+      expect(payload.oldValue).toBe(change.oldValue);
+      expect(payload.newValue).toBe(change.newValue);
+      expect(payload.oldValueTruncated).toBeUndefined();
+      expect(payload.newValueTruncated).toBeUndefined();
+    });
+
+    it("truncates values over 100KB and sets truncated flags", () => {
+      const change = makeChange();
+      change.oldValue = "a".repeat(200_000);
+      change.newValue = "b".repeat(300_000);
+      const payload = buildWebhookPayload(makeMonitor(), change);
+      expect(payload.oldValue!.length).toBe(100_000);
+      expect(payload.newValue!.length).toBe(100_000);
+      expect(payload.oldValueTruncated).toBe(true);
+      expect(payload.newValueTruncated).toBe(true);
+    });
+
+    it("does not set truncated flag for null values", () => {
+      const change = makeChange();
+      change.oldValue = null;
+      change.newValue = null;
+      const payload = buildWebhookPayload(makeMonitor(), change);
+      expect(payload.oldValue).toBeNull();
+      expect(payload.newValue).toBeNull();
+      expect(payload.oldValueTruncated).toBeUndefined();
+      expect(payload.newValueTruncated).toBeUndefined();
+    });
+
+    it("truncates only the value that exceeds the limit", () => {
+      const change = makeChange();
+      change.oldValue = "short";
+      change.newValue = "x".repeat(200_000);
+      const payload = buildWebhookPayload(makeMonitor(), change);
+      expect(payload.oldValue).toBe("short");
+      expect(payload.oldValueTruncated).toBeUndefined();
+      expect(payload.newValue!.length).toBe(100_000);
+      expect(payload.newValueTruncated).toBe(true);
+    });
+  });
 });

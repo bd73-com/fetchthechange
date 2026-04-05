@@ -14,6 +14,14 @@ vi.mock("../storage", () => ({ storage: mockStorage }));
 const mockIsPrivateUrl = vi.fn();
 vi.mock("../utils/ssrf", () => ({ isPrivateUrl: mockIsPrivateUrl }));
 
+// Mock encryption
+const mockIsEncryptionAvailable = vi.fn().mockReturnValue(true);
+vi.mock("../utils/encryption", () => ({
+  isEncryptionAvailable: () => mockIsEncryptionAvailable(),
+  encryptUrl: (url: string) => `encrypted:${url}`,
+  hashUrl: (url: string) => `hash:${url}`,
+}));
+
 // Mock logger
 const mockLoggerInfo = vi.fn().mockResolvedValue(undefined);
 const mockLoggerWarning = vi.fn().mockResolvedValue(undefined);
@@ -56,6 +64,10 @@ describe("Zapier route logic", () => {
   describe("POST /subscribe — subscription limit", () => {
     it("AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser is defined", () => {
       expect(AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser).toBe(25);
+    });
+
+    it("AUTOMATION_SUBSCRIPTION_LIMITS.failureThreshold is 15", () => {
+      expect(AUTOMATION_SUBSCRIPTION_LIMITS.failureThreshold).toBe(15);
     });
 
     it("countActiveAutomationSubscriptions returns a number", async () => {
@@ -154,6 +166,18 @@ describe("Zapier route logic", () => {
       expect(mapped).toEqual({ id: 1, name: "Test", url: "https://example.com", active: true });
       expect(mapped).not.toHaveProperty("selector");
       expect(mapped).not.toHaveProperty("userId");
+    });
+  });
+
+  describe("POST /subscribe — encryption availability", () => {
+    it("returns false when encryption key is missing", () => {
+      mockIsEncryptionAvailable.mockReturnValue(false);
+      expect(mockIsEncryptionAvailable()).toBe(false);
+    });
+
+    it("returns true when encryption key is available", () => {
+      mockIsEncryptionAvailable.mockReturnValue(true);
+      expect(mockIsEncryptionAvailable()).toBe(true);
     });
   });
 
