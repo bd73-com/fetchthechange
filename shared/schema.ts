@@ -474,8 +474,8 @@ export const automationSubscriptions = pgTable("automation_subscriptions", {
   userId: text("user_id").notNull().references(() => users.id),
   platform: text("platform").notNull(), // 'zapier'
   hookUrl: text("hook_url").notNull(), // encrypted with AES-256-GCM (requires SLACK_ENCRYPTION_KEY)
-  hookUrlHash: text("hook_url_hash"), // SHA-256 hash of plaintext URL for dedup
-  monitorId: integer("monitor_id").references(() => monitors.id, { onDelete: "cascade" }),
+  hookUrlHash: text("hook_url_hash"), // SHA-256 hash of plaintext URL for dedup; nullable for migration (backfill populates)
+  monitorId: integer("monitor_id").references(() => monitors.id, { onDelete: "cascade" }), // CASCADE: Zapier re-discovers via polling
   active: boolean("active").default(true).notNull(),
   consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
