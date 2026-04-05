@@ -336,8 +336,9 @@ async function backfillAutomationSubscriptionUrls(): Promise<void> {
       const batchCount = await db.transaction(async (tx) => {
         const rows = await tx.execute(sql`SELECT id, hook_url FROM automation_subscriptions WHERE hook_url_hash IS NULL ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED`);
         const toUpdate = (rows as any).rows as Array<{ id: number; hook_url: string }>;
-        if (!toUpdate || toUpdate.length === 0) return 0;
+        if (!toUpdate || toUpdate.length === 0) return { batchSize: 0, updated: 0 };
 
+        let updated = 0;
         for (const row of toUpdate) {
           let plainUrl: string;
           try {
@@ -350,11 +351,12 @@ async function backfillAutomationSubscriptionUrls(): Promise<void> {
           const hash = hashUrl(plainUrl);
           const encrypted = encryptUrl(plainUrl);
           await tx.execute(sql`UPDATE automation_subscriptions SET hook_url_hash = ${hash}, hook_url = ${encrypted} WHERE id = ${row.id} AND hook_url_hash IS NULL`);
+          updated++;
         }
-        return toUpdate.length;
+        return { batchSize: toUpdate.length, updated };
       });
-      if (batchCount === 0) break;
-      totalUpdated += batchCount;
+      if (batchCount.batchSize === 0) break;
+      totalUpdated += batchCount.updated;
     }
     if (totalUpdated > 0) {
       console.log(`[ensureTables] Backfilled ${totalUpdated} automation subscription URLs`);

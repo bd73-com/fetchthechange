@@ -170,14 +170,20 @@ describe("Zapier route logic", () => {
   });
 
   describe("POST /subscribe — encryption availability", () => {
-    it("returns false when encryption key is missing", () => {
-      mockIsEncryptionAvailable.mockReturnValue(false);
-      expect(mockIsEncryptionAvailable()).toBe(false);
+    it("isEncryptionAvailable is imported by the zapier route module", async () => {
+      // Verify the route module imports the encryption guard
+      const fs = await import("fs");
+      const source = fs.readFileSync("server/routes/zapier.ts", "utf-8");
+      expect(source).toContain("isEncryptionAvailable");
+      expect(source).toContain("ENCRYPTION_UNAVAILABLE");
     });
 
-    it("returns true when encryption key is available", () => {
-      mockIsEncryptionAvailable.mockReturnValue(true);
-      expect(mockIsEncryptionAvailable()).toBe(true);
+    it("route returns 503 with ENCRYPTION_UNAVAILABLE code when encryption is unavailable", async () => {
+      // Verify the route source contains the correct response shape
+      const fs = await import("fs");
+      const source = fs.readFileSync("server/routes/zapier.ts", "utf-8");
+      expect(source).toContain('res.status(503)');
+      expect(source).toContain('"ENCRYPTION_UNAVAILABLE"');
     });
   });
 

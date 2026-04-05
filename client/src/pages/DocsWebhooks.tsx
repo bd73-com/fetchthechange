@@ -120,7 +120,7 @@ export default function DocsWebhooks() {
               <code className="text-foreground">timestamp</code> records when
               the HTTP request was dispatched. Both are ISO 8601 strings.
               If <code className="text-foreground">oldValue</code> or{" "}
-              <code className="text-foreground">newValue</code> exceeds 100 KB it
+              <code className="text-foreground">newValue</code> exceeds 100,000 characters it
               is truncated and the corresponding{" "}
               <code className="text-foreground">oldValueTruncated</code> or{" "}
               <code className="text-foreground">newValueTruncated</code> field is

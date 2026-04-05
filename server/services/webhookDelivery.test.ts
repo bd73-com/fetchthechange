@@ -280,5 +280,20 @@ describe("webhookDelivery", () => {
       expect(payload.newValue!.length).toBe(100_000);
       expect(payload.newValueTruncated).toBe(true);
     });
+
+    it("does not split UTF-16 surrogate pairs at truncation boundary", () => {
+      const change = makeChange();
+      // U+1F600 (😀) is encoded as two UTF-16 code units (\uD83D\uDE00)
+      const emoji = "\uD83D\uDE00";
+      change.oldValue = "a".repeat(99_999) + emoji; // 100,001 code units
+      const payload = buildWebhookPayload(makeMonitor(), change);
+      // Should trim to 99,999 to avoid orphaning the high surrogate
+      expect(payload.oldValue!.length).toBe(99_999);
+      expect(payload.oldValueTruncated).toBe(true);
+      // Verify no orphaned high surrogate at the end
+      const lastCode = payload.oldValue!.charCodeAt(payload.oldValue!.length - 1);
+      const isHighSurrogate = lastCode >= 0xD800 && lastCode <= 0xDBFF;
+      expect(isHighSurrogate).toBe(false);
+    });
   });
 });
