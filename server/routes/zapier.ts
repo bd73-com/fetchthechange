@@ -11,6 +11,16 @@ import {
 import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
 import { isEncryptionAvailable } from "../utils/encryption";
 
+/** Maximum length for oldValue/newValue in Zapier responses (100KB, matching webhook payload). */
+const MAX_VALUE_LENGTH = 100_000;
+function truncateValue(v: string | null): string | null {
+  if (v === null || v.length <= MAX_VALUE_LENGTH) return v;
+  let end = MAX_VALUE_LENGTH;
+  const code = v.charCodeAt(end - 1);
+  if (code >= 0xD800 && code <= 0xDBFF) end--;
+  return v.slice(0, end);
+}
+
 const router = Router();
 
 // POST /subscribe — Zapier calls this when a Zap is activated
@@ -166,8 +176,8 @@ router.get("/changes", async (req: any, res) => {
         monitorId: c.monitorId,
         monitorName: mon?.name ?? "Unknown",
         url: mon?.url ?? "",
-        oldValue: c.oldValue,
-        newValue: c.newValue,
+        oldValue: truncateValue(c.oldValue),
+        newValue: truncateValue(c.newValue),
         detectedAt: c.detectedAt.toISOString(),
         timestamp: c.detectedAt.toISOString(),
       };

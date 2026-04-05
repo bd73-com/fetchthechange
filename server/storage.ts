@@ -371,8 +371,8 @@ export class DatabaseStorage implements IStorage {
           if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
           return { ...ch, config: decrypted };
         } catch {
-          // Return row with redacted config if decryption fails (key rotation, corruption)
-          return { ...ch, config: { url: "[decryption-failed]" } };
+          // Mark channel as disabled if decryption fails so delivery skips it
+          return { ...ch, enabled: false, config: { url: "[decryption-failed]" } };
         }
       }
       return ch;
@@ -776,7 +776,15 @@ export class DatabaseStorage implements IStorage {
           eq(automationSubscriptions.monitorId, monitorId),
         ),
       ));
-    return rows.map((row) => ({ ...row, hookUrl: decryptUrl(row.hookUrl) }));
+    return rows.flatMap((row) => {
+      try {
+        return [{ ...row, hookUrl: decryptUrl(row.hookUrl) }];
+      } catch {
+        // Skip rows with corrupted/unrecoverable hookUrl rather than crashing all delivery
+        console.warn(`[Automation] Skipping subscription ${row.id}: hookUrl decryption failed`);
+        return [];
+      }
+    });
   }
 
   async touchAutomationSubscription(id: number): Promise<void> {
