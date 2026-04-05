@@ -1148,6 +1148,7 @@ describe("processChangeNotification — automation delivery fan-out", () => {
 
     // fire-and-forget: rejection should not affect the main flow
     const result = await processChangeNotification(monitor, change, false);
+    expect(mockDeliverToAutomationSubscriptions).toHaveBeenCalledWith(monitor, change);
     expect(result).toEqual({ success: true });
   });
 });

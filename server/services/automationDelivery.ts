@@ -38,8 +38,14 @@ export async function deliverToAutomationSubscriptions(
         const hookDomain = new URL(sub.hookUrl).hostname;
         console.log(`[Automation] Delivered successfully (monitorId=${monitor.id}, platform=${sub.platform}, domain=${hookDomain}, status=${response.status})`);
         // Fire-and-forget lastDeliveredAt + failure counter reset
-        storage.touchAutomationSubscription(sub.id).catch((e) => console.warn("[Automation] Failed to touch subscription:", e.message));
-        storage.resetAutomationSubscriptionFailures(sub.id).catch((e) => console.warn("[Automation] Failed to reset failure counter:", e.message));
+        storage.touchAutomationSubscription(sub.id).catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn("[Automation] Failed to touch subscription:", msg);
+        });
+        storage.resetAutomationSubscriptionFailures(sub.id).catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn("[Automation] Failed to reset failure counter:", msg);
+        });
       } else {
         await handleDeliveryFailure(sub.id, monitor, sub.platform, `HTTP ${response.status}`);
       }

@@ -91,7 +91,7 @@ async function init(): Promise<void> {
     }
 
     userInfo = await res.json().catch(() => null);
-    if (!userInfo || typeof userInfo.userId !== "string") {
+    if (!userInfo || typeof userInfo.userId !== "string" || typeof userInfo.tier !== "string") {
       await clearToken();
       state = "unauthenticated";
       render();

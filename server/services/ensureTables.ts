@@ -239,7 +239,7 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
       const old = await db.execute(sql`SELECT indexdef FROM pg_indexes WHERE indexname = ${name} LIMIT 1`);
       const row = (old as any).rows?.[0];
       if (row && !row.indexdef?.includes('hook_url_hash')) {
-        await db.execute(sql.raw(`DROP INDEX ${name}`));
+        await db.execute(sql.raw(`DROP INDEX IF EXISTS ${name}`));
       }
     }
     await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_with_monitor ON automation_subscriptions(user_id, platform, hook_url_hash, monitor_id) WHERE active = true AND monitor_id IS NOT NULL`);

@@ -345,19 +345,19 @@ describe("ensureAutomationSubscriptionsTable", () => {
   });
 
   it("drops legacy dedup indexes when they exist", async () => {
-    // Return a row from pg_indexes check to simulate old indexes existing
+    // Return a row from pg_indexes check to simulate old indexes existing (without hook_url_hash)
     mockExecute.mockImplementation((...args: any[]) => {
       const stmt = JSON.stringify(args[0]);
-      if (stmt.includes("pg_indexes")) return { rows: [{ "?column?": 1 }] };
+      if (stmt.includes("pg_indexes")) return { rows: [{ indexdef: "CREATE UNIQUE INDEX ON automation_subscriptions(user_id, platform, hook_url)" }] };
       return { rows: [] };
     });
     await ensureAutomationSubscriptionsTable();
     const statements = mockExecute.mock.calls.map(([arg]: any) => {
       try { return JSON.stringify(arg); } catch { return String(arg); }
     });
-    expect(statements.some((s: string) => s.includes("DROP INDEX automation_subscriptions_dedup_uniq"))).toBe(true);
-    expect(statements.some((s: string) => s.includes("DROP INDEX automation_subscriptions_dedup_with_monitor"))).toBe(true);
-    expect(statements.some((s: string) => s.includes("DROP INDEX automation_subscriptions_dedup_global"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("DROP INDEX IF EXISTS automation_subscriptions_dedup_uniq"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("DROP INDEX IF EXISTS automation_subscriptions_dedup_with_monitor"))).toBe(true);
+    expect(statements.some((s: string) => s.includes("DROP INDEX IF EXISTS automation_subscriptions_dedup_global"))).toBe(true);
   });
 
   it("skips DROP when old indexes do not exist", async () => {
