@@ -31,7 +31,8 @@ router.post("/subscribe", async (req: any, res) => {
       return res.status(422).json({ error: "Hook URL targets a private network", code: "SSRF_BLOCKED" });
     }
 
-    // Enforce subscription limit
+    // Enforce subscription limit (soft — concurrent requests may briefly exceed by 1-2;
+    // the DB unique constraint prevents actual duplicates, and 25 is generous headroom)
     const activeCount = await storage.countActiveAutomationSubscriptions(req.apiUser.id);
     if (activeCount >= AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser) {
       return res.status(422).json({
@@ -150,6 +151,7 @@ router.get("/changes", async (req: any, res) => {
       const mon = monitorMap.get(c.monitorId);
       return {
         id: c.id,
+        event: "change.detected",
         monitorId: c.monitorId,
         monitorName: mon?.name ?? "Unknown",
         url: mon?.url ?? "",

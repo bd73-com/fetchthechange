@@ -685,10 +685,29 @@ export class DatabaseStorage implements IStorage {
       return existing;
     }
 
-    const [sub] = await db.insert(automationSubscriptions)
-      .values({ userId, platform, hookUrl, monitorId, active: true })
-      .returning();
-    return sub;
+    try {
+      const [sub] = await db.insert(automationSubscriptions)
+        .values({ userId, platform, hookUrl, monitorId, active: true })
+        .returning();
+      return sub;
+    } catch (err: any) {
+      // Handle concurrent insert race (unique constraint violation)
+      if (err?.code === "23505") {
+        const [existing] = await db.select().from(automationSubscriptions)
+          .where(and(
+            eq(automationSubscriptions.userId, userId),
+            eq(automationSubscriptions.platform, platform),
+            eq(automationSubscriptions.hookUrl, hookUrl),
+            monitorId !== null
+              ? eq(automationSubscriptions.monitorId, monitorId)
+              : isNull(automationSubscriptions.monitorId),
+            eq(automationSubscriptions.active, true),
+          ))
+          .limit(1);
+        if (existing) return existing;
+      }
+      throw err;
+    }
   }
 
   async deactivateAutomationSubscription(id: number, userId: string): Promise<boolean> {
