@@ -6,6 +6,9 @@
       "Write"
     ]
   },
+  "env": {
+    "MAX_THINKING_TOKENS": "10000"
+  },
   "hooks": {
     "PreToolUse": [
       {
