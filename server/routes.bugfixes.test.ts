@@ -20,6 +20,9 @@ const {
   mockUpdateReturningFn,
   mockDeleteWhereFn,
   mockSendNotificationEmail,
+  mockGetDeliveryLog,
+  mockGetMonitor,
+  mockChannelTablesExist,
 } = vi.hoisted(() => {
   const mockLimitFn = vi.fn();
   const mockOrderByFn = vi.fn(() => ({ limit: mockLimitFn }));
@@ -38,6 +41,9 @@ const {
   return {
     mockGetUser: vi.fn(),
     mockGetMonitors: vi.fn(),
+    mockGetDeliveryLog: vi.fn().mockResolvedValue([]),
+    mockGetMonitor: vi.fn(),
+    mockChannelTablesExist: vi.fn().mockResolvedValue(true),
     mockDbSelect,
     mockDbUpdate,
     mockDbDelete,
@@ -70,13 +76,14 @@ vi.mock("./replit_integrations/auth/storage", () => ({
 
 vi.mock("./storage", () => ({
   storage: {
-    getMonitor: vi.fn(),
+    getMonitor: (...args: any[]) => mockGetMonitor(...args),
     getMonitors: (...args: any[]) => mockGetMonitors(...args),
     getAllActiveMonitors: vi.fn().mockResolvedValue([]),
     deleteMonitor: vi.fn(),
     createMonitor: vi.fn(),
     updateMonitor: vi.fn(),
     getMonitorCount: vi.fn().mockResolvedValue(0),
+    getDeliveryLog: (...args: any[]) => mockGetDeliveryLog(...args),
   },
 }));
 
@@ -134,6 +141,11 @@ vi.mock("./middleware/rateLimiter", () => ({
   emailUpdateRateLimiter: (_req: any, _res: any, next: any) => next(),
   contactFormRateLimiter: (_req: any, _res: any, next: any) => next(),
   unauthenticatedRateLimiter: (_req: any, _res: any, next: any) => next(),
+}));
+
+vi.mock("./services/notificationReady", () => ({
+  notificationTablesExist: vi.fn().mockResolvedValue(true),
+  channelTablesExist: (...args: any[]) => mockChannelTablesExist(...args),
 }));
 
 vi.mock("./services/scheduler", () => ({
@@ -609,5 +621,184 @@ describe("app.param id validation (#346)", () => {
     paramHandler({}, res, next, "3.14");
     expect(res._status).toBe(400);
     expect(next).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #373 — Negative limit query parameter causes 500 error
+// ---------------------------------------------------------------------------
+describe("#373: Negative limit query parameter is clamped to 1", () => {
+  const DELIVERIES_ENDPOINT = "/api/monitors/:id/deliveries";
+  const ERROR_LOGS_ENDPOINT = "/api/admin/error-logs";
+
+  beforeEach(async () => {
+    await ensureRoutes();
+    vi.clearAllMocks();
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitor.mockResolvedValue({ id: 1, userId: "owner-123" });
+    mockGetDeliveryLog.mockResolvedValue([]);
+    mockChannelTablesExist.mockResolvedValue(true);
+    mockGetMonitors.mockResolvedValue([]);
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    mockLimitFn.mockResolvedValue([]);
+  });
+
+  it("deliveries endpoint clamps limit=-1 to 1", async () => {
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "-1" } });
+    const res = await callHandler("get", DELIVERIES_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // getDeliveryLog should be called with clamped limit of 1, not -1
+    expect(mockGetDeliveryLog).toHaveBeenCalledWith(1, 1, undefined);
+  });
+
+  it("deliveries endpoint defaults limit to 50 for non-numeric input", async () => {
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "abc" } });
+    const res = await callHandler("get", DELIVERIES_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockGetDeliveryLog).toHaveBeenCalledWith(1, 50, undefined);
+  });
+
+  it("deliveries endpoint caps limit at 200", async () => {
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "999" } });
+    const res = await callHandler("get", DELIVERIES_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockGetDeliveryLog).toHaveBeenCalledWith(1, 200, undefined);
+  });
+
+  it("deliveries endpoint treats limit=0 as default (50)", async () => {
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "0" } });
+    const res = await callHandler("get", DELIVERIES_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // Number("0") is falsy, so || 50 kicks in, then Math.max(1, 50) = 50
+    expect(mockGetDeliveryLog).toHaveBeenCalledWith(1, 50, undefined);
+  });
+
+  it("error-logs endpoint clamps limit=-1 to 1", async () => {
+    const req = ownerReq({ query: { limit: "-1" } });
+    const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // The DB select chain should have .limit(1) called, not .limit(-1)
+    expect(mockLimitFn).toHaveBeenCalledWith(1);
+  });
+
+  it("error-logs endpoint defaults limit to 100 for non-numeric input", async () => {
+    const req = ownerReq({ query: { limit: "abc" } });
+    const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockLimitFn).toHaveBeenCalledWith(100);
+  });
+
+  it("error-logs endpoint caps limit at 500", async () => {
+    const req = ownerReq({ query: { limit: "9999" } });
+    const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockLimitFn).toHaveBeenCalledWith(500);
+  });
+
+  it("error-logs endpoint treats limit=0 as default (100)", async () => {
+    const req = ownerReq({ query: { limit: "0" } });
+    const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // Number("0") is falsy, so || 100 kicks in, then Math.max(1, 100) = 100
+    expect(mockLimitFn).toHaveBeenCalledWith(100);
+  });
+
+  it("campaign analytics endpoint clamps limit=-1 to 1", async () => {
+    const ANALYTICS_ENDPOINT = "/api/admin/campaigns/:id/analytics";
+    // Campaign lookup returns a campaign
+    const mockOffset = vi.fn().mockResolvedValue([]);
+    mockLimitFn.mockReturnValue({ offset: mockOffset });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+
+    // First .limit(1) call returns the campaign, second .limit(n) returns recipients
+    let callCount = 0;
+    mockLimitFn.mockImplementation((n: number) => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve([{ id: 1, name: "Test" }]); // campaign lookup
+      return { offset: mockOffset }; // recipients query
+    });
+
+    // db.execute returns breakdown + total
+    const { db } = await import("./db");
+    (db.execute as any).mockResolvedValue({ rows: [{ total: 0 }] });
+
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "-1" } });
+    const res = await callHandler("get", ANALYTICS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // Second .limit() call (paginated query) should receive 1, not -1.
+    // First call is the campaign lookup with limit(1).
+    expect(mockLimitFn).toHaveBeenNthCalledWith(2, 1);
+  });
+
+  it("campaign analytics endpoint defaults limit to 50 for non-numeric input", async () => {
+    const ANALYTICS_ENDPOINT = "/api/admin/campaigns/:id/analytics";
+    const mockOffset = vi.fn().mockResolvedValue([]);
+    let callCount = 0;
+    mockLimitFn.mockImplementation((_n: number) => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve([{ id: 1, name: "Test" }]);
+      return { offset: mockOffset };
+    });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    const { db } = await import("./db");
+    (db.execute as any).mockResolvedValue({ rows: [{ total: 0 }] });
+
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "abc" } });
+    const res = await callHandler("get", ANALYTICS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockLimitFn).toHaveBeenNthCalledWith(2, 50);
+  });
+
+  it("campaign analytics endpoint caps limit at 100", async () => {
+    const ANALYTICS_ENDPOINT = "/api/admin/campaigns/:id/analytics";
+    const mockOffset = vi.fn().mockResolvedValue([]);
+    let callCount = 0;
+    mockLimitFn.mockImplementation((_n: number) => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve([{ id: 1, name: "Test" }]);
+      return { offset: mockOffset };
+    });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    const { db } = await import("./db");
+    (db.execute as any).mockResolvedValue({ rows: [{ total: 0 }] });
+
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "999" } });
+    const res = await callHandler("get", ANALYTICS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockLimitFn).toHaveBeenNthCalledWith(2, 100);
+  });
+
+  it("campaign analytics endpoint treats limit=0 as default (50)", async () => {
+    const ANALYTICS_ENDPOINT = "/api/admin/campaigns/:id/analytics";
+    const mockOffset = vi.fn().mockResolvedValue([]);
+    let callCount = 0;
+    mockLimitFn.mockImplementation((_n: number) => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve([{ id: 1, name: "Test" }]);
+      return { offset: mockOffset };
+    });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    const { db } = await import("./db");
+    (db.execute as any).mockResolvedValue({ rows: [{ total: 0 }] });
+
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "0" } });
+    const res = await callHandler("get", ANALYTICS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockLimitFn).toHaveBeenNthCalledWith(2, 50);
   });
 });

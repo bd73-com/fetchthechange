@@ -824,7 +824,7 @@ export async function registerRoutes(
     if (!monitor) return res.status(404).json({ message: "Not found" });
     if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
-    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 200));
     const channel = req.query.channel as string | undefined;
     const entries = await storage.getDeliveryLog(id, limit, channel);
     res.json(entries);
@@ -1484,7 +1484,7 @@ export async function registerRoutes(
 
       const level = req.query.level as string | undefined;
       const source = req.query.source as string | undefined;
-      const limitNum = Math.min(Number(req.query.limit) || 100, 500);
+      const limitNum = Math.max(1, Math.min(Number(req.query.limit) || 100, 500));
 
       const conditions = [eq(errorLogs.resolved, false), isNull(errorLogs.deletedAt)];
       if (level && ["error", "warning", "info"].includes(level)) {
@@ -1736,10 +1736,15 @@ export async function registerRoutes(
   softDeleteCleanupInterval = setInterval(async () => {
     try {
       const threshold = new Date(Date.now() - 5 * 60 * 1000);
-      const result = await db.delete(errorLogs).where(
-        and(isNotNull(errorLogs.deletedAt), sql`${errorLogs.deletedAt} < ${threshold}`)
-      );
-      const count = (result as any).rowCount ?? 0;
+      // Batch-limit the delete to avoid materializing unbounded rows via .returning()
+      const rows = await db.delete(errorLogs).where(
+        and(
+          isNotNull(errorLogs.deletedAt),
+          sql`${errorLogs.deletedAt} < ${threshold}`,
+          sql`${errorLogs.id} IN (SELECT id FROM error_logs WHERE deleted_at IS NOT NULL AND deleted_at < ${threshold} LIMIT 1000)`,
+        )
+      ).returning({ id: errorLogs.id });
+      const count = rows.length;
       if (count > 0) {
         console.warn(`Safety net: cleaned up ${count} orphaned soft-deleted error log entries`);
       }
@@ -2290,7 +2295,7 @@ export async function registerRoutes(
 
       // Get recipients list (paginated)
       const page = Math.max(1, Number(req.query.page) || 1);
-      const limit = Math.min(100, Number(req.query.limit) || 50);
+      const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
       const offset = (page - 1) * limit;
 
       const recipients = await db
