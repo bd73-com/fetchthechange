@@ -248,8 +248,8 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
           await tx.execute(sql.raw(`DROP INDEX IF EXISTS ${name}`));
         }
       }
-      await tx.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_with_monitor ON automation_subscriptions(user_id, platform, hook_url_hash, monitor_id) WHERE active = true AND monitor_id IS NOT NULL`);
-      await tx.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_global ON automation_subscriptions(user_id, platform, hook_url_hash) WHERE active = true AND monitor_id IS NULL`);
+      await tx.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_with_monitor ON automation_subscriptions(user_id, platform, hook_url_hash, monitor_id) WHERE active = true AND monitor_id IS NOT NULL AND hook_url_hash IS NOT NULL`);
+      await tx.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_global ON automation_subscriptions(user_id, platform, hook_url_hash) WHERE active = true AND monitor_id IS NULL AND hook_url_hash IS NOT NULL`);
     });
     // Backfill: hash and encrypt any legacy plaintext hook_url rows
     await backfillAutomationSubscriptionUrls();

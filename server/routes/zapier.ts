@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import rateLimit from "express-rate-limit";
 import { storage } from "../storage";
 import { isPrivateUrl } from "../utils/ssrf";
 import { ErrorLogger } from "../services/logger";
@@ -23,15 +24,42 @@ function truncateValue(v: string | null): string | null {
 
 const router = Router();
 
+// All Zapier endpoints require Power tier — API keys are a Power feature but
+// a user could downgrade and retain a key, so enforce tier on every route.
+router.use((req: any, res, next) => {
+  if (req.apiUser?.tier !== "power") {
+    return res.status(403).json({
+      message: "Automation endpoints require a Power tier plan",
+      code: "TIER_REQUIRED",
+    });
+  }
+  next();
+});
+
+// Tighter rate limit for subscription management (10 per hour per user)
+const subscribeRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => String(req.apiUser?.id ?? "unknown"),
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: "Too many subscription requests. Please try again later.",
+      code: "RATE_LIMIT_EXCEEDED",
+    });
+  },
+});
+
 // POST /subscribe — Zapier calls this when a Zap is activated
-router.post("/subscribe", async (req: any, res) => {
+router.post("/subscribe", subscribeRateLimit, async (req: any, res) => {
   try {
     const body = zapierSubscribeSchema.parse(req.body);
 
     // Refuse subscriptions when encryption key is unavailable — hook URLs are bearer tokens
     if (!isEncryptionAvailable()) {
       return res.status(503).json({
-        error: "Automation subscriptions are temporarily unavailable (encryption not configured)",
+        message: "Automation subscriptions are temporarily unavailable (encryption not configured)",
         code: "ENCRYPTION_UNAVAILABLE",
       });
     }
@@ -52,7 +80,7 @@ router.post("/subscribe", async (req: any, res) => {
     const activeCount = await storage.countActiveAutomationSubscriptions(req.apiUser.id);
     if (activeCount >= AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser) {
       return res.status(422).json({
-        error: `Maximum of ${AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser} active automation subscriptions reached`,
+        message: `Maximum of ${AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser} active automation subscriptions reached`,
         code: "SUBSCRIPTION_LIMIT_REACHED",
       });
     }
@@ -77,17 +105,16 @@ router.post("/subscribe", async (req: any, res) => {
     if (postCount > AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser) {
       await storage.deactivateAutomationSubscription(subscription.id, req.apiUser.id);
       return res.status(422).json({
-        error: `Maximum of ${AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser} active automation subscriptions reached`,
+        message: `Maximum of ${AUTOMATION_SUBSCRIPTION_LIMITS.maxPerUser} active automation subscriptions reached`,
         code: "SUBSCRIPTION_LIMIT_REACHED",
       });
     }
 
-    const hookUrlDomain = new URL(body.hookUrl).hostname;
     await ErrorLogger.info("api", "Automation subscription created", {
       userId: req.apiUser.id,
       platform: "zapier",
       monitorId: body.monitorId ?? "all",
-      hookUrlDomain,
+      subscriptionId: subscription.id,
     });
 
     res.status(201).json({
