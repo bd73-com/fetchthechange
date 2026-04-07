@@ -1,0 +1,8 @@
+node_modules/
+dist/
+build/
+*.lock
+__pycache__/
+.git/
+*.db
+*.sqlite
