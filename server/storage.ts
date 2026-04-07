@@ -372,9 +372,10 @@ export class DatabaseStorage implements IStorage {
           if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
           return { ...ch, config: decrypted };
         } catch {
-          // Mark channel as disabled if decryption fails so delivery skips it
+          // Mark channel as disabled if decryption fails so delivery skips it.
+          // Preserve the original encrypted config so re-saving doesn't destroy it.
           console.warn(`[Notification] Skipping webhook channel ${ch.id} for monitor ${monitorId}: decryption failed`);
-          return { ...ch, enabled: false, config: { url: "[decryption-failed]" } };
+          return { ...ch, enabled: false };
         }
       }
       return ch;
@@ -738,7 +739,7 @@ export class DatabaseStorage implements IStorage {
     } catch (err: any) {
       // Handle concurrent insert race (unique constraint violation)
       if (err?.code === "23505") {
-        const [existing] = await db.select().from(automationSubscriptions)
+        const [found] = await db.select().from(automationSubscriptions)
           .where(and(
             eq(automationSubscriptions.userId, userId),
             eq(automationSubscriptions.platform, platform),
@@ -746,10 +747,18 @@ export class DatabaseStorage implements IStorage {
             monitorId !== null
               ? eq(automationSubscriptions.monitorId, monitorId)
               : isNull(automationSubscriptions.monitorId),
-            eq(automationSubscriptions.active, true),
           ))
           .limit(1);
-        if (existing) return { ...existing, hookUrl: hookUrl };
+        if (found) {
+          if (!found.active) {
+            const [reactivated] = await db.update(automationSubscriptions)
+              .set({ active: true, consecutiveFailures: 0, deactivatedAt: null, hookUrl: encryptedUrl })
+              .where(eq(automationSubscriptions.id, found.id))
+              .returning();
+            return { ...reactivated, hookUrl: hookUrl };
+          }
+          return { ...found, hookUrl: hookUrl };
+        }
       }
       throw err;
     }
