@@ -735,4 +735,70 @@ describe("#373: Negative limit query parameter is clamped to 1", () => {
     // First call is the campaign lookup with limit(1).
     expect(mockLimitFn).toHaveBeenNthCalledWith(2, 1);
   });
+
+  it("campaign analytics endpoint defaults limit to 50 for non-numeric input", async () => {
+    const ANALYTICS_ENDPOINT = "/api/admin/campaigns/:id/analytics";
+    const mockOffset = vi.fn().mockResolvedValue([]);
+    let callCount = 0;
+    mockLimitFn.mockImplementation((_n: number) => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve([{ id: 1, name: "Test" }]);
+      return { offset: mockOffset };
+    });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    const { db } = await import("./db");
+    (db.execute as any).mockResolvedValue({ rows: [{ total: 0 }] });
+
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "abc" } });
+    const res = await callHandler("get", ANALYTICS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockLimitFn).toHaveBeenNthCalledWith(2, 50);
+  });
+
+  it("campaign analytics endpoint caps limit at 100", async () => {
+    const ANALYTICS_ENDPOINT = "/api/admin/campaigns/:id/analytics";
+    const mockOffset = vi.fn().mockResolvedValue([]);
+    let callCount = 0;
+    mockLimitFn.mockImplementation((_n: number) => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve([{ id: 1, name: "Test" }]);
+      return { offset: mockOffset };
+    });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    const { db } = await import("./db");
+    (db.execute as any).mockResolvedValue({ rows: [{ total: 0 }] });
+
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "999" } });
+    const res = await callHandler("get", ANALYTICS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockLimitFn).toHaveBeenNthCalledWith(2, 100);
+  });
+
+  it("campaign analytics endpoint treats limit=0 as default (50)", async () => {
+    const ANALYTICS_ENDPOINT = "/api/admin/campaigns/:id/analytics";
+    const mockOffset = vi.fn().mockResolvedValue([]);
+    let callCount = 0;
+    mockLimitFn.mockImplementation((_n: number) => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve([{ id: 1, name: "Test" }]);
+      return { offset: mockOffset };
+    });
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    const { db } = await import("./db");
+    (db.execute as any).mockResolvedValue({ rows: [{ total: 0 }] });
+
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "0" } });
+    const res = await callHandler("get", ANALYTICS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockLimitFn).toHaveBeenNthCalledWith(2, 50);
+  });
 });
