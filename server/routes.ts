@@ -824,7 +824,7 @@ export async function registerRoutes(
     if (!monitor) return res.status(404).json({ message: "Not found" });
     if (String(monitor.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
-    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 200));
     const channel = req.query.channel as string | undefined;
     const entries = await storage.getDeliveryLog(id, limit, channel);
     res.json(entries);
@@ -1484,7 +1484,7 @@ export async function registerRoutes(
 
       const level = req.query.level as string | undefined;
       const source = req.query.source as string | undefined;
-      const limitNum = Math.min(Number(req.query.limit) || 100, 500);
+      const limitNum = Math.max(1, Math.min(Number(req.query.limit) || 100, 500));
 
       const conditions = [eq(errorLogs.resolved, false), isNull(errorLogs.deletedAt)];
       if (level && ["error", "warning", "info"].includes(level)) {
@@ -1736,10 +1736,10 @@ export async function registerRoutes(
   softDeleteCleanupInterval = setInterval(async () => {
     try {
       const threshold = new Date(Date.now() - 5 * 60 * 1000);
-      const result = await db.delete(errorLogs).where(
+      const rows = await db.delete(errorLogs).where(
         and(isNotNull(errorLogs.deletedAt), sql`${errorLogs.deletedAt} < ${threshold}`)
-      );
-      const count = (result as any).rowCount ?? 0;
+      ).returning({ id: errorLogs.id });
+      const count = rows.length;
       if (count > 0) {
         console.warn(`Safety net: cleaned up ${count} orphaned soft-deleted error log entries`);
       }
