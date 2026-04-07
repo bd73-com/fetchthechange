@@ -1736,8 +1736,13 @@ export async function registerRoutes(
   softDeleteCleanupInterval = setInterval(async () => {
     try {
       const threshold = new Date(Date.now() - 5 * 60 * 1000);
+      // Batch-limit the delete to avoid materializing unbounded rows via .returning()
       const rows = await db.delete(errorLogs).where(
-        and(isNotNull(errorLogs.deletedAt), sql`${errorLogs.deletedAt} < ${threshold}`)
+        and(
+          isNotNull(errorLogs.deletedAt),
+          sql`${errorLogs.deletedAt} < ${threshold}`,
+          sql`${errorLogs.id} IN (SELECT id FROM error_logs WHERE deleted_at IS NOT NULL AND deleted_at < ${threshold} LIMIT 1000)`,
+        )
       ).returning({ id: errorLogs.id });
       const count = rows.length;
       if (count > 0) {

@@ -715,7 +715,8 @@ describe("#373: Negative limit query parameter is clamped to 1", () => {
     const req = ownerReq({ params: { id: "1" }, query: { limit: "-1" } });
     const res = await callHandler("get", ANALYTICS_ENDPOINT, req);
     expect(res._status).toBe(200);
-    // Second .limit() call should receive 1, not -1
-    expect(mockLimitFn).toHaveBeenCalledWith(1);
+    // Second .limit() call (paginated query) should receive 1, not -1.
+    // First call is the campaign lookup with limit(1).
+    expect(mockLimitFn).toHaveBeenNthCalledWith(2, 1);
   });
 });
