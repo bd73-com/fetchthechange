@@ -1,4 +1,5 @@
 {
+  "autoCompactWindow": 800000,
   "permissions": {
     "allow": [
       "Edit",
