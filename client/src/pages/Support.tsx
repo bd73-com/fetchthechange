@@ -325,7 +325,7 @@ const faqSections: FAQSection[] = [
       {
         question: "My Zap stopped triggering — what happened?",
         answer:
-          "If a Zapier hook URL fails to accept deliveries 5 times in a row, FetchTheChange automatically deactivates the subscription to prevent wasted requests. To re-enable, turn the Zap off and back on in Zapier — this sends a fresh subscribe request. Inactive subscriptions are cleaned up after 90 days.",
+          "If a Zapier hook URL fails to accept deliveries 15 times in a row, FetchTheChange automatically deactivates the subscription to prevent wasted requests. To re-enable, turn the Zap off and back on in Zapier — this sends a fresh subscribe request. Inactive subscriptions are cleaned up after 90 days.",
       },
     ],
   },
