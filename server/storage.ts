@@ -372,6 +372,7 @@ export class DatabaseStorage implements IStorage {
           return { ...ch, config: decrypted };
         } catch {
           // Mark channel as disabled if decryption fails so delivery skips it
+          console.warn(`[Notification] Skipping webhook channel ${ch.id} for monitor ${monitorId}: decryption failed`);
           return { ...ch, enabled: false, config: { url: "[decryption-failed]" } };
         }
       }
@@ -829,7 +830,7 @@ export class DatabaseStorage implements IStorage {
 
   async getRecentChangesForMonitors(monitorIds: number[], limit: number): Promise<MonitorChange[]> {
     if (monitorIds.length === 0) return [];
-    const safeLim = Math.min(Math.max(1, Math.trunc(limit)), 100);
+    const safeLim = Number.isFinite(limit) ? Math.min(Math.max(1, Math.trunc(limit)), 100) : 100;
     return await db.select().from(monitorChanges)
       .where(
         monitorIds.length === 1

@@ -298,6 +298,16 @@ describe("DatabaseStorage", () => {
       await storage.getRecentChangesForMonitors([1], 7.9);
       expect(mockChain.limit).toHaveBeenCalledWith(7);
     });
+
+    it("falls back to 100 when NaN is passed", async () => {
+      await storage.getRecentChangesForMonitors([1], NaN);
+      expect(mockChain.limit).toHaveBeenCalledWith(100);
+    });
+
+    it("falls back to 100 when Infinity is passed", async () => {
+      await storage.getRecentChangesForMonitors([1], Infinity);
+      expect(mockChain.limit).toHaveBeenCalledWith(100);
+    });
   });
 
   describe("cleanupPollutedValues — error code check", () => {
