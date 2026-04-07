@@ -668,6 +668,14 @@ describe("#373: Negative limit query parameter is clamped to 1", () => {
     expect(mockGetDeliveryLog).toHaveBeenCalledWith(1, 200, undefined);
   });
 
+  it("deliveries endpoint treats limit=0 as default (50)", async () => {
+    const req = ownerReq({ params: { id: "1" }, query: { limit: "0" } });
+    const res = await callHandler("get", DELIVERIES_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // Number("0") is falsy, so || 50 kicks in, then Math.max(1, 50) = 50
+    expect(mockGetDeliveryLog).toHaveBeenCalledWith(1, 50, undefined);
+  });
+
   it("error-logs endpoint clamps limit=-1 to 1", async () => {
     const req = ownerReq({ query: { limit: "-1" } });
     const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
@@ -688,6 +696,14 @@ describe("#373: Negative limit query parameter is clamped to 1", () => {
     const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(mockLimitFn).toHaveBeenCalledWith(500);
+  });
+
+  it("error-logs endpoint treats limit=0 as default (100)", async () => {
+    const req = ownerReq({ query: { limit: "0" } });
+    const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // Number("0") is falsy, so || 100 kicks in, then Math.max(1, 100) = 100
+    expect(mockLimitFn).toHaveBeenCalledWith(100);
   });
 
   it("campaign analytics endpoint clamps limit=-1 to 1", async () => {
