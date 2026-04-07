@@ -286,12 +286,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async cleanupPermanentlyFailedQueueEntries(olderThan: Date): Promise<number> {
-    const result = await db.delete(notificationQueue)
+    const rows = await db.delete(notificationQueue)
       .where(and(
         eq(notificationQueue.permanentlyFailed, true),
         lte(notificationQueue.createdAt, olderThan)
-      ));
-    return (result as any).rowCount ?? 0;
+      ))
+      .returning({ id: notificationQueue.id });
+    return rows.length;
   }
 
   async getStaleQueueEntries(olderThan: Date, limit = 100): Promise<NotificationQueueEntry[]> {
@@ -371,9 +372,10 @@ export class DatabaseStorage implements IStorage {
           if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
           return { ...ch, config: decrypted };
         } catch {
-          // Mark channel as disabled if decryption fails so delivery skips it
+          // Mark channel as disabled if decryption fails so delivery skips it.
+          // Preserve the original encrypted config so re-saving doesn't destroy it.
           console.warn(`[Notification] Skipping webhook channel ${ch.id} for monitor ${monitorId}: decryption failed`);
-          return { ...ch, enabled: false, config: { url: "[decryption-failed]" } };
+          return { ...ch, enabled: false };
         }
       }
       return ch;
@@ -451,9 +453,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async cleanupOldDeliveryLogs(olderThan: Date): Promise<number> {
-    const result = await db.delete(deliveryLog)
-      .where(lt(deliveryLog.createdAt, olderThan));
-    return (result as any).rowCount ?? 0;
+    const rows = await db.delete(deliveryLog)
+      .where(lt(deliveryLog.createdAt, olderThan))
+      .returning({ id: deliveryLog.id });
+    return rows.length;
   }
 
   // Slack connections
@@ -525,10 +528,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async revokeApiKey(id: number, userId: string): Promise<boolean> {
-    const result = await db.update(apiKeys)
+    const rows = await db.update(apiKeys)
       .set({ revokedAt: new Date() })
-      .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, userId), isNull(apiKeys.revokedAt)));
-    return ((result as any).rowCount ?? 0) > 0;
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, userId), isNull(apiKeys.revokedAt)))
+      .returning({ id: apiKeys.id });
+    return rows.length > 0;
   }
 
   async touchApiKey(id: number): Promise<void> {
@@ -735,7 +739,7 @@ export class DatabaseStorage implements IStorage {
     } catch (err: any) {
       // Handle concurrent insert race (unique constraint violation)
       if (err?.code === "23505") {
-        const [existing] = await db.select().from(automationSubscriptions)
+        const [found] = await db.select().from(automationSubscriptions)
           .where(and(
             eq(automationSubscriptions.userId, userId),
             eq(automationSubscriptions.platform, platform),
@@ -743,10 +747,18 @@ export class DatabaseStorage implements IStorage {
             monitorId !== null
               ? eq(automationSubscriptions.monitorId, monitorId)
               : isNull(automationSubscriptions.monitorId),
-            eq(automationSubscriptions.active, true),
           ))
           .limit(1);
-        if (existing) return { ...existing, hookUrl: hookUrl };
+        if (found) {
+          if (!found.active) {
+            const [reactivated] = await db.update(automationSubscriptions)
+              .set({ active: true, consecutiveFailures: 0, deactivatedAt: null, hookUrl: encryptedUrl })
+              .where(eq(automationSubscriptions.id, found.id))
+              .returning();
+            return { ...reactivated, hookUrl: hookUrl };
+          }
+          return { ...found, hookUrl: hookUrl };
+        }
       }
       throw err;
     }
@@ -761,10 +773,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deactivateAllUserAutomationSubscriptions(userId: string): Promise<number> {
-    const result = await db.update(automationSubscriptions)
+    const rows = await db.update(automationSubscriptions)
       .set({ active: false, deactivatedAt: new Date() })
-      .where(and(eq(automationSubscriptions.userId, userId), eq(automationSubscriptions.active, true)));
-    return (result as any).rowCount ?? 0;
+      .where(and(eq(automationSubscriptions.userId, userId), eq(automationSubscriptions.active, true)))
+      .returning({ id: automationSubscriptions.id });
+    return rows.length;
   }
 
   async getActiveAutomationSubscriptions(userId: string, monitorId: number): Promise<AutomationSubscription[]> {
@@ -817,15 +830,16 @@ export class DatabaseStorage implements IStorage {
   async cleanupStaleAutomationSubscriptions(olderThan: Date): Promise<number> {
     // Clean up inactive subscriptions where either deactivatedAt or createdAt is old enough.
     // deactivatedAt may be NULL for rows deactivated before the column was added.
-    const result = await db.delete(automationSubscriptions)
+    const rows = await db.delete(automationSubscriptions)
       .where(and(
         eq(automationSubscriptions.active, false),
         or(
           lt(automationSubscriptions.deactivatedAt, olderThan),
           and(isNull(automationSubscriptions.deactivatedAt), lt(automationSubscriptions.createdAt, olderThan)),
         ),
-      ));
-    return (result as any).rowCount ?? 0;
+      ))
+      .returning({ id: automationSubscriptions.id });
+    return rows.length;
   }
 
   async getRecentChangesForMonitors(monitorIds: number[], limit: number): Promise<MonitorChange[]> {

@@ -1,14 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+function clearEncryptionEnv() {
+  delete process.env.ENCRYPTION_KEY;
+  delete process.env.ENCRYPTION_KEY_OLD;
+  delete process.env.SLACK_ENCRYPTION_KEY;
+}
+
 describe("encryption", () => {
   const VALID_KEY = "a".repeat(64); // 32 bytes hex-encoded
 
   beforeEach(() => {
-    process.env.SLACK_ENCRYPTION_KEY = VALID_KEY;
+    process.env.ENCRYPTION_KEY = VALID_KEY;
   });
 
   afterEach(() => {
-    delete process.env.SLACK_ENCRYPTION_KEY;
+    clearEncryptionEnv();
     vi.resetModules();
   });
 
@@ -30,14 +36,15 @@ describe("encryption", () => {
     expect(a).not.toBe(b);
   });
 
-  it("throws when SLACK_ENCRYPTION_KEY is missing", async () => {
-    delete process.env.SLACK_ENCRYPTION_KEY;
+  it("throws when ENCRYPTION_KEY is missing", async () => {
+    clearEncryptionEnv();
     const { encryptToken } = await import("./encryption");
-    expect(() => encryptToken("test")).toThrow("SLACK_ENCRYPTION_KEY");
+    expect(() => encryptToken("test")).toThrow("ENCRYPTION_KEY");
   });
 
-  it("throws when SLACK_ENCRYPTION_KEY is wrong length", async () => {
-    process.env.SLACK_ENCRYPTION_KEY = "tooshort";
+  it("throws when ENCRYPTION_KEY is wrong length", async () => {
+    clearEncryptionEnv();
+    process.env.ENCRYPTION_KEY = "tooshort";
     const { encryptToken } = await import("./encryption");
     expect(() => encryptToken("test")).toThrow("32 bytes");
   });
@@ -71,26 +78,130 @@ describe("encryption", () => {
   });
 });
 
-describe("isEncryptionAvailable", () => {
+describe("backwards compatibility with SLACK_ENCRYPTION_KEY", () => {
+  const VALID_KEY = "a".repeat(64);
+
   afterEach(() => {
+    delete process.env.ENCRYPTION_KEY;
+    delete process.env.ENCRYPTION_KEY_OLD;
     delete process.env.SLACK_ENCRYPTION_KEY;
     vi.resetModules();
   });
 
-  it("returns true when key is set and valid", async () => {
+  it("falls back to SLACK_ENCRYPTION_KEY when ENCRYPTION_KEY is not set", async () => {
+    process.env.SLACK_ENCRYPTION_KEY = VALID_KEY;
+    const { encryptToken, decryptToken } = await import("./encryption");
+    const encrypted = encryptToken("test-fallback");
+    expect(decryptToken(encrypted)).toBe("test-fallback");
+  });
+
+  it("prefers ENCRYPTION_KEY over SLACK_ENCRYPTION_KEY", async () => {
+    process.env.ENCRYPTION_KEY = VALID_KEY;
+    process.env.SLACK_ENCRYPTION_KEY = "b".repeat(64);
+    const { encryptToken, decryptToken } = await import("./encryption");
+    const encrypted = encryptToken("test-prefer");
+    // Should decrypt with primary key
+    expect(decryptToken(encrypted)).toBe("test-prefer");
+  });
+});
+
+describe("key rotation", () => {
+  const OLD_KEY = "a".repeat(64);
+  const NEW_KEY = "b".repeat(64);
+
+  afterEach(() => {
+    delete process.env.ENCRYPTION_KEY;
+    delete process.env.ENCRYPTION_KEY_OLD;
+    delete process.env.SLACK_ENCRYPTION_KEY;
+    vi.resetModules();
+  });
+
+  it("decrypts data encrypted with old key after rotation", async () => {
+    // Encrypt with old key
+    process.env.ENCRYPTION_KEY = OLD_KEY;
+    const { encryptToken } = await import("./encryption");
+    const encrypted = encryptToken("secret-data");
+
+    // Rotate: new key is primary, old key is retained
+    vi.resetModules();
+    process.env.ENCRYPTION_KEY = NEW_KEY;
+    process.env.ENCRYPTION_KEY_OLD = OLD_KEY;
+    const { decryptToken } = await import("./encryption");
+    expect(decryptToken(encrypted)).toBe("secret-data");
+  });
+
+  it("encrypts new data with new key after rotation", async () => {
+    process.env.ENCRYPTION_KEY = NEW_KEY;
+    process.env.ENCRYPTION_KEY_OLD = OLD_KEY;
+    const { encryptToken, decryptToken } = await import("./encryption");
+    const encrypted = encryptToken("new-secret");
+
+    // Remove old key — should still decrypt because it was encrypted with new key
+    vi.resetModules();
+    delete process.env.ENCRYPTION_KEY_OLD;
+    process.env.ENCRYPTION_KEY = NEW_KEY;
+    const mod = await import("./encryption");
+    expect(mod.decryptToken(encrypted)).toBe("new-secret");
+  });
+
+  it("decrypts data from SLACK_ENCRYPTION_KEY during migration", async () => {
+    // Data encrypted with legacy env var
+    process.env.SLACK_ENCRYPTION_KEY = OLD_KEY;
+    const { encryptToken } = await import("./encryption");
+    const encrypted = encryptToken("legacy-data");
+
+    // Migrate to new env var with different key
+    vi.resetModules();
+    process.env.ENCRYPTION_KEY = NEW_KEY;
+    process.env.SLACK_ENCRYPTION_KEY = OLD_KEY;
+    const { decryptToken } = await import("./encryption");
+    expect(decryptToken(encrypted)).toBe("legacy-data");
+  });
+
+  it("throws descriptive error when no key can decrypt", async () => {
+    // Encrypt with one key
+    process.env.ENCRYPTION_KEY = OLD_KEY;
+    const { encryptToken } = await import("./encryption");
+    const encrypted = encryptToken("secret");
+
+    // Configure completely different keys
+    vi.resetModules();
+    process.env.ENCRYPTION_KEY = "c".repeat(64);
+    process.env.ENCRYPTION_KEY_OLD = "d".repeat(64);
+    const { decryptToken } = await import("./encryption");
+
+    expect(() => decryptToken(encrypted)).toThrow(/tried 2 key\(s\)/);
+  });
+});
+
+describe("isEncryptionAvailable", () => {
+  afterEach(() => {
+    delete process.env.ENCRYPTION_KEY;
+    delete process.env.SLACK_ENCRYPTION_KEY;
+    vi.resetModules();
+  });
+
+  it("returns true when ENCRYPTION_KEY is set and valid", async () => {
+    process.env.ENCRYPTION_KEY = "a".repeat(64);
+    const { isEncryptionAvailable } = await import("./encryption");
+    expect(isEncryptionAvailable()).toBe(true);
+  });
+
+  it("returns true when only SLACK_ENCRYPTION_KEY is set (fallback)", async () => {
     process.env.SLACK_ENCRYPTION_KEY = "a".repeat(64);
     const { isEncryptionAvailable } = await import("./encryption");
     expect(isEncryptionAvailable()).toBe(true);
   });
 
-  it("returns false when key is not set", async () => {
+  it("returns false when no key is set", async () => {
+    delete process.env.ENCRYPTION_KEY;
     delete process.env.SLACK_ENCRYPTION_KEY;
     const { isEncryptionAvailable } = await import("./encryption");
     expect(isEncryptionAvailable()).toBe(false);
   });
 
   it("returns false when key is wrong length", async () => {
-    process.env.SLACK_ENCRYPTION_KEY = "abcd";
+    process.env.ENCRYPTION_KEY = "abcd";
     const { isEncryptionAvailable } = await import("./encryption");
     expect(isEncryptionAvailable()).toBe(false);
   });
@@ -100,10 +211,11 @@ describe("encryptUrl / decryptUrl", () => {
   const VALID_KEY = "a".repeat(64);
 
   beforeEach(() => {
-    process.env.SLACK_ENCRYPTION_KEY = VALID_KEY;
+    process.env.ENCRYPTION_KEY = VALID_KEY;
   });
 
   afterEach(() => {
+    delete process.env.ENCRYPTION_KEY;
     delete process.env.SLACK_ENCRYPTION_KEY;
     vi.resetModules();
   });
@@ -118,9 +230,9 @@ describe("encryptUrl / decryptUrl", () => {
   });
 
   it("throws when encryption key is not set", async () => {
-    delete process.env.SLACK_ENCRYPTION_KEY;
+    delete process.env.ENCRYPTION_KEY;
     const { encryptUrl } = await import("./encryption");
-    expect(() => encryptUrl("https://example.com/webhook")).toThrow("SLACK_ENCRYPTION_KEY");
+    expect(() => encryptUrl("https://example.com/webhook")).toThrow("ENCRYPTION_KEY");
   });
 
   it("decryptUrl returns plaintext URLs as-is (legacy rows)", async () => {
@@ -133,7 +245,7 @@ describe("encryptUrl / decryptUrl", () => {
     const { encryptUrl, decryptUrl } = await import("./encryption");
     const url = "https://hooks.zapier.com/abc";
     const encrypted = encryptUrl(url);
-    delete process.env.SLACK_ENCRYPTION_KEY;
+    delete process.env.ENCRYPTION_KEY;
     expect(() => decryptUrl(encrypted)).toThrow("Cannot decrypt URL");
   });
 });
