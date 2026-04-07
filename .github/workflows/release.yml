@@ -70,6 +70,7 @@ jobs:
 
   sync-changelog:
     needs: publish-release
+    if: ${{ !cancelled() && needs.publish-release.result == 'success' }}
     uses: ./.github/workflows/sync-changelog.yml
     secrets:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

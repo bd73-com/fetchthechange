@@ -248,11 +248,20 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
           await tx.execute(sql.raw(`DROP INDEX IF EXISTS ${name}`));
         }
       }
-      await tx.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_with_monitor ON automation_subscriptions(user_id, platform, hook_url_hash, monitor_id) WHERE active = true AND monitor_id IS NOT NULL`);
-      await tx.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_global ON automation_subscriptions(user_id, platform, hook_url_hash) WHERE active = true AND monitor_id IS NULL`);
+      await tx.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_with_monitor ON automation_subscriptions(user_id, platform, hook_url_hash, monitor_id) WHERE active = true AND monitor_id IS NOT NULL AND hook_url_hash IS NOT NULL`);
+      await tx.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS automation_subscriptions_dedup_global ON automation_subscriptions(user_id, platform, hook_url_hash) WHERE active = true AND monitor_id IS NULL AND hook_url_hash IS NOT NULL`);
     });
     // Backfill: hash and encrypt any legacy plaintext hook_url rows
     await backfillAutomationSubscriptionUrls();
+    // Warn if any active subscriptions still have NULL hook_url_hash after backfill
+    // (e.g. decryption errors during backfill) — these bypass dedup unique indexes
+    const nullHashRows = await db.execute(
+      sql`SELECT count(*)::int AS cnt FROM automation_subscriptions WHERE active = true AND hook_url_hash IS NULL`,
+    );
+    const nullCount = (nullHashRows as any).rows?.[0]?.cnt ?? 0;
+    if (nullCount > 0) {
+      console.warn(`[ensureTables] WARNING: ${nullCount} active automation subscription(s) have NULL hook_url_hash — dedup indexes will not cover these rows. Investigate backfill failures.`);
+    }
     return true;
   } catch (e) {
     console.error("Could not ensure automation_subscriptions table:", e);

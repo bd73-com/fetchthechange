@@ -38,9 +38,7 @@ export async function deliverToAutomationSubscriptions(
       });
 
       if (response.ok) {
-        let hookDomain: string;
-        try { hookDomain = new URL(sub.hookUrl).hostname; } catch { hookDomain = "unknown"; }
-        console.log(`[Automation] Delivered successfully (monitorId=${monitor.id}, platform=${sub.platform}, domain=${hookDomain}, status=${response.status})`);
+        console.log(`[Automation] Delivered successfully (monitorId=${monitor.id}, platform=${sub.platform}, subId=${sub.id}, status=${response.status})`);
         // Atomic touch + failure counter reset in a single UPDATE
         storage.touchAndResetAutomationSubscription(sub.id).catch((err) => {
           console.warn(`[Automation] Failed to reset failure counter for subscription ${sub.id}`, err);
