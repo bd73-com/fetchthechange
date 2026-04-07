@@ -253,6 +253,15 @@ export async function ensureAutomationSubscriptionsTable(): Promise<boolean> {
     });
     // Backfill: hash and encrypt any legacy plaintext hook_url rows
     await backfillAutomationSubscriptionUrls();
+    // Warn if any active subscriptions still have NULL hook_url_hash after backfill
+    // (e.g. decryption errors during backfill) — these bypass dedup unique indexes
+    const nullHashRows = await db.execute(
+      sql`SELECT count(*)::int AS cnt FROM automation_subscriptions WHERE active = true AND hook_url_hash IS NULL`,
+    );
+    const nullCount = (nullHashRows as any).rows?.[0]?.cnt ?? 0;
+    if (nullCount > 0) {
+      console.warn(`[ensureTables] WARNING: ${nullCount} active automation subscription(s) have NULL hook_url_hash — dedup indexes will not cover these rows. Investigate backfill failures.`);
+    }
     return true;
   } catch (e) {
     console.error("Could not ensure automation_subscriptions table:", e);

@@ -370,8 +370,8 @@ describe("ensureAutomationSubscriptionsTable", () => {
     mockExecute.mockResolvedValue({ rows: [] });
     const result = await ensureAutomationSubscriptionsTable();
     expect(result).toBe(true);
-    // 1 CREATE TABLE + 3 ALTER TABLE ADD COLUMN + 2 CREATE INDEX + 1 SET LOCAL lock_timeout + 1 LOCK TABLE + 3 pg_indexes checks + 2 CREATE UNIQUE INDEX + 1 backfill SELECT = 14
-    expect(mockExecute).toHaveBeenCalledTimes(14);
+    // 1 CREATE TABLE + 3 ALTER TABLE ADD COLUMN + 2 CREATE INDEX + 1 SET LOCAL lock_timeout + 1 LOCK TABLE + 3 pg_indexes checks + 2 CREATE UNIQUE INDEX + 1 backfill SELECT + 1 NULL hash count = 15
+    expect(mockExecute).toHaveBeenCalledTimes(15);
   });
 
   it("sets lock_timeout and acquires EXCLUSIVE lock before dropping and recreating indexes", async () => {

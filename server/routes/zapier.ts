@@ -42,10 +42,15 @@ const subscribeRateLimit = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: any) => String(req.apiUser?.id ?? "unknown"),
+  keyGenerator: (req: any) => {
+    if (!req.apiUser?.id) {
+      throw new Error("subscribeRateLimit: req.apiUser.id missing — tier middleware must run first");
+    }
+    return String(req.apiUser.id);
+  },
   handler: (_req, res) => {
     res.status(429).json({
-      error: "Too many subscription requests. Please try again later.",
+      message: "Too many subscription requests. Please try again later.",
       code: "RATE_LIMIT_EXCEEDED",
     });
   },
