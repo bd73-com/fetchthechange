@@ -98,7 +98,7 @@ export function decryptToken(encrypted: string): string {
     }
   }
 
-  throw new Error("Unsupported state or unable to authenticate data");
+  throw new Error(`Unable to decrypt: tried ${keys.length} key(s), none succeeded. Check ENCRYPTION_KEY configuration or data integrity.`);
 }
 
 /**
