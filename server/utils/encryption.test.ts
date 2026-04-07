@@ -157,6 +157,21 @@ describe("key rotation", () => {
     const { decryptToken } = await import("./encryption");
     expect(decryptToken(encrypted)).toBe("legacy-data");
   });
+
+  it("throws descriptive error when no key can decrypt", async () => {
+    // Encrypt with one key
+    process.env.ENCRYPTION_KEY = OLD_KEY;
+    const { encryptToken } = await import("./encryption");
+    const encrypted = encryptToken("secret");
+
+    // Configure completely different keys
+    vi.resetModules();
+    process.env.ENCRYPTION_KEY = "c".repeat(64);
+    process.env.ENCRYPTION_KEY_OLD = "d".repeat(64);
+    const { decryptToken } = await import("./encryption");
+
+    expect(() => decryptToken(encrypted)).toThrow(/tried 2 key\(s\)/);
+  });
 });
 
 describe("isEncryptionAvailable", () => {

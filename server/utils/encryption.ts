@@ -45,6 +45,8 @@ function getDecryptionKeys(): Buffer[] {
       if (key) {
         keys.push(key);
         seen.add(hex);
+      } else {
+        console.warn(`[Encryption] ${envVar} is set but invalid (must be 64 hex chars) — ignoring for decryption`);
       }
     }
   }
