@@ -286,12 +286,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async cleanupPermanentlyFailedQueueEntries(olderThan: Date): Promise<number> {
-    const result = await db.delete(notificationQueue)
+    const rows = await db.delete(notificationQueue)
       .where(and(
         eq(notificationQueue.permanentlyFailed, true),
         lte(notificationQueue.createdAt, olderThan)
-      ));
-    return (result as any).rowCount ?? 0;
+      ))
+      .returning({ id: notificationQueue.id });
+    return rows.length;
   }
 
   async getStaleQueueEntries(olderThan: Date, limit = 100): Promise<NotificationQueueEntry[]> {
@@ -451,9 +452,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async cleanupOldDeliveryLogs(olderThan: Date): Promise<number> {
-    const result = await db.delete(deliveryLog)
-      .where(lt(deliveryLog.createdAt, olderThan));
-    return (result as any).rowCount ?? 0;
+    const rows = await db.delete(deliveryLog)
+      .where(lt(deliveryLog.createdAt, olderThan))
+      .returning({ id: deliveryLog.id });
+    return rows.length;
   }
 
   // Slack connections
@@ -525,10 +527,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async revokeApiKey(id: number, userId: string): Promise<boolean> {
-    const result = await db.update(apiKeys)
+    const rows = await db.update(apiKeys)
       .set({ revokedAt: new Date() })
-      .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, userId), isNull(apiKeys.revokedAt)));
-    return ((result as any).rowCount ?? 0) > 0;
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, userId), isNull(apiKeys.revokedAt)))
+      .returning({ id: apiKeys.id });
+    return rows.length > 0;
   }
 
   async touchApiKey(id: number): Promise<void> {

@@ -4,16 +4,52 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 
+function parseKeyHex(hex: string): Buffer | null {
+  const key = Buffer.from(hex, "hex");
+  return key.length === 32 ? key : null;
+}
+
+/**
+ * Returns the primary encryption key (used for encrypting new data).
+ * Checks ENCRYPTION_KEY first, falls back to SLACK_ENCRYPTION_KEY for
+ * backwards compatibility.
+ */
 function getEncryptionKey(): Buffer {
-  const keyHex = process.env.SLACK_ENCRYPTION_KEY;
+  const keyHex = process.env.ENCRYPTION_KEY ?? process.env.SLACK_ENCRYPTION_KEY;
   if (!keyHex) {
-    throw new Error("SLACK_ENCRYPTION_KEY environment variable is not set");
+    throw new Error("ENCRYPTION_KEY environment variable is not set");
   }
-  const key = Buffer.from(keyHex, "hex");
-  if (key.length !== 32) {
-    throw new Error("SLACK_ENCRYPTION_KEY must be 32 bytes (64 hex characters)");
+  const key = parseKeyHex(keyHex);
+  if (!key) {
+    throw new Error("ENCRYPTION_KEY must be 32 bytes (64 hex characters)");
   }
   return key;
+}
+
+/**
+ * Returns all available decryption keys, primary first.
+ * Supports key rotation: set ENCRYPTION_KEY to the new key and
+ * ENCRYPTION_KEY_OLD to the previous key. Data encrypted with either
+ * key can be decrypted. New encryptions always use the primary key.
+ *
+ * Also checks the legacy SLACK_ENCRYPTION_KEY for backwards compatibility.
+ */
+function getDecryptionKeys(): Buffer[] {
+  const keys: Buffer[] = [];
+  const seen = new Set<string>();
+
+  for (const envVar of ["ENCRYPTION_KEY", "SLACK_ENCRYPTION_KEY", "ENCRYPTION_KEY_OLD"]) {
+    const hex = process.env[envVar];
+    if (hex && !seen.has(hex)) {
+      const key = parseKeyHex(hex);
+      if (key) {
+        keys.push(key);
+        seen.add(hex);
+      }
+    }
+  }
+
+  return keys;
 }
 
 const ENCRYPTED_TOKEN_RE = /^[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/;
@@ -38,7 +74,6 @@ export function encryptToken(plaintext: string): string {
 }
 
 export function decryptToken(encrypted: string): string {
-  const key = getEncryptionKey();
   const parts = encrypted.split(":");
   if (parts.length !== 3) {
     throw new Error("Invalid encrypted token format");
@@ -46,20 +81,33 @@ export function decryptToken(encrypted: string): string {
   const iv = Buffer.from(parts[0], "base64");
   const ciphertext = Buffer.from(parts[1], "base64");
   const tag = Buffer.from(parts[2], "base64");
-  const decipher = createDecipheriv(ALGORITHM, key, iv);
-  decipher.setAuthTag(tag);
-  const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return decrypted.toString("utf8");
+
+  const keys = getDecryptionKeys();
+  if (keys.length === 0) {
+    throw new Error("ENCRYPTION_KEY environment variable is not set");
+  }
+
+  for (const key of keys) {
+    try {
+      const decipher = createDecipheriv(ALGORITHM, key, iv);
+      decipher.setAuthTag(tag);
+      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      return decrypted.toString("utf8");
+    } catch {
+      // Try next key
+    }
+  }
+
+  throw new Error("Unsupported state or unable to authenticate data");
 }
 
 /**
- * Returns true if SLACK_ENCRYPTION_KEY is configured and valid.
+ * Returns true if an encryption key is configured and valid.
  */
 export function isEncryptionAvailable(): boolean {
-  const keyHex = process.env.SLACK_ENCRYPTION_KEY;
+  const keyHex = process.env.ENCRYPTION_KEY ?? process.env.SLACK_ENCRYPTION_KEY;
   if (!keyHex) return false;
-  const key = Buffer.from(keyHex, "hex");
-  return key.length === 32;
+  return parseKeyHex(keyHex) !== null;
 }
 
 /**
@@ -77,7 +125,7 @@ export function encryptUrl(url: string): string {
 export function decryptUrl(value: string): string {
   if (!isValidEncryptedToken(value)) return value;
   if (!isEncryptionAvailable()) {
-    throw new Error("Cannot decrypt URL: SLACK_ENCRYPTION_KEY is not set but encrypted data exists in the database. Set the encryption key to restore access.");
+    throw new Error("Cannot decrypt URL: ENCRYPTION_KEY is not set but encrypted data exists in the database. Set the encryption key to restore access.");
   }
   return decryptToken(value);
 }
