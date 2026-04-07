@@ -276,6 +276,40 @@ describe("DatabaseStorage", () => {
     });
   });
 
+  describe("getRecentChangesForMonitors", () => {
+    it("returns empty array when monitorIds is empty", async () => {
+      const result = await storage.getRecentChangesForMonitors([], 10);
+      expect(result).toEqual([]);
+      // Should not hit the database at all
+      expect(mockDbSelect).not.toHaveBeenCalled();
+    });
+
+    it("clamps limit to 100 max", async () => {
+      await storage.getRecentChangesForMonitors([1], 500);
+      expect(mockChain.limit).toHaveBeenCalledWith(100);
+    });
+
+    it("clamps limit to 1 min", async () => {
+      await storage.getRecentChangesForMonitors([1], 0);
+      expect(mockChain.limit).toHaveBeenCalledWith(1);
+    });
+
+    it("truncates float limit values", async () => {
+      await storage.getRecentChangesForMonitors([1], 7.9);
+      expect(mockChain.limit).toHaveBeenCalledWith(7);
+    });
+
+    it("falls back to 100 when NaN is passed", async () => {
+      await storage.getRecentChangesForMonitors([1], NaN);
+      expect(mockChain.limit).toHaveBeenCalledWith(100);
+    });
+
+    it("falls back to 100 when Infinity is passed", async () => {
+      await storage.getRecentChangesForMonitors([1], Infinity);
+      expect(mockChain.limit).toHaveBeenCalledWith(100);
+    });
+  });
+
   describe("cleanupPollutedValues — error code check", () => {
     it("wraps deletes in a db.transaction call per polluted entry", async () => {
       const pollutedRow = { id: 99, monitorId: 1, oldValue: "Blocked/Unavailable", newValue: "ok" };
@@ -300,7 +334,10 @@ describe("DatabaseStorage", () => {
         const txChain: any = {
           where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
         };
-        const tx = { delete: vi.fn().mockReturnValue(txChain) };
+        const tx = {
+          delete: vi.fn().mockReturnValue(txChain),
+          execute: vi.fn().mockResolvedValue(undefined),
+        };
         await cb(tx);
       });
 
@@ -347,12 +384,65 @@ describe("DatabaseStorage", () => {
               where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
             };
           }),
+          execute: vi.fn().mockResolvedValue(undefined),
         };
         await cb(tx);
       });
 
       const result = await storage.cleanupPollutedValues();
       expect(result).toBe(1); // cleaned 1 polluted history entry
+    });
+
+    it("uses SAVEPOINTs around optional table deletes and rolls back on 42P01", async () => {
+      const pollutedRow = { id: 99, monitorId: 1, oldValue: "Blocked/Unavailable", newValue: "ok" };
+
+      let selectCallNum = 0;
+      mockDbSelect.mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockImplementation(() => {
+            selectCallNum++;
+            return {
+              then: (resolve: any) => {
+                if (selectCallNum === 1) resolve([]);
+                else if (selectCallNum === 2) resolve([pollutedRow]);
+                else resolve([]);
+              },
+            };
+          }),
+        }),
+      });
+
+      const pgError = new Error("relation does not exist") as any;
+      pgError.code = "42P01";
+
+      const executeCalls: string[] = [];
+      mockTransaction.mockImplementation(async (cb: any) => {
+        let deleteCallNum = 0;
+        const tx = {
+          delete: vi.fn().mockImplementation(() => {
+            deleteCallNum++;
+            if (deleteCallNum === 1) {
+              // First optional table throws 42P01
+              return { where: vi.fn().mockRejectedValue(pgError) };
+            }
+            return {
+              where: vi.fn().mockReturnValue({ then: (r: any) => r(undefined) }),
+            };
+          }),
+          execute: vi.fn().mockImplementation((...args: any[]) => {
+            executeCalls.push(JSON.stringify(args[0]));
+            return Promise.resolve(undefined);
+          }),
+        };
+        await cb(tx);
+      });
+
+      await storage.cleanupPollutedValues();
+      // Verify SAVEPOINTs are used
+      expect(executeCalls.some((s) => s.includes("SAVEPOINT sp_cleanup_optional"))).toBe(true);
+      // On success: RELEASE; on 42P01: ROLLBACK TO
+      expect(executeCalls.some((s) => s.includes("RELEASE SAVEPOINT sp_cleanup_optional"))).toBe(true);
+      expect(executeCalls.some((s) => s.includes("ROLLBACK TO SAVEPOINT sp_cleanup_optional"))).toBe(true);
     });
 
     it("rethrows non-42P01 errors in cleanupPollutedValues", async () => {
@@ -386,7 +476,10 @@ describe("DatabaseStorage", () => {
         const txChain: any = {
           where: vi.fn().mockRejectedValue(fkError),
         };
-        const tx = { delete: vi.fn().mockReturnValue(txChain) };
+        const tx = {
+          delete: vi.fn().mockReturnValue(txChain),
+          execute: vi.fn().mockResolvedValue(undefined),
+        };
         await cb(tx);
       });
 

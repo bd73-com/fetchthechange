@@ -337,9 +337,12 @@ export class DatabaseStorage implements IStorage {
       // Wrap in transaction matching deleteMonitor pattern for consistency.
       await db.transaction(async (tx) => {
         for (const [table, col] of [[notificationQueue, notificationQueue.changeId], [deliveryLog, deliveryLog.changeId]] as const) {
+          await tx.execute(sql`SAVEPOINT sp_cleanup_optional`);
           try {
             await tx.delete(table).where(eq(col, h.id));
+            await tx.execute(sql`RELEASE SAVEPOINT sp_cleanup_optional`);
           } catch (err: any) {
+            await tx.execute(sql`ROLLBACK TO SAVEPOINT sp_cleanup_optional`);
             if (err?.code !== "42P01") throw err;
           }
         }
@@ -361,11 +364,17 @@ export class DatabaseStorage implements IStorage {
       .where(eq(notificationChannels.monitorId, monitorId));
     return rows.map((ch) => {
       if (ch.channel === "webhook" && ch.config) {
-        const cfg = ch.config as Record<string, unknown>;
-        const decrypted: Record<string, unknown> = { ...cfg };
-        if (cfg.url) decrypted.url = decryptUrl(cfg.url as string);
-        if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
-        return { ...ch, config: decrypted };
+        try {
+          const cfg = ch.config as Record<string, unknown>;
+          const decrypted: Record<string, unknown> = { ...cfg };
+          if (cfg.url) decrypted.url = decryptUrl(cfg.url as string);
+          if (cfg.secret) decrypted.secret = decryptUrl(cfg.secret as string);
+          return { ...ch, config: decrypted };
+        } catch {
+          // Mark channel as disabled if decryption fails so delivery skips it
+          console.warn(`[Notification] Skipping webhook channel ${ch.id} for monitor ${monitorId}: decryption failed`);
+          return { ...ch, enabled: false, config: { url: "[decryption-failed]" } };
+        }
       }
       return ch;
     });
@@ -768,7 +777,15 @@ export class DatabaseStorage implements IStorage {
           eq(automationSubscriptions.monitorId, monitorId),
         ),
       ));
-    return rows.map((row) => ({ ...row, hookUrl: decryptUrl(row.hookUrl) }));
+    return rows.flatMap((row) => {
+      try {
+        return [{ ...row, hookUrl: decryptUrl(row.hookUrl) }];
+      } catch {
+        // Skip rows with corrupted/unrecoverable hookUrl rather than crashing all delivery
+        console.warn(`[Automation] Skipping subscription ${row.id}: hookUrl decryption failed`);
+        return [];
+      }
+    });
   }
 
   async touchAutomationSubscription(id: number): Promise<void> {
@@ -813,7 +830,7 @@ export class DatabaseStorage implements IStorage {
 
   async getRecentChangesForMonitors(monitorIds: number[], limit: number): Promise<MonitorChange[]> {
     if (monitorIds.length === 0) return [];
-    const safeLim = Math.min(Math.max(1, Math.trunc(limit)), 100);
+    const safeLim = Number.isFinite(limit) ? Math.min(Math.max(1, Math.trunc(limit)), 100) : 100;
     return await db.select().from(monitorChanges)
       .where(
         monitorIds.length === 1
