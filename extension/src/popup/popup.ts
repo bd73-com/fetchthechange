@@ -346,7 +346,8 @@ function renderConnecting(): void {
     </div>
   `;
 
-  document.getElementById("cancel-connect")?.addEventListener("click", () => {
+  document.getElementById("cancel-connect")?.addEventListener("click", async () => {
+    await chrome.storage.local.remove(AUTH_STARTED_KEY);
     state = "unauthenticated";
     render();
   });

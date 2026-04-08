@@ -237,12 +237,30 @@ async function removePicker(tabId: number): Promise<void> {
   }
 }
 
+// Guard against duplicate calls from overlapping delivery layers
+let lastStoredToken = "";
+
 async function handleTokenReceived(
   token: string,
   expiresAt: string,
   tabId?: number,
 ): Promise<void> {
+  // Dedup: skip if we already stored this exact token
+  if (token === lastStoredToken) {
+    console.log(TAG, "duplicate token, skipping storage");
+    // Still close the tab if it's open
+    if (tabId) chrome.tabs.remove(tabId).catch(() => {});
+    return;
+  }
+
+  // Basic JWT structure check (3 dot-separated parts)
+  if (token.split(".").length !== 3) {
+    console.warn(TAG, "rejected: token doesn't look like a JWT");
+    return;
+  }
+
   console.log(TAG, "storing token, expiresAt:", expiresAt);
+  lastStoredToken = token;
   await setToken(token, expiresAt);
   // Clear the auth-started flag so the popup knows it succeeded
   await chrome.storage.local.remove(AUTH_STARTED_KEY);

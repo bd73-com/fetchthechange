@@ -6,7 +6,7 @@ import { BASE_URL } from "../shared/constants";
 const TAG = "[FTC:auth-relay]";
 const EXPECTED_ORIGIN = new URL(BASE_URL).origin;
 
-console.log(TAG, "loaded on", window.location.href);
+console.log(TAG, "loaded on", window.location.href.split("#")[0]);
 
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
