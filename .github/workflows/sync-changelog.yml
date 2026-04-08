@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   sync:
@@ -28,47 +29,62 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx tsx script/sync-changelog.ts
 
-      # Requires contents:write permission. If branch protection on main
-      # blocks the GITHUB_TOKEN, add github-actions[bot] to the bypass list
-      # or use a fine-grained PAT with "bypass branch protections" permission.
-      - name: Commit via GitHub API
+      - name: Commit changelog update
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LOCAL_SHA=$(git hash-object client/src/data/changelog.ts)
           NEW_CONTENT=$(base64 -w0 client/src/data/changelog.ts)
+
+          # Fetch current file SHA from GitHub
+          FILE_SHA=""
           for attempt in 1 2 3; do
-            FILE_META=$(gh api repos/${{ github.repository }}/contents/client/src/data/changelog.ts \
-              --jq '{sha: .sha}' 2>/dev/null) || {
-              echo "Failed to fetch file metadata (attempt $attempt)"
-              sleep $((attempt * 2))
-              continue
-            }
-            FILE_SHA=$(echo "$FILE_META" | jq -r '.sha')
-            if [ -z "$FILE_SHA" ] || [ "$FILE_SHA" = "null" ]; then
-              echo "Invalid file SHA (attempt $attempt)"
-              sleep $((attempt * 2))
-              continue
-            fi
-            # GitHub blob SHA is git hash-object of the file content
-            if [ "$LOCAL_SHA" = "$FILE_SHA" ]; then
-              echo "No changelog changes needed"
-              exit 0
-            fi
-            ERROR_FILE=$(mktemp)
-            gh api repos/${{ github.repository }}/contents/client/src/data/changelog.ts \
-              -X PUT \
-              -f message="chore: sync changelog from GitHub releases" \
-              -f content="$NEW_CONTENT" \
-              -f sha="$FILE_SHA" \
-              -f branch="main" > /dev/null 2>"$ERROR_FILE" && {
-              echo "Changelog committed successfully"
-              rm -f "$ERROR_FILE"
-              exit 0
-            }
-            echo "API commit failed (attempt $attempt):"
-            cat "$ERROR_FILE"
-            rm -f "$ERROR_FILE"
+            FILE_SHA=$(gh api "repos/${{ github.repository }}/contents/client/src/data/changelog.ts" \
+              --jq '.sha' 2>/dev/null) && [ -n "$FILE_SHA" ] && [ "$FILE_SHA" != "null" ] && break
+            echo "Failed to fetch file SHA (attempt $attempt)"
+            FILE_SHA=""
             sleep $((attempt * 2))
           done
-          echo "Failed after 3 attempts" && exit 1
+          if [ -z "$FILE_SHA" ]; then
+            echo "::error::Could not fetch file SHA after 3 attempts"
+            exit 1
+          fi
+
+          # Skip if content is unchanged
+          if [ "$LOCAL_SHA" = "$FILE_SHA" ]; then
+            echo "No changelog changes needed"
+            exit 0
+          fi
+
+          # Try direct commit to main first
+          if gh api "repos/${{ github.repository }}/contents/client/src/data/changelog.ts" \
+            -X PUT \
+            -f message="chore: sync changelog from GitHub releases" \
+            -f content="$NEW_CONTENT" \
+            -f sha="$FILE_SHA" \
+            -f branch="main" > /dev/null 2>&1; then
+            echo "Changelog committed directly to main"
+            exit 0
+          fi
+          echo "Direct commit blocked (likely branch protection), falling back to PR"
+
+          # Fallback: create a PR when direct push is blocked
+          BRANCH="chore/sync-changelog-$(date +%s)"
+          MAIN_SHA=$(gh api "repos/${{ github.repository }}/git/ref/heads/main" --jq '.object.sha')
+          gh api "repos/${{ github.repository }}/git/refs" \
+            -f ref="refs/heads/$BRANCH" \
+            -f sha="$MAIN_SHA"
+          gh api "repos/${{ github.repository }}/contents/client/src/data/changelog.ts" \
+            -X PUT \
+            -f message="chore: sync changelog from GitHub releases" \
+            -f content="$NEW_CONTENT" \
+            -f sha="$FILE_SHA" \
+            -f branch="$BRANCH"
+          gh pr create \
+            --repo "${{ github.repository }}" \
+            --head "$BRANCH" \
+            --base main \
+            --title "chore: sync changelog from GitHub releases" \
+            --body "Auto-generated changelog update after release publication." \
+            --label chore
+          echo "Created changelog PR from branch $BRANCH"
