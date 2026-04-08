@@ -103,6 +103,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateMonitor(id: number, updates: Partial<typeof monitors.$inferInsert>): Promise<Monitor> {
+    if (Object.keys(updates).length === 0) {
+      throw new Error("Cannot update monitor with empty set");
+    }
     const [updated] = await db.update(monitors).set(updates).where(eq(monitors.id, id)).returning();
     return updated;
   }

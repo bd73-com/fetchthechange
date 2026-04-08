@@ -887,13 +887,13 @@ export async function registerRoutes(
       if (input.type.startsWith("numeric_")) {
         const parsed = parseFloat(input.value);
         if (!Number.isFinite(parsed)) {
-          return res.status(422).json({
+          return res.status(400).json({
             message: "Numeric condition value must be a valid number.",
             code: "VALIDATION_ERROR",
           });
         }
         if (input.type === "numeric_change_pct" && parsed <= 0) {
-          return res.status(422).json({
+          return res.status(400).json({
             message: "Percentage threshold must be a positive number.",
             code: "VALIDATION_ERROR",
           });

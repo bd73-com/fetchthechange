@@ -152,7 +152,7 @@ describe("useUpdateNotificationPreferences", () => {
       http.put(api.monitors.notificationPreferences.put.path, () =>
         HttpResponse.json(
           { message: "Failed to update notification preferences" },
-          { status: 422 }
+          { status: 400 }
         )
       )
     );
