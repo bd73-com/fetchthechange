@@ -116,3 +116,38 @@ describe("v1 /ping response shape", { timeout: 15_000 }, () => {
     expect(responseBody).not.toHaveProperty("userId");
   });
 });
+
+describe("v1 PATCH /monitors/:id TOCTOU guard", { timeout: 15_000 }, () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns 404 when updateMonitor returns undefined (concurrent delete)", async () => {
+    const { default: router } = await import("./v1");
+    const patchLayer = router.stack.find(
+      (l: any) => l.route?.path === "/monitors/:id" && l.route?.methods?.patch,
+    );
+    expect(patchLayer).toBeDefined();
+
+    const handler = patchLayer.route.stack[0].handle;
+
+    mockStorage.getMonitor.mockResolvedValueOnce({ id: 1, userId: "user1", active: true });
+    mockStorage.updateMonitor.mockResolvedValueOnce(undefined);
+
+    const req = {
+      apiUser: { id: "user1", tier: "power", keyPrefix: "ftc_abc12345" },
+      params: { id: "1" },
+      body: { name: "NewName" },
+    };
+    let statusCode = 200;
+    let responseBody: any;
+    const res = {
+      status(code: number) { statusCode = code; return this; },
+      json(body: any) { responseBody = body; return this; },
+    };
+
+    await handler(req, res);
+    expect(statusCode).toBe(404);
+    expect(responseBody).toEqual({ error: "Monitor not found", code: "NOT_FOUND" });
+  });
+});

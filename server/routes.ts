@@ -558,7 +558,7 @@ export async function registerRoutes(
     }
 
     const updated = await storage.updateMonitor(id, updates);
-    if (!updated) return res.status(404).json({ message: "Not found" });
+    if (!updated) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
     res.json(updated);
   });
 
@@ -2853,7 +2853,7 @@ export async function registerRoutes(
       }
 
       const updated = await storage.updateTag(tagId, userId, fields);
-      if (!updated) return res.status(404).json({ message: "Not found" });
+      if (!updated) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -2932,7 +2932,7 @@ export async function registerRoutes(
 
       await storage.setMonitorTags(monitorId, input.tagIds);
       const updated = await storage.getMonitorWithTags(monitorId);
-      if (!updated) return res.status(404).json({ message: "Not found" });
+      if (!updated) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) {

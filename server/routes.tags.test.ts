@@ -498,6 +498,21 @@ describe("PATCH /api/tags/:id", () => {
     const res = await callHandler("patch", "/api/tags/:id", req);
     expect(res._status).toBe(400);
   });
+
+  it("returns 404 when tag deleted concurrently (TOCTOU race)", async () => {
+    // Existence check passes — tag exists at time of getTag call
+    mockGetTag.mockResolvedValueOnce({ id: 1, userId: "user1", name: "Work", nameLower: "work", colour: "#ef4444" });
+    // But updateTag returns undefined — tag deleted between check and update
+    mockUpdateTag.mockResolvedValueOnce(undefined);
+
+    const req = makeReq("user1", {
+      params: { id: "1" },
+      body: { colour: "#3b82f6" },
+    });
+    const res = await callHandler("patch", "/api/tags/:id", req);
+    expect(res._status).toBe(404);
+    expect(res._json).toEqual({ message: "Not found", code: "NOT_FOUND" });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -657,6 +672,22 @@ describe("PUT /api/monitors/:id/tags", () => {
     });
     const res = await callHandler("put", "/api/monitors/:id/tags", req);
     expect(res._status).toBe(200);
+  });
+
+  it("returns 404 when monitor deleted concurrently (TOCTOU race)", async () => {
+    // Ownership check passes — monitor exists at time of getMonitor call
+    mockGetMonitor.mockResolvedValueOnce({ id: 1, userId: "user1" });
+    mockSetMonitorTags.mockResolvedValueOnce(undefined);
+    // But getMonitorWithTags returns undefined — monitor deleted between setMonitorTags and fetch
+    mockGetMonitorWithTags.mockResolvedValueOnce(undefined);
+
+    const req = makeReq("user1", {
+      params: { id: "1" },
+      body: { tagIds: [] },
+    });
+    const res = await callHandler("put", "/api/monitors/:id/tags", req);
+    expect(res._status).toBe(404);
+    expect(res._json).toEqual({ message: "Not found", code: "NOT_FOUND" });
   });
 });
 

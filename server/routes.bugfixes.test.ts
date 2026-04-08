@@ -864,3 +864,40 @@ describe("#380: PATCH /api/monitors/:id rejects empty body", () => {
     expect(res._json.code).toBe("VALIDATION_ERROR");
   });
 });
+
+// ---------------------------------------------------------------------------
+// #384 — PATCH /api/monitors/:id returns 404 when monitor deleted concurrently
+// ---------------------------------------------------------------------------
+describe("#384: PATCH /api/monitors/:id returns 404 on concurrent delete (TOCTOU)", () => {
+  const ENDPOINT = "/api/monitors/:id";
+
+  beforeEach(async () => {
+    await ensureRoutes();
+    vi.clearAllMocks();
+    mockGetUser.mockResolvedValue({ tier: "free" });
+    // Existence check passes — monitor exists at time of check
+    mockGetMonitor.mockResolvedValue({ id: 1, userId: "owner-123", active: true });
+  });
+
+  it("returns 404 when updateMonitor returns undefined (concurrent delete)", async () => {
+    const { storage } = await import("./storage");
+    vi.mocked(storage.updateMonitor).mockResolvedValueOnce(undefined);
+
+    const req = ownerReq({ params: { id: "1" }, body: { name: "NewName" } });
+    const res = await callHandler("patch", ENDPOINT, req);
+    expect(res._status).toBe(404);
+    expect(res._json).toEqual({ message: "Not found", code: "NOT_FOUND" });
+  });
+
+  it("returns 200 with updated monitor when updateMonitor succeeds", async () => {
+    const { storage } = await import("./storage");
+    vi.mocked(storage.updateMonitor).mockResolvedValueOnce({
+      id: 1, userId: "owner-123", name: "NewName", active: true,
+    } as any);
+
+    const req = ownerReq({ params: { id: "1" }, body: { name: "NewName" } });
+    const res = await callHandler("patch", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json.name).toBe("NewName");
+  });
+});
