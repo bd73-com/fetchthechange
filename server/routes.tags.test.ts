@@ -628,7 +628,7 @@ describe("PUT /api/monitors/:id/tags", () => {
     expect(res._json.code).toBe("TAG_ASSIGNMENT_LIMIT_REACHED");
   });
 
-  it("returns 422 for invalid body (non-array tagIds)", async () => {
+  it("returns 400 for invalid body (non-array tagIds)", async () => {
     mockGetMonitor.mockResolvedValueOnce({ id: 1, userId: "user1" });
 
     const req = makeReq("user1", {
@@ -636,7 +636,7 @@ describe("PUT /api/monitors/:id/tags", () => {
       body: { tagIds: "not-an-array" },
     });
     const res = await callHandler("put", "/api/monitors/:id/tags", req);
-    expect(res._status).toBe(422);
+    expect(res._status).toBe(400);
   });
 
   it("allows power tier with many tags", async () => {

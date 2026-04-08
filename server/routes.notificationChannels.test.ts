@@ -464,7 +464,7 @@ describe("PUT /api/monitors/:id/channels/:channel", () => {
     expect(res._status).toBe(403);
   });
 
-  it("returns 422 for invalid webhook config (missing url)", async () => {
+  it("returns 400 for invalid webhook config (missing url)", async () => {
     mockGetMonitor.mockResolvedValueOnce({ id: 1, userId: "user1" });
     mockGetUser.mockResolvedValueOnce({ tier: "pro" });
 
@@ -473,7 +473,7 @@ describe("PUT /api/monitors/:id/channels/:channel", () => {
       body: { enabled: true, config: {} },
     });
     const res = await callHandler("put", ENDPOINT, req);
-    expect(res._status).toBe(422);
+    expect(res._status).toBe(400);
   });
 });
 

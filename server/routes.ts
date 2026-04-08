@@ -500,7 +500,7 @@ export async function registerRoutes(
       res.status(201).json({ ...monitor, selectorWarning });
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
+        return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       throw err;
     }
@@ -520,6 +520,10 @@ export async function registerRoutes(
         return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       throw err;
+    }
+
+    if (Object.keys(input).length === 0) {
+      return res.status(400).json({ message: "At least one field is required", code: "VALIDATION_ERROR" });
     }
 
     // Frequency tier check
@@ -664,7 +668,7 @@ export async function registerRoutes(
       res.json(prefs);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
+        return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       throw err;
     }
@@ -771,7 +775,7 @@ export async function registerRoutes(
       res.json({ ...result, config: responseConfig });
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
+        return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       throw err;
     }
@@ -934,7 +938,7 @@ export async function registerRoutes(
       res.status(201).json(condition);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(422).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
+        return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       throw err;
     }
@@ -1425,7 +1429,7 @@ export async function registerRoutes(
       res.json({ success: true, message: "Your message has been sent successfully. We'll get back to you soon.", resendId: response.data?.id });
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
+        return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       console.error("[Support] Contact form error:", err);
       res.status(500).json({ message: "Failed to send your message. Please try again." });
@@ -2800,7 +2804,7 @@ export async function registerRoutes(
       res.status(201).json(tag);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message, code: "INVALID_INPUT" });
+        return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       // Handle unique constraint violation (TOCTOU race on duplicate name)
       if ((err as any)?.code === "23505") {
@@ -2851,7 +2855,7 @@ export async function registerRoutes(
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message, code: "INVALID_INPUT" });
+        return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       // Handle unique constraint violation (TOCTOU race on duplicate name)
       if ((err as any)?.code === "23505") {
@@ -2929,7 +2933,7 @@ export async function registerRoutes(
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(422).json({ message: err.errors[0].message, code: "INVALID_INPUT" });
+        return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       throw err;
     }
