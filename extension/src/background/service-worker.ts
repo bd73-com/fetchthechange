@@ -53,21 +53,34 @@ const authTabs = new Set<number>();
 // fallback the auth page navigates to
 //   /extension-auth?done=1#token=<jwt>&expiresAt=<iso>
 // and we pick up the token from the tab URL change.
+//
+// Chrome fires onUpdated separately for URL changes and status changes:
+//   1. {url: "...?done=1"} — URL without hash (Chrome strips # from changeInfo.url)
+//   2. {status: "complete"} — page loaded; tab.url now includes the hash fragment
+// We must handle BOTH events to reliably extract the token.
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (!changeInfo.url) return;
+  const urlChanged = !!changeInfo.url;
+  const pageComplete = changeInfo.status === "complete";
+  if (!urlChanged && !pageComplete) return;
+
   // Only accept tokens from tabs we opened for auth — prevents token
   // fixation via attacker-crafted links in other tabs.
   // Fast path: in-memory Set (works when service worker hasn't restarted).
   // Slow path: check AUTH_STARTED_KEY in storage (survives SW termination;
   // Chrome MV3 aggressively kills SWs after ~30 s of inactivity).
   if (!authTabs.has(tabId)) {
+    // For status-only events on random tabs, quick-reject if URL doesn't
+    // look like the auth page to avoid unnecessary storage reads.
+    const tabUrl = tab.url || changeInfo.url || "";
+    if (!urlChanged && !tabUrl.includes("/extension-auth")) return;
+
     const stored = await chrome.storage.local.get(AUTH_STARTED_KEY);
     const startedAt = Number(stored[AUTH_STARTED_KEY]);
     if (!Number.isFinite(startedAt) || Date.now() - startedAt > 120_000) return;
     console.log(TAG, "onUpdated: tab not in authTabs (SW restarted?), but recent auth attempt found");
   }
 
-  const fullUrl = tab.url || changeInfo.url;
+  const fullUrl = tab.url || changeInfo.url || "";
 
   // First try the URL we already have
   let result = extractTokenFromUrl(fullUrl);
@@ -83,7 +96,25 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         result = extractTokenFromUrl(freshTab.url);
       }
     } catch {
-      // Tab may have been closed
+      // Tab may have been closed; try scripting fallback
+    }
+
+    // Last resort: if tabs.get didn't return the hash, try reading it
+    // via scripting API (requires host permission to be granted).
+    if (!result) {
+      try {
+        const frames = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => window.location.href,
+        });
+        const pageUrl = frames?.[0]?.result;
+        if (typeof pageUrl === "string") {
+          console.log(TAG, "onUpdated: scripting fallback URL:", pageUrl.split("#")[0]);
+          result = extractTokenFromUrl(pageUrl);
+        }
+      } catch {
+        // No host permission — scripting not available
+      }
     }
   }
 
@@ -97,12 +128,28 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   });
 });
 
+// ── Tab closure tracking ────────────────────────────────────────
+// Use onRemoved for accurate tab-closed detection instead of relying
+// on chrome.tabs.get() errors (which can be transient in MV3).
+const closedTabs = new Set<number>();
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (authTabs.has(tabId)) {
+    console.log(TAG, `onRemoved: auth tab ${tabId} closed`);
+    authTabs.delete(tabId);
+    closedTabs.add(tabId);
+    // Clean up after 60 s to avoid memory leaks
+    setTimeout(() => closedTabs.delete(tabId), 60_000);
+  }
+});
+
 // ── Polling fallback ────────────────────────────────────────────
 // If chrome.tabs.onUpdated doesn't fire (e.g. hash-only change),
-// we poll the auth tab URL every 2 s for up to 30 s.
+// we poll the auth tab URL every 2 s for up to 2 min.
 async function pollAuthTab(tabId: number): Promise<void> {
   console.log(TAG, `poll: starting for tab ${tabId}`);
-  for (let i = 0; i < 15; i++) {
+  let consecutiveErrors = 0;
+
+  for (let i = 0; i < 60; i++) {
     await new Promise((r) => setTimeout(r, 2000));
 
     // Already handled by onUpdated or content script?
@@ -111,8 +158,15 @@ async function pollAuthTab(tabId: number): Promise<void> {
       return;
     }
 
+    // Tab confirmed closed by onRemoved?
+    if (closedTabs.has(tabId)) {
+      console.log(TAG, `poll: tab ${tabId} confirmed closed, stopping`);
+      return;
+    }
+
     try {
       const tab = await chrome.tabs.get(tabId);
+      consecutiveErrors = 0; // reset on success
       if (!tab.url) continue;
 
       const result = extractTokenFromUrl(tab.url);
@@ -122,15 +176,21 @@ async function pollAuthTab(tabId: number): Promise<void> {
         await handleTokenReceived(result.token, result.expiresAt, tabId);
         return;
       }
-    } catch {
-      // Tab closed before auth completed
-      console.log(TAG, `poll: tab ${tabId} closed, stopping`);
-      authTabs.delete(tabId);
-      return;
+    } catch (err) {
+      consecutiveErrors++;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(TAG, `poll: tabs.get(${tabId}) error #${consecutiveErrors}: ${msg}`);
+      // Only give up after 3 consecutive errors — transient failures
+      // are common in MV3 when the SW just woke up.
+      if (consecutiveErrors >= 3) {
+        console.log(TAG, `poll: tab ${tabId} unreachable after ${consecutiveErrors} errors, stopping`);
+        authTabs.delete(tabId);
+        return;
+      }
     }
   }
 
-  console.warn(TAG, `poll: timed out for tab ${tabId} after 30 s`);
+  console.warn(TAG, `poll: timed out for tab ${tabId} after 2 min`);
   authTabs.delete(tabId);
 }
 

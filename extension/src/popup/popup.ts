@@ -1,4 +1,4 @@
-import { BASE_URL, MSG, AUTH_STARTED_KEY } from "../shared/constants";
+import { BASE_URL, MSG, AUTH_STARTED_KEY, TOKEN_STORAGE_KEY } from "../shared/constants";
 import { getToken, clearToken, isTokenValid } from "../auth/token";
 import { escapeAttr, sanitizeTier } from "./utils";
 
@@ -176,6 +176,16 @@ chrome.runtime.onMessage.addListener((message) => {
 
   if (message.type === "FTC_AUTH_COMPLETE") {
     // Re-initialise after auth
+    init();
+  }
+});
+
+// Also listen for direct storage writes (e.g. from auth-relay content script
+// writing the token directly, bypassing the service worker).
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes[TOKEN_STORAGE_KEY]?.newValue && (state === "connecting" || state === "auth_failed")) {
+    console.log(TAG, "token appeared in storage (direct write), re-initialising...");
     init();
   }
 });
