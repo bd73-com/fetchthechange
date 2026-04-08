@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 // Mock chrome APIs and build-time constants before importing
 vi.mock("../shared/constants", () => ({
   BASE_URL: "https://ftc.bd73.com",
+  AUTH_STARTED_KEY: "ftc_auth_started_at",
   MSG: {
     START_PICKER: "FTC_START_PICKER",
     CANCEL_PICKER: "FTC_CANCEL_PICKER",
@@ -10,6 +11,7 @@ vi.mock("../shared/constants", () => ({
     GET_CANDIDATES: "FTC_GET_CANDIDATES",
     CANDIDATES_RESULT: "FTC_CANDIDATES_RESULT",
     FTC_EXTENSION_TOKEN: "FTC_EXTENSION_TOKEN",
+    AUTH_TAB_OPENED: "FTC_AUTH_TAB_OPENED",
   },
 }));
 

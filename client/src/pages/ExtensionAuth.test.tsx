@@ -64,7 +64,7 @@ describe("ExtensionAuth", () => {
     renderWithProviders(<ExtensionAuth />);
 
     await waitFor(() => {
-      expect(screen.getByText("Failed to generate token. Please try again.")).toBeDefined();
+      expect(screen.getByText("Failed to generate token (500). Please try again.")).toBeDefined();
     });
   });
 
