@@ -512,7 +512,15 @@ export async function registerRoutes(
     if (!existing) return res.status(404).json({ message: "Not found" });
     if (String(existing.userId) !== String(req.user.claims.sub)) return res.status(403).json({ message: "Forbidden" });
 
-    const input = api.monitors.update.input.parse(req.body);
+    let input;
+    try {
+      input = api.monitors.update.input.parse(req.body);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
+      }
+      throw err;
+    }
 
     // Frequency tier check
     if (input.frequency) {
