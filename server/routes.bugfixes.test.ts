@@ -802,3 +802,40 @@ describe("#373: Negative limit query parameter is clamped to 1", () => {
     expect(mockLimitFn).toHaveBeenNthCalledWith(2, 50);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #378 — PATCH /api/monitors/:id returns 400 on invalid body (not 500)
+// ---------------------------------------------------------------------------
+describe("#378: PATCH /api/monitors/:id returns 400 on invalid request body", () => {
+  const ENDPOINT = "/api/monitors/:id";
+
+  beforeEach(async () => {
+    await ensureRoutes();
+    vi.clearAllMocks();
+    mockGetUser.mockResolvedValue({ tier: "free" });
+    mockGetMonitor.mockResolvedValue({ id: 1, userId: "owner-123", active: true });
+  });
+
+  it("returns 400 with Zod message for invalid frequency enum", async () => {
+    const req = ownerReq({ params: { id: "1" }, body: { frequency: "not-a-valid-frequency" } });
+    const res = await callHandler("patch", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toHaveProperty("message");
+    expect(typeof res._json.message).toBe("string");
+    expect(res._json.message.length).toBeGreaterThan(0);
+  });
+
+  it("returns 400 with Zod message for wrong type on url field", async () => {
+    const req = ownerReq({ params: { id: "1" }, body: { url: 12345 } });
+    const res = await callHandler("patch", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toHaveProperty("message");
+  });
+
+  it("returns 400 with Zod message for invalid active field type", async () => {
+    const req = ownerReq({ params: { id: "1" }, body: { active: "not-a-boolean" } });
+    const res = await callHandler("patch", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json).toHaveProperty("message");
+  });
+});
