@@ -90,20 +90,35 @@ jobs:
           echo "Creating branch: $BRANCH"
           MAIN_SHA=$(gh api "repos/${{ github.repository }}/git/ref/heads/main" --jq '.object.sha')
           echo "main HEAD: $MAIN_SHA"
+          cleanup_branch() {
+            echo "Cleaning up branch $BRANCH"
+            gh api "repos/${{ github.repository }}/git/refs/heads/$BRANCH" -X DELETE 2>/dev/null || true
+          }
           gh api "repos/${{ github.repository }}/git/refs" \
             -f ref="refs/heads/$BRANCH" \
             -f sha="$MAIN_SHA"
-          gh api "repos/${{ github.repository }}/contents/client/src/data/changelog.ts" \
+          # Re-fetch file SHA from current main in case it changed since initial fetch
+          BRANCH_FILE_SHA=$(gh api "repos/${{ github.repository }}/contents/client/src/data/changelog.ts?ref=$MAIN_SHA" \
+            --jq '.sha' 2>/dev/null) || BRANCH_FILE_SHA="$FILE_SHA"
+          if ! gh api "repos/${{ github.repository }}/contents/client/src/data/changelog.ts" \
             -X PUT \
             -f message="chore: sync changelog from GitHub releases" \
             -f content="$NEW_CONTENT" \
-            -f sha="$FILE_SHA" \
-            -f branch="$BRANCH"
-          PR_URL=$(gh pr create \
+            -f sha="$BRANCH_FILE_SHA" \
+            -f branch="$BRANCH"; then
+            cleanup_branch
+            echo "::error::Failed to commit changelog to fallback branch"
+            exit 1
+          fi
+          if ! PR_URL=$(gh pr create \
             --repo "${{ github.repository }}" \
             --head "$BRANCH" \
             --base main \
             --title "chore: sync changelog from GitHub releases" \
             --body "Auto-generated changelog update after release publication." \
-            --label chore 2>&1)
+            --label chore 2>&1); then
+            cleanup_branch
+            echo "::error::Failed to create changelog PR"
+            exit 1
+          fi
           echo "Created changelog PR: $PR_URL"
