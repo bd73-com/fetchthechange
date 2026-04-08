@@ -102,7 +102,7 @@ jobs:
           trap cleanup_branch EXIT
 
           # Close any existing open changelog PRs to avoid accumulation
-          EXISTING_PRS=$(gh pr list --repo "$REPO" --head "" --search "chore: sync changelog from GitHub releases" --state open --json number --jq '.[].number' 2>/dev/null || true)
+          EXISTING_PRS=$(gh pr list --repo "$REPO" --search "chore: sync changelog from GitHub releases" --state open --json number --jq '.[].number' 2>/dev/null || true)
           for pr_num in $EXISTING_PRS; do
             echo "Closing stale changelog PR #$pr_num"
             gh pr close "$pr_num" --repo "$REPO" --delete-branch 2>/dev/null || true
