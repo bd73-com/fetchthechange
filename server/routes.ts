@@ -517,7 +517,7 @@ export async function registerRoutes(
       input = api.monitors.update.input.parse(req.body);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
+        return res.status(400).json({ message: err.errors[0].message, code: "VALIDATION_ERROR" });
       }
       throw err;
     }

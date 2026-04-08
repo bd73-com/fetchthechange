@@ -816,26 +816,29 @@ describe("#378: PATCH /api/monitors/:id returns 400 on invalid request body", ()
     mockGetMonitor.mockResolvedValue({ id: 1, userId: "owner-123", active: true });
   });
 
-  it("returns 400 with Zod message for invalid frequency enum", async () => {
-    const req = ownerReq({ params: { id: "1" }, body: { frequency: "not-a-valid-frequency" } });
+  it("returns 400 with Zod message and code for wrong type on name field", async () => {
+    const req = ownerReq({ params: { id: "1" }, body: { name: 12345 } });
     const res = await callHandler("patch", ENDPOINT, req);
     expect(res._status).toBe(400);
     expect(res._json).toHaveProperty("message");
     expect(typeof res._json.message).toBe("string");
     expect(res._json.message.length).toBeGreaterThan(0);
+    expect(res._json.code).toBe("VALIDATION_ERROR");
   });
 
-  it("returns 400 with Zod message for wrong type on url field", async () => {
+  it("returns 400 with Zod message and code for wrong type on url field", async () => {
     const req = ownerReq({ params: { id: "1" }, body: { url: 12345 } });
     const res = await callHandler("patch", ENDPOINT, req);
     expect(res._status).toBe(400);
     expect(res._json).toHaveProperty("message");
+    expect(res._json.code).toBe("VALIDATION_ERROR");
   });
 
-  it("returns 400 with Zod message for invalid active field type", async () => {
+  it("returns 400 with Zod message and code for invalid active field type", async () => {
     const req = ownerReq({ params: { id: "1" }, body: { active: "not-a-boolean" } });
     const res = await callHandler("patch", ENDPOINT, req);
     expect(res._status).toBe(400);
     expect(res._json).toHaveProperty("message");
+    expect(res._json.code).toBe("VALIDATION_ERROR");
   });
 });
