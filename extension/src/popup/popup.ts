@@ -1,6 +1,8 @@
-import { BASE_URL, MSG } from "../shared/constants";
+import { BASE_URL, MSG, AUTH_STARTED_KEY } from "../shared/constants";
 import { getToken, clearToken, isTokenValid } from "../auth/token";
 import { escapeAttr, sanitizeTier } from "./utils";
+
+const TAG = "[FTC:popup]";
 
 // ──────────────────────────────────────────────────────────────────
 // State
@@ -28,6 +30,7 @@ interface Candidate {
 type PopupState =
   | "unauthenticated"
   | "connecting"
+  | "auth_failed"
   | "authenticated"
   | "picking"
   | "confirm"
@@ -50,11 +53,18 @@ let dropdownOpen = false;
 const content = document.getElementById("content")!;
 const accountArea = document.getElementById("account-area")!;
 
+// How long we consider an auth attempt "recent" — if no token was stored
+// within this window, we show an error instead of the default connect screen.
+// Must match the SW's fallback window (120 s in service-worker.ts onUpdated).
+const AUTH_TIMEOUT_MS = 120_000;
+
 // ──────────────────────────────────────────────────────────────────
 // Initialise
 // ──────────────────────────────────────────────────────────────────
 
 async function init(): Promise<void> {
+  console.log(TAG, "init start");
+
   // Get current tab info
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab) {
@@ -65,7 +75,18 @@ async function init(): Promise<void> {
 
   const valid = await isTokenValid();
   if (!valid) {
-    state = "unauthenticated";
+    console.log(TAG, "no valid token in storage");
+
+    // Check if an auth attempt was recently started but failed
+    const stored = await chrome.storage.local.get(AUTH_STARTED_KEY);
+    const startedAt = Number(stored[AUTH_STARTED_KEY]);
+    if (Number.isFinite(startedAt) && Date.now() - startedAt < AUTH_TIMEOUT_MS) {
+      console.warn(TAG, "recent auth attempt found but no token — showing failure state");
+      state = "auth_failed";
+    } else {
+      state = "unauthenticated";
+    }
+
     render();
     return;
   }
@@ -73,17 +94,20 @@ async function init(): Promise<void> {
   // Verify token with backend
   const token = await getToken();
   if (!token) {
+    console.log(TAG, "getToken returned null despite isTokenValid");
     state = "unauthenticated";
     render();
     return;
   }
 
+  console.log(TAG, "verifying token with backend...");
   try {
     const res = await fetch(`${BASE_URL}/api/extension/verify`, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
     if (!res.ok) {
+      console.warn(TAG, "verify returned", res.status);
       await clearToken();
       state = "unauthenticated";
       render();
@@ -92,6 +116,7 @@ async function init(): Promise<void> {
 
     userInfo = await res.json().catch(() => null);
     if (!userInfo || typeof userInfo.userId !== "string" || typeof userInfo.tier !== "string") {
+      console.warn(TAG, "verify response malformed:", userInfo);
       await clearToken();
       state = "unauthenticated";
       render();
@@ -99,8 +124,12 @@ async function init(): Promise<void> {
     }
     // Cache userInfo for offline fallback
     await chrome.storage.local.set({ cachedUserInfo: userInfo });
+    // Clear any stale auth-started flag
+    await chrome.storage.local.remove(AUTH_STARTED_KEY);
     state = "authenticated";
-  } catch {
+    console.log(TAG, "authenticated as", userInfo.email);
+  } catch (err) {
+    console.warn(TAG, "verify network error:", err);
     // Network error — try to restore cached userInfo so tier/account display correctly
     const cached = await chrome.storage.local.get("cachedUserInfo");
     const c = cached.cachedUserInfo;
@@ -164,6 +193,9 @@ function render(): void {
       break;
     case "connecting":
       renderConnecting();
+      break;
+    case "auth_failed":
+      renderAuthFailed();
       break;
     case "authenticated":
       renderAuthenticated();
@@ -240,11 +272,68 @@ function renderUnauth(): void {
     </div>
   `;
 
-  document.getElementById("connect-btn")?.addEventListener("click", () => {
-    chrome.tabs.create({ url: `${BASE_URL}/extension-auth` });
-    state = "connecting";
+  document.getElementById("connect-btn")?.addEventListener("click", startAuthFlow);
+}
+
+function renderAuthFailed(): void {
+  content.innerHTML = `
+    <div class="unauth">
+      <h2>Connection failed</h2>
+      <p>We couldn't connect the extension to your account. This can happen if your browser blocked the connection.</p>
+      <button class="btn btn-primary btn-full" id="retry-connect-btn">Try again</button>
+      <p style="margin-top: 12px; font-size: 12px; opacity: 0.7;">
+        Tip: when Chrome asks to allow access to ftc.bd73.com, click <strong>Allow</strong>.
+      </p>
+    </div>
+  `;
+
+  document.getElementById("retry-connect-btn")?.addEventListener("click", startAuthFlow);
+}
+
+async function startAuthFlow(): Promise<void> {
+  console.log(TAG, "starting auth flow");
+
+  // Chrome 127+ treats host_permissions as optional.
+  // Request the permission so the auth-relay content script gets injected.
+  let permissionGranted = false;
+  try {
+    const origin = new URL(BASE_URL).origin;
+    permissionGranted = await chrome.permissions.contains({ origins: [`${origin}/*`] });
+    console.log(TAG, "host permission already granted:", permissionGranted);
+    if (!permissionGranted) {
+      permissionGranted = await chrome.permissions.request({ origins: [`${origin}/*`] });
+      console.log(TAG, "host permission request result:", permissionGranted);
+    }
+  } catch (err) {
+    console.warn(TAG, "permission request error:", err);
+    // Fallback auth still works without the permission
+  }
+
+  // Record that we started an auth attempt so if the popup
+  // re-opens without a token, we can show an error instead of
+  // the generic "Connect your account" screen.
+  await chrome.storage.local.set({ [AUTH_STARTED_KEY]: Date.now() });
+
+  let tab: chrome.tabs.Tab;
+  try {
+    tab = await chrome.tabs.create({ url: `${BASE_URL}/extension-auth` });
+  } catch (err) {
+    console.error(TAG, "failed to open auth tab:", err);
+    state = "auth_failed";
     render();
-  });
+    return;
+  }
+  console.log(TAG, "auth tab created:", tab.id);
+
+  // Tell the service worker which tab to watch
+  if (tab.id) {
+    chrome.runtime.sendMessage({ type: MSG.AUTH_TAB_OPENED, tabId: tab.id }).catch((err) =>
+      console.warn(TAG, "failed to notify service worker of auth tab:", err),
+    );
+  }
+
+  state = "connecting";
+  render();
 }
 
 function renderConnecting(): void {
@@ -257,7 +346,8 @@ function renderConnecting(): void {
     </div>
   `;
 
-  document.getElementById("cancel-connect")?.addEventListener("click", () => {
+  document.getElementById("cancel-connect")?.addEventListener("click", async () => {
+    await chrome.storage.local.remove(AUTH_STARTED_KEY);
     state = "unauthenticated";
     render();
   });

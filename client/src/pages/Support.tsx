@@ -405,6 +405,11 @@ const faqSections: FAQSection[] = [
         answer:
           "Click the extension icon on any web page, then click \"Pick an element\". Your cursor becomes a crosshair \u2014 hover over any element on the page to highlight it, then click to select it. The extension generates a CSS selector automatically and shows you the current value so you can confirm you picked the right element.",
       },
+      {
+        question: "The extension says \"Connect your account\" even though I'm signed in. What do I do?",
+        answer:
+          "Click \"Connect your account\". If Chrome asks you to allow access to ftc.bd73.com, click Allow \u2014 this permission is required for the extension to communicate with your account. If the connection still fails, try removing and re-adding the extension, or update Chrome to the latest version.",
+      },
     ],
   },
 ];

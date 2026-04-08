@@ -64,7 +64,7 @@ describe("ExtensionAuth", () => {
     renderWithProviders(<ExtensionAuth />);
 
     await waitFor(() => {
-      expect(screen.getByText("Failed to generate token. Please try again.")).toBeDefined();
+      expect(screen.getByText("Failed to generate token (500). Please try again.")).toBeDefined();
     });
   });
 
@@ -136,6 +136,37 @@ describe("ExtensionAuth", () => {
       { type: "FTC_EXTENSION_TOKEN", token: "jwt-abc", expiresAt: "2099-01-01T00:00:00.000Z" },
       window.location.origin,
     );
+  });
+
+  it("shows Connected! when done=1 query param is present (fallback callback)", async () => {
+    let tokenRequestMade = false;
+    server.use(
+      http.post("/api/extension/token", () => {
+        tokenRequestMade = true;
+        return HttpResponse.json({ token: "test", expiresAt: "2099-01-01T00:00:00.000Z" });
+      }),
+    );
+
+    // Simulate the fallback callback URL
+    const originalSearch = window.location.search;
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, search: "?done=1" },
+      writable: true,
+    });
+
+    renderWithProviders(<ExtensionAuth />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Connected!")).toBeDefined();
+    });
+
+    // Verify no token request was made (isDone skips token generation)
+    expect(tokenRequestMade).toBe(false);
+
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, search: originalSearch },
+      writable: true,
+    });
   });
 
   it("includes credentials in the token request", async () => {

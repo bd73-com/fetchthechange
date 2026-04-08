@@ -8,17 +8,22 @@ export default function ExtensionAuth() {
   const [tokenSent, setTokenSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Check if this is the fallback callback (service worker reads token from the URL)
+  const isDone = new URLSearchParams(window.location.search).get("done") === "1";
+
   useEffect(() => {
-    if (!user || tokenSent || error) return;
+    if (isDone || !user || tokenSent || error) return;
 
     (async () => {
       try {
+        console.log("[FTC:auth-page] user logged in, requesting token...");
         const res = await fetch("/api/extension/token", {
           method: "POST",
           credentials: "include",
         });
         if (!res.ok) {
-          setError("Failed to generate token. Please try again.");
+          console.error("[FTC:auth-page] POST /api/extension/token returned", res.status);
+          setError(`Failed to generate token (${res.status}). Please try again.`);
           return;
         }
         const data = await res.json().catch(() => {
@@ -27,20 +32,35 @@ export default function ExtensionAuth() {
         if (typeof data?.token !== "string" || typeof data?.expiresAt !== "string") {
           throw new Error("Invalid token payload from server");
         }
+
+        console.log("[FTC:auth-page] token received, posting to content script...");
+
+        // Primary: postMessage for content script relay (works when host permission granted)
         window.postMessage(
           { type: "FTC_EXTENSION_TOKEN", token: data.token, expiresAt: data.expiresAt },
           window.location.origin,
         );
         setTokenSent(true);
+
+        // Fallback: after a short delay, navigate to a callback URL so the
+        // service worker can read the token from the tab URL via chrome.tabs.onUpdated
+        // or its polling loop.
+        // This handles Chrome 127+ where host_permissions are optional and the
+        // content script may not be injected.  If the content script DID work,
+        // the service worker will have already closed this tab before the timeout fires.
         setTimeout(() => {
-          window.close();
-        }, 1500);
+          console.log("[FTC:auth-page] navigating to fallback callback URL...");
+          const callbackUrl =
+            `/extension-auth?done=1#token=${encodeURIComponent(data.token)}` +
+            `&expiresAt=${encodeURIComponent(data.expiresAt)}`;
+          window.location.replace(callbackUrl);
+        }, 1000);
       } catch (err) {
-        console.error("Extension token fetch failed:", err instanceof Error ? err.message : String(err));
+        console.error("[FTC:auth-page] token fetch failed:", err instanceof Error ? err.message : String(err));
         setError("Something went wrong. Please try again.");
       }
     })();
-  }, [user, tokenSent, error]);
+  }, [user, tokenSent, error, isDone]);
 
   if (isLoading) {
     return (
@@ -61,7 +81,7 @@ export default function ExtensionAuth() {
           <p className="text-muted-foreground">Connect your browser extension</p>
         </div>
 
-        {tokenSent ? (
+        {tokenSent || isDone ? (
           <div className="space-y-3">
             <CheckCircle2 className="h-12 w-12 text-emerald-500 dark:text-emerald-400 mx-auto" />
             <p className="text-foreground font-medium">Connected!</p>

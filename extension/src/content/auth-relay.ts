@@ -3,7 +3,10 @@
 
 import { BASE_URL } from "../shared/constants";
 
+const TAG = "[FTC:auth-relay]";
 const EXPECTED_ORIGIN = new URL(BASE_URL).origin;
+
+console.log(TAG, "loaded on", window.location.href.split("#")[0]);
 
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
@@ -11,11 +14,25 @@ window.addEventListener("message", (event) => {
   if (event.data?.type !== "FTC_EXTENSION_TOKEN") return;
 
   const { token, expiresAt } = event.data;
-  if (typeof token !== "string" || typeof expiresAt !== "string") return;
+  if (typeof token !== "string" || typeof expiresAt !== "string") {
+    console.warn(TAG, "received FTC_EXTENSION_TOKEN but payload is invalid");
+    return;
+  }
 
-  chrome.runtime.sendMessage({
-    type: "FTC_EXTENSION_TOKEN",
-    token,
-    expiresAt,
-  });
+  console.log(TAG, "relaying token to service worker...");
+
+  chrome.runtime.sendMessage(
+    { type: "FTC_EXTENSION_TOKEN", token, expiresAt },
+    (response) => {
+      if (chrome.runtime.lastError) {
+        console.error(TAG, "sendMessage failed:", chrome.runtime.lastError.message);
+        return;
+      }
+      if (response?.ok) {
+        console.log(TAG, "service worker acknowledged token");
+      } else {
+        console.warn(TAG, "service worker rejected token:", response?.error);
+      }
+    },
+  );
 });
