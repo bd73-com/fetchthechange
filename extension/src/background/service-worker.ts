@@ -91,9 +91,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   console.log(TAG, "onUpdated: token found in tab URL, storing...");
   authTabs.delete(tabId);
-  handleTokenReceived(result.token, result.expiresAt, tabId).catch((err) =>
-    console.error(TAG, "onUpdated: handleTokenReceived failed:", err),
-  );
+  handleTokenReceived(result.token, result.expiresAt, tabId).catch((err) => {
+    console.error(TAG, "onUpdated: handleTokenReceived failed:", err);
+    chrome.storage.local.remove(AUTH_STARTED_KEY).catch(() => {});
+  });
 });
 
 // ── Polling fallback ────────────────────────────────────────────
@@ -186,6 +187,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch((err) => {
         console.error(TAG, "handleTokenReceived failed:", err);
+        chrome.storage.local.remove(AUTH_STARTED_KEY).catch(() => {});
         sendResponse({ ok: false, error: "storage failed" });
       });
     return true;
@@ -256,6 +258,7 @@ async function handleTokenReceived(
   // Basic JWT structure check (3 dot-separated parts)
   if (token.split(".").length !== 3) {
     console.warn(TAG, "rejected: token doesn't look like a JWT");
+    await chrome.storage.local.remove(AUTH_STARTED_KEY);
     return;
   }
 

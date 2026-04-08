@@ -139,6 +139,14 @@ describe("ExtensionAuth", () => {
   });
 
   it("shows Connected! when done=1 query param is present (fallback callback)", async () => {
+    let tokenRequestMade = false;
+    server.use(
+      http.post("/api/extension/token", () => {
+        tokenRequestMade = true;
+        return HttpResponse.json({ token: "test", expiresAt: "2099-01-01T00:00:00.000Z" });
+      }),
+    );
+
     // Simulate the fallback callback URL
     const originalSearch = window.location.search;
     Object.defineProperty(window, "location", {
@@ -152,7 +160,9 @@ describe("ExtensionAuth", () => {
       expect(screen.getByText("Connected!")).toBeDefined();
     });
 
-    // Should NOT have made a token request (skips token generation)
+    // Verify no token request was made (isDone skips token generation)
+    expect(tokenRequestMade).toBe(false);
+
     Object.defineProperty(window, "location", {
       value: { ...window.location, search: originalSearch },
       writable: true,
