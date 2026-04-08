@@ -84,12 +84,22 @@ jobs:
         with:
           node-version: 20
 
-      - run: npm install --no-save tsx@4.21.0
+      - name: Install tsx
+        run: |
+          npm install --no-save tsx@4.21.0
+          echo "tsx version: $(npx tsx --version)"
+          echo "node version: $(node --version)"
 
       - name: Generate changelog
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx tsx script/sync-changelog.ts
+        run: |
+          echo "::group::Running sync-changelog.ts"
+          npx tsx script/sync-changelog.ts
+          echo "::endgroup::"
+          echo "Generated file size: $(wc -c < client/src/data/changelog.ts) bytes"
+          echo "Generated file lines: $(wc -l < client/src/data/changelog.ts)"
+          echo "Local blob SHA: $(git hash-object client/src/data/changelog.ts)"
 
       - name: Commit changelog update
         env:
@@ -118,21 +128,30 @@ jobs:
             exit 0
           fi
 
+          echo "Content base64 length: ${#NEW_CONTENT} chars"
+
           # Try direct commit to main first
+          DIRECT_ERR=$(mktemp)
           if gh api "repos/${{ github.repository }}/contents/client/src/data/changelog.ts" \
             -X PUT \
             -f message="chore: sync changelog from GitHub releases" \
             -f content="$NEW_CONTENT" \
             -f sha="$FILE_SHA" \
-            -f branch="main" > /dev/null 2>&1; then
+            -f branch="main" > /dev/null 2>"$DIRECT_ERR"; then
             echo "Changelog committed directly to main"
+            rm -f "$DIRECT_ERR"
             exit 0
           fi
-          echo "Direct commit blocked (likely branch protection), falling back to PR"
+          echo "::warning::Direct commit to main failed:"
+          cat "$DIRECT_ERR"
+          rm -f "$DIRECT_ERR"
+          echo "Falling back to PR..."
 
           # Fallback: create a PR when direct push is blocked
           BRANCH="chore/sync-changelog-$(date +%s)"
+          echo "Creating branch: $BRANCH"
           MAIN_SHA=$(gh api "repos/${{ github.repository }}/git/ref/heads/main" --jq '.object.sha')
+          echo "main HEAD: $MAIN_SHA"
           gh api "repos/${{ github.repository }}/git/refs" \
             -f ref="refs/heads/$BRANCH" \
             -f sha="$MAIN_SHA"
@@ -142,11 +161,11 @@ jobs:
             -f content="$NEW_CONTENT" \
             -f sha="$FILE_SHA" \
             -f branch="$BRANCH"
-          gh pr create \
+          PR_URL=$(gh pr create \
             --repo "${{ github.repository }}" \
             --head "$BRANCH" \
             --base main \
             --title "chore: sync changelog from GitHub releases" \
             --body "Auto-generated changelog update after release publication." \
-            --label chore
-          echo "Created changelog PR from branch $BRANCH"
+            --label chore 2>&1)
+          echo "Created changelog PR: $PR_URL"
