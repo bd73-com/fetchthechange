@@ -351,7 +351,7 @@ describe("conditions routes", () => {
       expect(res._status).toBe(201);
     });
 
-    it("invalid type → 422", async () => {
+    it("invalid type → 400", async () => {
       mockGetMonitor.mockResolvedValue(ownedMonitor);
       mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });
       mockCountMonitorConditions.mockResolvedValue(0);
@@ -360,7 +360,7 @@ describe("conditions routes", () => {
         body: { type: "invalid_type", value: "100", groupIndex: 0 },
       });
       const res = await callHandler("post", "/api/monitors/:id/conditions", req);
-      expect(res._status).toBe(422);
+      expect(res._status).toBe(400);
     });
 
     it("regex type with invalid regex → 422 INVALID_REGEX", async () => {
@@ -403,7 +403,7 @@ describe("conditions routes", () => {
       expect(res._status).toBe(201);
     });
 
-    it("numeric type with non-numeric value → 422 VALIDATION_ERROR", async () => {
+    it("numeric type with non-numeric value → 400 VALIDATION_ERROR", async () => {
       mockGetMonitor.mockResolvedValue(ownedMonitor);
       mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });
       mockCountMonitorConditions.mockResolvedValue(0);
@@ -412,12 +412,12 @@ describe("conditions routes", () => {
         body: { type: "numeric_gt", value: "abc", groupIndex: 0 },
       });
       const res = await callHandler("post", "/api/monitors/:id/conditions", req);
-      expect(res._status).toBe(422);
+      expect(res._status).toBe(400);
       expect(res._json.code).toBe("VALIDATION_ERROR");
       expect(res._json.message).toMatch(/valid number/i);
     });
 
-    it("numeric_change_pct with zero value → 422", async () => {
+    it("numeric_change_pct with zero value → 400", async () => {
       mockGetMonitor.mockResolvedValue(ownedMonitor);
       mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });
       mockCountMonitorConditions.mockResolvedValue(0);
@@ -426,11 +426,11 @@ describe("conditions routes", () => {
         body: { type: "numeric_change_pct", value: "0", groupIndex: 0 },
       });
       const res = await callHandler("post", "/api/monitors/:id/conditions", req);
-      expect(res._status).toBe(422);
+      expect(res._status).toBe(400);
       expect(res._json.message).toMatch(/positive/i);
     });
 
-    it("numeric_change_pct with negative value → 422", async () => {
+    it("numeric_change_pct with negative value → 400", async () => {
       mockGetMonitor.mockResolvedValue(ownedMonitor);
       mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });
       mockCountMonitorConditions.mockResolvedValue(0);
@@ -439,7 +439,7 @@ describe("conditions routes", () => {
         body: { type: "numeric_change_pct", value: "-5", groupIndex: 0 },
       });
       const res = await callHandler("post", "/api/monitors/:id/conditions", req);
-      expect(res._status).toBe(422);
+      expect(res._status).toBe(400);
     });
 
     it("TOCTOU: free-tier concurrent insert → later insert is rolled back", async () => {
@@ -505,7 +505,7 @@ describe("conditions routes", () => {
       expect(res._json.code).toBe("INVALID_REGEX");
     });
 
-    it("value empty string → 422", async () => {
+    it("value empty string → 400", async () => {
       mockGetMonitor.mockResolvedValue(ownedMonitor);
       mockGetUser.mockResolvedValue({ id: "user1", tier: "pro" });
       mockCountMonitorConditions.mockResolvedValue(0);
@@ -514,7 +514,7 @@ describe("conditions routes", () => {
         body: { type: "numeric_lt", value: "", groupIndex: 0 },
       });
       const res = await callHandler("post", "/api/monitors/:id/conditions", req);
-      expect(res._status).toBe(422);
+      expect(res._status).toBe(400);
     });
 
     it("monitor not owned → 404", async () => {

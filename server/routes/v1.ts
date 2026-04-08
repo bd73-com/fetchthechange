@@ -151,6 +151,10 @@ router.patch("/monitors/:id", async (req: any, res) => {
 
     const input = apiV1UpdateMonitorSchema.parse(req.body);
 
+    if (Object.keys(input).length === 0) {
+      return res.status(400).json({ error: "At least one field is required", code: "VALIDATION_ERROR" });
+    }
+
     // Frequency tier check
     if (input.frequency) {
       const freqErr = checkFrequencyTier(input.frequency, req.apiUser.tier);

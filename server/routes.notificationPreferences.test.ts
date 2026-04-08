@@ -278,7 +278,7 @@ describe("PUT /api/monitors/:id/notification-preferences", () => {
     }));
   });
 
-  it("returns 422 for invalid input", async () => {
+  it("returns 400 for invalid input", async () => {
     mockGetMonitor.mockResolvedValueOnce({ id: 1, userId: "user1" });
     mockNotificationTablesExist.mockResolvedValueOnce(true);
 
@@ -287,7 +287,7 @@ describe("PUT /api/monitors/:id/notification-preferences", () => {
 
     const res = await callHandler("put", ENDPOINT, req);
 
-    expect(res._status).toBe(422);
+    expect(res._status).toBe(400);
   });
 });
 

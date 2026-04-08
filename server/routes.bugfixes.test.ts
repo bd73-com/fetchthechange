@@ -842,3 +842,25 @@ describe("#378: PATCH /api/monitors/:id returns 400 on invalid request body", ()
     expect(res._json.code).toBe("VALIDATION_ERROR");
   });
 });
+
+// ---------------------------------------------------------------------------
+// #380 — PATCH /api/monitors/:id rejects empty body {} with 400 (not 500)
+// ---------------------------------------------------------------------------
+describe("#380: PATCH /api/monitors/:id rejects empty body", () => {
+  const ENDPOINT = "/api/monitors/:id";
+
+  beforeEach(async () => {
+    await ensureRoutes();
+    vi.clearAllMocks();
+    mockGetUser.mockResolvedValue({ tier: "free" });
+    mockGetMonitor.mockResolvedValue({ id: 1, userId: "owner-123", active: true });
+  });
+
+  it("returns 400 with VALIDATION_ERROR for empty object body", async () => {
+    const req = ownerReq({ params: { id: "1" }, body: {} });
+    const res = await callHandler("patch", ENDPOINT, req);
+    expect(res._status).toBe(400);
+    expect(res._json.message).toBe("At least one field is required");
+    expect(res._json.code).toBe("VALIDATION_ERROR");
+  });
+});
