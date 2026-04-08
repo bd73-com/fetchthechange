@@ -240,7 +240,19 @@ function renderUnauth(): void {
     </div>
   `;
 
-  document.getElementById("connect-btn")?.addEventListener("click", () => {
+  document.getElementById("connect-btn")?.addEventListener("click", async () => {
+    // Chrome 127+ treats host_permissions as optional.
+    // Request the permission so the auth-relay content script gets injected.
+    try {
+      const origin = new URL(BASE_URL).origin;
+      const hasPermission = await chrome.permissions.contains({ origins: [`${origin}/*`] });
+      if (!hasPermission) {
+        await chrome.permissions.request({ origins: [`${origin}/*`] });
+      }
+    } catch {
+      // Permission API unavailable or user denied — fallback auth still works
+    }
+
     chrome.tabs.create({ url: `${BASE_URL}/extension-auth` });
     state = "connecting";
     render();

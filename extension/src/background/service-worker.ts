@@ -15,7 +15,38 @@ export function isValidAuthSender(senderUrl: string, baseUrl: string): boolean {
   }
 }
 
-// Listen for messages from popup and content scripts
+const EXPECTED_AUTH_ORIGIN = new URL(BASE_URL).origin;
+
+// ── Tab URL monitoring for auth fallback ────────────────────────
+// Chrome 127+ treats host_permissions as optional, so the static
+// content script (auth-relay.js) may never be injected. As a
+// fallback the auth page navigates to
+//   /extension-auth?done=1#token=<jwt>&expiresAt=<iso>
+// and we pick up the token from the tab URL change.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!changeInfo.url) return;
+
+  try {
+    const fullUrl = tab.url || changeInfo.url;
+    const url = new URL(fullUrl);
+
+    if (url.origin !== EXPECTED_AUTH_ORIGIN) return;
+    if (url.pathname !== "/extension-auth" || url.searchParams.get("done") !== "1") return;
+    if (!url.hash || url.hash.length < 2) return;
+
+    const hashParams = new URLSearchParams(url.hash.slice(1));
+    const token = hashParams.get("token");
+    const expiresAt = hashParams.get("expiresAt");
+
+    if (!token || !expiresAt) return;
+
+    handleTokenReceived(token, expiresAt, tabId).catch(console.error);
+  } catch {
+    // Ignore URL parsing errors
+  }
+});
+
+// ── Message listener ────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === MSG.START_PICKER) {
     injectPicker(message.tabId);
@@ -40,9 +71,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, error: "unexpected origin" });
       return false;
     }
-    handleTokenReceived(message.token, message.expiresAt, sender.tab?.id);
-    sendResponse({ ok: true });
-    return false;
+    // Return true to keep the message port open while we await the async storage
+    handleTokenReceived(message.token, message.expiresAt, sender.tab?.id)
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false, error: "storage failed" }));
+    return true;
   }
 
   // Relay element selection and candidate results from content script to popup

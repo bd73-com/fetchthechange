@@ -20,9 +20,10 @@ vi.mock("../auth/token", () => ({
 // Stub chrome global
 const chromeMock = {
   runtime: { onMessage: { addListener: vi.fn() }, sendMessage: vi.fn() },
-  tabs: { get: vi.fn(), remove: vi.fn() },
+  tabs: { get: vi.fn(), remove: vi.fn(), onUpdated: { addListener: vi.fn() } },
   scripting: { insertCSS: vi.fn(), executeScript: vi.fn() },
   storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn() } },
+  permissions: { contains: vi.fn(), request: vi.fn() },
 };
 vi.stubGlobal("chrome", chromeMock);
 
