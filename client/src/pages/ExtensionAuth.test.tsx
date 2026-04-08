@@ -138,6 +138,27 @@ describe("ExtensionAuth", () => {
     );
   });
 
+  it("shows Connected! when done=1 query param is present (fallback callback)", async () => {
+    // Simulate the fallback callback URL
+    const originalSearch = window.location.search;
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, search: "?done=1" },
+      writable: true,
+    });
+
+    renderWithProviders(<ExtensionAuth />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Connected!")).toBeDefined();
+    });
+
+    // Should NOT have made a token request (skips token generation)
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, search: originalSearch },
+      writable: true,
+    });
+  });
+
   it("includes credentials in the token request", async () => {
     const originalFetch = window.fetch;
     let fetchOptions: RequestInit | undefined;

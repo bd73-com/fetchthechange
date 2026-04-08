@@ -21,7 +21,7 @@ export function isValidAuthSender(senderUrl: string, baseUrl: string): boolean {
  * Extract token + expiresAt from a URL hash fragment.
  * Expected format: #token=<jwt>&expiresAt=<iso>
  */
-function extractTokenFromUrl(url: string): { token: string; expiresAt: string } | null {
+export function extractTokenFromUrl(url: string): { token: string; expiresAt: string } | null {
   try {
     const parsed = new URL(url);
     if (parsed.origin !== EXPECTED_AUTH_ORIGIN) return null;
@@ -55,6 +55,17 @@ const authTabs = new Set<number>();
 // and we pick up the token from the tab URL change.
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (!changeInfo.url) return;
+  // Only accept tokens from tabs we opened for auth — prevents token
+  // fixation via attacker-crafted links in other tabs.
+  // Fast path: in-memory Set (works when service worker hasn't restarted).
+  // Slow path: check AUTH_STARTED_KEY in storage (survives SW termination;
+  // Chrome MV3 aggressively kills SWs after ~30 s of inactivity).
+  if (!authTabs.has(tabId)) {
+    const stored = await chrome.storage.local.get(AUTH_STARTED_KEY);
+    const startedAt = Number(stored[AUTH_STARTED_KEY]);
+    if (!Number.isFinite(startedAt) || Date.now() - startedAt > 120_000) return;
+    console.log(TAG, "onUpdated: tab not in authTabs (SW restarted?), but recent auth attempt found");
+  }
 
   const fullUrl = tab.url || changeInfo.url;
 
@@ -68,7 +79,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     try {
       const freshTab = await chrome.tabs.get(tabId);
       if (freshTab.url) {
-        console.log(TAG, "onUpdated: re-read tab URL:", freshTab.url.slice(0, 120));
+        console.log(TAG, "onUpdated: re-read tab URL:", freshTab.url.split("#")[0]);
         result = extractTokenFromUrl(freshTab.url);
       }
     } catch {

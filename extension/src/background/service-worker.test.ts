@@ -29,7 +29,7 @@ const chromeMock = {
 };
 vi.stubGlobal("chrome", chromeMock);
 
-const { isValidAuthSender } = await import("./service-worker");
+const { isValidAuthSender, extractTokenFromUrl } = await import("./service-worker");
 
 const BASE = "https://ftc.bd73.com";
 
@@ -80,5 +80,69 @@ describe("isValidAuthSender", () => {
 
   it("rejects trailing-slash variant /extension-auth/", () => {
     expect(isValidAuthSender("https://ftc.bd73.com/extension-auth/", BASE)).toBe(false);
+  });
+});
+
+describe("extractTokenFromUrl", () => {
+  const TOKEN = "eyJhbGciOiJIUzI1NiJ9.test.sig";
+  const EXPIRES = "2099-01-01T00:00:00.000Z";
+
+  it("extracts token and expiresAt from a valid callback URL", () => {
+    const url = `https://ftc.bd73.com/extension-auth?done=1#token=${encodeURIComponent(TOKEN)}&expiresAt=${encodeURIComponent(EXPIRES)}`;
+    expect(extractTokenFromUrl(url)).toEqual({ token: TOKEN, expiresAt: EXPIRES });
+  });
+
+  it("returns null when origin is wrong", () => {
+    const url = `https://evil.com/extension-auth?done=1#token=${TOKEN}&expiresAt=${EXPIRES}`;
+    expect(extractTokenFromUrl(url)).toBeNull();
+  });
+
+  it("returns null when pathname is wrong", () => {
+    const url = `https://ftc.bd73.com/other-page?done=1#token=${TOKEN}&expiresAt=${EXPIRES}`;
+    expect(extractTokenFromUrl(url)).toBeNull();
+  });
+
+  it("returns null when done param is missing", () => {
+    const url = `https://ftc.bd73.com/extension-auth#token=${TOKEN}&expiresAt=${EXPIRES}`;
+    expect(extractTokenFromUrl(url)).toBeNull();
+  });
+
+  it("returns null when done param is not 1", () => {
+    const url = `https://ftc.bd73.com/extension-auth?done=0#token=${TOKEN}&expiresAt=${EXPIRES}`;
+    expect(extractTokenFromUrl(url)).toBeNull();
+  });
+
+  it("returns null when hash is empty", () => {
+    const url = "https://ftc.bd73.com/extension-auth?done=1";
+    expect(extractTokenFromUrl(url)).toBeNull();
+  });
+
+  it("returns null when hash has only #", () => {
+    const url = "https://ftc.bd73.com/extension-auth?done=1#";
+    expect(extractTokenFromUrl(url)).toBeNull();
+  });
+
+  it("returns null when token is missing from hash", () => {
+    const url = `https://ftc.bd73.com/extension-auth?done=1#expiresAt=${EXPIRES}`;
+    expect(extractTokenFromUrl(url)).toBeNull();
+  });
+
+  it("returns null when expiresAt is missing from hash", () => {
+    const url = `https://ftc.bd73.com/extension-auth?done=1#token=${TOKEN}`;
+    expect(extractTokenFromUrl(url)).toBeNull();
+  });
+
+  it("returns null for an invalid URL", () => {
+    expect(extractTokenFromUrl("not-a-url")).toBeNull();
+  });
+
+  it("returns null for an empty string", () => {
+    expect(extractTokenFromUrl("")).toBeNull();
+  });
+
+  it("handles URI-encoded values in the hash", () => {
+    const weirdToken = "abc+def/ghi=";
+    const url = `https://ftc.bd73.com/extension-auth?done=1#token=${encodeURIComponent(weirdToken)}&expiresAt=${encodeURIComponent(EXPIRES)}`;
+    expect(extractTokenFromUrl(url)).toEqual({ token: weirdToken, expiresAt: EXPIRES });
   });
 });

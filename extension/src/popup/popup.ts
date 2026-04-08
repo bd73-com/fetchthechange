@@ -55,7 +55,8 @@ const accountArea = document.getElementById("account-area")!;
 
 // How long we consider an auth attempt "recent" — if no token was stored
 // within this window, we show an error instead of the default connect screen.
-const AUTH_TIMEOUT_MS = 60_000;
+// Must match the SW's fallback window (120 s in service-worker.ts onUpdated).
+const AUTH_TIMEOUT_MS = 120_000;
 
 // ──────────────────────────────────────────────────────────────────
 // Initialise
@@ -78,8 +79,8 @@ async function init(): Promise<void> {
 
     // Check if an auth attempt was recently started but failed
     const stored = await chrome.storage.local.get(AUTH_STARTED_KEY);
-    const startedAt = stored[AUTH_STARTED_KEY] as number | undefined;
-    if (startedAt && Date.now() - startedAt < AUTH_TIMEOUT_MS) {
+    const startedAt = Number(stored[AUTH_STARTED_KEY]);
+    if (Number.isFinite(startedAt) && Date.now() - startedAt < AUTH_TIMEOUT_MS) {
       console.warn(TAG, "recent auth attempt found but no token — showing failure state");
       state = "auth_failed";
     } else {
@@ -313,7 +314,15 @@ async function startAuthFlow(): Promise<void> {
   // the generic "Connect your account" screen.
   await chrome.storage.local.set({ [AUTH_STARTED_KEY]: Date.now() });
 
-  const tab = await chrome.tabs.create({ url: `${BASE_URL}/extension-auth` });
+  let tab: chrome.tabs.Tab;
+  try {
+    tab = await chrome.tabs.create({ url: `${BASE_URL}/extension-auth` });
+  } catch (err) {
+    console.error(TAG, "failed to open auth tab:", err);
+    state = "auth_failed";
+    render();
+    return;
+  }
   console.log(TAG, "auth tab created:", tab.id);
 
   // Tell the service worker which tab to watch
