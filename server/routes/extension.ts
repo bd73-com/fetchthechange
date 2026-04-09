@@ -47,7 +47,12 @@ router.post("/token", isAuthenticated, async (req: any, res) => {
   } catch (error: any) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error("[Extension] Failed to issue token:", detail);
-    res.status(500).json({ message: "Failed to generate extension token", detail });
+    // Surface config errors to help operators diagnose; redact everything
+    // else to avoid leaking DB connection strings or internal paths.
+    const safeMsg = detail.includes("EXTENSION_JWT_SECRET")
+      ? "Extension signing key not configured. Contact the site administrator."
+      : "Failed to generate extension token";
+    res.status(500).json({ message: safeMsg });
   }
 });
 
