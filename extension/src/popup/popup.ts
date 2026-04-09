@@ -1,4 +1,4 @@
-import { BASE_URL, MSG, AUTH_STARTED_KEY } from "../shared/constants";
+import { BASE_URL, MSG, AUTH_STARTED_KEY, TOKEN_STORAGE_KEY } from "../shared/constants";
 import { getToken, clearToken, isTokenValid } from "../auth/token";
 import { escapeAttr, sanitizeTier } from "./utils";
 
@@ -62,8 +62,18 @@ const AUTH_TIMEOUT_MS = 120_000;
 // Initialise
 // ──────────────────────────────────────────────────────────────────
 
+let initRunning = false;
+let initPending = false;
+
 async function init(): Promise<void> {
+  if (initRunning) {
+    initPending = true;
+    console.log(TAG, "init already running, queueing rerun");
+    return;
+  }
+  initRunning = true;
   console.log(TAG, "init start");
+  try {
 
   // Get current tab info
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -77,12 +87,20 @@ async function init(): Promise<void> {
   if (!valid) {
     console.log(TAG, "no valid token in storage");
 
-    // Check if an auth attempt was recently started but failed
+    // Check if an auth attempt was recently started.
+    // Show "connecting" for the first 30 s (auth may still be in progress),
+    // then "auth_failed" up to AUTH_TIMEOUT_MS.
     const stored = await chrome.storage.local.get(AUTH_STARTED_KEY);
     const startedAt = Number(stored[AUTH_STARTED_KEY]);
-    if (Number.isFinite(startedAt) && Date.now() - startedAt < AUTH_TIMEOUT_MS) {
-      console.warn(TAG, "recent auth attempt found but no token — showing failure state");
-      state = "auth_failed";
+    const elapsed = Date.now() - startedAt;
+    if (Number.isFinite(startedAt) && elapsed < AUTH_TIMEOUT_MS) {
+      if (elapsed < 30_000) {
+        console.log(TAG, "auth attempt in progress (", Math.round(elapsed / 1000), "s ago)");
+        state = "connecting";
+      } else {
+        console.warn(TAG, "recent auth attempt found but no token — showing failure state");
+        state = "auth_failed";
+      }
     } else {
       state = "unauthenticated";
     }
@@ -142,6 +160,13 @@ async function init(): Promise<void> {
   }
 
   render();
+  } finally {
+    initRunning = false;
+    if (initPending) {
+      initPending = false;
+      void init();
+    }
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -177,6 +202,16 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "FTC_AUTH_COMPLETE") {
     // Re-initialise after auth
     init();
+  }
+});
+
+// Also listen for direct storage writes (e.g. from auth-relay content script
+// writing the token directly, bypassing the service worker).
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (changes[TOKEN_STORAGE_KEY]?.newValue) {
+    console.log(TAG, "token appeared in storage (direct write), re-initialising...");
+    void init();
   }
 });
 

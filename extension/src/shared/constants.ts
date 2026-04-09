@@ -5,6 +5,7 @@ export const BASE_URL = BASE_URL_INJECTED;
 export const TOKEN_STORAGE_KEY = "ftc_extension_token";
 export const TOKEN_EXPIRY_KEY = "ftc_extension_token_expiry";
 export const AUTH_STARTED_KEY = "ftc_auth_started_at";
+export const AUTH_TAB_ID_KEY = "ftc_auth_tab_id";
 
 export const MSG = {
   START_PICKER: "FTC_START_PICKER",
