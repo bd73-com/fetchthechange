@@ -13,7 +13,7 @@ export interface IStorage {
   getMonitor(id: number): Promise<Monitor | undefined>;
   getMonitorCount(userId: string): Promise<number>;
   createMonitor(monitor: InsertMonitor): Promise<Monitor>;
-  updateMonitor(id: number, updates: any): Promise<Monitor>;
+  updateMonitor(id: number, updates: any): Promise<Monitor | undefined>;
   deleteMonitor(id: number): Promise<void>;
 
   // Monitor health alerts
@@ -47,7 +47,7 @@ export interface IStorage {
   countUserTags(userId: string): Promise<number>;
   createTag(userId: string, name: string, nameLower: string, colour: string): Promise<Tag>;
   getTag(id: number, userId: string): Promise<Tag | undefined>;
-  updateTag(id: number, userId: string, fields: { name?: string; nameLower?: string; colour?: string }): Promise<Tag>;
+  updateTag(id: number, userId: string, fields: { name?: string; nameLower?: string; colour?: string }): Promise<Tag | undefined>;
   deleteTag(id: number, userId: string): Promise<void>;
   getMonitorTags(monitorId: number): Promise<{ id: number; name: string; colour: string }[]>;
   setMonitorTags(monitorId: number, tagIds: number[]): Promise<void>;
@@ -102,7 +102,7 @@ export class DatabaseStorage implements IStorage {
     return monitor;
   }
 
-  async updateMonitor(id: number, updates: Partial<typeof monitors.$inferInsert>): Promise<Monitor> {
+  async updateMonitor(id: number, updates: Partial<typeof monitors.$inferInsert>): Promise<Monitor | undefined> {
     if (Object.keys(updates).length === 0) {
       throw new Error("Cannot update monitor with empty set");
     }
@@ -614,7 +614,7 @@ export class DatabaseStorage implements IStorage {
     return tag;
   }
 
-  async updateTag(id: number, userId: string, fields: { name?: string; nameLower?: string; colour?: string }): Promise<Tag> {
+  async updateTag(id: number, userId: string, fields: { name?: string; nameLower?: string; colour?: string }): Promise<Tag | undefined> {
     const [updated] = await db.update(tags).set(fields).where(and(eq(tags.id, id), eq(tags.userId, userId))).returning();
     return updated;
   }

@@ -184,6 +184,7 @@ router.patch("/monitors/:id", async (req: any, res) => {
     }
 
     const updated = await storage.updateMonitor(id, updates);
+    if (!updated) return res.status(404).json({ error: "Monitor not found", code: "NOT_FOUND" });
     res.json(formatMonitor(updated));
   } catch (err) {
     if (err instanceof z.ZodError) {
