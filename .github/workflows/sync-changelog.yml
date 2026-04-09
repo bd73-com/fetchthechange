@@ -46,8 +46,29 @@ jobs:
           REPO="${{ github.repository }}"
           LOCAL_SHA=$(git hash-object client/src/data/changelog.ts)
           BODY_FILE=$(mktemp)
+          PAYLOAD_FILE=$(mktemp)
           base64 -w0 client/src/data/changelog.ts > "$BODY_FILE"
           echo "Content base64 length: $(wc -c < "$BODY_FILE") chars"
+
+          cleanup() {
+            rm -f "$BODY_FILE" "$PAYLOAD_FILE" "${DIRECT_ERR:-}"
+            if [ "${BRANCH_CREATED:-false}" = "true" ]; then
+              echo "Cleaning up branch $BRANCH"
+              timeout 5 gh api "repos/$REPO/git/refs/heads/$BRANCH" -X DELETE 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          # Helper: build Contents API JSON payload without shell-expanding the base64
+          build_payload() {
+            jq -n \
+              --arg msg "chore: sync changelog from GitHub releases" \
+              --rawfile content "$BODY_FILE" \
+              --arg sha "$1" \
+              --arg branch "$2" \
+              '{message: $msg, content: $content, sha: $sha, branch: $branch}' \
+              > "$PAYLOAD_FILE"
+          }
 
           # Fetch current file SHA from GitHub (pinned to main)
           FILE_SHA=""
@@ -60,28 +81,25 @@ jobs:
           done
           if [ -z "$FILE_SHA" ]; then
             echo "::error::Could not fetch file SHA after 3 attempts"
-            rm -f "$BODY_FILE"
             exit 1
           fi
 
           # Skip if content is unchanged
           if [ "$LOCAL_SHA" = "$FILE_SHA" ]; then
             echo "No changelog changes needed"
-            rm -f "$BODY_FILE"
             exit 0
           fi
 
+          echo "Changelog changed (local=$LOCAL_SHA remote=$FILE_SHA)"
+
           # Try direct commit to main first
-          NEW_CONTENT=$(cat "$BODY_FILE")
+          build_payload "$FILE_SHA" "main"
+          echo "Payload size: $(wc -c < "$PAYLOAD_FILE") bytes"
           DIRECT_ERR=$(mktemp)
           if gh api "repos/$REPO/contents/client/src/data/changelog.ts" \
-            -X PUT \
-            -f message="chore: sync changelog from GitHub releases" \
-            -f content="$NEW_CONTENT" \
-            -f sha="$FILE_SHA" \
-            -f branch="main" > /dev/null 2>"$DIRECT_ERR"; then
+            -X PUT --input "$PAYLOAD_FILE" > /dev/null 2>"$DIRECT_ERR"; then
             echo "Changelog committed directly to main"
-            rm -f "$DIRECT_ERR" "$BODY_FILE"
+            rm -f "$DIRECT_ERR"
             exit 0
           fi
           echo "::warning::Direct commit to main failed:"
@@ -92,49 +110,46 @@ jobs:
           # Fallback: create a PR when direct push is blocked
           BRANCH="chore/sync-changelog-$(date +%s)"
           BRANCH_CREATED=false
-          cleanup_branch() {
-            if [ "$BRANCH_CREATED" = "true" ]; then
-              echo "Cleaning up branch $BRANCH"
-              gh api "repos/$REPO/git/refs/heads/$BRANCH" -X DELETE 2>/dev/null || true
-            fi
-            rm -f "$BODY_FILE"
-          }
-          trap cleanup_branch EXIT
 
           # Close any existing open changelog PRs to avoid accumulation
-          EXISTING_PRS=$(gh pr list --repo "$REPO" --search "chore: sync changelog from GitHub releases" --state open --json number --jq '.[].number' 2>/dev/null || true)
+          EXISTING_PRS=$(gh pr list --repo "$REPO" --author "app/github-actions" --search "chore: sync changelog from GitHub releases in:title" --state open --json number --jq '.[].number' 2>/dev/null || true)
           for pr_num in $EXISTING_PRS; do
             echo "Closing stale changelog PR #$pr_num"
             gh pr close "$pr_num" --repo "$REPO" --delete-branch 2>/dev/null || true
           done
 
           echo "Creating branch: $BRANCH"
-          MAIN_SHA=$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')
+          MAIN_SHA=$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha') || {
+            echo "::error::Failed to fetch main HEAD SHA"; exit 1; }
           echo "main HEAD: $MAIN_SHA"
+
           gh api "repos/$REPO/git/refs" \
             -f ref="refs/heads/$BRANCH" \
-            -f sha="$MAIN_SHA"
+            -f sha="$MAIN_SHA" > /dev/null || {
+            echo "::error::Failed to create branch $BRANCH"; exit 1; }
           BRANCH_CREATED=true
 
           # Re-fetch file SHA pinned to the exact commit the branch was created from
           BRANCH_FILE_SHA=$(gh api "repos/$REPO/contents/client/src/data/changelog.ts?ref=$MAIN_SHA" \
             --jq '.sha' 2>/dev/null) || BRANCH_FILE_SHA="$FILE_SHA"
+
+          build_payload "$BRANCH_FILE_SHA" "$BRANCH"
           gh api "repos/$REPO/contents/client/src/data/changelog.ts" \
-            -X PUT \
-            -f message="chore: sync changelog from GitHub releases" \
-            -f content="$NEW_CONTENT" \
-            -f sha="$BRANCH_FILE_SHA" \
-            -f branch="$BRANCH"
+            -X PUT --input "$PAYLOAD_FILE" > /dev/null || {
+            echo "::error::Failed to commit changelog to branch $BRANCH"; exit 1; }
 
           PR_URL=$(gh pr create \
             --repo "$REPO" \
             --head "$BRANCH" \
             --base main \
             --title "chore: sync changelog from GitHub releases" \
-            --body "Auto-generated changelog update after release publication.")
+            --body "Auto-generated changelog update after release publication.") || {
+            echo "::error::Failed to create PR"; exit 1; }
           echo "Created changelog PR: $PR_URL"
           BRANCH_CREATED=false  # PR owns the branch now; don't delete on exit
 
           # Enable auto-merge so the PR lands without manual intervention
-          PR_NUM=$(echo "$PR_URL" | grep -oP '\d+$')
-          gh pr merge "$PR_NUM" --repo "$REPO" --squash --auto 2>/dev/null || echo "::warning::Auto-merge not available; PR requires manual merge"
+          PR_NUM=$(echo "$PR_URL" | grep -oP '\d+$' || true)
+          if [ -n "$PR_NUM" ]; then
+            gh pr merge "$PR_NUM" --repo "$REPO" --squash --auto 2>/dev/null || echo "::warning::Auto-merge not available; PR requires manual merge"
+          fi
