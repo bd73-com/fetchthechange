@@ -20,7 +20,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install tsx
         run: |
@@ -138,13 +138,23 @@ jobs:
             -X PUT --input "$PAYLOAD_FILE" > /dev/null || {
             echo "::error::Failed to commit changelog to branch $BRANCH"; exit 1; }
 
-          PR_URL=$(gh pr create \
-            --repo "$REPO" \
-            --head "$BRANCH" \
-            --base main \
-            --title "chore: sync changelog from GitHub releases" \
-            --body "Auto-generated changelog update after release publication.") || {
-            echo "::error::Failed to create PR"; exit 1; }
+          # Wait for GitHub to propagate the branch and commit before creating PR
+          PR_URL=""
+          for pr_attempt in 1 2 3; do
+            PR_URL=$(gh pr create \
+              --repo "$REPO" \
+              --head "$BRANCH" \
+              --base main \
+              --title "chore: sync changelog from GitHub releases" \
+              --body "Auto-generated changelog update after release publication." 2>/dev/null) && break
+            echo "PR creation attempt $pr_attempt failed, retrying in $((pr_attempt * 3))s..."
+            PR_URL=""
+            sleep $((pr_attempt * 3))
+          done
+          if [ -z "$PR_URL" ]; then
+            echo "::error::Failed to create PR after 3 attempts"
+            exit 1
+          fi
           echo "Created changelog PR: $PR_URL"
           BRANCH_CREATED=false  # PR owns the branch now; don't delete on exit
 
