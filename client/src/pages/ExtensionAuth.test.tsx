@@ -1,6 +1,7 @@
 /**
  * Tests: ExtensionAuth page
- * Coverage: token fetch (no Content-Type on bodyless POST), error states, success flow
+ * Coverage: token fetch (no Content-Type on bodyless POST), error states,
+ *           401 redirect, retry-on-failure, and success flow
  *
  * @vitest-environment jsdom
  */
@@ -54,19 +55,82 @@ describe("ExtensionAuth", () => {
     expect(capturedHeaders!.get("content-type")).toBeNull();
   });
 
-  it("shows error message when token endpoint returns non-OK", async () => {
+  it("shows server error message when token endpoint returns non-OK", async () => {
+    // Both attempts (initial + retry) return 500
     server.use(
       http.post("/api/extension/token", () =>
-        HttpResponse.json({ message: "Failed" }, { status: 500 }),
+        HttpResponse.json({ message: "Extension signing key not configured" }, { status: 500 }),
       ),
     );
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    renderWithProviders(<ExtensionAuth />);
+
+    // Retry adds ~1 s of delay before the error is shown
+    await waitFor(() => {
+      expect(screen.getByText("Extension signing key not configured")).toBeDefined();
+    }, { timeout: 5000 });
+
+    consoleSpy.mockRestore();
+  });
+
+  it("redirects to login on 401 response", async () => {
+    server.use(
+      http.post("/api/extension/token", () =>
+        HttpResponse.json({ message: "Unauthorized" }, { status: 401 }),
+      ),
+    );
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // jsdom doesn't support navigation; spy on the setter
+    const originalLocation = window.location;
+    const assignSpy = vi.fn();
+    // @ts-ignore — replacing read-only property in test
+    delete (window as any).location;
+    window.location = { ...originalLocation, href: originalLocation.href } as Location;
+    Object.defineProperty(window.location, "href", {
+      get: () => originalLocation.href,
+      set: assignSpy,
+      configurable: true,
+    });
 
     renderWithProviders(<ExtensionAuth />);
 
     await waitFor(() => {
-      expect(screen.getByText("Failed to generate token (500). Please try again.")).toBeDefined();
-    });
+      expect(assignSpy).toHaveBeenCalledWith("/api/login?returnTo=/extension-auth");
+    }, { timeout: 3000 });
+
+    // Restore
+    window.location = originalLocation;
+    consoleSpy.mockRestore();
   });
+
+  it("retries once before showing error (makes at least 2 requests)", async () => {
+    let callCount = 0;
+    server.use(
+      http.post("/api/extension/token", () => {
+        callCount++;
+        return HttpResponse.json({ message: "Server error" }, { status: 500 });
+      }),
+    );
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    renderWithProviders(<ExtensionAuth />);
+
+    // Both attempts fail → error is shown after the retry delay
+    await waitFor(() => {
+      expect(screen.getByText("Server error")).toBeDefined();
+    }, { timeout: 8000 });
+
+    // Retry means at least 2 requests were made (initial + retry)
+    expect(callCount).toBeGreaterThanOrEqual(2);
+  }, 15000);
 
   it("shows error when token response is not valid JSON", async () => {
     server.use(
@@ -79,12 +143,13 @@ describe("ExtensionAuth", () => {
     );
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
 
     renderWithProviders(<ExtensionAuth />);
 
     await waitFor(() => {
-      expect(screen.getByText("Something went wrong. Please try again.")).toBeDefined();
-    });
+      expect(screen.getByText("Unexpected response format from server")).toBeDefined();
+    }, { timeout: 5000 });
 
     consoleSpy.mockRestore();
   });
@@ -92,6 +157,7 @@ describe("ExtensionAuth", () => {
   it("shows error when 200 response has malformed token payload", async () => {
     const postMessageSpy = vi.spyOn(window, "postMessage");
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
 
     server.use(
       http.post("/api/extension/token", () =>
@@ -102,8 +168,8 @@ describe("ExtensionAuth", () => {
     renderWithProviders(<ExtensionAuth />);
 
     await waitFor(() => {
-      expect(screen.getByText("Something went wrong. Please try again.")).toBeDefined();
-    });
+      expect(screen.getByText("Invalid token payload from server")).toBeDefined();
+    }, { timeout: 5000 });
 
     // postMessage should NOT have been called with a token
     expect(postMessageSpy).not.toHaveBeenCalledWith(

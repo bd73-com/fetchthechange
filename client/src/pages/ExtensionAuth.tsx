@@ -3,6 +3,48 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle2, Chrome } from "lucide-react";
 
+async function requestToken(): Promise<{ token: string; expiresAt: string }> {
+  const res = await fetch("/api/extension/token", {
+    method: "POST",
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    // Read the server's error message for diagnostics
+    let serverMsg = "";
+    try {
+      const body = await res.json();
+      serverMsg = body?.message || "";
+    } catch { /* non-JSON response */ }
+
+    console.error(
+      "[FTC:auth-page] POST /api/extension/token →",
+      res.status,
+      serverMsg,
+    );
+
+    // Session expired or invalid — redirect to login so the user
+    // gets a fresh session instead of a dead-end error screen.
+    if (res.status === 401) {
+      window.location.href = "/api/login?returnTo=/extension-auth";
+      // Never resolves — page is navigating away
+      return new Promise(() => {});
+    }
+
+    throw new Error(
+      serverMsg || `Server returned ${res.status}`,
+    );
+  }
+
+  const data = await res.json().catch(() => {
+    throw new Error("Unexpected response format from server");
+  });
+  if (typeof data?.token !== "string" || typeof data?.expiresAt !== "string") {
+    throw new Error("Invalid token payload from server");
+  }
+  return data as { token: string; expiresAt: string };
+}
+
 export default function ExtensionAuth() {
   const { user, isLoading } = useAuth();
   const [tokenSent, setTokenSent] = useState(false);
@@ -26,20 +68,15 @@ export default function ExtensionAuth() {
     (async () => {
       try {
         console.log("[FTC:auth-page] user logged in, requesting token...");
-        const res = await fetch("/api/extension/token", {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!res.ok) {
-          console.error("[FTC:auth-page] POST /api/extension/token returned", res.status);
-          setError(`Failed to generate token (${res.status}). Please try again.`);
-          return;
-        }
-        const data = await res.json().catch(() => {
-          throw new Error("Unexpected response format from server");
-        });
-        if (typeof data?.token !== "string" || typeof data?.expiresAt !== "string") {
-          throw new Error("Invalid token payload from server");
+        let data: { token: string; expiresAt: string };
+        try {
+          data = await requestToken();
+        } catch (firstErr) {
+          // Retry once after a short delay — the session may not have
+          // been fully persisted when the OAuth redirect landed us here.
+          console.warn("[FTC:auth-page] first attempt failed, retrying in 1 s...");
+          await new Promise((r) => setTimeout(r, 1000));
+          data = await requestToken();
         }
 
         console.log("[FTC:auth-page] token received, posting to content script...");
@@ -65,8 +102,9 @@ export default function ExtensionAuth() {
           window.location.replace(callbackUrl);
         }, 1000);
       } catch (err) {
-        console.error("[FTC:auth-page] token fetch failed:", err instanceof Error ? err.message : String(err));
-        setError("Something went wrong. Please try again.");
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[FTC:auth-page] token fetch failed:", msg);
+        setError(msg);
       }
     })();
   }, [user, tokenSent, error, isDone]);
@@ -99,7 +137,9 @@ export default function ExtensionAuth() {
         ) : error ? (
           <div className="space-y-3">
             <p className="text-destructive text-sm">{error}</p>
-            <Button onClick={() => window.location.reload()}>Try again</Button>
+            <Button onClick={() => {
+              window.location.href = "/api/login?returnTo=/extension-auth";
+            }}>Sign in &amp; retry</Button>
           </div>
         ) : user ? (
           <div className="space-y-3">

@@ -2953,6 +2953,9 @@ export async function registerRoutes(
   // ---------------------------------------------------------------
   // CHROME EXTENSION API ROUTES
   // ---------------------------------------------------------------
+  if (!process.env.EXTENSION_JWT_SECRET) {
+    console.warn("[Startup] EXTENSION_JWT_SECRET not set — Chrome extension token generation will fail");
+  }
   const { default: extensionRouter } = await import("./routes/extension");
   app.use("/api/extension", extensionRouter);
 

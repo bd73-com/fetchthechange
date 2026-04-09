@@ -28,16 +28,31 @@ const router = Router();
 router.post("/token", isAuthenticated, async (req: any, res) => {
   try {
     const userId = req.user.claims.sub;
-    const user = await authStorage.getUser(userId);
-    const tier = (user?.tier || "free") as string;
+
+    // DB lookup for tier — non-fatal so token generation works even
+    // when the database is slow or timing out.
+    let tier = "free";
+    try {
+      const user = await authStorage.getUser(userId);
+      tier = (user?.tier || "free") as string;
+    } catch (dbErr) {
+      console.warn("[Extension] DB lookup failed, defaulting to free tier:",
+        dbErr instanceof Error ? dbErr.message : String(dbErr));
+    }
 
     const token = signExtensionToken(userId, tier);
     const expiresAt = getExtensionTokenExpiresAt();
 
     res.json({ token, expiresAt });
   } catch (error: any) {
-    console.error("[Extension] Failed to issue token:", error);
-    res.status(500).json({ message: "Failed to generate extension token" });
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("[Extension] Failed to issue token:", detail);
+    // Surface config errors to help operators diagnose; redact everything
+    // else to avoid leaking DB connection strings or internal paths.
+    const safeMsg = detail.includes("EXTENSION_JWT_SECRET")
+      ? "Extension signing key not configured. Contact the site administrator."
+      : "Failed to generate extension token";
+    res.status(500).json({ message: safeMsg });
   }
 });
 
