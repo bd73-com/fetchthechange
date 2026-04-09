@@ -5,8 +5,7 @@ import { fileURLToPath } from 'node:url';
 {
   const candidates = [
     resolve(process.cwd(), '.env'),
-    resolve(dirname(fileURLToPath(import.meta.url)), '..', '.env'),
-  ];
+...(typeof import.meta.url !== 'undefined' ? [resolve(dirname(fileURLToPath(import.meta.url)), '..', '.env')] : []),  ];
   for (const envPath of candidates) {
     try {
       if (!existsSync(envPath)) continue;
