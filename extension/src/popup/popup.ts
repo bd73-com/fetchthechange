@@ -206,13 +206,13 @@ async function init(): Promise<void> {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === MSG.ELEMENT_SELECTED) {
-    const sel = typeof message.selector === "string" ? message.selector : "";
+    const sel = typeof message.selector === "string" ? message.selector.trim().slice(0, 500) : "";
     if (!sel) return;
     selection = {
       selector: sel,
-      currentValue: typeof message.currentValue === "string" ? message.currentValue : "",
-      url: typeof message.url === "string" ? message.url : currentTabUrl,
-      pageTitle: typeof message.pageTitle === "string" ? message.pageTitle : currentTabTitle,
+      currentValue: typeof message.currentValue === "string" ? message.currentValue.slice(0, 500) : "",
+      url: typeof message.url === "string" ? message.url.slice(0, 2000) : currentTabUrl,
+      pageTitle: typeof message.pageTitle === "string" ? message.pageTitle.slice(0, 200) : currentTabTitle,
     };
     state = "confirm";
     render();

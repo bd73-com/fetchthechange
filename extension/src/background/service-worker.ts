@@ -276,7 +276,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Persist to storage so the popup can pick it up when it reopens.
   if (message.type === MSG.ELEMENT_SELECTED) {
     // Basic type + length guard before persisting to storage
-    const selector = typeof message.selector === "string" ? message.selector.slice(0, 500) : "";
+    const selector = typeof message.selector === "string" ? message.selector.trim().slice(0, 500) : "";
     if (!selector) return false;
     const payload = {
       selector,

@@ -398,6 +398,43 @@ describe("ELEMENT_SELECTED handler", () => {
     expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
   });
 
+  it("rejects whitespace-only selectors", () => {
+    const sendResponse = vi.fn();
+    onMessageCb(
+      { type: "FTC_ELEMENT_SELECTED", selector: "   ", currentValue: "v", url: "u", pageTitle: "t" },
+      {},
+      sendResponse,
+    );
+    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it("truncates oversized fields to their length caps", async () => {
+    const sendResponse = vi.fn();
+    onMessageCb(
+      {
+        type: "FTC_ELEMENT_SELECTED",
+        selector: "s".repeat(700),
+        currentValue: "v".repeat(700),
+        url: "u".repeat(2500),
+        pageTitle: "t".repeat(300),
+      },
+      {},
+      sendResponse,
+    );
+
+    await vi.waitFor(() => {
+      expect(chromeMock.storage.local.set).toHaveBeenCalledWith({
+        ftc_pending_selection: {
+          selector: "s".repeat(500),
+          currentValue: "v".repeat(500),
+          url: "u".repeat(2000),
+          pageTitle: "t".repeat(200),
+          timestamp: expect.any(Number),
+        },
+      });
+    });
+  });
+
   it("also sends fast-path runtime.sendMessage for ELEMENT_SELECTED", () => {
     const sendResponse = vi.fn();
     onMessageCb(
