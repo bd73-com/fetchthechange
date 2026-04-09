@@ -85,7 +85,10 @@ export async function getStripeSync() {
       return new StripeSync({
         poolConfig: {
           connectionString: process.env.DATABASE_URL!,
-          max: 1,
+          // Must be >= 2: withAdvisoryLock holds one connection while the
+          // callback (getAccountIdByApiKeyHash, upsertAccount) needs another.
+          // max: 1 causes a pool-internal deadlock → "timeout exceeded".
+          max: 2,
           connectionTimeoutMillis: 10_000,
           idleTimeoutMillis: 15_000,
         },

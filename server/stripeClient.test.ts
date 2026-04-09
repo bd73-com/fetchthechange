@@ -23,7 +23,7 @@ describe("getStripeSync concurrency", () => {
     await getStripeSync();
 
     expect(capturedConfig).toBeDefined();
-    expect(capturedConfig.max).toBe(1);
+    expect(capturedConfig.max).toBe(2);
     expect(capturedConfig.connectionTimeoutMillis).toBe(10_000);
     expect(capturedConfig.idleTimeoutMillis).toBe(15_000);
   });
