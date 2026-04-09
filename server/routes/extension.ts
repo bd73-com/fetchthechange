@@ -36,13 +36,9 @@ router.post("/token", isAuthenticated, async (req: any, res) => {
 
     res.json({ token, expiresAt });
   } catch (error: any) {
-    console.error("[Extension] Failed to issue token:", error);
-    const msg = error instanceof Error ? error.message : "";
-    if (msg.includes("EXTENSION_JWT_SECRET")) {
-      res.status(500).json({ message: "Extension signing key not configured. Contact the site administrator." });
-    } else {
-      res.status(500).json({ message: "Failed to generate extension token" });
-    }
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("[Extension] Failed to issue token:", detail);
+    res.status(500).json({ message: "Failed to generate extension token", detail });
   }
 });
 
