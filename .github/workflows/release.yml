@@ -116,7 +116,7 @@ jobs:
             rm -f "$BODY_FILE" "$PAYLOAD_FILE" "${DIRECT_ERR:-}"
             if [ "${BRANCH_CREATED:-false}" = "true" ]; then
               echo "Cleaning up branch $BRANCH"
-              gh api "repos/$REPO/git/refs/heads/$BRANCH" -X DELETE 2>/dev/null || true
+              timeout 5 gh api "repos/$REPO/git/refs/heads/$BRANCH" -X DELETE 2>/dev/null || true
             fi
           }
           trap cleanup EXIT
@@ -174,7 +174,7 @@ jobs:
           BRANCH_CREATED=false
 
           # Close any existing open changelog PRs to avoid accumulation
-          EXISTING_PRS=$(gh pr list --repo "$REPO" --search "chore: sync changelog from GitHub releases" --state open --json number --jq '.[].number' 2>/dev/null || true)
+          EXISTING_PRS=$(gh pr list --repo "$REPO" --author "app/github-actions" --search "chore: sync changelog from GitHub releases in:title" --state open --json number --jq '.[].number' 2>/dev/null || true)
           for pr_num in $EXISTING_PRS; do
             echo "Closing stale changelog PR #$pr_num"
             gh pr close "$pr_num" --repo "$REPO" --delete-branch 2>/dev/null || true
@@ -211,5 +211,7 @@ jobs:
           BRANCH_CREATED=false  # PR owns the branch now; don't delete on exit
 
           # Enable auto-merge so the PR lands without manual intervention
-          PR_NUM=$(echo "$PR_URL" | grep -oP '\d+$')
-          gh pr merge "$PR_NUM" --repo "$REPO" --squash --auto 2>/dev/null || echo "::warning::Auto-merge not available; PR requires manual merge"
+          PR_NUM=$(echo "$PR_URL" | grep -oP '\d+$' || true)
+          if [ -n "$PR_NUM" ]; then
+            gh pr merge "$PR_NUM" --repo "$REPO" --squash --auto 2>/dev/null || echo "::warning::Auto-merge not available; PR requires manual merge"
+          fi
