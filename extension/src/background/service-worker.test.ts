@@ -5,6 +5,7 @@ vi.mock("../shared/constants", () => ({
   BASE_URL: "https://ftc.bd73.com",
   AUTH_STARTED_KEY: "ftc_auth_started_at",
   AUTH_TAB_ID_KEY: "ftc_auth_tab_id",
+  PENDING_SELECTION_KEY: "ftc_pending_selection",
   MSG: {
     START_PICKER: "FTC_START_PICKER",
     CANCEL_PICKER: "FTC_CANCEL_PICKER",
@@ -37,6 +38,7 @@ const chromeMock = {
       remove: vi.fn().mockResolvedValue(undefined),
     },
   },
+  action: { openPopup: vi.fn().mockResolvedValue(undefined) },
   permissions: { contains: vi.fn(), request: vi.fn() },
 };
 vi.stubGlobal("chrome", chromeMock);
@@ -309,5 +311,164 @@ describe("onRemoved handler", () => {
     // Fire onRemoved for a random tab — should not throw or error
     onRemovedCb(999);
     // No error is the success condition
+  });
+});
+
+// ── ELEMENT_SELECTED handler tests ─────────────────────────────
+
+describe("ELEMENT_SELECTED handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("stores pending selection and attempts openPopup when ELEMENT_SELECTED received", async () => {
+    const sendResponse = vi.fn();
+    const payload = {
+      type: "FTC_ELEMENT_SELECTED",
+      selector: ".price",
+      currentValue: "$19.99",
+      url: "https://example.com/product",
+      pageTitle: "Test Product",
+    };
+
+    onMessageCb(payload, {}, sendResponse);
+
+    // Wait for the async storage.set to complete
+    await vi.waitFor(() => {
+      expect(chromeMock.storage.local.set).toHaveBeenCalledWith({
+        ftc_pending_selection: {
+          selector: ".price",
+          currentValue: "$19.99",
+          url: "https://example.com/product",
+          pageTitle: "Test Product",
+          timestamp: expect.any(Number),
+        },
+      });
+    });
+
+    expect(chromeMock.action.openPopup).toHaveBeenCalled();
+  });
+
+  it("does not crash when chrome.action.openPopup throws", async () => {
+    chromeMock.action.openPopup.mockImplementationOnce(() => {
+      throw new Error("No active window");
+    });
+
+    const sendResponse = vi.fn();
+    const payload = {
+      type: "FTC_ELEMENT_SELECTED",
+      selector: ".stock",
+      currentValue: "In Stock",
+      url: "https://example.com",
+      pageTitle: "Test",
+    };
+
+    // Should not throw
+    onMessageCb(payload, {}, sendResponse);
+
+    await vi.waitFor(() => {
+      expect(chromeMock.storage.local.set).toHaveBeenCalledWith({
+        ftc_pending_selection: {
+          selector: ".stock",
+          currentValue: "In Stock",
+          url: "https://example.com",
+          pageTitle: "Test",
+          timestamp: expect.any(Number),
+        },
+      });
+    });
+  });
+
+  it("rejects ELEMENT_SELECTED with non-string or empty selector", () => {
+    const sendResponse = vi.fn();
+    // Non-string selector
+    onMessageCb(
+      { type: "FTC_ELEMENT_SELECTED", selector: 123, currentValue: "v", url: "u", pageTitle: "t" },
+      {},
+      sendResponse,
+    );
+    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
+
+    // Empty string selector
+    onMessageCb(
+      { type: "FTC_ELEMENT_SELECTED", selector: "", currentValue: "v", url: "u", pageTitle: "t" },
+      {},
+      sendResponse,
+    );
+    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it("rejects whitespace-only selectors", () => {
+    const sendResponse = vi.fn();
+    onMessageCb(
+      { type: "FTC_ELEMENT_SELECTED", selector: "   ", currentValue: "v", url: "u", pageTitle: "t" },
+      {},
+      sendResponse,
+    );
+    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it("truncates oversized fields to their length caps", async () => {
+    const sendResponse = vi.fn();
+    onMessageCb(
+      {
+        type: "FTC_ELEMENT_SELECTED",
+        selector: "s".repeat(700),
+        currentValue: "v".repeat(700),
+        url: "u".repeat(2500),
+        pageTitle: "t".repeat(300),
+      },
+      {},
+      sendResponse,
+    );
+
+    await vi.waitFor(() => {
+      expect(chromeMock.storage.local.set).toHaveBeenCalledWith({
+        ftc_pending_selection: {
+          selector: "s".repeat(500),
+          currentValue: "v".repeat(500),
+          url: "u".repeat(2000),
+          pageTitle: "t".repeat(200),
+          timestamp: expect.any(Number),
+        },
+      });
+    });
+  });
+
+  it("also sends fast-path runtime.sendMessage for ELEMENT_SELECTED", () => {
+    const sendResponse = vi.fn();
+    onMessageCb(
+      { type: "FTC_ELEMENT_SELECTED", selector: "h1", currentValue: "Hi", url: "https://x.com", pageTitle: "X" },
+      {},
+      sendResponse,
+    );
+    // Fast-path forward should be called immediately (before storage resolves)
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FTC_ELEMENT_SELECTED", selector: "h1" }),
+    );
+  });
+});
+
+// ── CANDIDATES_RESULT handler tests ─────────────────────────────
+
+describe("CANDIDATES_RESULT handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("forwards CANDIDATES_RESULT via runtime.sendMessage without storage", () => {
+    const sendResponse = vi.fn();
+    const payload = {
+      type: "FTC_CANDIDATES_RESULT",
+      candidates: [{ selector: ".price", text: "$9.99", score: 5 }],
+    };
+
+    const result = onMessageCb(payload, {}, sendResponse);
+
+    // Should forward to popup
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(payload);
+    // Should NOT touch storage
+    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
+    expect(result).toBe(false);
   });
 });

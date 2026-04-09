@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FetchTheChange",
   "description": "Track any element on any web page for changes. Get notified when prices drop, stock updates, or content changes.",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": ["https://ftc.bd73.com/*"],
   "background": {
