@@ -1,4 +1,4 @@
-import { BASE_URL, MSG, AUTH_STARTED_KEY } from "../shared/constants";
+import { BASE_URL, MSG, AUTH_STARTED_KEY, AUTH_TAB_ID_KEY } from "../shared/constants";
 import { setToken } from "../auth/token";
 
 const TAG = "[FTC:SW]";
@@ -75,9 +75,13 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     const tabUrl = tab.url || changeInfo.url || "";
     if (!tabUrl.includes("/extension-auth")) return;
 
-    const stored = await chrome.storage.local.get(AUTH_STARTED_KEY);
+    const stored = await chrome.storage.local.get([AUTH_STARTED_KEY, AUTH_TAB_ID_KEY]);
     const startedAt = Number(stored[AUTH_STARTED_KEY]);
     if (!Number.isFinite(startedAt) || Date.now() - startedAt > 120_000) return;
+    // Verify this is the specific tab we opened for auth, not an
+    // attacker-crafted link in another tab (token fixation prevention).
+    const storedTabId = Number(stored[AUTH_TAB_ID_KEY]);
+    if (Number.isFinite(storedTabId) && storedTabId !== tabId) return;
     console.log(TAG, "onUpdated: tab not in authTabs (SW restarted?), but recent auth attempt found");
   }
 
@@ -138,9 +142,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     console.log(TAG, `onRemoved: auth tab ${tabId} closed without token`);
     authTabs.delete(tabId);
     closedTabs.add(tabId);
-    // Clean up AUTH_STARTED_KEY so the popup doesn't show a false
+    // Clean up auth flags so the popup doesn't show a false
     // "Connection failed" screen when the user simply closed the tab.
-    chrome.storage.local.remove(AUTH_STARTED_KEY).catch(() => {});
+    chrome.storage.local.remove([AUTH_STARTED_KEY, AUTH_TAB_ID_KEY]).catch(() => {});
     // Clean up after 60 s to avoid memory leaks
     setTimeout(() => closedTabs.delete(tabId), 60_000);
   }
@@ -217,6 +221,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = message.tabId as number;
     console.log(TAG, `auth tab opened: ${tabId}`);
     authTabs.add(tabId);
+    // Persist tab ID so the onUpdated fallback can verify the correct
+    // tab after a SW restart (prevents token fixation via other tabs).
+    chrome.storage.local.set({ [AUTH_TAB_ID_KEY]: tabId }).catch(() => {});
     pollAuthTab(tabId).catch((err) =>
       console.error(TAG, "pollAuthTab error:", err),
     );
@@ -329,8 +336,8 @@ async function handleTokenReceived(
   console.log(TAG, "storing token, expiresAt:", expiresAt);
   lastStoredToken = token;
   await setToken(token, expiresAt);
-  // Clear the auth-started flag so the popup knows it succeeded
-  await chrome.storage.local.remove(AUTH_STARTED_KEY);
+  // Clear the auth-started flags so the popup knows it succeeded
+  await chrome.storage.local.remove([AUTH_STARTED_KEY, AUTH_TAB_ID_KEY]);
   console.log(TAG, "token stored OK");
 
   // Close the auth tab

@@ -63,10 +63,12 @@ const AUTH_TIMEOUT_MS = 120_000;
 // ──────────────────────────────────────────────────────────────────
 
 let initRunning = false;
+let initPending = false;
 
 async function init(): Promise<void> {
   if (initRunning) {
-    console.log(TAG, "init already running, skipping");
+    initPending = true;
+    console.log(TAG, "init already running, queueing rerun");
     return;
   }
   initRunning = true;
@@ -160,6 +162,10 @@ async function init(): Promise<void> {
   render();
   } finally {
     initRunning = false;
+    if (initPending) {
+      initPending = false;
+      void init();
+    }
   }
 }
 
@@ -203,9 +209,9 @@ chrome.runtime.onMessage.addListener((message) => {
 // writing the token directly, bypassing the service worker).
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  if (changes[TOKEN_STORAGE_KEY]?.newValue && (state === "connecting" || state === "auth_failed")) {
+  if (changes[TOKEN_STORAGE_KEY]?.newValue) {
     console.log(TAG, "token appeared in storage (direct write), re-initialising...");
-    init();
+    void init();
   }
 });
 

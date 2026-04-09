@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("../shared/constants", () => ({
   BASE_URL: "https://ftc.bd73.com",
   AUTH_STARTED_KEY: "ftc_auth_started_at",
+  AUTH_TAB_ID_KEY: "ftc_auth_tab_id",
   MSG: {
     START_PICKER: "FTC_START_PICKER",
     CANCEL_PICKER: "FTC_CANCEL_PICKER",
@@ -209,6 +210,7 @@ describe("onUpdated handler", () => {
   it("processes status:complete events for auth tab URLs", async () => {
     chromeMock.storage.local.get.mockResolvedValueOnce({
       ftc_auth_started_at: Date.now(),
+      ftc_auth_tab_id: 42,
     });
 
     await onUpdatedCb(
@@ -234,6 +236,7 @@ describe("onUpdated handler", () => {
   it("processes URL change events (existing behaviour)", async () => {
     chromeMock.storage.local.get.mockResolvedValueOnce({
       ftc_auth_started_at: Date.now(),
+      ftc_auth_tab_id: 42,
     });
 
     await onUpdatedCb(
@@ -253,6 +256,7 @@ describe("onUpdated handler", () => {
 
     chromeMock.storage.local.get.mockResolvedValueOnce({
       ftc_auth_started_at: Date.now(),
+      ftc_auth_tab_id: 42,
     });
     // tabs.get fails
     chromeMock.tabs.get.mockRejectedValueOnce(new Error("No tab"));
