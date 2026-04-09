@@ -1,3 +1,6 @@
+// 0. LOAD .env FILE (if present) BEFORE ANYTHING ELSE
+import 'dotenv/config';
+
 // 1. IMPORT POLYFILLS IMMEDIATELY
 import { File, Blob } from 'node:buffer';
 
