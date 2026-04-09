@@ -45,7 +45,8 @@ jobs:
         if: steps.cpr.outputs.pull-request-number
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}
         run: |
-          gh pr merge ${{ steps.cpr.outputs.pull-request-number }} \
+          gh pr merge "$PR_NUMBER" \
             --repo ${{ github.repository }} --squash --auto 2>/dev/null \
             || echo "::warning::Auto-merge not available; PR requires manual merge"
