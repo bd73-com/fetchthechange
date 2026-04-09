@@ -23,146 +23,29 @@ jobs:
           node-version: 22
 
       - name: Install tsx
-        run: |
-          npm install --no-save tsx@4.21.0
-          echo "tsx version: $(npx tsx --version)"
-          echo "node version: $(node --version)"
+        run: npm install --no-save tsx@4.21.0
 
       - name: Generate changelog
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "::group::Running sync-changelog.ts"
-          npx tsx script/sync-changelog.ts
-          echo "::endgroup::"
-          echo "Generated file size: $(wc -c < client/src/data/changelog.ts) bytes"
-          echo "Generated file lines: $(wc -l < client/src/data/changelog.ts)"
-          echo "Local blob SHA: $(git hash-object client/src/data/changelog.ts)"
+        run: npx tsx script/sync-changelog.ts
 
-      - name: Commit changelog update
+      - name: Create changelog PR
+        id: cpr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: sync changelog from GitHub releases"
+          title: "chore: sync changelog from GitHub releases"
+          body: "Auto-generated changelog update after release publication."
+          branch: chore/sync-changelog
+          delete-branch: true
+
+      - name: Enable auto-merge
+        if: steps.cpr.outputs.pull-request-number
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          REPO="${{ github.repository }}"
-          LOCAL_SHA=$(git hash-object client/src/data/changelog.ts)
-          BODY_FILE=$(mktemp)
-          PAYLOAD_FILE=$(mktemp)
-          base64 -w0 client/src/data/changelog.ts > "$BODY_FILE"
-          echo "Content base64 length: $(wc -c < "$BODY_FILE") chars"
-
-          cleanup() {
-            rm -f "$BODY_FILE" "$PAYLOAD_FILE" "${DIRECT_ERR:-}"
-            if [ "${BRANCH_CREATED:-false}" = "true" ]; then
-              echo "Cleaning up branch $BRANCH"
-              timeout 5 gh api "repos/$REPO/git/refs/heads/$BRANCH" -X DELETE 2>/dev/null || true
-            fi
-          }
-          trap cleanup EXIT
-
-          # Helper: build Contents API JSON payload without shell-expanding the base64
-          build_payload() {
-            jq -n \
-              --arg msg "chore: sync changelog from GitHub releases" \
-              --rawfile content "$BODY_FILE" \
-              --arg sha "$1" \
-              --arg branch "$2" \
-              '{message: $msg, content: $content, sha: $sha, branch: $branch}' \
-              > "$PAYLOAD_FILE"
-          }
-
-          # Fetch current file SHA from GitHub (pinned to main)
-          FILE_SHA=""
-          for attempt in 1 2 3; do
-            FILE_SHA=$(gh api "repos/$REPO/contents/client/src/data/changelog.ts?ref=main" \
-              --jq '.sha' 2>/dev/null) && [ -n "$FILE_SHA" ] && [ "$FILE_SHA" != "null" ] && break
-            echo "Failed to fetch file SHA (attempt $attempt)"
-            FILE_SHA=""
-            sleep $((attempt * 2))
-          done
-          if [ -z "$FILE_SHA" ]; then
-            echo "::error::Could not fetch file SHA after 3 attempts"
-            exit 1
-          fi
-
-          # Skip if content is unchanged
-          if [ "$LOCAL_SHA" = "$FILE_SHA" ]; then
-            echo "No changelog changes needed"
-            exit 0
-          fi
-
-          echo "Changelog changed (local=$LOCAL_SHA remote=$FILE_SHA)"
-
-          # Try direct commit to main first
-          build_payload "$FILE_SHA" "main"
-          echo "Payload size: $(wc -c < "$PAYLOAD_FILE") bytes"
-          DIRECT_ERR=$(mktemp)
-          if gh api "repos/$REPO/contents/client/src/data/changelog.ts" \
-            -X PUT --input "$PAYLOAD_FILE" > /dev/null 2>"$DIRECT_ERR"; then
-            echo "Changelog committed directly to main"
-            rm -f "$DIRECT_ERR"
-            exit 0
-          fi
-          echo "::warning::Direct commit to main failed:"
-          cat "$DIRECT_ERR"
-          rm -f "$DIRECT_ERR"
-          echo "Falling back to PR..."
-
-          # Fallback: create a PR when direct push is blocked
-          BRANCH="chore/sync-changelog-$(date +%s)"
-          BRANCH_CREATED=false
-
-          # Close any existing open changelog PRs to avoid accumulation
-          EXISTING_PRS=$(gh pr list --repo "$REPO" --author "app/github-actions" --search "chore: sync changelog from GitHub releases in:title" --state open --json number --jq '.[].number' 2>/dev/null || true)
-          for pr_num in $EXISTING_PRS; do
-            echo "Closing stale changelog PR #$pr_num"
-            gh pr close "$pr_num" --repo "$REPO" --delete-branch 2>/dev/null || true
-          done
-
-          echo "Creating branch: $BRANCH"
-          MAIN_SHA=$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha') || {
-            echo "::error::Failed to fetch main HEAD SHA"; exit 1; }
-          echo "main HEAD: $MAIN_SHA"
-
-          gh api "repos/$REPO/git/refs" \
-            -f ref="refs/heads/$BRANCH" \
-            -f sha="$MAIN_SHA" > /dev/null || {
-            echo "::error::Failed to create branch $BRANCH"; exit 1; }
-          BRANCH_CREATED=true
-
-          # Re-fetch file SHA pinned to the exact commit the branch was created from
-          BRANCH_FILE_SHA=$(gh api "repos/$REPO/contents/client/src/data/changelog.ts?ref=$MAIN_SHA" \
-            --jq '.sha' 2>/dev/null) || BRANCH_FILE_SHA="$FILE_SHA"
-
-          build_payload "$BRANCH_FILE_SHA" "$BRANCH"
-          gh api "repos/$REPO/contents/client/src/data/changelog.ts" \
-            -X PUT --input "$PAYLOAD_FILE" > /dev/null || {
-            echo "::error::Failed to commit changelog to branch $BRANCH"; exit 1; }
-
-          # Retry PR creation — GitHub may need time to propagate the branch/commit
-          PR_URL=""
-          PR_ERR=$(mktemp)
-          for pr_attempt in 1 2 3; do
-            PR_URL=$(gh pr create \
-              --repo "$REPO" \
-              --head "$BRANCH" \
-              --base main \
-              --title "chore: sync changelog from GitHub releases" \
-              --body "Auto-generated changelog update after release publication." 2>"$PR_ERR") && break
-            echo "PR creation attempt $pr_attempt failed: $(cat "$PR_ERR")"
-            PR_URL=""
-            sleep $((pr_attempt * 3))
-          done
-          if [ -z "$PR_URL" ]; then
-            echo "::error::Failed to create PR after 3 attempts: $(cat "$PR_ERR")"
-            rm -f "$PR_ERR"
-            exit 1
-          fi
-          rm -f "$PR_ERR"
-          echo "Created changelog PR: $PR_URL"
-          BRANCH_CREATED=false  # PR owns the branch now; don't delete on exit
-
-          # Enable auto-merge so the PR lands without manual intervention
-          PR_NUM=$(echo "$PR_URL" | grep -oP '\d+$' || true)
-          if [ -n "$PR_NUM" ]; then
-            gh pr merge "$PR_NUM" --repo "$REPO" --squash --auto 2>/dev/null || echo "::warning::Auto-merge not available; PR requires manual merge"
-          fi
+          gh pr merge ${{ steps.cpr.outputs.pull-request-number }} \
+            --repo ${{ github.repository }} --squash --auto 2>/dev/null \
+            || echo "::warning::Auto-merge not available; PR requires manual merge"
