@@ -15,7 +15,8 @@ jobs:
   update-release-draft:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.merged == true
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.user.login != 'github-actions[bot]')
     runs-on: ubuntu-latest
     outputs:
       tag_name: ${{ steps.drafter.outputs.tag_name }}
@@ -25,6 +26,8 @@ jobs:
         with:
           publish: false
           config-name: release-drafter.yml
+          # Autolabeling is handled by label-prs.yml on PR open/edit;
+          # disable here to avoid pull_request_target warnings during draft updates
           disable-autolabeler: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -75,7 +78,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: sync-changelog
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,7 +112,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}
+        # Auto-merge requires "Allow auto-merge" enabled in repo settings.
+        # If branch protection requires reviews, GITHUB_TOKEN cannot self-approve;
+        # add github-actions[bot] to the bypass list or merge changelog PRs manually.
         run: |
-          gh pr merge "$PR_NUMBER" \
-            --repo ${{ github.repository }} --squash --auto 2>/dev/null \
-            || echo "::warning::Auto-merge not available; PR requires manual merge"
+          if ! merge_output=$(gh pr merge "$PR_NUMBER" --repo ${{ github.repository }} --squash --auto 2>&1); then
+            echo "::warning::Auto-merge failed: $merge_output"
+          fi

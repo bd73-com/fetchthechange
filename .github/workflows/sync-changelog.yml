@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: sync-changelog
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,7 +46,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}
+        # Auto-merge requires "Allow auto-merge" enabled in repo settings.
+        # If branch protection requires reviews, GITHUB_TOKEN cannot self-approve;
+        # add github-actions[bot] to the bypass list or merge changelog PRs manually.
         run: |
-          gh pr merge "$PR_NUMBER" \
-            --repo ${{ github.repository }} --squash --auto 2>/dev/null \
-            || echo "::warning::Auto-merge not available; PR requires manual merge"
+          if ! merge_output=$(gh pr merge "$PR_NUMBER" --repo ${{ github.repository }} --squash --auto 2>&1); then
+            echo "::warning::Auto-merge failed: $merge_output"
+          fi
