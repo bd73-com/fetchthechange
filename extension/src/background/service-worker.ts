@@ -69,10 +69,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Slow path: check AUTH_STARTED_KEY in storage (survives SW termination;
   // Chrome MV3 aggressively kills SWs after ~30 s of inactivity).
   if (!authTabs.has(tabId)) {
-    // For status-only events on random tabs, quick-reject if URL doesn't
-    // look like the auth page to avoid unnecessary storage reads.
+    // Quick-reject: skip storage reads for tabs whose URL doesn't look
+    // like the auth page.  Applies to both URL-change and status-complete
+    // events so we avoid waking the SW for every navigation in the browser.
     const tabUrl = tab.url || changeInfo.url || "";
-    if (!urlChanged && !tabUrl.includes("/extension-auth")) return;
+    if (!tabUrl.includes("/extension-auth")) return;
 
     const stored = await chrome.storage.local.get(AUTH_STARTED_KEY);
     const startedAt = Number(stored[AUTH_STARTED_KEY]);

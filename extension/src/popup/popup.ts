@@ -62,8 +62,16 @@ const AUTH_TIMEOUT_MS = 120_000;
 // Initialise
 // ──────────────────────────────────────────────────────────────────
 
+let initRunning = false;
+
 async function init(): Promise<void> {
+  if (initRunning) {
+    console.log(TAG, "init already running, skipping");
+    return;
+  }
+  initRunning = true;
   console.log(TAG, "init start");
+  try {
 
   // Get current tab info
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -77,12 +85,20 @@ async function init(): Promise<void> {
   if (!valid) {
     console.log(TAG, "no valid token in storage");
 
-    // Check if an auth attempt was recently started but failed
+    // Check if an auth attempt was recently started.
+    // Show "connecting" for the first 30 s (auth may still be in progress),
+    // then "auth_failed" up to AUTH_TIMEOUT_MS.
     const stored = await chrome.storage.local.get(AUTH_STARTED_KEY);
     const startedAt = Number(stored[AUTH_STARTED_KEY]);
-    if (Number.isFinite(startedAt) && Date.now() - startedAt < AUTH_TIMEOUT_MS) {
-      console.warn(TAG, "recent auth attempt found but no token — showing failure state");
-      state = "auth_failed";
+    const elapsed = Date.now() - startedAt;
+    if (Number.isFinite(startedAt) && elapsed < AUTH_TIMEOUT_MS) {
+      if (elapsed < 30_000) {
+        console.log(TAG, "auth attempt in progress (", Math.round(elapsed / 1000), "s ago)");
+        state = "connecting";
+      } else {
+        console.warn(TAG, "recent auth attempt found but no token — showing failure state");
+        state = "auth_failed";
+      }
     } else {
       state = "unauthenticated";
     }
@@ -142,6 +158,9 @@ async function init(): Promise<void> {
   }
 
   render();
+  } finally {
+    initRunning = false;
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────

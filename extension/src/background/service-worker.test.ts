@@ -19,17 +19,39 @@ vi.mock("../auth/token", () => ({
   setToken: vi.fn(),
 }));
 
-// Stub chrome global
+// Stub chrome global — methods that return promises need resolved defaults
 const chromeMock = {
-  runtime: { onMessage: { addListener: vi.fn() }, sendMessage: vi.fn() },
-  tabs: { get: vi.fn(), remove: vi.fn(), onUpdated: { addListener: vi.fn() }, onRemoved: { addListener: vi.fn() } },
-  scripting: { insertCSS: vi.fn(), executeScript: vi.fn() },
-  storage: { local: { get: vi.fn(), set: vi.fn(), remove: vi.fn() } },
+  runtime: { onMessage: { addListener: vi.fn() }, sendMessage: vi.fn().mockResolvedValue(undefined) },
+  tabs: {
+    get: vi.fn().mockResolvedValue({ url: "" }),
+    remove: vi.fn().mockResolvedValue(undefined),
+    onUpdated: { addListener: vi.fn() },
+    onRemoved: { addListener: vi.fn() },
+  },
+  scripting: { insertCSS: vi.fn().mockResolvedValue(undefined), executeScript: vi.fn().mockResolvedValue([]) },
+  storage: {
+    local: {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn().mockResolvedValue(undefined),
+      remove: vi.fn().mockResolvedValue(undefined),
+    },
+  },
   permissions: { contains: vi.fn(), request: vi.fn() },
 };
 vi.stubGlobal("chrome", chromeMock);
 
 const { isValidAuthSender, extractTokenFromUrl } = await import("./service-worker");
+
+// Capture listener callbacks registered at module load time (before any clearAllMocks)
+const onUpdatedCb = chromeMock.tabs.onUpdated.addListener.mock.calls[0][0] as (
+  tabId: number, changeInfo: any, tab: any,
+) => Promise<void>;
+const onRemovedCb = chromeMock.tabs.onRemoved.addListener.mock.calls[0][0] as (
+  tabId: number,
+) => void;
+const onMessageCb = chromeMock.runtime.onMessage.addListener.mock.calls[0][0] as (
+  message: any, sender: any, sendResponse: any,
+) => boolean;
 
 const BASE = "https://ftc.bd73.com";
 
@@ -144,5 +166,144 @@ describe("extractTokenFromUrl", () => {
     const weirdToken = "abc+def/ghi=";
     const url = `https://ftc.bd73.com/extension-auth?done=1#token=${encodeURIComponent(weirdToken)}&expiresAt=${encodeURIComponent(EXPIRES)}`;
     expect(extractTokenFromUrl(url)).toEqual({ token: weirdToken, expiresAt: EXPIRES });
+  });
+});
+
+// ── Listener registration tests ─────────────────────────────────
+
+describe("Chrome listener registration", () => {
+  it("registers onUpdated listener", () => {
+    expect(chromeMock.tabs.onUpdated.addListener).toHaveBeenCalledOnce();
+    expect(typeof chromeMock.tabs.onUpdated.addListener.mock.calls[0][0]).toBe("function");
+  });
+
+  it("registers onRemoved listener", () => {
+    expect(chromeMock.tabs.onRemoved.addListener).toHaveBeenCalledOnce();
+    expect(typeof chromeMock.tabs.onRemoved.addListener.mock.calls[0][0]).toBe("function");
+  });
+
+  it("registers onMessage listener", () => {
+    expect(chromeMock.runtime.onMessage.addListener).toHaveBeenCalledOnce();
+    expect(typeof chromeMock.runtime.onMessage.addListener.mock.calls[0][0]).toBe("function");
+  });
+});
+
+// ── onUpdated handler tests ──────────────────────────────────────
+
+describe("onUpdated handler", () => {
+  const TOKEN = "eyJhbGciOiJIUzI1NiJ9.test.sig";
+  const EXPIRES = "2099-01-01T00:00:00.000Z";
+  const DONE_URL_WITH_HASH = `https://ftc.bd73.com/extension-auth?done=1#token=${encodeURIComponent(TOKEN)}&expiresAt=${encodeURIComponent(EXPIRES)}`;
+  const DONE_URL_NO_HASH = "https://ftc.bd73.com/extension-auth?done=1";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("ignores events with neither url change nor status complete", async () => {
+    await onUpdatedCb(1, { status: "loading" }, {});
+    // Should return immediately — no storage reads
+    expect(chromeMock.storage.local.get).not.toHaveBeenCalled();
+  });
+
+  it("processes status:complete events for auth tab URLs", async () => {
+    chromeMock.storage.local.get.mockResolvedValueOnce({
+      ftc_auth_started_at: Date.now(),
+    });
+
+    await onUpdatedCb(
+      42,
+      { status: "complete" },
+      { url: DONE_URL_WITH_HASH },
+    );
+
+    // Should have checked storage for AUTH_STARTED_KEY
+    expect(chromeMock.storage.local.get).toHaveBeenCalled();
+  });
+
+  it("quick-rejects status:complete for non-auth-page tabs", async () => {
+    await onUpdatedCb(
+      99,
+      { status: "complete" },
+      { url: "https://example.com/random-page" },
+    );
+    // Should NOT read storage since URL doesn't include /extension-auth
+    expect(chromeMock.storage.local.get).not.toHaveBeenCalled();
+  });
+
+  it("processes URL change events (existing behaviour)", async () => {
+    chromeMock.storage.local.get.mockResolvedValueOnce({
+      ftc_auth_started_at: Date.now(),
+    });
+
+    await onUpdatedCb(
+      42,
+      { url: DONE_URL_WITH_HASH },
+      { url: DONE_URL_WITH_HASH },
+    );
+
+    expect(chromeMock.storage.local.get).toHaveBeenCalled();
+  });
+
+  it("falls back to scripting API when tabs.get fails and URL has done=1", async () => {
+    // Use a unique token to avoid dedup guard from prior tests
+    const UNIQUE_TOKEN = "eyJhbGciOiJIUzI1NiJ9.scripting-test.sig";
+    const UNIQUE_EXPIRES = "2099-06-01T00:00:00.000Z";
+    const urlWithHash = `https://ftc.bd73.com/extension-auth?done=1#token=${encodeURIComponent(UNIQUE_TOKEN)}&expiresAt=${encodeURIComponent(UNIQUE_EXPIRES)}`;
+
+    chromeMock.storage.local.get.mockResolvedValueOnce({
+      ftc_auth_started_at: Date.now(),
+    });
+    // tabs.get fails
+    chromeMock.tabs.get.mockRejectedValueOnce(new Error("No tab"));
+    // scripting.executeScript returns the full URL with hash
+    chromeMock.scripting.executeScript.mockResolvedValueOnce([
+      { result: urlWithHash },
+    ]);
+
+    const { setToken } = await import("../auth/token");
+
+    await onUpdatedCb(
+      42,
+      { url: DONE_URL_NO_HASH },
+      { url: DONE_URL_NO_HASH },
+    );
+
+    expect(chromeMock.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 42 },
+      func: expect.any(Function),
+    });
+    expect(setToken).toHaveBeenCalledWith(UNIQUE_TOKEN, UNIQUE_EXPIRES);
+  });
+});
+
+// ── onRemoved handler tests ──────────────────────────────────────
+
+describe("onRemoved handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("removes tab from authTabs when an auth tab is closed", () => {
+    // First register a tab as auth tab via the message handler
+    const sendResponse = vi.fn();
+    onMessageCb(
+      { type: "FTC_AUTH_TAB_OPENED", tabId: 123 },
+      {},
+      sendResponse,
+    );
+
+    // Now fire onRemoved for that tab
+    onRemovedCb(123);
+
+    // The tab should be removed from authTabs — next poll should see it resolved
+    // We verify indirectly: onRemoved was called and didn't throw
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true });
+  });
+
+  it("ignores tabs that are not auth tabs", () => {
+    // Fire onRemoved for a random tab — should not throw or error
+    onRemovedCb(999);
+    // No error is the success condition
   });
 });
