@@ -674,7 +674,7 @@ describe("PUT /api/monitors/:id/tags", () => {
     expect(res._status).toBe(200);
   });
 
-  it("returns 404 when monitor deleted concurrently (TOCTOU race)", async () => {
+  it("returns 404 when monitor deleted concurrently (TOCTOU race — post-write)", async () => {
     // Ownership check passes — monitor exists at time of getMonitor call
     mockGetMonitor.mockResolvedValueOnce({ id: 1, userId: "user1" });
     mockSetMonitorTags.mockResolvedValueOnce(undefined);
@@ -684,6 +684,27 @@ describe("PUT /api/monitors/:id/tags", () => {
     const req = makeReq("user1", {
       params: { id: "1" },
       body: { tagIds: [] },
+    });
+    const res = await callHandler("put", "/api/monitors/:id/tags", req);
+    expect(res._status).toBe(404);
+    expect(res._json).toEqual({ message: "Not found", code: "NOT_FOUND" });
+  });
+
+  it("returns 404 when setMonitorTags hits FK violation (TOCTOU race — mid-write)", async () => {
+    // Ownership check passes — monitor exists at time of getMonitor call
+    mockGetMonitor.mockResolvedValueOnce({ id: 1, userId: "user1" });
+    mockListUserTags.mockResolvedValueOnce([
+      { id: 10, userId: "user1", name: "Work", nameLower: "work", colour: "#ef4444" },
+    ]);
+    mockGetUser.mockResolvedValueOnce({ tier: "pro" });
+    // Monitor deleted before setMonitorTags — FK violation
+    const fkError: any = new Error("insert or update on table violates foreign key constraint");
+    fkError.code = "23503";
+    mockSetMonitorTags.mockRejectedValueOnce(fkError);
+
+    const req = makeReq("user1", {
+      params: { id: "1" },
+      body: { tagIds: [10] },
     });
     const res = await callHandler("put", "/api/monitors/:id/tags", req);
     expect(res._status).toBe(404);

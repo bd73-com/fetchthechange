@@ -2930,7 +2930,15 @@ export async function registerRoutes(
         }
       }
 
-      await storage.setMonitorTags(monitorId, input.tagIds);
+      try {
+        await storage.setMonitorTags(monitorId, input.tagIds);
+      } catch (err: any) {
+        // Monitor deleted between ownership check and tag write (TOCTOU race)
+        if (err?.code === "23503") {
+          return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
+        }
+        throw err;
+      }
       const updated = await storage.getMonitorWithTags(monitorId);
       if (!updated) return res.status(404).json({ message: "Not found", code: "NOT_FOUND" });
       res.json(updated);
