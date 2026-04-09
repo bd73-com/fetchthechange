@@ -51,6 +51,37 @@ describe("getStripeSync concurrency", () => {
     expect(capturedConfig.max).toBeLessThanOrEqual(5);
   });
 
+  it("registers an idle-client error handler on the StripeSync pool", async () => {
+    const on = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.doMock("stripe-replit-sync", () => ({
+      StripeSync: class {
+        postgresClient = {
+          pool: {
+            on,
+            end: vi.fn().mockResolvedValue(undefined),
+          },
+        };
+      },
+    }));
+
+    const { getStripeSync } = await import("./stripeClient");
+    await getStripeSync();
+
+    expect(on).toHaveBeenCalledWith("error", expect.any(Function));
+
+    const handler = on.mock.calls[0][1] as (err: Error) => void;
+    handler(new Error("connection lost"));
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "[StripeSync Pool] Unexpected error on idle client:",
+      "connection lost",
+    );
+
+    consoleError.mockRestore();
+  });
+
   it("returns the same instance when called concurrently", async () => {
     let constructCount = 0;
     vi.doMock("stripe-replit-sync", () => ({
