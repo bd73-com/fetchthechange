@@ -135,9 +135,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 const closedTabs = new Set<number>();
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (authTabs.has(tabId)) {
-    console.log(TAG, `onRemoved: auth tab ${tabId} closed`);
+    console.log(TAG, `onRemoved: auth tab ${tabId} closed without token`);
     authTabs.delete(tabId);
     closedTabs.add(tabId);
+    // Clean up AUTH_STARTED_KEY so the popup doesn't show a false
+    // "Connection failed" screen when the user simply closed the tab.
+    chrome.storage.local.remove(AUTH_STARTED_KEY).catch(() => {});
     // Clean up after 60 s to avoid memory leaks
     setTimeout(() => closedTabs.delete(tabId), 60_000);
   }

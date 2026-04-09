@@ -11,6 +11,15 @@ export default function ExtensionAuth() {
   // Check if this is the fallback callback (service worker reads token from the URL)
   const isDone = new URLSearchParams(window.location.search).get("done") === "1";
 
+  // Strip the token from the URL bar once the page renders with isDone.
+  // The SW/polling already extracted the token from the hash; keeping it
+  // in the address bar is a needless exposure risk.
+  useEffect(() => {
+    if (isDone && window.location.hash) {
+      window.history.replaceState(null, "", "/extension-auth?done=1");
+    }
+  }, [isDone]);
+
   useEffect(() => {
     if (isDone || !user || tokenSent || error) return;
 
