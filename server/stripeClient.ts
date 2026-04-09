@@ -108,6 +108,11 @@ export async function getStripeSync() {
       if (!stripeSyncShuttingDown) {
         stripeSync = result;
       }
+      // Mirror the error handler in db.ts — prevent unhandled error crashes
+      // on idle connections (e.g. PostgreSQL restart, network blip).
+      result.postgresClient?.pool?.on?.("error", (err: Error) => {
+        console.error("[StripeSync Pool] Unexpected error on idle client:", err.message);
+      });
       return result;
     }).catch((err) => {
       clearTimeout(timer);

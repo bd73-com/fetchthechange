@@ -28,6 +28,29 @@ describe("getStripeSync concurrency", () => {
     expect(capturedConfig.idleTimeoutMillis).toBe(15_000);
   });
 
+  it("requires pool max >= 2 to avoid advisory lock deadlock", async () => {
+    // stripe-replit-sync's withAdvisoryLock holds one connection while its
+    // callback (getAccountIdByApiKeyHash, upsertAccount) needs another.
+    // max < 2 causes a pool-internal deadlock → "timeout exceeded".
+    let capturedConfig: any = null;
+    vi.doMock("stripe-replit-sync", () => ({
+      StripeSync: class {
+        postgresClient = { pool: { end: vi.fn().mockResolvedValue(undefined) } };
+        constructor(opts: any) {
+          capturedConfig = opts.poolConfig;
+        }
+      },
+    }));
+
+    const { getStripeSync } = await import("./stripeClient");
+    await getStripeSync();
+
+    expect(capturedConfig.max).toBeGreaterThanOrEqual(2);
+    // Guard against accidental over-allocation that would blow the connection budget
+    // (main pool: 5 + stripe pool should stay modest).
+    expect(capturedConfig.max).toBeLessThanOrEqual(5);
+  });
+
   it("returns the same instance when called concurrently", async () => {
     let constructCount = 0;
     vi.doMock("stripe-replit-sync", () => ({
