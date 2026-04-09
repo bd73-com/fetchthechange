@@ -28,8 +28,17 @@ const router = Router();
 router.post("/token", isAuthenticated, async (req: any, res) => {
   try {
     const userId = req.user.claims.sub;
-    const user = await authStorage.getUser(userId);
-    const tier = (user?.tier || "free") as string;
+
+    // DB lookup for tier — non-fatal so token generation works even
+    // when the database is slow or timing out.
+    let tier = "free";
+    try {
+      const user = await authStorage.getUser(userId);
+      tier = (user?.tier || "free") as string;
+    } catch (dbErr) {
+      console.warn("[Extension] DB lookup failed, defaulting to free tier:",
+        dbErr instanceof Error ? dbErr.message : String(dbErr));
+    }
 
     const token = signExtensionToken(userId, tier);
     const expiresAt = getExtensionTokenExpiresAt();
