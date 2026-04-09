@@ -51,7 +51,7 @@ jobs:
           echo "Content base64 length: $(wc -c < "$BODY_FILE") chars"
 
           cleanup() {
-            rm -f "$BODY_FILE" "$PAYLOAD_FILE"
+            rm -f "$BODY_FILE" "$PAYLOAD_FILE" "${DIRECT_ERR:-}"
             if [ "${BRANCH_CREATED:-false}" = "true" ]; then
               echo "Cleaning up branch $BRANCH"
               gh api "repos/$REPO/git/refs/heads/$BRANCH" -X DELETE 2>/dev/null || true
