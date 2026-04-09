@@ -275,11 +275,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Element selected — popup is likely closed (Chrome closes it on page click).
   // Persist to storage so the popup can pick it up when it reopens.
   if (message.type === MSG.ELEMENT_SELECTED) {
+    // Basic type + length guard before persisting to storage
+    const selector = typeof message.selector === "string" ? message.selector.slice(0, 500) : "";
+    if (!selector) return false;
     const payload = {
-      selector: message.selector,
-      currentValue: message.currentValue,
-      url: message.url,
-      pageTitle: message.pageTitle,
+      selector,
+      currentValue: typeof message.currentValue === "string" ? message.currentValue.slice(0, 500) : "",
+      url: typeof message.url === "string" ? message.url.slice(0, 2000) : "",
+      pageTitle: typeof message.pageTitle === "string" ? message.pageTitle.slice(0, 200) : "",
+      timestamp: Date.now(),
     };
     chrome.storage.local.set({ [PENDING_SELECTION_KEY]: payload }).then(() => {
       console.log(TAG, "selection stored, attempting to reopen popup");
@@ -293,8 +297,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }).catch((err) => {
       console.error(TAG, "failed to store pending selection:", err);
     });
-    // Fast path: forward to popup in case it's still open (rare)
-    chrome.runtime.sendMessage(message).catch(() => {});
+    // Fast path: forward sanitized payload to popup in case it's still open (rare)
+    chrome.runtime.sendMessage({ type: MSG.ELEMENT_SELECTED, ...payload }).catch(() => {});
     return false;
   }
 

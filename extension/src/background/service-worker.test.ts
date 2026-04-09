@@ -341,6 +341,7 @@ describe("ELEMENT_SELECTED handler", () => {
           currentValue: "$19.99",
           url: "https://example.com/product",
           pageTitle: "Test Product",
+          timestamp: expect.any(Number),
         },
       });
     });
@@ -372,8 +373,65 @@ describe("ELEMENT_SELECTED handler", () => {
           currentValue: "In Stock",
           url: "https://example.com",
           pageTitle: "Test",
+          timestamp: expect.any(Number),
         },
       });
     });
+  });
+
+  it("rejects ELEMENT_SELECTED with non-string or empty selector", () => {
+    const sendResponse = vi.fn();
+    // Non-string selector
+    onMessageCb(
+      { type: "FTC_ELEMENT_SELECTED", selector: 123, currentValue: "v", url: "u", pageTitle: "t" },
+      {},
+      sendResponse,
+    );
+    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
+
+    // Empty string selector
+    onMessageCb(
+      { type: "FTC_ELEMENT_SELECTED", selector: "", currentValue: "v", url: "u", pageTitle: "t" },
+      {},
+      sendResponse,
+    );
+    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it("also sends fast-path runtime.sendMessage for ELEMENT_SELECTED", () => {
+    const sendResponse = vi.fn();
+    onMessageCb(
+      { type: "FTC_ELEMENT_SELECTED", selector: "h1", currentValue: "Hi", url: "https://x.com", pageTitle: "X" },
+      {},
+      sendResponse,
+    );
+    // Fast-path forward should be called immediately (before storage resolves)
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "FTC_ELEMENT_SELECTED", selector: "h1" }),
+    );
+  });
+});
+
+// ── CANDIDATES_RESULT handler tests ─────────────────────────────
+
+describe("CANDIDATES_RESULT handler", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("forwards CANDIDATES_RESULT via runtime.sendMessage without storage", () => {
+    const sendResponse = vi.fn();
+    const payload = {
+      type: "FTC_CANDIDATES_RESULT",
+      candidates: [{ selector: ".price", text: "$9.99", score: 5 }],
+    };
+
+    const result = onMessageCb(payload, {}, sendResponse);
+
+    // Should forward to popup
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(payload);
+    // Should NOT touch storage
+    expect(chromeMock.storage.local.set).not.toHaveBeenCalled();
+    expect(result).toBe(false);
   });
 });

@@ -161,22 +161,28 @@ async function init(): Promise<void> {
 
   // Check for a pending element selection left by the service worker
   // (the popup was closed when the user clicked an element on the page).
+  // Discard selections older than 10 minutes to avoid confusing stale state.
   if (state === "authenticated") {
     const pending = await chrome.storage.local.get(PENDING_SELECTION_KEY);
     const stored = pending[PENDING_SELECTION_KEY];
     if (stored && typeof stored.selector === "string") {
+      const age = stored.timestamp ? Date.now() - stored.timestamp : Infinity;
       // Clear immediately so stale selections don't persist
       await chrome.storage.local.remove(PENDING_SELECTION_KEY);
-      console.log(TAG, "pending selection found in storage, jumping to confirm");
-      selection = {
-        selector: stored.selector,
-        currentValue: stored.currentValue || "",
-        url: stored.url || currentTabUrl,
-        pageTitle: stored.pageTitle || currentTabTitle,
-      };
-      state = "confirm";
-      render();
-      return;
+      if (age < 600_000) {
+        console.log(TAG, "pending selection found in storage, jumping to confirm");
+        selection = {
+          selector: stored.selector,
+          currentValue: typeof stored.currentValue === "string" ? stored.currentValue : "",
+          url: typeof stored.url === "string" ? stored.url : currentTabUrl,
+          pageTitle: typeof stored.pageTitle === "string" ? stored.pageTitle : currentTabTitle,
+        };
+        state = "confirm";
+        render();
+        return;
+      } else {
+        console.log(TAG, "pending selection too old (", Math.round(age / 1000), "s), discarding");
+      }
     }
   }
 
@@ -185,7 +191,11 @@ async function init(): Promise<void> {
     initRunning = false;
     if (initPending) {
       initPending = false;
-      void init();
+      // Don't re-run init if we already reached confirm — the user is
+      // looking at the confirm screen and a re-init would clobber it.
+      if (state !== "confirm") {
+        void init();
+      }
     }
   }
 }
@@ -196,11 +206,13 @@ async function init(): Promise<void> {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === MSG.ELEMENT_SELECTED) {
+    const sel = typeof message.selector === "string" ? message.selector : "";
+    if (!sel) return;
     selection = {
-      selector: message.selector,
-      currentValue: message.currentValue,
-      url: message.url,
-      pageTitle: message.pageTitle,
+      selector: sel,
+      currentValue: typeof message.currentValue === "string" ? message.currentValue : "",
+      url: typeof message.url === "string" ? message.url : currentTabUrl,
+      pageTitle: typeof message.pageTitle === "string" ? message.pageTitle : currentTabTitle,
     };
     state = "confirm";
     render();
@@ -234,7 +246,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     console.log(TAG, "token appeared in storage (direct write), re-initialising...");
     void init();
   }
-  if (changes[PENDING_SELECTION_KEY]?.newValue) {
+  if (changes[PENDING_SELECTION_KEY]?.newValue && state !== "confirm") {
     console.log(TAG, "pending selection appeared in storage, re-initialising...");
     void init();
   }
@@ -553,7 +565,8 @@ function renderConfirm(): void {
       </div>
     </div>
     <div class="btn-row">
-      <button class="btn btn-secondary" id="pick-again-btn">Pick again</button>
+      <button class="btn btn-secondary" id="pick-again-btn"
+        ${selection.url && selection.url !== currentTabUrl ? "disabled title=\"Switch to the original tab to pick again\"" : ""}>Pick again</button>
       <button class="btn btn-primary" id="create-btn">Create monitor</button>
     </div>
   `;
