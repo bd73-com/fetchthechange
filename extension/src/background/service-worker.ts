@@ -1,4 +1,4 @@
-import { BASE_URL, MSG, AUTH_STARTED_KEY, AUTH_TAB_ID_KEY } from "../shared/constants";
+import { BASE_URL, MSG, AUTH_STARTED_KEY, AUTH_TAB_ID_KEY, PENDING_SELECTION_KEY } from "../shared/constants";
 import { setToken } from "../auth/token";
 
 const TAG = "[FTC:SW]";
@@ -264,11 +264,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // Relay element selection and candidate results from content script to popup
-  if (message.type === MSG.ELEMENT_SELECTED || message.type === MSG.CANDIDATES_RESULT) {
+  // Relay candidate results from content script to popup (popup is still open)
+  if (message.type === MSG.CANDIDATES_RESULT) {
     chrome.runtime.sendMessage(message).catch(() => {
       // Popup may not be open; ignore
     });
+    return false;
+  }
+
+  // Element selected — popup is likely closed (Chrome closes it on page click).
+  // Persist to storage so the popup can pick it up when it reopens.
+  if (message.type === MSG.ELEMENT_SELECTED) {
+    const payload = {
+      selector: message.selector,
+      currentValue: message.currentValue,
+      url: message.url,
+      pageTitle: message.pageTitle,
+    };
+    chrome.storage.local.set({ [PENDING_SELECTION_KEY]: payload }).then(() => {
+      console.log(TAG, "selection stored, attempting to reopen popup");
+      // Best-effort: reopen the popup so the user sees the confirm screen.
+      // chrome.action.openPopup() throws in non-interactive contexts and on Chrome < 127.
+      try {
+        chrome.action.openPopup().catch(() => {});
+      } catch {
+        // Not available — the user can click the extension icon manually
+      }
+    }).catch((err) => {
+      console.error(TAG, "failed to store pending selection:", err);
+    });
+    // Fast path: forward to popup in case it's still open (rare)
+    chrome.runtime.sendMessage(message).catch(() => {});
     return false;
   }
 

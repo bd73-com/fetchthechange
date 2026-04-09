@@ -6,6 +6,7 @@ export const TOKEN_STORAGE_KEY = "ftc_extension_token";
 export const TOKEN_EXPIRY_KEY = "ftc_extension_token_expiry";
 export const AUTH_STARTED_KEY = "ftc_auth_started_at";
 export const AUTH_TAB_ID_KEY = "ftc_auth_tab_id";
+export const PENDING_SELECTION_KEY = "ftc_pending_selection";
 
 export const MSG = {
   START_PICKER: "FTC_START_PICKER",

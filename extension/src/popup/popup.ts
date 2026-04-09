@@ -1,4 +1,4 @@
-import { BASE_URL, MSG, AUTH_STARTED_KEY, TOKEN_STORAGE_KEY } from "../shared/constants";
+import { BASE_URL, MSG, AUTH_STARTED_KEY, TOKEN_STORAGE_KEY, PENDING_SELECTION_KEY } from "../shared/constants";
 import { getToken, clearToken, isTokenValid } from "../auth/token";
 import { escapeAttr, sanitizeTier } from "./utils";
 
@@ -159,6 +159,27 @@ async function init(): Promise<void> {
     }
   }
 
+  // Check for a pending element selection left by the service worker
+  // (the popup was closed when the user clicked an element on the page).
+  if (state === "authenticated") {
+    const pending = await chrome.storage.local.get(PENDING_SELECTION_KEY);
+    const stored = pending[PENDING_SELECTION_KEY];
+    if (stored && typeof stored.selector === "string") {
+      // Clear immediately so stale selections don't persist
+      await chrome.storage.local.remove(PENDING_SELECTION_KEY);
+      console.log(TAG, "pending selection found in storage, jumping to confirm");
+      selection = {
+        selector: stored.selector,
+        currentValue: stored.currentValue || "",
+        url: stored.url || currentTabUrl,
+        pageTitle: stored.pageTitle || currentTabTitle,
+      };
+      state = "confirm";
+      render();
+      return;
+    }
+  }
+
   render();
   } finally {
     initRunning = false;
@@ -211,6 +232,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes[TOKEN_STORAGE_KEY]?.newValue) {
     console.log(TAG, "token appeared in storage (direct write), re-initialising...");
+    void init();
+  }
+  if (changes[PENDING_SELECTION_KEY]?.newValue) {
+    console.log(TAG, "pending selection appeared in storage, re-initialising...");
     void init();
   }
 });
