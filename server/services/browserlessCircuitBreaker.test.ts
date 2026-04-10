@@ -292,4 +292,61 @@ describe("BrowserlessCircuitBreaker", () => {
     cb.recordSuccess();
     expect(callback).not.toHaveBeenCalled();
   });
+
+  describe("cancelProbe", () => {
+    it("restores probe slot in half_open state", () => {
+      for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+      vi.advanceTimersByTime(2 * 60 * 1000);
+      expect(cb.getState()).toBe("half_open");
+
+      // Consume one probe slot
+      expect(cb.isAvailable()).toBe(true);  // probes: allowed=2, inFlight=1
+
+      // Cancel the probe — slot should be returned
+      cb.cancelProbe();
+
+      // All 3 probes should still be available (the canceled one was returned)
+      expect(cb.isAvailable()).toBe(true);  // probe 1
+      expect(cb.isAvailable()).toBe(true);  // probe 2
+      expect(cb.isAvailable()).toBe(true);  // probe 3
+      expect(cb.isAvailable()).toBe(false); // exhausted
+    });
+
+    it("does not reopen circuit when all probes are canceled", () => {
+      for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+      vi.advanceTimersByTime(2 * 60 * 1000);
+      expect(cb.getState()).toBe("half_open");
+
+      // Consume and cancel all 3 probes
+      cb.isAvailable(); cb.cancelProbe();
+      cb.isAvailable(); cb.cancelProbe();
+      cb.isAvailable(); cb.cancelProbe();
+
+      // Circuit should still be half_open (not reopened), probes available
+      expect(cb.getState()).toBe("half_open");
+      expect(cb.isAvailable()).toBe(true);
+    });
+
+    it("is a no-op in closed state", () => {
+      expect(cb.getState()).toBe("closed");
+      cb.cancelProbe();
+      expect(cb.getState()).toBe("closed");
+      expect(cb.isAvailable()).toBe(true);
+    });
+
+    it("is a no-op when no probes are in flight", () => {
+      for (let i = 0; i < 3; i++) cb.recordInfraFailure();
+      vi.advanceTimersByTime(2 * 60 * 1000);
+      expect(cb.getState()).toBe("half_open");
+
+      // No probes consumed yet — cancelProbe should be harmless
+      cb.cancelProbe();
+      expect(cb.getState()).toBe("half_open");
+      // All 3 probes still available
+      expect(cb.isAvailable()).toBe(true);
+      expect(cb.isAvailable()).toBe(true);
+      expect(cb.isAvailable()).toBe(true);
+      expect(cb.isAvailable()).toBe(false);
+    });
+  });
 });

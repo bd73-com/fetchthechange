@@ -43,13 +43,13 @@ import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureT
 // URL VALIDATION - SSRF PROTECTION (shared module)
 // ------------------------------------------------------------------
 import { isPrivateUrl, ssrfSafeFetch } from './utils/ssrf';
-import { checkFrequencyTier } from './services/monitorValidation';
+import { checkFrequencyTier, safeHostname } from './services/monitorValidation';
 
 // ------------------------------------------------------------------
 // 1. CHECK MONITOR FUNCTION
 // ------------------------------------------------------------------
 async function checkMonitor(monitor: any) {
-  console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
+  console.log(`Checking monitor ${monitor.id}: ${safeHostname(monitor.url)}`);
   return scraperCheckMonitor(monitor);
 }
 

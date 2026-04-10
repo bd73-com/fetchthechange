@@ -18,7 +18,7 @@ import { checkMonitor as scraperCheckMonitor } from "../services/scraper";
 import { seedDefaultEmailChannel } from "../services/notification";
 
 async function checkMonitor(monitor: any) {
-  console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
+  console.log(`Checking monitor ${monitor.id}: ${safeHostname(monitor.url)}`);
   return scraperCheckMonitor(monitor);
 }
 

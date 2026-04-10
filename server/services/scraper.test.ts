@@ -47,6 +47,7 @@ vi.mock("./browserlessCircuitBreaker", () => ({
     isAvailable: vi.fn().mockReturnValue(true),
     recordSuccess: vi.fn(),
     recordInfraFailure: vi.fn(),
+    cancelProbe: vi.fn(),
     getState: vi.fn().mockReturnValue("closed"),
     reset: vi.fn(),
   },
@@ -3960,6 +3961,36 @@ describe("self-healing recovery", () => {
     expect(result.status).toBe("selector_missing");
     expect(result.currentValue).toBe("$50.00");
     expect(result.error).toBeNull();
+  });
+
+  it("calls cancelProbe when cap check denies after isAvailable returned true", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    // Circuit breaker allows (isAvailable returns true, simulating half_open probe)
+    const cbMock = browserlessCircuitBreaker as unknown as {
+      isAvailable: ReturnType<typeof vi.fn>;
+      cancelProbe: ReturnType<typeof vi.fn>;
+      recordSuccess: ReturnType<typeof vi.fn>;
+      recordInfraFailure: ReturnType<typeof vi.fn>;
+    };
+    cbMock.isAvailable.mockReturnValue(true);
+
+    // But cap check denies the Browserless call
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ allowed: false, reason: "free_tier_cap" });
+
+    const monitor = makeMonitor({ selector: ".missing", currentValue: null });
+    await runWithTimers(monitor);
+
+    // cancelProbe should be called exactly once to release the probe slot
+    expect(cbMock.cancelProbe).toHaveBeenCalledTimes(1);
+    // recordSuccess and recordInfraFailure should NOT be called (no Browserless call was made)
+    expect(cbMock.recordSuccess).not.toHaveBeenCalled();
+    expect(cbMock.recordInfraFailure).not.toHaveBeenCalled();
   });
 });
 
