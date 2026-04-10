@@ -88,27 +88,40 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install tsx
-        run: npm install --no-save tsx@4.21.0
-
       - name: Generate changelog
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx tsx script/sync-changelog.ts
+        run: npx --yes tsx@4.21.0 script/sync-changelog.ts
 
       - name: Create changelog PR
         id: cpr
+        continue-on-error: true
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          add-paths: client/src/data/changelog.ts
           commit-message: "chore: sync changelog from GitHub releases"
           title: "chore: sync changelog from GitHub releases"
           body: "Auto-generated changelog update after release publication."
           branch: chore/sync-changelog
           delete-branch: true
 
+      - name: Direct commit fallback
+        if: steps.cpr.outcome == 'failure'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add client/src/data/changelog.ts
+          if git diff --cached --quiet; then
+            echo "Changelog already up to date."
+          else
+            git commit -m "chore: sync changelog from GitHub releases"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
       - name: Enable auto-merge
-        if: steps.cpr.outputs.pull-request-number
+        if: steps.cpr.outcome == 'success' && steps.cpr.outputs.pull-request-number
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}
