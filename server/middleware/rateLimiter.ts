@@ -45,17 +45,27 @@ function getOrCreateLimiter(key: string, config: TierConfig, message: string, ti
   return limiters.get(cacheKey)!;
 }
 
+/**
+ * Extracts userId from either session auth (req.user.claims.sub) or
+ * extension JWT auth (req.extensionUser.id).
+ */
+function resolveUserId(req: any): string | null {
+  if (req.extensionUser?.id) return req.extensionUser.id;
+  if (req.user?.claims?.sub) return req.user.claims.sub;
+  return null;
+}
+
 function createTieredRateLimiter(name: string, config: TieredRateLimiterConfig) {
   return async (req: any, res: Response, next: NextFunction) => {
-    if (!req.user) {
+    const userId = resolveUserId(req);
+    if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const userId = req.user.claims.sub;
     const tier = await getUserTier(userId);
     const tierConfig = config[tier];
 
-    const keyGen = config.keyGenerator || ((r: any) => r.user.claims.sub);
+    const keyGen = config.keyGenerator || ((r: any) => resolveUserId(r) || "unknown");
     const limiter = getOrCreateLimiter(name, tierConfig, config.message, tier, keyGen);
 
     return limiter(req, res, next);
@@ -82,7 +92,7 @@ export const checkMonitorRateLimiter = createTieredRateLimiter("checkMonitor", {
   power: { max: 500, windowMs: 60 * 60 * 1000 },
   message: "Free tier: You can check each monitor once per 24 hours. Upgrade to Pro for more frequent checks.",
   keyGenerator: (req: any) => {
-    const userId = req.user.claims.sub;
+    const userId = resolveUserId(req) || "unknown";
     const monitorId = req.params.id;
     return `${userId}:${monitorId}`;
   }
