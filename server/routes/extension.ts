@@ -47,12 +47,7 @@ router.post("/token", isAuthenticated, async (req: any, res) => {
   } catch (error: any) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error("[Extension] Failed to issue token:", detail);
-    // Surface config errors to help operators diagnose; redact everything
-    // else to avoid leaking DB connection strings or internal paths.
-    const safeMsg = detail.includes("EXTENSION_JWT_SECRET")
-      ? "Extension signing key not configured. Contact the site administrator."
-      : "Failed to generate extension token";
-    res.status(500).json({ message: safeMsg });
+    res.status(500).json({ message: "Failed to generate extension token", code: "TOKEN_GENERATION_FAILED" });
   }
 });
 
@@ -76,9 +71,16 @@ router.post("/monitors", extensionAuth, createMonitorRateLimiter, async (req: an
   try {
     const { id: userId, tier: tokenTier } = req.extensionUser!;
 
-    // Fetch fresh user data for tier (may have changed since token was issued)
-    const user = await authStorage.getUser(userId);
-    const tier = (user?.tier || tokenTier || "free") as UserTier;
+    // Fetch fresh user data for tier (may have changed since token was issued).
+    // Non-fatal: fall back to the JWT-embedded tier if the DB is slow/timing out.
+    let tier: UserTier = (tokenTier || "free") as UserTier;
+    try {
+      const user = await authStorage.getUser(userId);
+      tier = (user?.tier || tokenTier || "free") as UserTier;
+    } catch (dbErr) {
+      console.warn("[Extension] DB lookup failed for monitor creation, using token tier:",
+        dbErr instanceof Error ? dbErr.message : String(dbErr));
+    }
 
     // Tier limit check
     const limitErr = await checkMonitorLimit(userId, tier);

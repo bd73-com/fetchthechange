@@ -4,8 +4,14 @@ import { authStorage } from "../replit_integrations/auth/storage";
 import { type UserTier } from "@shared/models/auth";
 
 async function getUserTier(userId: string): Promise<UserTier> {
-  const user = await authStorage.getUser(userId);
-  return (user?.tier || "free") as UserTier;
+  try {
+    const user = await authStorage.getUser(userId);
+    return (user?.tier || "free") as UserTier;
+  } catch (err) {
+    console.warn("[RateLimiter] DB lookup failed, defaulting to free tier:",
+      err instanceof Error ? err.message : String(err));
+    return "free";
+  }
 }
 
 interface TierConfig {
@@ -45,17 +51,28 @@ function getOrCreateLimiter(key: string, config: TierConfig, message: string, ti
   return limiters.get(cacheKey)!;
 }
 
+/**
+ * Extracts userId from either session auth (req.user.claims.sub) or
+ * extension JWT auth (req.extensionUser.id).
+ */
+function resolveUserId(req: any): string | null {
+  if (req.extensionUser?.id) return req.extensionUser.id;
+  if (req.user?.claims?.sub) return req.user.claims.sub;
+  return null;
+}
+
 function createTieredRateLimiter(name: string, config: TieredRateLimiterConfig) {
   return async (req: any, res: Response, next: NextFunction) => {
-    if (!req.user) {
+    const userId = resolveUserId(req);
+    if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const userId = req.user.claims.sub;
     const tier = await getUserTier(userId);
     const tierConfig = config[tier];
 
-    const keyGen = config.keyGenerator || ((r: any) => r.user.claims.sub);
+    // Use userId (already validated above) as fallback to avoid a shared "unknown" bucket
+    const keyGen = config.keyGenerator || ((r: any) => resolveUserId(r) || `anon:${r.ip}`);
     const limiter = getOrCreateLimiter(name, tierConfig, config.message, tier, keyGen);
 
     return limiter(req, res, next);
@@ -82,7 +99,7 @@ export const checkMonitorRateLimiter = createTieredRateLimiter("checkMonitor", {
   power: { max: 500, windowMs: 60 * 60 * 1000 },
   message: "Free tier: You can check each monitor once per 24 hours. Upgrade to Pro for more frequent checks.",
   keyGenerator: (req: any) => {
-    const userId = req.user.claims.sub;
+    const userId = resolveUserId(req) || `anon:${req.ip}`;
     const monitorId = req.params.id;
     return `${userId}:${monitorId}`;
   }
