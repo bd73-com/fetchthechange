@@ -4,8 +4,14 @@ import { authStorage } from "../replit_integrations/auth/storage";
 import { type UserTier } from "@shared/models/auth";
 
 async function getUserTier(userId: string): Promise<UserTier> {
-  const user = await authStorage.getUser(userId);
-  return (user?.tier || "free") as UserTier;
+  try {
+    const user = await authStorage.getUser(userId);
+    return (user?.tier || "free") as UserTier;
+  } catch (err) {
+    console.warn("[RateLimiter] DB lookup failed, defaulting to free tier:",
+      err instanceof Error ? err.message : String(err));
+    return "free";
+  }
 }
 
 interface TierConfig {
