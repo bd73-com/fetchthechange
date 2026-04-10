@@ -71,7 +71,8 @@ function createTieredRateLimiter(name: string, config: TieredRateLimiterConfig) 
     const tier = await getUserTier(userId);
     const tierConfig = config[tier];
 
-    const keyGen = config.keyGenerator || ((r: any) => resolveUserId(r) || "unknown");
+    // Use userId (already validated above) as fallback to avoid a shared "unknown" bucket
+    const keyGen = config.keyGenerator || ((r: any) => resolveUserId(r) || `anon:${r.ip}`);
     const limiter = getOrCreateLimiter(name, tierConfig, config.message, tier, keyGen);
 
     return limiter(req, res, next);
@@ -98,7 +99,7 @@ export const checkMonitorRateLimiter = createTieredRateLimiter("checkMonitor", {
   power: { max: 500, windowMs: 60 * 60 * 1000 },
   message: "Free tier: You can check each monitor once per 24 hours. Upgrade to Pro for more frequent checks.",
   keyGenerator: (req: any) => {
-    const userId = resolveUserId(req) || "unknown";
+    const userId = resolveUserId(req) || `anon:${req.ip}`;
     const monitorId = req.params.id;
     return `${userId}:${monitorId}`;
   }
