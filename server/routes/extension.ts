@@ -75,17 +75,14 @@ router.get("/verify", extensionAuth, async (req: any, res) => {
 router.post("/monitors", extensionAuth, createMonitorRateLimiter, async (req: any, res) => {
   try {
     const { id: userId, tier: tokenTier } = req.extensionUser!;
-    console.log(`[Extension] POST /monitors — userId=${userId}, tokenTier=${tokenTier}, body keys=${Object.keys(req.body || {}).join(",")}`);
 
     // Fetch fresh user data for tier (may have changed since token was issued)
     const user = await authStorage.getUser(userId);
     const tier = (user?.tier || tokenTier || "free") as UserTier;
-    console.log(`[Extension] POST /monitors — resolved tier=${tier}`);
 
     // Tier limit check
     const limitErr = await checkMonitorLimit(userId, tier);
     if (limitErr) {
-      console.log(`[Extension] POST /monitors — tier limit reached: ${limitErr.code}`);
       return res.status(limitErr.status).json({
         message: limitErr.error,
         code: limitErr.code,
@@ -94,7 +91,6 @@ router.post("/monitors", extensionAuth, createMonitorRateLimiter, async (req: an
 
     // Validate input
     const input = api.monitors.create.input.parse(req.body);
-    console.log(`[Extension] POST /monitors — input parsed: url=${safeHostname(input.url)}, selector=${(input.selector || "").slice(0, 80)}, freq=${input.frequency}`);
 
     // Frequency tier check
     const freqErr = checkFrequencyTier(input.frequency, tier);
@@ -108,11 +104,9 @@ router.post("/monitors", extensionAuth, createMonitorRateLimiter, async (req: an
       if (validationErr.code === "SSRF_BLOCKED") {
         console.warn(`[Extension] SSRF blocked for userId=${userId}, hostname=${safeHostname(input.url)}`);
       }
-      console.log(`[Extension] POST /monitors — validation error: ${validationErr.code}`);
       return res.status(validationErr.status).json({ message: validationErr.error, code: validationErr.code });
     }
 
-    console.log(`[Extension] POST /monitors — inserting into DB...`);
     const monitor = await storage.createMonitor({
       ...input,
       userId,
@@ -129,7 +123,6 @@ router.post("/monitors", extensionAuth, createMonitorRateLimiter, async (req: an
     res.status(201).json(monitor);
   } catch (error: any) {
     if (error.name === "ZodError") {
-      console.warn("[Extension] POST /monitors — ZodError:", error.errors);
       return res.status(400).json({ message: "Invalid input", errors: error.errors });
     }
     console.error("[Extension] Monitor creation error:", error);
