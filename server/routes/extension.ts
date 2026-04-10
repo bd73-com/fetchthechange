@@ -47,7 +47,7 @@ router.post("/token", isAuthenticated, async (req: any, res) => {
   } catch (error: any) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error("[Extension] Failed to issue token:", detail);
-    res.status(500).json({ message: "Failed to generate extension token" });
+    res.status(500).json({ message: "Failed to generate extension token", code: "TOKEN_GENERATION_FAILED" });
   }
 });
 
