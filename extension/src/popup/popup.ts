@@ -528,8 +528,6 @@ function renderPicking(): void {
 function renderConfirm(): void {
   if (!selection) return;
 
-  const tier = userInfo?.tier || "free";
-  const hourlyDisabled = tier === "free";
   const defaultName = (selection.pageTitle || "").slice(0, 100);
 
   content.innerHTML = `
@@ -548,19 +546,6 @@ function renderConfirm(): void {
     <div class="form-group">
       <label class="form-label">Monitor name</label>
       <input type="text" class="form-input" id="monitor-name" value="${escapeAttr(defaultName)}" maxlength="100">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Check frequency</label>
-      <div class="radio-group">
-        <label class="radio-label">
-          <input type="radio" name="frequency" value="daily" checked> Daily
-        </label>
-        <label class="radio-label ${hourlyDisabled ? "disabled" : ""}">
-          <input type="radio" name="frequency" value="hourly" ${hourlyDisabled ? "disabled" : ""}>
-          Hourly
-          ${hourlyDisabled ? '<span class="tooltip-text">(Pro+)</span>' : ""}
-        </label>
-      </div>
     </div>
     <div class="btn-row">
       <button class="btn btn-secondary" id="pick-again-btn"

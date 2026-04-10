@@ -276,7 +276,7 @@ export function CreateMonitorDialog({ initialValues, externalOpen, onExternalOpe
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setOpen(false)}
+                onClick={() => handleOpenChange(false)}
                 disabled={isPending}
               >
                 Cancel
