@@ -464,6 +464,19 @@ function renderAuthenticated(): void {
 
   // Pick element button
   document.getElementById("pick-btn")?.addEventListener("click", () => {
+    if (!currentTabUrl.startsWith("http://") && !currentTabUrl.startsWith("https://")) {
+      // Show inline warning without leaving authenticated state — the global
+      // "error" state renders "Couldn't create monitor" which is misleading here.
+      const pickBtn = document.getElementById("pick-btn");
+      const existing = document.querySelector(".ftc-picker-warning");
+      if (existing) existing.remove();
+      const warning = document.createElement("div");
+      warning.className = "ftc-picker-warning";
+      warning.style.cssText = "color: #f59e0b; font-size: 13px; margin-top: 8px; padding: 8px; border-radius: 6px; background: rgba(245,158,11,0.1);";
+      warning.textContent = "The picker only works on web pages (http/https). Navigate to a website first.";
+      pickBtn?.after(warning);
+      return;
+    }
     chrome.runtime.sendMessage({ type: MSG.START_PICKER, tabId: currentTabId });
     state = "picking";
     render();

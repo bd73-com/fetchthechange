@@ -138,6 +138,7 @@ interface Candidate {
 
 function findCandidates(): Candidate[] {
   const scored = new Map<Element, number>();
+  const elementBonusApplied = new Set<Element>();
 
   const priceRegex = /[$\u20AC\u00A3][\d,]+\.?\d*/;
   const currencyRegex = /\d+(\.\d+)?\s*(USD|EUR|GBP|CAD|AUD)/i;
@@ -171,29 +172,35 @@ function findCandidates(): Candidate[] {
 
     let score = scored.get(el) || 0;
 
+    // Text-node-level bonuses (applied per text node)
     if (priceRegex.test(text) || currencyRegex.test(text)) score += 3;
     if (stockRegex.test(text)) score += 2;
 
-    const classList = typeof el.className === "string" ? el.className : "";
-    if (classRegex.test(classList)) score += 2;
+    // Element-level bonuses (applied once per element)
+    if (!elementBonusApplied.has(el)) {
+      elementBonusApplied.add(el);
 
-    for (const attr of Array.from(el.attributes)) {
-      if (attr.name.startsWith("data-") && dataAttrRegex.test(attr.name)) {
-        score += 2;
-        break;
+      const classList = typeof el.className === "string" ? el.className : "";
+      if (classRegex.test(classList)) score += 2;
+
+      for (const attr of Array.from(el.attributes)) {
+        if (attr.name.startsWith("data-") && dataAttrRegex.test(attr.name)) {
+          score += 2;
+          break;
+        }
       }
-    }
 
-    if (el.id && idRegex.test(el.id)) score += 1;
+      if (el.id && idRegex.test(el.id)) score += 1;
 
-    // Prefer shallower elements
-    let depth = 0;
-    let parent = el.parentElement;
-    while (parent && parent !== document.body) {
-      depth++;
-      parent = parent.parentElement;
+      // Prefer shallower elements
+      let depth = 0;
+      let parent = el.parentElement;
+      while (parent && parent !== document.body) {
+        depth++;
+        parent = parent.parentElement;
+      }
+      score -= Math.floor(depth / 5);
     }
-    score -= Math.floor(depth / 5);
 
     if (score > (scored.get(el) || 0)) {
       scored.set(el, score);
