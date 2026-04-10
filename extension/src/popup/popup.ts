@@ -464,6 +464,12 @@ function renderAuthenticated(): void {
 
   // Pick element button
   document.getElementById("pick-btn")?.addEventListener("click", () => {
+    if (!currentTabUrl.startsWith("http://") && !currentTabUrl.startsWith("https://")) {
+      errorMessage = "The picker only works on web pages (http/https). Try navigating to a website first.";
+      state = "error";
+      render();
+      return;
+    }
     chrome.runtime.sendMessage({ type: MSG.START_PICKER, tabId: currentTabId });
     state = "picking";
     render();

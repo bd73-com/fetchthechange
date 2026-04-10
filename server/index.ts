@@ -415,6 +415,9 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     // Wait for in-flight monitor checks to finish (up to 5s)
     const { waitForActiveChecks } = await import("./services/scheduler");
     await waitForActiveChecks(5000);
+    // Clear pending jittered timeouts so no new checks start during HTTP close
+    console.log("Stopping scheduler...");
+    stopScheduler();
     // Stop accepting new connections and wait for in-flight requests to finish
     console.log("Closing HTTP server...");
     await new Promise<void>((resolve) => {
@@ -432,9 +435,8 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         }
       }, 9_000).unref();
     });
-    // Stop cron jobs and intervals before closing DB pool
-    console.log("Stopping scheduler and timers...");
-    stopScheduler();
+    // Stop route timers before closing DB pool
+    console.log("Stopping route timers...");
     stopRouteTimers();
     // Drain warm browsers
     let cleanupFailed = false;
