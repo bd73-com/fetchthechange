@@ -579,8 +579,11 @@ function renderConfirm(): void {
   document.getElementById("create-btn")?.addEventListener("click", createMonitor);
 }
 
+let creating = false;
+
 async function createMonitor(): Promise<void> {
-  if (!selection) return;
+  if (!selection || creating) return;
+  creating = true;
 
   const nameInput = document.getElementById("monitor-name") as HTMLInputElement;
   const name = nameInput?.value.trim() || "Untitled monitor";
@@ -592,7 +595,13 @@ async function createMonitor(): Promise<void> {
   params.set("selector", selection.selector);
   if (name && name !== "Untitled monitor") params.set("name", name);
 
-  chrome.tabs.create({ url: `${BASE_URL}/dashboard?${params.toString()}` });
+  try {
+    await chrome.tabs.create({ url: `${BASE_URL}/dashboard?${params.toString()}` });
+    window.close();
+  } catch (err) {
+    console.error(TAG, "failed to open dashboard tab:", err);
+    creating = false;
+  }
 }
 
 

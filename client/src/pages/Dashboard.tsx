@@ -61,9 +61,11 @@ export default function Dashboard() {
     }
   }, [searchString, toast]);
 
-  // Auto-open Create Monitor dialog when URL params are present (e.g. from extension)
+  // Auto-open Create Monitor dialog when URL params are present (e.g. from extension).
+  // Skip when checkout params are present to avoid conflicting with Stripe redirect.
   const prefillParams = useMemo(() => {
     const params = new URLSearchParams(searchString);
+    if (params.has("checkout")) return null;
     const url = params.get("url");
     if (!url) return null;
     return {
