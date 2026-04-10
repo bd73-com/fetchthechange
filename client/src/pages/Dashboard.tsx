@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { LayoutDashboard, RefreshCw, Loader2, Sparkles, X, Megaphone } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_LIMITS, TAG_LIMITS, type UserTier } from "@shared/models/auth";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSearch } from "wouter";
 import { useTags } from "@/hooks/use-tags";
 import { TagManager } from "@/components/TagManager";
@@ -43,7 +43,7 @@ export default function Dashboard() {
   useEffect(() => {
     const params = new URLSearchParams(searchString);
     const checkoutStatus = params.get("checkout");
-    
+
     if (checkoutStatus === "success") {
       toast({
         title: "Subscription activated!",
@@ -60,6 +60,28 @@ export default function Dashboard() {
       window.history.replaceState({}, "", "/dashboard");
     }
   }, [searchString, toast]);
+
+  // Auto-open Create Monitor dialog when URL params are present (e.g. from extension)
+  const prefillParams = useMemo(() => {
+    const params = new URLSearchParams(searchString);
+    const url = params.get("url");
+    if (!url) return null;
+    return {
+      url,
+      selector: params.get("selector") || undefined,
+      name: params.get("name") || undefined,
+    };
+  }, [searchString]);
+
+  const [prefillDialogOpen, setPrefillDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (prefillParams) {
+      setPrefillDialogOpen(true);
+      // Clear query params so reopening doesn't re-trigger
+      window.history.replaceState({}, "", "/dashboard");
+    }
+  }, [prefillParams]);
 
   const handleRefresh = async () => {
     console.log("Refreshing monitors...");
@@ -200,7 +222,11 @@ export default function Dashboard() {
                  <RefreshCw className="h-4 w-4" />
                )}
             </Button>
-            <CreateMonitorDialog />
+            <CreateMonitorDialog
+              initialValues={prefillParams ?? undefined}
+              externalOpen={prefillDialogOpen ? true : undefined}
+              onExternalOpenChange={(v) => { if (!v) setPrefillDialogOpen(false); }}
+            />
           </div>
         </div>
 
@@ -307,7 +333,11 @@ export default function Dashboard() {
                 <p className="text-muted-foreground max-w-sm mx-auto mb-6">
                   Start tracking web pages for changes by creating your first monitor. We'll notify you when content updates.
                 </p>
-                <CreateMonitorDialog />
+                <CreateMonitorDialog
+                  initialValues={prefillParams ?? undefined}
+                  externalOpen={prefillDialogOpen ? true : undefined}
+                  onExternalOpenChange={(v) => { if (!v) setPrefillDialogOpen(false); }}
+                />
               </div>
             );
           }

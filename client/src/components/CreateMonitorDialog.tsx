@@ -39,8 +39,19 @@ import { useAuth } from "@/hooks/use-auth";
 import { TAG_ASSIGNMENT_LIMITS, FREQUENCY_TIERS, type UserTier } from "@shared/models/auth";
 import { useToast } from "@/hooks/use-toast";
 
-export function CreateMonitorDialog() {
-  const [open, setOpen] = useState(false);
+interface CreateMonitorDialogProps {
+  initialValues?: { url?: string; selector?: string; name?: string };
+  externalOpen?: boolean;
+  onExternalOpenChange?: (open: boolean) => void;
+}
+
+export function CreateMonitorDialog({ initialValues, externalOpen, onExternalOpenChange }: CreateMonitorDialogProps = {}) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = externalOpen ?? internalOpen;
+  const setOpen = (v: boolean) => {
+    setInternalOpen(v);
+    onExternalOpenChange?.(v);
+  };
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [botWarning, setBotWarning] = useState<string | null>(null);
 
@@ -60,9 +71,9 @@ export function CreateMonitorDialog() {
   const form = useForm<InsertMonitor>({
     resolver: zodResolver(insertMonitorSchema),
     defaultValues: {
-      name: "",
-      url: "",
-      selector: "",
+      name: initialValues?.name || "",
+      url: initialValues?.url || "",
+      selector: initialValues?.selector || "",
       frequency: "daily",
       emailEnabled: true,
       active: true,
