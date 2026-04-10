@@ -40,42 +40,32 @@ describe("createCorsOriginChecker", () => {
     });
   });
 
-  describe("chrome extension restriction", () => {
-    it("rejects any chrome-extension origin when CHROME_EXTENSION_ID is not set", async () => {
+  describe("chrome extension origins", () => {
+    it("allows any chrome-extension origin (JWT auth handles security)", async () => {
       delete process.env.CHROME_EXTENSION_ID;
       const checker = createCorsOriginChecker(allowedOrigins, false);
       const result = await callChecker(checker, "chrome-extension://abcdef1234567890");
-      expect(result.err).toBeInstanceOf(Error);
-    });
-
-    it("allows the exact configured chrome-extension origin", async () => {
-      process.env.CHROME_EXTENSION_ID = "abcdef1234567890";
-      const checker = createCorsOriginChecker(allowedOrigins, false);
-      const result = await callChecker(checker, "chrome-extension://abcdef1234567890");
       expect(result.err).toBeNull();
       expect(result.allow).toBe(true);
     });
 
-    it("rejects a different chrome-extension ID even when env var is set", async () => {
-      process.env.CHROME_EXTENSION_ID = "abcdef1234567890";
+    it("allows a different chrome-extension ID", async () => {
       const checker = createCorsOriginChecker(allowedOrigins, false);
       const result = await callChecker(checker, "chrome-extension://differentextensionid");
-      expect(result.err).toBeInstanceOf(Error);
-    });
-
-    it("rejects chrome-extension with empty CHROME_EXTENSION_ID", async () => {
-      process.env.CHROME_EXTENSION_ID = "";
-      const checker = createCorsOriginChecker(allowedOrigins, false);
-      const result = await callChecker(checker, "chrome-extension://anything");
-      expect(result.err).toBeInstanceOf(Error);
-    });
-
-    it("trims whitespace from CHROME_EXTENSION_ID", async () => {
-      process.env.CHROME_EXTENSION_ID = "  abcdef1234567890  ";
-      const checker = createCorsOriginChecker(allowedOrigins, false);
-      const result = await callChecker(checker, "chrome-extension://abcdef1234567890");
       expect(result.err).toBeNull();
       expect(result.allow).toBe(true);
+    });
+
+    it("rejects non-chrome-extension schemes that look similar", async () => {
+      const checker = createCorsOriginChecker(allowedOrigins, false);
+      const result = await callChecker(checker, "moz-extension://abcdef1234567890");
+      expect(result.err).toBeInstanceOf(Error);
+    });
+
+    it("rejects origins that contain chrome-extension as a substring", async () => {
+      const checker = createCorsOriginChecker(allowedOrigins, false);
+      const result = await callChecker(checker, "https://chrome-extension.evil.com");
+      expect(result.err).toBeInstanceOf(Error);
     });
   });
 

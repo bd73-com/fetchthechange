@@ -33,10 +33,7 @@ type PopupState =
   | "auth_failed"
   | "authenticated"
   | "picking"
-  | "confirm"
-  | "creating"
-  | "success"
-  | "error";
+  | "confirm";
 
 let state: PopupState = "unauthenticated";
 let userInfo: UserInfo | null = null;
@@ -45,9 +42,6 @@ let candidates: Candidate[] = [];
 let currentTabUrl = "";
 let currentTabTitle = "";
 let currentTabId = 0;
-let errorMessage = "";
-let createdMonitorName = "";
-let createdMonitorValue = "";
 let dropdownOpen = false;
 
 const content = document.getElementById("content")!;
@@ -277,15 +271,6 @@ function render(): void {
       break;
     case "confirm":
       renderConfirm();
-      break;
-    case "creating":
-      renderCreating();
-      break;
-    case "success":
-      renderSuccess();
-      break;
-    case "error":
-      renderError();
       break;
   }
 }
@@ -543,8 +528,6 @@ function renderPicking(): void {
 function renderConfirm(): void {
   if (!selection) return;
 
-  const tier = userInfo?.tier || "free";
-  const hourlyDisabled = tier === "free";
   const defaultName = (selection.pageTitle || "").slice(0, 100);
 
   content.innerHTML = `
@@ -564,19 +547,6 @@ function renderConfirm(): void {
       <label class="form-label">Monitor name</label>
       <input type="text" class="form-input" id="monitor-name" value="${escapeAttr(defaultName)}" maxlength="100">
     </div>
-    <div class="form-group">
-      <label class="form-label">Check frequency</label>
-      <div class="radio-group">
-        <label class="radio-label">
-          <input type="radio" name="frequency" value="daily" checked> Daily
-        </label>
-        <label class="radio-label ${hourlyDisabled ? "disabled" : ""}">
-          <input type="radio" name="frequency" value="hourly" ${hourlyDisabled ? "disabled" : ""}>
-          Hourly
-          ${hourlyDisabled ? '<span class="tooltip-text">(Pro+)</span>' : ""}
-        </label>
-      </div>
-    </div>
     <div class="btn-row">
       <button class="btn btn-secondary" id="pick-again-btn"
         ${selection.url && selection.url !== currentTabUrl ? "disabled title=\"Switch to the original tab to pick again\"" : ""}>Pick again</button>
@@ -594,124 +564,31 @@ function renderConfirm(): void {
   document.getElementById("create-btn")?.addEventListener("click", createMonitor);
 }
 
+let creating = false;
+
 async function createMonitor(): Promise<void> {
-  if (!selection || state === "creating") return;
+  if (!selection || creating) return;
+  creating = true;
 
   const nameInput = document.getElementById("monitor-name") as HTMLInputElement;
   const name = nameInput?.value.trim() || "Untitled monitor";
-  const frequency =
-    (document.querySelector('input[name="frequency"]:checked') as HTMLInputElement)?.value || "daily";
 
-  state = "creating";
-  createdMonitorName = name;
-  createdMonitorValue = selection.currentValue;
-  render();
+  // Open the dashboard with pre-filled query params so the full web UI
+  // handles creation (tags, email notifications, validation, etc.).
+  const params = new URLSearchParams();
+  params.set("url", selection.url);
+  params.set("selector", selection.selector);
+  if (name && name !== "Untitled monitor") params.set("name", name);
 
   try {
-    const token = await getToken();
-    if (!token) {
-      errorMessage = "Not authenticated. Please reconnect.";
-      state = "error";
-      render();
-      return;
-    }
-
-    const res = await fetch(`${BASE_URL}/api/extension/monitors`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        name,
-        url: selection.url,
-        selector: selection.selector,
-        frequency,
-      }),
-    });
-
-    if (res.ok) {
-      state = "success";
-      render();
-      return;
-    }
-
-    const data = await res.json().catch(() => null);
-
-    if (data?.code === "TIER_LIMIT_REACHED") {
-      errorMessage = `${data.message || data.error || "Monitor limit reached."}`;
-      state = "error";
-      render();
-      // Add upgrade link after render using DOM API
-      const errContainer = content.querySelector(".error p");
-      if (errContainer) {
-        errContainer.appendChild(document.createElement("br"));
-        const link = document.createElement("a");
-        link.href = `${BASE_URL}/pricing`;
-        link.target = "_blank";
-        link.style.color = "#6366f1";
-        link.textContent = "Upgrade your plan";
-        errContainer.appendChild(link);
-      }
-      return;
-    }
-
-    errorMessage = data?.message || data?.error || `Failed (${res.status})`;
-    state = "error";
-    render();
-  } catch {
-    errorMessage = "Network error. Please try again.";
-    state = "error";
-    render();
+    await chrome.tabs.create({ url: `${BASE_URL}/dashboard?${params.toString()}` });
+    window.close();
+  } catch (err) {
+    console.error(TAG, "failed to open dashboard tab:", err);
+    creating = false;
   }
 }
 
-function renderCreating(): void {
-  content.innerHTML = `
-    <div class="connecting" style="padding-top: 64px;">
-      <div class="spinner"></div>
-      <p>Creating monitor...</p>
-    </div>
-  `;
-}
-
-function renderSuccess(): void {
-  content.innerHTML = `
-    <div class="success">
-      <div class="icon">&#10003;</div>
-      <h3>Monitor created!</h3>
-      <p><strong>${escapeHtml(createdMonitorName)}</strong> is now being watched.</p>
-      ${createdMonitorValue ? `<p>You'll be notified when <strong>${escapeHtml(createdMonitorValue.slice(0, 60))}</strong> changes.</p>` : ""}
-      <div class="btn-row" style="margin-top: 24px; justify-content: center;">
-        <a class="btn btn-primary btn-sm" href="${BASE_URL}/dashboard" target="_blank">View in dashboard</a>
-        <button class="btn btn-secondary btn-sm" id="track-another-btn">Track another</button>
-      </div>
-    </div>
-  `;
-
-  document.getElementById("track-another-btn")?.addEventListener("click", () => {
-    selection = null;
-    candidates = [];
-    state = "authenticated";
-    render();
-  });
-}
-
-function renderError(): void {
-  content.innerHTML = `
-    <div class="error">
-      <div class="icon">&#10007;</div>
-      <h3>Couldn't create monitor</h3>
-      <p>${escapeHtml(errorMessage)}</p>
-      <button class="btn btn-secondary" id="try-again-btn">Try again</button>
-    </div>
-  `;
-
-  document.getElementById("try-again-btn")?.addEventListener("click", () => {
-    state = selection ? "confirm" : "authenticated";
-    render();
-  });
-}
 
 // ──────────────────────────────────────────────────────────────────
 // Helpers

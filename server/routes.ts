@@ -2974,6 +2974,10 @@ export async function registerRoutes(
 
   // Catch-all error handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    // CORS rejections from the cors() middleware arrive as Error('Not allowed by CORS')
+    if (err.message === "Not allowed by CORS") {
+      return res.status(403).json({ message: "Not allowed by CORS", code: "CORS_FORBIDDEN" });
+    }
     ErrorLogger.error("api", err.message || "Unhandled API error", err instanceof Error ? err : null, { status: err.status || 500 });
     res.status(err.status || 500).json({ message: "Internal server error" });
   });
