@@ -1185,10 +1185,12 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     const isPermanentHttpError = httpStatusClassification && !httpStatusClassification.transient
       && ![401, 403].includes(httpStatusClassification.status);
     let browserlessInfraFailure = false;
+    let skippedDueToOpenCircuit = false;
     if ((!newValue || block.blocked) && process.env.BROWSERLESS_TOKEN && !isPermanentHttpError) {
       // Circuit breaker: skip Browserless entirely when the service is known-down
       if (!browserlessCircuitBreaker.isAvailable()) {
         browserlessInfraFailure = true;
+        skippedDueToOpenCircuit = true;
         console.log(`[Browserless] Monitor ${monitor.id}: circuit breaker OPEN, skipping Browserless`);
         await recordMetric(monitor.id, "browserless", 0, "error", undefined, false, "Circuit breaker open — Browserless skipped");
       }
@@ -1259,7 +1261,13 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             // Downgrade to warning: Browserless failures are expected for sites that
             // block headless browsers. The circuit breaker and retry logic handle recovery.
             const classified = classifyBrowserlessError(rawBrowserlessMsg);
-            await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+            // Suffix varies by cached-value state — intentionally creates two dedup
+            // buckets in error_logs so the admin UI distinguishes first-check failures
+            // from degraded-but-cached monitors.
+            const degradationNote = monitor.currentValue
+              ? ", preserving last known value. Will retry shortly."
+              : ".";
+            await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}${degradationNote}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() });
           }
         }
 
@@ -1283,11 +1291,18 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         monitorsNeedingRetry.add(monitor.id);
         await storage.updateMonitor(monitor.id, { lastChecked: new Date() });
         console.log(`[SelfHeal] Monitor ${monitor.id}: Browserless unavailable, preserving last known value`);
-        await ErrorLogger.info(
-          "scraper",
-          `"${monitor.name}" — Browserless temporarily unavailable, preserving last known value. Will retry shortly.`,
-          { monitorId: monitor.id, monitorName: monitor.name, circuitState: browserlessCircuitBreaker.getState() }
-        );
+        // When the circuit breaker was already open before we tried extraction,
+        // the warning in the capCheck.allowed block never fires — log one here
+        // so the admin UI still shows an entry for this degradation episode.
+        // Use the flag (not live breaker state) to avoid a duplicate warning
+        // when an attempted extraction just opened the breaker.
+        if (skippedDueToOpenCircuit) {
+          await ErrorLogger.warning(
+            "scraper",
+            `"${monitor.name}" — rendered page extraction failed: Browserless circuit breaker open, preserving last known value. Will retry shortly.`,
+            { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
+          );
+        }
         return {
           changed: false,
           currentValue: monitor.currentValue,
