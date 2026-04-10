@@ -1259,10 +1259,13 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             // Downgrade to warning: Browserless failures are expected for sites that
             // block headless browsers. The circuit breaker and retry logic handle recovery.
             const classified = classifyBrowserlessError(rawBrowserlessMsg);
+            // Suffix varies by cached-value state — intentionally creates two dedup
+            // buckets in error_logs so the admin UI distinguishes first-check failures
+            // from degraded-but-cached monitors.
             const degradationNote = monitor.currentValue
               ? ", preserving last known value. Will retry shortly."
               : ".";
-            await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}${degradationNote}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+            await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}${degradationNote}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() });
           }
         }
 
@@ -1286,6 +1289,16 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         monitorsNeedingRetry.add(monitor.id);
         await storage.updateMonitor(monitor.id, { lastChecked: new Date() });
         console.log(`[SelfHeal] Monitor ${monitor.id}: Browserless unavailable, preserving last known value`);
+        // When the circuit breaker is open, extraction is skipped and the
+        // warning in the capCheck.allowed block never fires — log one here so
+        // the admin UI still shows an entry for this degradation episode.
+        if (!browserlessCircuitBreaker.isAvailable()) {
+          await ErrorLogger.warning(
+            "scraper",
+            `"${monitor.name}" — rendered page extraction failed: Browserless circuit breaker open, preserving last known value. Will retry shortly.`,
+            { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
+          );
+        }
         return {
           changed: false,
           currentValue: monitor.currentValue,
