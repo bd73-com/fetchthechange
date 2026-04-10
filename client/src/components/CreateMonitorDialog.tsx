@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMonitorSchema, type InsertMonitor } from "@shared/schema";
@@ -54,12 +54,6 @@ export function CreateMonitorDialog({ initialValues, externalOpen, onExternalOpe
   };
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [botWarning, setBotWarning] = useState<string | null>(null);
-
-  // Reset tag selection when dialog closes (cancel or dismiss)
-  const handleOpenChange = (isOpen: boolean) => {
-    setOpen(isOpen);
-    if (!isOpen) { setSelectedTagIds([]); setBotWarning(null); }
-  };
   const { mutate, isPending } = useCreateMonitor();
   const { mutate: setMonitorTags } = useSetMonitorTags();
   const { data: allTags = [] } = useTags();
@@ -79,6 +73,30 @@ export function CreateMonitorDialog({ initialValues, externalOpen, onExternalOpe
       active: true,
     },
   });
+
+  // Populate form when dialog opens externally with pre-filled values
+  useEffect(() => {
+    if (externalOpen && initialValues) {
+      form.reset({
+        name: initialValues.name || "",
+        url: initialValues.url || "",
+        selector: initialValues.selector || "",
+        frequency: "daily",
+        emailEnabled: true,
+        active: true,
+      });
+    }
+  }, [externalOpen, initialValues, form]);
+
+  // Reset tag selection and form when dialog closes (cancel or dismiss)
+  const handleOpenChange = (isOpen: boolean) => {
+    setOpen(isOpen);
+    if (!isOpen) {
+      setSelectedTagIds([]);
+      setBotWarning(null);
+      form.reset({ name: "", url: "", selector: "", frequency: "daily", emailEnabled: true, active: true });
+    }
+  };
 
   const onSubmit = (data: InsertMonitor) => {
     // Ensure bot-protection warning is visible even if onBlur never fired (e.g. paste-and-submit)

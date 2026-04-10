@@ -55,6 +55,18 @@ describe("createCorsOriginChecker", () => {
       expect(result.err).toBeNull();
       expect(result.allow).toBe(true);
     });
+
+    it("rejects non-chrome-extension schemes that look similar", async () => {
+      const checker = createCorsOriginChecker(allowedOrigins, false);
+      const result = await callChecker(checker, "moz-extension://abcdef1234567890");
+      expect(result.err).toBeInstanceOf(Error);
+    });
+
+    it("rejects origins that contain chrome-extension as a substring", async () => {
+      const checker = createCorsOriginChecker(allowedOrigins, false);
+      const result = await callChecker(checker, "https://chrome-extension.evil.com");
+      expect(result.err).toBeInstanceOf(Error);
+    });
   });
 
   describe("dev mode localhost", () => {
