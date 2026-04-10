@@ -57,6 +57,18 @@ jobs:
             git push origin HEAD:main
           fi
 
+      - name: Clean up orphaned branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Delete the chore/sync-changelog branch if no open PR references it.
+          # Prevents orphaned branches from accumulating after partial failures.
+          if ! gh pr list --repo "$REPO" --head chore/sync-changelog --state open --json number --jq '.[0].number' | grep -q .; then
+            git push origin --delete chore/sync-changelog 2>/dev/null && echo "Deleted orphaned branch" || echo "Branch already gone"
+          fi
+
       - name: Enable auto-merge
         if: steps.cpr.outcome == 'success' && steps.cpr.outputs.pull-request-number
         env:
