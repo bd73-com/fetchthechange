@@ -209,9 +209,6 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     }
   }
   const isDev = process.env.NODE_ENV !== 'production';
-  if (!process.env.CHROME_EXTENSION_ID?.trim()) {
-    console.warn('CHROME_EXTENSION_ID not set; chrome extension CORS requests will be rejected');
-  }
   app.use(cors({
     origin: createCorsOriginChecker(allowedOrigins, isDev),
     credentials: true,
