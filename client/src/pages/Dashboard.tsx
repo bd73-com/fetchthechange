@@ -76,9 +76,15 @@ export default function Dashboard() {
   }, [searchString]);
 
   const [prefillDialogOpen, setPrefillDialogOpen] = useState(false);
+  // Store prefill values in state so they persist after the URL is cleared.
+  // Without this, the CreateMonitorDialog may not be mounted yet when the
+  // useEffect clears the URL (e.g. during the loading skeleton phase),
+  // causing it to mount later with empty values.
+  const [storedPrefill, setStoredPrefill] = useState<typeof prefillParams>(null);
 
   useEffect(() => {
     if (prefillParams) {
+      setStoredPrefill(prefillParams);
       setPrefillDialogOpen(true);
       // Clear query params so reopening doesn't re-trigger
       window.history.replaceState({}, "", "/dashboard");
@@ -225,9 +231,9 @@ export default function Dashboard() {
                )}
             </Button>
             <CreateMonitorDialog
-              initialValues={prefillParams ?? undefined}
+              initialValues={storedPrefill ?? undefined}
               externalOpen={prefillDialogOpen ? true : undefined}
-              onExternalOpenChange={(v) => { if (!v) setPrefillDialogOpen(false); }}
+              onExternalOpenChange={(v) => { if (!v) { setPrefillDialogOpen(false); setStoredPrefill(null); } }}
             />
           </div>
         </div>
@@ -336,9 +342,9 @@ export default function Dashboard() {
                   Start tracking web pages for changes by creating your first monitor. We'll notify you when content updates.
                 </p>
                 <CreateMonitorDialog
-                  initialValues={prefillParams ?? undefined}
+                  initialValues={storedPrefill ?? undefined}
                   externalOpen={prefillDialogOpen ? true : undefined}
-                  onExternalOpenChange={(v) => { if (!v) setPrefillDialogOpen(false); }}
+                  onExternalOpenChange={(v) => { if (!v) { setPrefillDialogOpen(false); setStoredPrefill(null); } }}
                 />
               </div>
             );
