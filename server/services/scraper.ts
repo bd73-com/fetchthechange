@@ -1259,7 +1259,10 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             // Downgrade to warning: Browserless failures are expected for sites that
             // block headless browsers. The circuit breaker and retry logic handle recovery.
             const classified = classifyBrowserlessError(rawBrowserlessMsg);
-            await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+            const degradationNote = monitor.currentValue
+              ? ", preserving last known value. Will retry shortly."
+              : ".";
+            await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}${degradationNote}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
           }
         }
 
@@ -1283,11 +1286,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         monitorsNeedingRetry.add(monitor.id);
         await storage.updateMonitor(monitor.id, { lastChecked: new Date() });
         console.log(`[SelfHeal] Monitor ${monitor.id}: Browserless unavailable, preserving last known value`);
-        await ErrorLogger.info(
-          "scraper",
-          `"${monitor.name}" — Browserless temporarily unavailable, preserving last known value. Will retry shortly.`,
-          { monitorId: monitor.id, monitorName: monitor.name, circuitState: browserlessCircuitBreaker.getState() }
-        );
         return {
           changed: false,
           currentValue: monitor.currentValue,

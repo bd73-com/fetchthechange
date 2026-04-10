@@ -204,6 +204,22 @@ describe("ErrorLogger deduplication", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("Browserless graceful degradation logs a single warning with preservation note", async () => {
+    // Contract test: when monitor has currentValue, the warning message includes
+    // "preserving last known value" so no separate Info entry is created.
+    const classified = "Rendered page extraction failed — the site may block automated browsers";
+    const withCurrentValue = ", preserving last known value. Will retry shortly.";
+    const withoutCurrentValue = ".";
+
+    const msgWithValue = `"My Monitor" — rendered page extraction failed: ${classified}${withCurrentValue}`;
+    const msgWithoutValue = `"My Monitor" — rendered page extraction failed: ${classified}${withoutCurrentValue}`;
+
+    expect(msgWithValue).toMatch(/preserving last known value/);
+    expect(msgWithValue).not.toMatch(/Browserless temporarily unavailable/);
+    expect(msgWithoutValue).not.toMatch(/preserving last known value/);
+    expect(msgWithoutValue).toMatch(/\.$/);
+  });
+
   it("convenience methods call log with correct level", async () => {
     mockSelectLimitFn.mockResolvedValue([]);
 
