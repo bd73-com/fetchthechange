@@ -61,21 +61,13 @@ export class BrowserlessCircuitBreaker {
   /**
    * Cancel a half_open probe slot that was acquired by isAvailable() but
    * never used (e.g. the caller was denied by a usage-cap check).
-   * Decrements halfOpenProbesInFlight so the circuit can still resolve.
+   * Returns the slot to the pool so a real probe can use it later.
    */
   cancelProbe(): void {
     if (this.state !== "half_open") return;
-    if (this.halfOpenProbesInFlight > 0) {
-      this.halfOpenProbesInFlight--;
-    }
-    // If all probes have now resolved and none succeeded, reopen the circuit
-    if (this.halfOpenProbesInFlight <= 0 && this.halfOpenProbesAllowed <= 0 && !this.halfOpenSucceeded) {
-      this.state = "open";
-      this.openedAt = Date.now();
-      this.consecutiveOpenCycles++;
-      this.halfOpenProbesAllowed = 0;
-      this.halfOpenProbesInFlight = 0;
-    }
+    if (this.halfOpenProbesInFlight <= 0) return;
+    this.halfOpenProbesInFlight--;
+    this.halfOpenProbesAllowed = Math.min(this.halfOpenProbesAllowed + 1, HALF_OPEN_PROBE_LIMIT);
   }
 
   /** Record a successful Browserless call. Resets the circuit to CLOSED. */
