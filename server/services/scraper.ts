@@ -19,6 +19,11 @@ import { eq, sql } from "drizzle-orm";
  */
 export const monitorsNeedingRetry = new Set<number>();
 
+/** Extract hostname from a URL for safe logging (no query params or paths). */
+function safeHostname(urlString: string): string {
+  try { return new URL(urlString).hostname; } catch { return "unknown"; }
+}
+
 /** Pool of modern User-Agent profiles to rotate per request, reducing fingerprint-based blocking. */
 const UA_PROFILES: Array<{ userAgent: string; secChUa?: string; secChUaPlatform?: string }> = [
   // Chrome 133 – Windows 10
@@ -1047,7 +1052,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
   error: string | null;
 }> {
   try {
-    console.log(`Checking monitor ${monitor.id}: ${monitor.url}`);
+    console.log(`Checking monitor ${monitor.id}: ${safeHostname(monitor.url)}`);
     
     let html = "";
     let staticFetchError: string | null = null;
@@ -1260,7 +1265,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           } else {
             // Downgrade to warning: Browserless failures are expected for sites that
             // block headless browsers. The circuit breaker and retry logic handle recovery.
-            const classified = classifyBrowserlessError(rawBrowserlessMsg);
+            const classified = browserlessInfraFailure
+              ? "Browserless service connection refused (infrastructure issue)"
+              : classifyBrowserlessError(rawBrowserlessMsg);
             // Suffix varies by cached-value state — intentionally creates two dedup
             // buckets in error_logs so the admin UI distinguishes first-check failures
             // from degraded-but-cached monitors.
@@ -1274,6 +1281,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         const durationMs = Date.now() - startTime;
         await BrowserlessUsageTracker.recordUsage(monitor.userId, monitor.id, durationMs, browserlessSuccess).catch(() => {});
       } else {
+        // Release the half_open probe slot acquired by isAvailable() so the
+        // circuit breaker doesn't get stuck when the cap check denies the call.
+        browserlessCircuitBreaker.cancelProbe();
         console.log(`Browserless skipped for monitor ${monitor.id}: ${capCheck.reason}`);
       }
     }

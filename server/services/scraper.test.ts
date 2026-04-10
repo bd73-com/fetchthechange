@@ -47,6 +47,7 @@ vi.mock("./browserlessCircuitBreaker", () => ({
     isAvailable: vi.fn().mockReturnValue(true),
     recordSuccess: vi.fn(),
     recordInfraFailure: vi.fn(),
+    cancelProbe: vi.fn(),
     getState: vi.fn().mockReturnValue("closed"),
     reset: vi.fn(),
   },
