@@ -8,6 +8,131 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    "version": "1.23.25",
+    "date": "2026-04-10",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: eliminate sync-changelog CI failures (#409) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.24...v1.23.25"
+  },
+  {
+    "version": "1.23.24",
+    "date": "2026-04-10",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.23...v1.23.24"
+  },
+  {
+    "version": "1.23.23",
+    "date": "2026-04-10",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve three open bugs (#402, #403, #405) (#407) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.22...v1.23.23"
+  },
+  {
+    "version": "1.23.22",
+    "date": "2026-04-10",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: support extension JWT auth in rate limiter middleware (#406) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.21...v1.23.22"
+  },
+  {
+    "version": "1.23.21",
+    "date": "2026-04-10",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: collapse duplicate Browserless scraper log entries (#404) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.20...v1.23.21"
+  },
+  {
+    "version": "1.23.20",
+    "date": "2026-04-10",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve four open bugs (#394, #396, #397, #399) (#401) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.19...v1.23.20"
+  },
+  {
+    "version": "1.23.19",
+    "date": "2026-04-09",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: harden sync-changelog and release workflows (#400) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.18...v1.23.19"
+  },
+  {
+    "version": "1.23.18",
+    "date": "2026-04-09",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: persist element picker selection across popup close (#398) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.17...v1.23.18"
+  },
+  {
+    "version": "1.23.17",
+    "date": "2026-04-09",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve StripeSync pool deadlock on startup (#395) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.16...v1.23.17"
+  },
+  {
+    "version": "1.23.16",
+    "date": "2026-04-09",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: use file-based payloads for sync-changelog CI (#393) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.15...v1.23.16"
+  },
+  {
+    "version": "1.23.15",
+    "date": "2026-04-09",
+    "body": "## What's Changed\n\n## Maintenance\n\n* Refactor env file candidates array initialization (#392) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.14...v1.23.15"
+  },
+  {
+    "version": "1.23.14",
+    "date": "2026-04-09",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.13...v1.23.14"
+  },
+  {
+    "version": "1.23.13",
+    "date": "2026-04-09",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: make Chrome extension auth resilient to MV3 service worker issues (#390) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.12...v1.23.13"
+  },
+  {
+    "version": "1.23.12",
+    "date": "2026-04-09",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.11...v1.23.12"
+  },
+  {
+    "version": "1.23.11",
+    "date": "2026-04-08",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: sync-changelog PR fallback when branch protection blocks push (#387) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.10...v1.23.11"
+  },
+  {
+    "version": "1.23.10",
+    "date": "2026-04-08",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: extension auth broken in Chrome 127+ (v1.0.5) (#386) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.9...v1.23.10"
+  },
+  {
+    "version": "1.23.9",
+    "date": "2026-04-08",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: standardize validation errors and reject empty PATCH bodies (#385) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.8...v1.23.9"
+  },
+  {
+    "version": "1.23.8",
+    "date": "2026-04-08",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: eliminate sync-changelog ghost run failures (#383) @bd73-com\n* fix: return 400 on invalid PATCH /api/monitors/:id body (#382) @bd73-com\n* fix: clamp negative limit params and harden soft-delete cleanup (#379) @bd73-com\n* fix: hardening, Zapier/Make integrations, and CI improvements (#375) @bd73-com\n* fix: stable Drizzle API, encryption key rename, key rotation (#372) @bd73-com\n* Zapier/Make integration, bug fixes, and CI hardening (#376) @bd73-com\n* fix: prevent sync-changelog CI failure and harden Zapier routes (#374) @bd73-com\n* fix: SAVEPOINT transaction safety and decryption resilience hardening (#370) @bd73-com\n* fix: harden deleteMonitor and ensureTables for partial migrations (#366) @bd73-com\n* fix: address 10 open bugs — encryption, race conditions, payload limits (#364) @bd73-com\n* fix: harden extension, encryption, and automation delivery (#352) @bd73-com\n* fix: redact extension token, validate route IDs, harden Zapier hooks (#353) @bd73-com\n* fix: use GitHub Contents API for sync-changelog CI job (#350) @bd73-com\n\n## Maintenance\n\n* chore: add .claudeignore and configure autoCompactWindow (#377) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.7...v1.23.8"
+  },
+  {
+    "version": "1.23.7",
+    "date": "2026-04-05",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve Chrome extension \"Failed to generate token\" error (#349) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.6...v1.23.7"
+  },
+  {
+    "version": "1.23.6",
+    "date": "2026-04-05",
+    "body": "## What's Changed\n\n## Security\n\n* fix: CSRF over-match, monitor_changes index, encrypt webhook URLs at rest (#347) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.5...v1.23.6"
+  },
+  {
+    "version": "1.23.5",
+    "date": "2026-04-05",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: eliminate rebase conflicts in sync-changelog CI (#345) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.4...v1.23.5"
+  },
+  {
+    "version": "1.23.4",
+    "date": "2026-04-05",
+    "body": "## What's Changed\n\n* No changes\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.3...v1.23.4"
+  },
+  {
+    "version": "1.23.3",
+    "date": "2026-04-05",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: sync changelog automation + harden Zapier integration (#340) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.2...v1.23.3"
+  },
+  {
+    "version": "1.23.2",
+    "date": "2026-04-05",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: auto-deactivate failing automation subscriptions and clean up stale ones (#337) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.1...v1.23.2"
+  },
+  {
+    "version": "1.23.1",
+    "date": "2026-04-05",
+    "body": "## What's Changed\n\n## Bug Fixes\n\n* fix: resolve deployment migration error and harden Zapier integration (#341) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.23.0...v1.23.1"
+  },
+  {
     "version": "1.23.0",
     "date": "2026-04-04",
     "body": "## What's Changed\n\n## Features\n\n* Zapier & Make integration — connect FTC changes to 7,000+ apps (#336) @bd73-com\n\n**Full Changelog**: https://github.com/bd73-com/fetchthechange/compare/v1.22.17...v1.23.0"
