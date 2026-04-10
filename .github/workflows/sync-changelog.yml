@@ -43,6 +43,9 @@ jobs:
       - name: Direct commit fallback
         if: steps.cpr.outcome == 'failure'
         run: |
+          # Ensure we're on main — create-pull-request may have left us on
+          # the chore/sync-changelog branch after a partial failure.
+          git checkout main
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add client/src/data/changelog.ts
