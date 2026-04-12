@@ -91,6 +91,12 @@ export default function Dashboard() {
     }
   }, [prefillParams]);
 
+  const prefillDialogProps = {
+    initialValues: storedPrefill ?? undefined,
+    externalOpen: prefillDialogOpen ? true : undefined,
+    onExternalOpenChange: (v: boolean) => { if (!v) { setPrefillDialogOpen(false); setStoredPrefill(null); } },
+  } as const;
+
   const handleRefresh = async () => {
     console.log("Refreshing monitors...");
     // First refetch the list
@@ -230,11 +236,7 @@ export default function Dashboard() {
                  <RefreshCw className="h-4 w-4" />
                )}
             </Button>
-            <CreateMonitorDialog
-              initialValues={storedPrefill ?? undefined}
-              externalOpen={prefillDialogOpen ? true : undefined}
-              onExternalOpenChange={(v) => { if (!v) { setPrefillDialogOpen(false); setStoredPrefill(null); } }}
-            />
+            <CreateMonitorDialog {...prefillDialogProps} />
           </div>
         </div>
 
@@ -341,11 +343,7 @@ export default function Dashboard() {
                 <p className="text-muted-foreground max-w-sm mx-auto mb-6">
                   Start tracking web pages for changes by creating your first monitor. We'll notify you when content updates.
                 </p>
-                <CreateMonitorDialog
-                  initialValues={storedPrefill ?? undefined}
-                  externalOpen={prefillDialogOpen ? true : undefined}
-                  onExternalOpenChange={(v) => { if (!v) { setPrefillDialogOpen(false); setStoredPrefill(null); } }}
-                />
+                <CreateMonitorDialog />
               </div>
             );
           }
