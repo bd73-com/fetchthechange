@@ -76,14 +76,26 @@ export default function Dashboard() {
   }, [searchString]);
 
   const [prefillDialogOpen, setPrefillDialogOpen] = useState(false);
+  // Store prefill values in state so they persist after the URL is cleared.
+  // Without this, the CreateMonitorDialog may not be mounted yet when the
+  // useEffect clears the URL (e.g. during the loading skeleton phase),
+  // causing it to mount later with empty values.
+  const [storedPrefill, setStoredPrefill] = useState<typeof prefillParams>(null);
 
   useEffect(() => {
     if (prefillParams) {
+      setStoredPrefill(prefillParams);
       setPrefillDialogOpen(true);
       // Clear query params so reopening doesn't re-trigger
       window.history.replaceState({}, "", "/dashboard");
     }
   }, [prefillParams]);
+
+  const prefillDialogProps = {
+    initialValues: storedPrefill ?? undefined,
+    externalOpen: prefillDialogOpen ? true : undefined,
+    onExternalOpenChange: (v: boolean) => { if (!v) { setPrefillDialogOpen(false); setStoredPrefill(null); } },
+  } as const;
 
   const handleRefresh = async () => {
     console.log("Refreshing monitors...");
@@ -224,11 +236,7 @@ export default function Dashboard() {
                  <RefreshCw className="h-4 w-4" />
                )}
             </Button>
-            <CreateMonitorDialog
-              initialValues={prefillParams ?? undefined}
-              externalOpen={prefillDialogOpen ? true : undefined}
-              onExternalOpenChange={(v) => { if (!v) setPrefillDialogOpen(false); }}
-            />
+            <CreateMonitorDialog {...prefillDialogProps} />
           </div>
         </div>
 
@@ -335,11 +343,7 @@ export default function Dashboard() {
                 <p className="text-muted-foreground max-w-sm mx-auto mb-6">
                   Start tracking web pages for changes by creating your first monitor. We'll notify you when content updates.
                 </p>
-                <CreateMonitorDialog
-                  initialValues={prefillParams ?? undefined}
-                  externalOpen={prefillDialogOpen ? true : undefined}
-                  onExternalOpenChange={(v) => { if (!v) setPrefillDialogOpen(false); }}
-                />
+                <CreateMonitorDialog />
               </div>
             );
           }

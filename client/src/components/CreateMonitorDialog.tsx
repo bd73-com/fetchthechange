@@ -110,9 +110,7 @@ export function CreateMonitorDialog({ initialValues, externalOpen, onExternalOpe
             },
           });
         }
-        setOpen(false);
-        form.reset();
-        setSelectedTagIds([]);
+        handleOpenChange(false);
       },
     });
   };
