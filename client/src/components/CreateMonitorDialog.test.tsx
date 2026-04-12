@@ -23,6 +23,23 @@ vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ user: { id: "user1", tier: "free", email: "test@example.com" } }),
 }));
 
+// Mutable mock for useCreateMonitor — default passes through real behavior,
+// individual tests can override via mockMutateFn.
+let mockMutateFn: ((...args: any[]) => void) | null = null;
+vi.mock("@/hooks/use-monitors", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("@/hooks/use-monitors")>();
+  return {
+    ...orig,
+    useCreateMonitor: () => ({
+      mutate: (...args: any[]) => {
+        if (mockMutateFn) return mockMutateFn(...args);
+        return orig.useCreateMonitor().mutate(...(args as [any]));
+      },
+      isPending: false,
+    }),
+  };
+});
+
 function renderDialog(ui: ReactElement) {
   return renderWithProviders(<TooltipProvider>{ui}</TooltipProvider>);
 }
@@ -30,6 +47,7 @@ function renderDialog(ui: ReactElement) {
 describe("CreateMonitorDialog", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    mockMutateFn = null;
   });
 
   it("renders the trigger button", () => {
@@ -81,6 +99,40 @@ describe("CreateMonitorDialog", () => {
   it("does not open the dialog when externalOpen is undefined", () => {
     renderDialog(<CreateMonitorDialog />);
     expect(screen.queryByText("Monitor New Page")).not.toBeInTheDocument();
+  });
+
+  it("calls onExternalOpenChange(false) on successful creation", async () => {
+    let capturedOnSuccess: (() => void) | null = null;
+    mockMutateFn = vi.fn((_data: any, opts: any) => {
+      capturedOnSuccess = () => opts.onSuccess({ monitor: { id: 1 }, selectorWarning: null });
+    });
+
+    const user = userEvent.setup();
+    const onExternalOpenChange = vi.fn();
+
+    renderDialog(
+      <CreateMonitorDialog
+        initialValues={{ url: "https://example.com", selector: ".test", name: "Test" }}
+        externalOpen={true}
+        onExternalOpenChange={onExternalOpenChange}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Monitor New Page")).toBeInTheDocument();
+    });
+
+    // Submit the form
+    await user.click(screen.getByRole("button", { name: "Create Monitor" }));
+
+    // mutate should have been called
+    expect(mockMutateFn).toHaveBeenCalled();
+
+    // Simulate server success
+    capturedOnSuccess?.();
+
+    // The success handler should call handleOpenChange(false) → onExternalOpenChange(false)
+    expect(onExternalOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("calls onExternalOpenChange when Cancel is clicked", async () => {
