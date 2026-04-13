@@ -160,6 +160,14 @@ For every documentation surface classified as UPDATE REQUIRED or NEW SECTION NEE
 
 A phase is complete when all UPDATE REQUIRED and NEW SECTION NEEDED surfaces have been patched and `npm run check` exits with code 0.
 
+**End-of-edits graphify rebuild.** After Phase 7 completes, all in-pipeline code edits are done (Phase 8 only zips the extension; Phase 9 only opens a PR). If `graphify-out/graph.json` exists, rebuild the code graph **once** here so the next session inherits a current graph:
+
+```bash
+[ -f graphify-out/graph.json ] && python3 -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))" || true
+```
+
+This satisfies the CLAUDE.md "rebuild once at the end of a task" rule for the entire pipeline. Do not rebuild after each individual fix in earlier phases. If `graphify-out/graph.json` does not exist, skip silently — graphify is not yet primed on this checkout.
+
 ### Phase 8 of 9 — Extension Release
 
 Before delegating, pre-check whether extension files changed:

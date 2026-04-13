@@ -10,3 +10,6 @@ dist/
 extension/node_modules/
 extension/build/
 extension/*.zip
+
+# graphify knowledge graph output (generated, per-developer)
+graphify-out/
