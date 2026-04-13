@@ -59,11 +59,11 @@ See `README.md` for project overview, tech stack, structure, and setup.
 - `.claude/agents/security-auditor.md` — OWASP security analysis (read-only)
 - `.claude/agents/skeptic.md` — adversarial review for edge cases and failure modes (read-only); invoked by magicwand Phase 5
 
-## graphify
+## graphify (optional tooling)
 
-This project has a graphify knowledge graph at graphify-out/.
+Some developers use [graphify](https://github.com/safishamsi/graphify) to maintain a knowledge graph at `graphify-out/`. The directory is gitignored — these rules apply only when graphify is primed on this checkout (i.e. `graphify-out/graph.json` exists). If it doesn't exist, skip everything in this section.
 
-Rules:
-- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
-- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- If you modified code files during a task, run the graph rebuild **once at the end** of the task (after all edits are done, before handing back), not after each individual edit. Multi-phase commands like `/magicwand` should rebuild a single time at the end of the pipeline. Rebuild command: `python3 -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"`
+Rules (when primed):
+- Before answering architecture or codebase questions, read `graphify-out/GRAPH_REPORT.md` for god nodes and community structure
+- If `graphify-out/wiki/index.md` exists, navigate it instead of reading raw files
+- If you modified code files during a task, run the graph rebuild **once at the end** of the task (after all edits are done, before handing back), not after each individual edit. Multi-phase commands like `/magicwand` should rebuild a single time at the end of the pipeline. Rebuild command: `python3 -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"` (this is the same call graphify's own `graphify hook install` post-commit hook uses — AST-only, no LLM)
