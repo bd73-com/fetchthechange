@@ -292,16 +292,51 @@ export async function bootstrapWelcomeCampaign(): Promise<void> {
   const signupAfter = new Date("2025-03-19T00:00:00Z");
   const signupBefore = now;
 
-  const result = await runWelcomeCampaign({
-    signupAfter,
-    signupBefore,
-    configId: config.id,
-  });
+  try {
+    const result = await runWelcomeCampaign({
+      signupAfter,
+      signupBefore,
+      configId: config.id,
+    });
 
-  if ("skipped" in result) {
-    console.log("[Bootstrap] Welcome campaign bootstrap complete — no new recipients in window.");
-  } else {
-    console.log(`[Bootstrap] Welcome campaign bootstrap complete — sent campaign #${result.campaignId} to ${result.totalRecipients} recipients. Next run: ${nextRunAt.toISOString()}`);
+    if ("skipped" in result) {
+      console.log("[Bootstrap] Welcome campaign bootstrap complete — no new recipients in window.");
+    } else {
+      console.log(`[Bootstrap] Welcome campaign bootstrap complete — sent campaign #${result.campaignId} to ${result.totalRecipients} recipients. Next run: ${nextRunAt.toISOString()}`);
+    }
+  } catch (error) {
+    // Roll back the atomic claim so a future bootstrap (on restart) re-attempts
+    // the same early-adopter window. Without this, a transient failure during
+    // the very first send would permanently drop the entire cohort, because
+    // the next bootstrap call short-circuits on `config.lastRunAt` being set.
+    // Guard the rollback on `lastRunAt === now` so we don't overwrite a
+    // successful claim by a concurrent instance.
+    try {
+      await db
+        .update(automatedCampaignConfigs)
+        .set({
+          lastRunAt: null,
+          nextRunAt: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(automatedCampaignConfigs.id, config.id),
+            eq(automatedCampaignConfigs.lastRunAt, now),
+          )
+        );
+    } catch (rollbackError) {
+      await ErrorLogger.error(
+        "scheduler",
+        "Welcome campaign bootstrap rollback failed",
+        rollbackError instanceof Error ? rollbackError : null,
+        { configId: config.id, configKey: config.key }
+      );
+    }
+
+    // Re-throw so the caller (server startup) knows the bootstrap failed —
+    // matches the pre-existing behavior where bootstrap errors propagated.
+    throw error;
   }
 }
 
@@ -428,6 +463,10 @@ export async function processAutomatedCampaigns(): Promise<void> {
       // If we successfully claimed the run but then failed to send, restore
       // lastRunAt and nextRunAt so the next cron tick re-attempts the same
       // user window. (See comment above the try block.)
+      //
+      // Guard the rollback on `lastRunAt === now` so we don't overwrite a
+      // successful claim by a concurrent instance that managed to claim
+      // between our failure and this rollback.
       if (claimedThisRun) {
         try {
           await db
@@ -437,7 +476,12 @@ export async function processAutomatedCampaigns(): Promise<void> {
               nextRunAt: previousNextRunAt,
               updatedAt: new Date(),
             })
-            .where(eq(automatedCampaignConfigs.id, config.id));
+            .where(
+              and(
+                eq(automatedCampaignConfigs.id, config.id),
+                eq(automatedCampaignConfigs.lastRunAt, now),
+              )
+            );
         } catch (rollbackError) {
           await ErrorLogger.error(
             "scheduler",

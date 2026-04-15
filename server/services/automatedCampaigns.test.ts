@@ -271,6 +271,63 @@ describe("bootstrapWelcomeCampaign", () => {
     expect(mockResolveRecipients).not.toHaveBeenCalled();
     expect(mockTriggerCampaignSend).not.toHaveBeenCalled();
   });
+
+  it("rolls back the claim (lastRunAt → null) when the send throws, and re-raises", async () => {
+    // Start from a fresh config with no prior bootstrap.
+    const freshConfig = {
+      id: 1,
+      key: "welcome",
+      name: "Welcome — New Members",
+      subject: "Welcome",
+      htmlBody: "<html></html>",
+      textBody: "text",
+      enabled: true,
+      lastRunAt: null,
+      nextRunAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    // ensureWelcomeConfig() reads via select().from().where().limit()
+    // runWelcomeCampaign() reads the config again via a second select chain.
+    mockDbLimit.mockResolvedValue([freshConfig]);
+
+    // Differentiate where() calls:
+    // 1) atomic claim's update().set().where().returning() → returns [config]
+    // 2) rollback update().set().where() → just resolves
+    let whereCallCount = 0;
+    mockDbWhere.mockImplementation(() => {
+      whereCallCount++;
+      if (whereCallCount === 1) {
+        return {
+          returning: vi.fn().mockResolvedValue([freshConfig]),
+          limit: vi.fn().mockResolvedValue([freshConfig]),
+        };
+      }
+      // Subsequent where() calls: runWelcomeCampaign's inner select, and the
+      // rollback. We return a permissive chain object for both.
+      return {
+        returning: vi.fn().mockResolvedValue([freshConfig]),
+        limit: vi.fn().mockResolvedValue([freshConfig]),
+      };
+    });
+
+    // Make the send itself fail.
+    mockResolveRecipients.mockRejectedValue(new Error("Resend outage"));
+
+    // bootstrapWelcomeCampaign re-raises to surface startup errors.
+    await expect(bootstrapWelcomeCampaign()).rejects.toThrow("Resend outage");
+
+    // Two .set() calls: the claim, then the rollback.
+    expect(mockDbSet).toHaveBeenCalledTimes(2);
+
+    // Rollback restored lastRunAt and nextRunAt to NULL so a future bootstrap
+    // on restart can re-attempt the early-adopter cohort.
+    const rollbackSetArg = mockDbSet.mock.calls[1][0];
+    expect(rollbackSetArg.lastRunAt).toBeNull();
+    expect(rollbackSetArg.nextRunAt).toBeNull();
+    expect(rollbackSetArg.updatedAt).toBeInstanceOf(Date);
+  });
 });
 
 describe("WELCOME_CAMPAIGN_DEFAULTS", () => {
