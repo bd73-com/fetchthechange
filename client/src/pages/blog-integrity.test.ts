@@ -170,6 +170,59 @@ describe("BlogNoCode page integrity", () => {
   });
 });
 
+describe("BlogSlackAlerts page integrity", () => {
+  const slackAlertsSource = fs.readFileSync(
+    path.join(PAGES_DIR, "BlogSlackAlerts.tsx"),
+    "utf-8",
+  );
+
+  it("has matching BLOG_PATH and route in App.tsx", () => {
+    const match = slackAlertsSource.match(/BLOG_PATH\s*=\s*"([^"]+)"/);
+    expect(match).not.toBeNull();
+    const blogPath = match![1];
+    expect(routes).toContain(blogPath);
+  });
+
+  it("has a valid PUBLISH_DATE", () => {
+    const match = slackAlertsSource.match(/PUBLISH_DATE\s*=\s*"([^"]+)"/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("contains required Schema.org BlogPosting properties", () => {
+    expect(slackAlertsSource).toContain('"@type": "BlogPosting"');
+    expect(slackAlertsSource).toContain("datePublished");
+    expect(slackAlertsSource).toContain("publisher");
+    expect(slackAlertsSource).toContain("author");
+  });
+
+  it("CTA button links to /api/login", () => {
+    expect(slackAlertsSource).toContain('href="/api/login"');
+  });
+
+  it("has correct SEO title with brand suffix", () => {
+    expect(slackAlertsSource).toContain("| FetchTheChange");
+  });
+
+  it("Badge shows 'Integrations' category", () => {
+    expect(slackAlertsSource).toContain(">Integrations<");
+  });
+
+  it("includes stub links to the 4 planned series posts", () => {
+    // The spec requires stubbed Link hrefs to the other 4 integration
+    // series posts so they go live automatically when those posts ship.
+    const seriesSlugs = [
+      "/blog/webhook-webpage-change-trigger",
+      "/blog/zapier-webpage-change-automation",
+      "/blog/webpage-monitoring-api",
+      "/blog/chrome-extension-webpage-monitor",
+    ];
+    for (const href of seriesSlugs) {
+      expect(slackAlertsSource).toContain(`href="${href}"`);
+    }
+  });
+});
+
 describe("each blog post has a corresponding page file", () => {
   for (const slug of slugs) {
     it(`page file exists for slug "${slug}"`, () => {
