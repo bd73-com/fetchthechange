@@ -15,7 +15,7 @@ export default function BlogSlackAlerts() {
   const jsonLd = useMemo(() => ({
     "@context": "https://schema.org",
     "@type": "BlogPosting",
-    headline: "How to Get a Slack Alert When Any Webpage Changes",
+    headline: "How to get a Slack alert when any webpage changes",
     description: "Set up Slack notifications for webpage changes in minutes. Monitor prices, stock levels, competitor pages, or any site element — alerts go straight to your Slack channel.",
     author: { "@type": "Person", name: AUTHOR },
     publisher: { "@type": "Organization", name: "FetchTheChange" },
@@ -85,8 +85,8 @@ export default function BlogSlackAlerts() {
           </p>
           <ol className="list-decimal list-inside space-y-3 ml-4">
             <li><strong className="text-foreground">Open your monitor</strong> — Go to the FetchTheChange dashboard and open the monitor you want Slack alerts for, or create a new one.</li>
-            <li><strong className="text-foreground">Go to Notifications</strong> — In the monitor settings, scroll to the Notifications section.</li>
-            <li><strong className="text-foreground">Click Connect Slack</strong> — This opens the standard Slack OAuth flow. Authorise FetchTheChange to post to your workspace.</li>
+            <li><strong className="text-foreground">Open Notification Channels</strong> — In the monitor settings, scroll to the Notification Channels section.</li>
+            <li><strong className="text-foreground">Click Connect to Slack</strong> — This opens the standard Slack OAuth flow. Authorise FetchTheChange to post to your workspace.</li>
             <li><strong className="text-foreground">Select a channel</strong> — Pick the channel where alerts should go. You can choose a different channel for every monitor.</li>
             <li><strong className="text-foreground">Toggle Slack on</strong> — Enable Slack in the notification channel picker. Email and Slack are independent — turning one on does not disable the other.</li>
             <li><strong className="text-foreground">Save the monitor</strong> — The next time the tracked value changes, an alert fires to the channel you chose.</li>
@@ -131,22 +131,22 @@ export default function BlogSlackAlerts() {
           </p>
           <ul className="list-disc list-inside space-y-3 ml-4">
             <li>
-              <Link href="/blog/webhook-webpage-change-trigger" className="text-primary hover:underline">
+              <Link href="/blog/webhook-webpage-change-trigger" rel="nofollow" className="text-primary hover:underline">
                 Trigger any automation when a webpage changes using webhooks
               </Link>
             </li>
             <li>
-              <Link href="/blog/zapier-webpage-change-automation" className="text-primary hover:underline">
+              <Link href="/blog/zapier-webpage-change-automation" rel="nofollow" className="text-primary hover:underline">
                 Connect webpage monitoring to 7,000+ apps with Zapier
               </Link>
             </li>
             <li>
-              <Link href="/blog/webpage-monitoring-api" className="text-primary hover:underline">
+              <Link href="/blog/webpage-monitoring-api" rel="nofollow" className="text-primary hover:underline">
                 Monitor webpages programmatically with the FetchTheChange API
               </Link>
             </li>
             <li>
-              <Link href="/blog/chrome-extension-webpage-monitor" className="text-primary hover:underline">
+              <Link href="/blog/chrome-extension-webpage-monitor" rel="nofollow" className="text-primary hover:underline">
                 Monitor any element on any page without writing CSS selectors
               </Link>
             </li>

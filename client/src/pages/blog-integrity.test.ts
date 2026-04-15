@@ -221,6 +221,57 @@ describe("BlogSlackAlerts page integrity", () => {
       expect(slackAlertsSource).toContain(`href="${href}"`);
     }
   });
+
+  it("every /blog/ href is either an existing route or a planned series stub", () => {
+    // This assertion intentionally replaces the standard "internal links
+    // point to existing blog routes" check. The four planned-series stubs
+    // are allowed because they ship as nofollow Links that go live when
+    // later posts in the series land. Any other /blog/ href (e.g. a typo
+    // in one of the stubs) must resolve to a real route today.
+    const plannedStubs = new Set([
+      "/blog/webhook-webpage-change-trigger",
+      "/blog/zapier-webpage-change-automation",
+      "/blog/webpage-monitoring-api",
+      "/blog/chrome-extension-webpage-monitor",
+    ]);
+    const hrefMatches = [
+      ...slackAlertsSource.matchAll(/href="(\/blog\/[^"]+)"/g),
+    ];
+    const linkedPaths = hrefMatches.map((m) => m[1]);
+    expect(linkedPaths.length).toBeGreaterThanOrEqual(3);
+    for (const href of linkedPaths) {
+      if (plannedStubs.has(href)) continue;
+      expect(routes).toContain(href);
+    }
+  });
+
+  it("planned-series stub links carry rel=\"nofollow\"", () => {
+    // Prevents Google from treating the not-yet-routed targets as
+    // soft-404s during the window before each series post ships.
+    const plannedStubs = [
+      "/blog/webhook-webpage-change-trigger",
+      "/blog/zapier-webpage-change-automation",
+      "/blog/webpage-monitoring-api",
+      "/blog/chrome-extension-webpage-monitor",
+    ];
+    for (const href of plannedStubs) {
+      const pattern = new RegExp(
+        `href="${href.replace(/\//g, "\\/")}"[^>]*rel="nofollow"|rel="nofollow"[^>]*href="${href.replace(/\//g, "\\/")}"`,
+      );
+      expect(slackAlertsSource).toMatch(pattern);
+    }
+  });
+
+  it("JSON-LD headline matches the rendered H1", () => {
+    // Google Rich Results expects the structured-data headline to match
+    // the visible page headline. This assertion prevents future case or
+    // wording drift between the two.
+    const headlineMatch = slackAlertsSource.match(/headline:\s*"([^"]+)"/);
+    expect(headlineMatch).not.toBeNull();
+    const headline = headlineMatch![1];
+    const h1Pattern = new RegExp(`<h1[^>]*>\\s*${headline.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*</h1>`);
+    expect(slackAlertsSource).toMatch(h1Pattern);
+  });
 });
 
 describe("each blog post has a corresponding page file", () => {
