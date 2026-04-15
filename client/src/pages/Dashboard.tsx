@@ -91,10 +91,16 @@ export default function Dashboard() {
     }
   }, [prefillParams]);
 
+  // The header dialog is the single externally-controlled instance that
+  // auto-opens when prefill params arrive. The empty-state dialog below
+  // must NOT be externally controlled, or both dialogs race on the same
+  // externalOpen=true / onExternalOpenChange callback. Keep
+  // `storedPrefill` populated after a dismiss so the empty-state dialog
+  // can still open with the prefill via its own trigger button.
   const prefillDialogProps = {
     initialValues: storedPrefill ?? undefined,
     externalOpen: prefillDialogOpen ? true : undefined,
-    onExternalOpenChange: (v: boolean) => { if (!v) { setPrefillDialogOpen(false); setStoredPrefill(null); } },
+    onExternalOpenChange: (v: boolean) => { if (!v) setPrefillDialogOpen(false); },
   } as const;
 
   const handleRefresh = async () => {
@@ -343,7 +349,12 @@ export default function Dashboard() {
                 <p className="text-muted-foreground max-w-sm mx-auto mb-6">
                   Start tracking web pages for changes by creating your first monitor. We'll notify you when content updates.
                 </p>
-                <CreateMonitorDialog {...prefillDialogProps} />
+                {/* Empty-state dialog is NOT externally controlled — the
+                    header dialog above already auto-opens on prefill. This
+                    instance inherits only the cached initialValues so that
+                    clicking its trigger after dismissing the header dialog
+                    still produces the prefilled form (fixes #415). */}
+                <CreateMonitorDialog initialValues={storedPrefill ?? undefined} />
               </div>
             );
           }

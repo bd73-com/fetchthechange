@@ -11,7 +11,14 @@ export default function NotFound() {
     const existing = document.head.querySelector<HTMLMetaElement>(
       'meta[name="robots"]',
     );
-    const previousContent = existing?.getAttribute("content") ?? null;
+    // Differentiate "tag existed but had no content" from "no tag existed".
+    // Both cases yield `getAttribute('content') === null`; without this
+    // flag, cleanup would wrongly remove a pre-existing tag that simply
+    // had no content attribute.
+    const hadExistingTag = existing !== null;
+    const hadContentAttribute = existing?.hasAttribute("content") ?? false;
+    const previousContent = existing?.getAttribute("content");
+    let injected: HTMLMetaElement | null = null;
 
     if (existing) {
       existing.setAttribute("content", "noindex");
@@ -20,17 +27,30 @@ export default function NotFound() {
       meta.setAttribute("name", "robots");
       meta.setAttribute("content", "noindex");
       document.head.appendChild(meta);
+      injected = meta;
     }
 
     return () => {
-      const current = document.head.querySelector<HTMLMetaElement>(
-        'meta[name="robots"]',
-      );
+      if (!hadExistingTag) {
+        // We created the tag ourselves — remove it.
+        if (injected?.isConnected) injected.remove();
+        return;
+      }
+
+      // A tag was there before us; find the current one (fall back to a
+      // fresh query in case the originally-captured node was replaced).
+      const current =
+        existing && existing.isConnected
+          ? existing
+          : document.head.querySelector<HTMLMetaElement>(
+              'meta[name="robots"]',
+            );
       if (!current) return;
-      if (previousContent === null) {
-        current.remove();
+
+      if (hadContentAttribute) {
+        current.setAttribute("content", previousContent ?? "");
       } else {
-        current.setAttribute("content", previousContent);
+        current.removeAttribute("content");
       }
     };
   }, []);

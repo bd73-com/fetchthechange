@@ -70,6 +70,27 @@ describe("NotFound noindex meta tag", () => {
     expect(afterUnmount!.getAttribute("content")).toBe("index,follow");
   });
 
+  it("preserves an existing robots meta that had no content attribute", () => {
+    // Edge case: a page set up `<meta name="robots">` with no content value.
+    // Cleanup must leave the tag in place with no content attribute — not
+    // remove it (which would happen if we conflated "no content attribute"
+    // with "no tag existed at all").
+    const existing = document.createElement("meta");
+    existing.setAttribute("name", "robots");
+    document.head.appendChild(existing);
+
+    const { unmount } = render(<NotFound />);
+    const mountedMeta = getRobotsMeta();
+    expect(mountedMeta).not.toBeNull();
+    expect(mountedMeta!.getAttribute("content")).toBe("noindex");
+    expect(document.head.querySelectorAll('meta[name="robots"]').length).toBe(1);
+
+    unmount();
+    const afterUnmount = getRobotsMeta();
+    expect(afterUnmount).not.toBeNull();
+    expect(afterUnmount!.hasAttribute("content")).toBe(false);
+  });
+
   it("renders the 404 heading", () => {
     const { getByText, unmount } = render(<NotFound />);
     expect(getByText("404 Page Not Found")).toBeDefined();
