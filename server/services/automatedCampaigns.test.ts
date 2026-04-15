@@ -85,7 +85,7 @@ vi.mock("./logger", () => ({
   },
 }));
 
-import { computeNextRunAt, ensureWelcomeConfig, bootstrapWelcomeCampaign, processAutomatedCampaigns, runWelcomeCampaign, WELCOME_CAMPAIGN_DEFAULTS } from "./automatedCampaigns";
+import { computeNextRunAt, ensureWelcomeConfig, bootstrapWelcomeCampaign, patchWelcomeCampaignUrls, processAutomatedCampaigns, runWelcomeCampaign, WELCOME_CAMPAIGN_DEFAULTS } from "./automatedCampaigns";
 
 describe("computeNextRunAt", () => {
   it("Jan 1 00:00 UTC → Jan 15", () => {
@@ -289,6 +289,115 @@ describe("WELCOME_CAMPAIGN_DEFAULTS", () => {
   it("HTML body contains extension and dashboard links", () => {
     expect(WELCOME_CAMPAIGN_DEFAULTS.htmlBody).toContain("https://ftc.bd73.com/support");
     expect(WELCOME_CAMPAIGN_DEFAULTS.htmlBody).toContain("https://ftc.bd73.com/dashboard");
+  });
+
+  it("text body uses /support instead of legacy /docs/extension", () => {
+    expect(WELCOME_CAMPAIGN_DEFAULTS.textBody).toContain("https://ftc.bd73.com/support");
+    expect(WELCOME_CAMPAIGN_DEFAULTS.textBody).not.toContain("/docs/extension");
+  });
+
+  it("HTML body no longer references the deprecated /docs/extension URL", () => {
+    expect(WELCOME_CAMPAIGN_DEFAULTS.htmlBody).not.toContain("/docs/extension");
+  });
+});
+
+describe("patchWelcomeCampaignUrls", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbFrom.mockReturnValue({ where: mockDbWhere, orderBy: mockDbOrderBy });
+    mockDbWhere.mockReturnValue({ limit: mockDbLimit, returning: mockDbReturning });
+    mockDbSet.mockReturnValue({ where: mockDbWhere });
+    mockDbValues.mockReturnValue({ returning: mockDbReturning, onConflictDoNothing: vi.fn().mockResolvedValue(undefined) });
+  });
+
+  it("is a no-op when the welcome config row does not exist", async () => {
+    mockDbLimit.mockResolvedValue([]);
+
+    await patchWelcomeCampaignUrls();
+
+    // Should only have done a select; no update
+    expect(mockDbSet).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when the stored htmlBody does not contain the deprecated URL", async () => {
+    const config = {
+      id: 1,
+      key: "welcome",
+      name: "Welcome",
+      subject: "Welcome",
+      htmlBody: "<a href=\"https://ftc.bd73.com/support\">Get the extension</a>",
+      textBody: "See https://ftc.bd73.com/support",
+      enabled: true,
+      lastRunAt: null,
+      nextRunAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+
+    await patchWelcomeCampaignUrls();
+
+    expect(mockDbSet).not.toHaveBeenCalled();
+  });
+
+  it("updates htmlBody and textBody when the stored htmlBody still contains the deprecated URL", async () => {
+    const staleConfig = {
+      id: 1,
+      key: "welcome",
+      name: "Welcome",
+      subject: "Welcome",
+      htmlBody: "<a href=\"https://ftc.bd73.com/docs/extension\">Get the extension</a>",
+      textBody: "Old link: https://ftc.bd73.com/docs/extension",
+      enabled: true,
+      lastRunAt: null,
+      nextRunAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([staleConfig]);
+
+    await patchWelcomeCampaignUrls();
+
+    expect(mockDbSet).toHaveBeenCalledTimes(1);
+    const setArg = mockDbSet.mock.calls[0][0];
+    expect(setArg.htmlBody).toBe(WELCOME_CAMPAIGN_DEFAULTS.htmlBody);
+    expect(setArg.textBody).toBe(WELCOME_CAMPAIGN_DEFAULTS.textBody);
+    expect(setArg.updatedAt).toBeInstanceOf(Date);
+    // The replacement body must not carry the legacy URL forward
+    expect(setArg.htmlBody).not.toContain("/docs/extension");
+    expect(setArg.textBody).not.toContain("/docs/extension");
+  });
+
+  it("is idempotent when invoked twice after the first run patches the row", async () => {
+    const staleConfig = {
+      id: 1,
+      key: "welcome",
+      name: "Welcome",
+      subject: "Welcome",
+      htmlBody: "<a href=\"https://ftc.bd73.com/docs/extension\">x</a>",
+      textBody: "x",
+      enabled: true,
+      lastRunAt: null,
+      nextRunAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    // First call: returns stale config → triggers update
+    // Second call: returns updated config (matching the defaults) → no-op
+    const updatedConfig = {
+      ...staleConfig,
+      htmlBody: WELCOME_CAMPAIGN_DEFAULTS.htmlBody,
+      textBody: WELCOME_CAMPAIGN_DEFAULTS.textBody,
+    };
+    mockDbLimit
+      .mockResolvedValueOnce([staleConfig])
+      .mockResolvedValueOnce([updatedConfig]);
+
+    await patchWelcomeCampaignUrls();
+    await patchWelcomeCampaignUrls();
+
+    // Only the first invocation should have issued an update
+    expect(mockDbSet).toHaveBeenCalledTimes(1);
   });
 });
 
