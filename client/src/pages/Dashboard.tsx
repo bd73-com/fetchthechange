@@ -343,7 +343,7 @@ export default function Dashboard() {
                 <p className="text-muted-foreground max-w-sm mx-auto mb-6">
                   Start tracking web pages for changes by creating your first monitor. We'll notify you when content updates.
                 </p>
-                <CreateMonitorDialog />
+                <CreateMonitorDialog {...prefillDialogProps} />
               </div>
             );
           }

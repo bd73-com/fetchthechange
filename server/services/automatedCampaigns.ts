@@ -378,6 +378,14 @@ export async function processAutomatedCampaigns(): Promise<void> {
   for (const config of configs) {
     if (!config.nextRunAt || config.nextRunAt > now) continue;
 
+    // Capture the pre-claim values so we can roll them back if the send fails
+    // after we have advanced lastRunAt/nextRunAt. Without rollback, users who
+    // signed up during a failed run's window would be permanently excluded
+    // from the welcome email (signupAfter would advance past their signup).
+    const previousLastRunAt = config.lastRunAt;
+    const previousNextRunAt = config.nextRunAt;
+    let claimedThisRun = false;
+
     try {
       const signupAfter = config.lastRunAt || new Date("2025-03-19T00:00:00Z");
       const signupBefore = now;
@@ -405,6 +413,8 @@ export async function processAutomatedCampaigns(): Promise<void> {
         continue;
       }
 
+      claimedThisRun = true;
+
       const result = await runWelcomeCampaign({
         signupAfter,
         signupBefore,
@@ -415,6 +425,34 @@ export async function processAutomatedCampaigns(): Promise<void> {
         console.log(`[AutoCampaign] Sent welcome campaign #${result.campaignId} to ${result.totalRecipients} recipients. Next run: ${nextRunAt.toISOString()}`);
       }
     } catch (error) {
+      // If we successfully claimed the run but then failed to send, restore
+      // lastRunAt and nextRunAt so the next cron tick re-attempts the same
+      // user window. (See comment above the try block.)
+      if (claimedThisRun) {
+        try {
+          await db
+            .update(automatedCampaignConfigs)
+            .set({
+              lastRunAt: previousLastRunAt,
+              nextRunAt: previousNextRunAt,
+              updatedAt: new Date(),
+            })
+            .where(eq(automatedCampaignConfigs.id, config.id));
+        } catch (rollbackError) {
+          await ErrorLogger.error(
+            "scheduler",
+            `Automated campaign '${config.key}' rollback failed`,
+            rollbackError instanceof Error ? rollbackError : null,
+            {
+              configId: config.id,
+              configKey: config.key,
+              previousLastRunAt: previousLastRunAt?.toISOString() ?? null,
+              previousNextRunAt: previousNextRunAt?.toISOString() ?? null,
+            }
+          );
+        }
+      }
+
       await ErrorLogger.error(
         "scheduler",
         `Automated campaign '${config.key}' failed`,

@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight } from "lucide-react";
 import PublicNav from "@/components/PublicNav";
+import SEOHead from "@/components/SEOHead";
 
 const blogPosts = [
   {
@@ -60,6 +61,13 @@ const blogPosts = [
 export default function Blog() {
   return (
     <div className="min-h-screen bg-background">
+      <SEOHead
+        title="Blog — Website monitoring, change detection, and integrations | FetchTheChange"
+        description="Insights on web monitoring, change detection, CSS selector resilience, and integrations with Slack, webhooks, and Zapier. Read the FetchTheChange blog."
+        path="/blog"
+        ogDescription="Insights on web monitoring, change detection, and staying ahead of website updates."
+        twitterDescription="Insights on web monitoring, change detection, and staying ahead of website updates."
+      />
       <PublicNav />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">

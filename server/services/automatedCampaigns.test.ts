@@ -633,4 +633,109 @@ describe("processAutomatedCampaigns", () => {
       expect.objectContaining({ configKey: "welcome" }),
     );
   });
+
+  it("rolls back lastRunAt and nextRunAt when send fails after the run is claimed", async () => {
+    const previousLastRunAt = new Date("2025-03-20T00:00:00Z");
+    const previousNextRunAt = new Date(Date.now() - 3600000); // 1 hour ago — eligible
+    const config = {
+      id: 1,
+      key: "welcome",
+      enabled: true,
+      lastRunAt: previousLastRunAt,
+      nextRunAt: previousNextRunAt,
+      subject: "test",
+      htmlBody: "<html></html>",
+      textBody: null,
+      name: "Welcome",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    // Differentiate where() calls:
+    // 1) initial select for configs → resolves to [config]
+    // 2) atomic claim update().set().where().returning() → returns [config]
+    // 3) runWelcomeCampaign's select().from().where().limit() → returns [config]
+    // 4) rollback update().set().where() → just resolves (no chained call)
+    let whereCallCount = 0;
+    mockDbWhere.mockImplementation(() => {
+      whereCallCount++;
+      if (whereCallCount === 1) {
+        return Promise.resolve([config]);
+      }
+      // For the claim and the inner config select, we want a non-empty
+      // returning() and limit() so the code proceeds into runWelcomeCampaign.
+      // For the rollback's plain `await ... .where(...)`, the awaited object
+      // is fine — `await {obj}` resolves to the object.
+      return {
+        returning: vi.fn().mockResolvedValue([config]),
+        limit: vi.fn().mockResolvedValue([config]),
+      };
+    });
+
+    // Make the send fail by having recipient resolution throw.
+    mockResolveRecipients.mockRejectedValue(new Error("Recipients lookup failed"));
+
+    await processAutomatedCampaigns();
+
+    // Two .set() calls: the atomic claim, then the rollback.
+    expect(mockDbSet).toHaveBeenCalledTimes(2);
+
+    // The claim advanced lastRunAt/nextRunAt to "now".
+    const claimSetArg = mockDbSet.mock.calls[0][0];
+    expect(claimSetArg.lastRunAt).toBeInstanceOf(Date);
+    expect(claimSetArg.nextRunAt).toBeInstanceOf(Date);
+
+    // The rollback restored the original values so the next cron tick can
+    // re-attempt the same user window.
+    const rollbackSetArg = mockDbSet.mock.calls[1][0];
+    expect(rollbackSetArg.lastRunAt).toBe(previousLastRunAt);
+    expect(rollbackSetArg.nextRunAt).toBe(previousNextRunAt);
+    expect(rollbackSetArg.updatedAt).toBeInstanceOf(Date);
+
+    expect(mockErrorLoggerError).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("'welcome' failed"),
+      expect.any(Error),
+      expect.objectContaining({ configKey: "welcome" }),
+    );
+  });
+
+  it("does not roll back when the claim itself loses to a concurrent run", async () => {
+    const pastDate = new Date(Date.now() - 3600000);
+    const config = {
+      id: 1,
+      key: "welcome",
+      enabled: true,
+      lastRunAt: new Date("2025-03-20T00:00:00Z"),
+      nextRunAt: pastDate,
+      subject: "test",
+      htmlBody: "<html></html>",
+      textBody: null,
+      name: "Welcome",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    let whereCallCount = 0;
+    mockDbWhere.mockImplementation(() => {
+      whereCallCount++;
+      if (whereCallCount === 1) {
+        // Initial select for configs
+        return Promise.resolve([config]);
+      }
+      // Atomic claim returning() returns empty — another instance already claimed.
+      return {
+        returning: vi.fn().mockResolvedValue([]),
+        limit: vi.fn().mockResolvedValue([]),
+      };
+    });
+
+    await processAutomatedCampaigns();
+
+    // Only one .set() call (the failed claim attempt). No rollback, no send.
+    expect(mockDbSet).toHaveBeenCalledTimes(1);
+    expect(mockResolveRecipients).not.toHaveBeenCalled();
+    expect(mockTriggerCampaignSend).not.toHaveBeenCalled();
+    expect(mockErrorLoggerError).not.toHaveBeenCalled();
+  });
 });
