@@ -243,12 +243,12 @@ const faqSections: FAQSection[] = [
       {
         question: "How do I connect Slack?",
         answer:
-          "Go to your dashboard settings and click \"Connect Slack\". This starts a standard OAuth flow — you'll authorise FetchTheChange to post to your workspace. Once connected, open a monitor's detail page, enable the Slack channel, and pick the channel you want alerts sent to.",
+          "Open a monitor's detail page and scroll to the Notification Channels section. Click \"Connect to Slack\" — this starts a standard OAuth flow where you authorise FetchTheChange to post to your workspace. Once connected, enable the Slack channel on that monitor and pick the channel you want alerts sent to.",
       },
       {
         question: "Can I disconnect Slack?",
         answer:
-          "Yes. Visit your integrations settings and click \"Disconnect Slack\". This removes FetchTheChange's access to your workspace and disables all Slack notification channels across your monitors.",
+          "Yes. Open the Notification Channels section on any monitor that has Slack connected and click \"Disconnect\". This removes FetchTheChange's access to your workspace and disables all Slack notification channels across your monitors.",
       },
       {
         question: "My webhook stopped delivering. What should I check?",
