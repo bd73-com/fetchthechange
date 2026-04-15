@@ -15,6 +15,7 @@ const {
   mockDbUpdate,
   mockDbSet,
   mockDbOrderBy,
+  mockDbDeleteWhere,
   mockTriggerCampaignSend,
   mockResolveRecipients,
   mockErrorLoggerError,
@@ -30,6 +31,7 @@ const {
   mockDbUpdate: vi.fn(),
   mockDbSet: vi.fn(),
   mockDbOrderBy: vi.fn(),
+  mockDbDeleteWhere: vi.fn().mockResolvedValue(undefined),
   mockTriggerCampaignSend: vi.fn(),
   mockResolveRecipients: vi.fn(),
   mockErrorLoggerError: vi.fn().mockResolvedValue(undefined),
@@ -41,6 +43,7 @@ vi.mock("../db", () => ({
     select: () => ({ from: mockDbFrom }),
     insert: () => ({ values: mockDbValues }),
     update: () => ({ set: mockDbSet }),
+    delete: () => ({ where: mockDbDeleteWhere }),
   },
 }));
 
@@ -578,6 +581,57 @@ describe("runWelcomeCampaign", () => {
       signupBefore: new Date(),
       configId: 999,
     })).rejects.toThrow("Automated campaign config not found");
+  });
+
+  it("cleans up the orphaned draft campaign when triggerCampaignSend throws", async () => {
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockResolveRecipients.mockResolvedValue([
+      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+    ]);
+    // Campaign insert succeeds and returns a draft row.
+    mockDbReturning.mockResolvedValue([{ id: 42, ...config, status: "draft", type: "automated" }]);
+    // Send throws after the draft is created.
+    mockTriggerCampaignSend.mockRejectedValue(new Error("Resend blew up"));
+
+    await expect(runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 1,
+    })).rejects.toThrow("Resend blew up");
+
+    // Cleanup path must have fired — db.delete(campaigns).where(...) → mockDbDeleteWhere
+    expect(mockDbDeleteWhere).toHaveBeenCalledTimes(1);
+    // The WHERE arg should be an `and(eq(id, 42), eq(status, "draft"))` composite.
+    const whereArg = mockDbDeleteWhere.mock.calls[0][0];
+    expect(whereArg.type).toBe("and");
+  });
+
+  it("swallows cleanup errors but still re-throws the original send error", async () => {
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockResolveRecipients.mockResolvedValue([
+      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+    ]);
+    mockDbReturning.mockResolvedValue([{ id: 42, ...config, status: "draft", type: "automated" }]);
+    mockTriggerCampaignSend.mockRejectedValue(new Error("Original send error"));
+    // Cleanup fails too (e.g. DB momentarily down).
+    mockDbDeleteWhere.mockRejectedValueOnce(new Error("Cleanup DB error"));
+
+    // The original error must surface, not the cleanup error.
+    await expect(runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 1,
+    })).rejects.toThrow("Original send error");
   });
 });
 
