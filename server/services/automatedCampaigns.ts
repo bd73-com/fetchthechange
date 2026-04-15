@@ -204,14 +204,21 @@ export async function ensureWelcomeConfig(): Promise<AutomatedCampaignConfig> {
 }
 
 /**
- * One-time patch: update the welcome campaign config row if its html_body still
- * contains the deprecated /docs/extension URL. Idempotent — once the bad URL is
- * gone, this is a no-op, so it's safe to call on every deployment.
+ * One-time patch: update the welcome campaign config row if its html_body or
+ * text_body still contains the deprecated /docs/extension URL. Idempotent —
+ * once the bad URL is gone from both bodies, this is a no-op, so it's safe to
+ * call on every deployment.
+ *
+ * Does a targeted string replacement rather than overwriting with defaults, so
+ * any admin customizations to the rest of the template are preserved.
  *
  * Only patches the config template row; already-sent campaign records are left
  * untouched.
  */
 export async function patchWelcomeCampaignUrls(): Promise<void> {
+  const LEGACY_URL = "ftc.bd73.com/docs/extension";
+  const NEW_URL = "ftc.bd73.com/support";
+
   const [config] = await db
     .select()
     .from(automatedCampaignConfigs)
@@ -219,13 +226,24 @@ export async function patchWelcomeCampaignUrls(): Promise<void> {
     .limit(1);
 
   if (!config) return;
-  if (!config.htmlBody.includes("ftc.bd73.com/docs/extension")) return;
+
+  const htmlNeedsPatch = config.htmlBody.includes(LEGACY_URL);
+  const textNeedsPatch = config.textBody?.includes(LEGACY_URL) ?? false;
+
+  if (!htmlNeedsPatch && !textNeedsPatch) return;
+
+  const patchedHtmlBody = htmlNeedsPatch
+    ? config.htmlBody.split(LEGACY_URL).join(NEW_URL)
+    : config.htmlBody;
+  const patchedTextBody = textNeedsPatch
+    ? config.textBody!.split(LEGACY_URL).join(NEW_URL)
+    : config.textBody;
 
   await db
     .update(automatedCampaignConfigs)
     .set({
-      htmlBody: WELCOME_CAMPAIGN_DEFAULTS.htmlBody,
-      textBody: WELCOME_CAMPAIGN_DEFAULTS.textBody,
+      htmlBody: patchedHtmlBody,
+      textBody: patchedTextBody,
       updatedAt: new Date(),
     })
     .where(eq(automatedCampaignConfigs.key, "welcome"));

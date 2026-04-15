@@ -340,14 +340,22 @@ describe("patchWelcomeCampaignUrls", () => {
     expect(mockDbSet).not.toHaveBeenCalled();
   });
 
-  it("updates htmlBody and textBody when the stored htmlBody still contains the deprecated URL", async () => {
+  it("does a targeted URL replacement and preserves surrounding custom content", async () => {
+    const customHtml =
+      "<p>Hi, welcome — special offer inside!</p>" +
+      "<a href=\"https://ftc.bd73.com/docs/extension\">Get the extension</a>" +
+      "<p>Signed, Christian</p>";
+    const customText =
+      "Hi, welcome — special offer inside!\n" +
+      "Get the extension: https://ftc.bd73.com/docs/extension\n" +
+      "Signed, Christian";
     const staleConfig = {
       id: 1,
       key: "welcome",
       name: "Welcome",
       subject: "Welcome",
-      htmlBody: "<a href=\"https://ftc.bd73.com/docs/extension\">Get the extension</a>",
-      textBody: "Old link: https://ftc.bd73.com/docs/extension",
+      htmlBody: customHtml,
+      textBody: customText,
       enabled: true,
       lastRunAt: null,
       nextRunAt: null,
@@ -360,12 +368,64 @@ describe("patchWelcomeCampaignUrls", () => {
 
     expect(mockDbSet).toHaveBeenCalledTimes(1);
     const setArg = mockDbSet.mock.calls[0][0];
-    expect(setArg.htmlBody).toBe(WELCOME_CAMPAIGN_DEFAULTS.htmlBody);
-    expect(setArg.textBody).toBe(WELCOME_CAMPAIGN_DEFAULTS.textBody);
+    // Targeted replacement: URL swapped, surrounding custom content preserved
+    expect(setArg.htmlBody).toBe(customHtml.replace("/docs/extension", "/support"));
+    expect(setArg.textBody).toBe(customText.replace("/docs/extension", "/support"));
     expect(setArg.updatedAt).toBeInstanceOf(Date);
-    // The replacement body must not carry the legacy URL forward
+    // Custom copy must survive the patch
+    expect(setArg.htmlBody).toContain("special offer inside");
+    expect(setArg.htmlBody).toContain("Signed, Christian");
+    expect(setArg.textBody).toContain("special offer inside");
+    // And the legacy URL must be gone
     expect(setArg.htmlBody).not.toContain("/docs/extension");
     expect(setArg.textBody).not.toContain("/docs/extension");
+  });
+
+  it("patches textBody even when htmlBody was already manually fixed", async () => {
+    const config = {
+      id: 1,
+      key: "welcome",
+      name: "Welcome",
+      subject: "Welcome",
+      htmlBody: "<a href=\"https://ftc.bd73.com/support\">Get the extension</a>",
+      textBody: "Old link: https://ftc.bd73.com/docs/extension",
+      enabled: true,
+      lastRunAt: null,
+      nextRunAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+
+    await patchWelcomeCampaignUrls();
+
+    expect(mockDbSet).toHaveBeenCalledTimes(1);
+    const setArg = mockDbSet.mock.calls[0][0];
+    // htmlBody was already clean, left untouched
+    expect(setArg.htmlBody).toBe(config.htmlBody);
+    // textBody had the legacy URL, now replaced
+    expect(setArg.textBody).toBe("Old link: https://ftc.bd73.com/support");
+  });
+
+  it("no-ops when textBody is null and htmlBody is already clean", async () => {
+    const config = {
+      id: 1,
+      key: "welcome",
+      name: "Welcome",
+      subject: "Welcome",
+      htmlBody: "<a href=\"https://ftc.bd73.com/support\">ok</a>",
+      textBody: null,
+      enabled: true,
+      lastRunAt: null,
+      nextRunAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+
+    await patchWelcomeCampaignUrls();
+
+    expect(mockDbSet).not.toHaveBeenCalled();
   });
 
   it("is idempotent when invoked twice after the first run patches the row", async () => {
@@ -382,16 +442,16 @@ describe("patchWelcomeCampaignUrls", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    // First call: returns stale config → triggers update
-    // Second call: returns updated config (matching the defaults) → no-op
-    const updatedConfig = {
+    // First call: returns stale config → triggers targeted patch
+    // Second call: returns config after patch (URL replaced) → no-op
+    const patchedConfig = {
       ...staleConfig,
-      htmlBody: WELCOME_CAMPAIGN_DEFAULTS.htmlBody,
-      textBody: WELCOME_CAMPAIGN_DEFAULTS.textBody,
+      htmlBody: staleConfig.htmlBody.replace("/docs/extension", "/support"),
+      textBody: staleConfig.textBody,
     };
     mockDbLimit
       .mockResolvedValueOnce([staleConfig])
-      .mockResolvedValueOnce([updatedConfig]);
+      .mockResolvedValueOnce([patchedConfig]);
 
     await patchWelcomeCampaignUrls();
     await patchWelcomeCampaignUrls();
