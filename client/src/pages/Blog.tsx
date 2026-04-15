@@ -7,6 +7,13 @@ import PublicNav from "@/components/PublicNav";
 
 const blogPosts = [
   {
+    slug: "slack-webpage-change-alerts",
+    title: "How to Get a Slack Alert When Any Webpage Changes",
+    description: "Set up Slack notifications for webpage changes in minutes. Monitor prices, stock levels, competitor pages, or any site element — alerts go straight to your Slack channel.",
+    category: "Integrations",
+    date: "2026-04-15",
+  },
+  {
     slug: "monitor-website-changes-without-writing-code",
     title: "How to Monitor Website Changes Without Writing Code",
     description: "You don't need to be a developer to track changes on a website. A step-by-step guide to monitoring any webpage using a point-and-click browser extension — no coding required.",
