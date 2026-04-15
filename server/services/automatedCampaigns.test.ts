@@ -287,7 +287,7 @@ describe("WELCOME_CAMPAIGN_DEFAULTS", () => {
   });
 
   it("HTML body contains extension and dashboard links", () => {
-    expect(WELCOME_CAMPAIGN_DEFAULTS.htmlBody).toContain("https://ftc.bd73.com/docs/extension");
+    expect(WELCOME_CAMPAIGN_DEFAULTS.htmlBody).toContain("https://ftc.bd73.com/support");
     expect(WELCOME_CAMPAIGN_DEFAULTS.htmlBody).toContain("https://ftc.bd73.com/dashboard");
   });
 });

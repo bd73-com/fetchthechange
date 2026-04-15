@@ -261,7 +261,8 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     const BOOTSTRAP_TIMEOUT_MS = 5_000;
     try {
       if (campaignConfigsReady) {
-        const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
+        const { bootstrapWelcomeCampaign, patchWelcomeCampaignUrls } = await import("./services/automatedCampaigns");
+        await patchWelcomeCampaignUrls();
         const campaignPromise = bootstrapWelcomeCampaign();
         let timedOut = false;
         // Log outcome if the underlying promise fails after timeout fires.

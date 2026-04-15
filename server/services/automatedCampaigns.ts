@@ -47,7 +47,7 @@ export const WELCOME_CAMPAIGN_DEFAULTS = {
               <table cellpadding="0" cellspacing="0" style="margin:20px 0;">
                 <tr>
                   <td style="background:#6366f1;border-radius:8px;padding:12px 24px;">
-                    <a href="https://ftc.bd73.com/docs/extension" style="color:#fff;text-decoration:none;font-size:15px;font-weight:600;">
+                    <a href="https://ftc.bd73.com/support" style="color:#fff;text-decoration:none;font-size:15px;font-weight:600;">
                       → Get the Chrome extension
                     </a>
                   </td>
@@ -105,7 +105,7 @@ Welcome to FetchTheChange. You're set up and ready to go.
 
 The fastest way to start: install the Chrome extension. Hover over any element on any page, click it, and your monitor is live — no CSS selectors needed.
 
-→ Get the extension: https://ftc.bd73.com/docs/extension
+→ Get the extension: https://ftc.bd73.com/support
 
 Or go straight to the dashboard and create a monitor manually if you already know your selector:
 
@@ -201,6 +201,36 @@ export async function ensureWelcomeConfig(): Promise<AutomatedCampaignConfig> {
     .limit(1);
 
   return inserted;
+}
+
+/**
+ * One-time patch: update the welcome campaign config row if its html_body still
+ * contains the deprecated /docs/extension URL. Idempotent — once the bad URL is
+ * gone, this is a no-op, so it's safe to call on every deployment.
+ *
+ * Only patches the config template row; already-sent campaign records are left
+ * untouched.
+ */
+export async function patchWelcomeCampaignUrls(): Promise<void> {
+  const [config] = await db
+    .select()
+    .from(automatedCampaignConfigs)
+    .where(eq(automatedCampaignConfigs.key, "welcome"))
+    .limit(1);
+
+  if (!config) return;
+  if (!config.htmlBody.includes("ftc.bd73.com/docs/extension")) return;
+
+  await db
+    .update(automatedCampaignConfigs)
+    .set({
+      htmlBody: WELCOME_CAMPAIGN_DEFAULTS.htmlBody,
+      textBody: WELCOME_CAMPAIGN_DEFAULTS.textBody,
+      updatedAt: new Date(),
+    })
+    .where(eq(automatedCampaignConfigs.key, "welcome"));
+
+  console.log("[Patch] Welcome campaign URLs updated: /docs/extension → /support");
 }
 
 /**
