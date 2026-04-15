@@ -47,7 +47,7 @@ export const WELCOME_CAMPAIGN_DEFAULTS = {
               <table cellpadding="0" cellspacing="0" style="margin:20px 0;">
                 <tr>
                   <td style="background:#6366f1;border-radius:8px;padding:12px 24px;">
-                    <a href="https://ftc.bd73.com/docs/extension" style="color:#fff;text-decoration:none;font-size:15px;font-weight:600;">
+                    <a href="https://ftc.bd73.com/support" style="color:#fff;text-decoration:none;font-size:15px;font-weight:600;">
                       → Get the Chrome extension
                     </a>
                   </td>
@@ -105,7 +105,7 @@ Welcome to FetchTheChange. You're set up and ready to go.
 
 The fastest way to start: install the Chrome extension. Hover over any element on any page, click it, and your monitor is live — no CSS selectors needed.
 
-→ Get the extension: https://ftc.bd73.com/docs/extension
+→ Get the extension: https://ftc.bd73.com/support
 
 Or go straight to the dashboard and create a monitor manually if you already know your selector:
 
@@ -201,6 +201,54 @@ export async function ensureWelcomeConfig(): Promise<AutomatedCampaignConfig> {
     .limit(1);
 
   return inserted;
+}
+
+/**
+ * One-time patch: update the welcome campaign config row if its html_body or
+ * text_body still contains the deprecated /docs/extension URL. Idempotent —
+ * once the bad URL is gone from both bodies, this is a no-op, so it's safe to
+ * call on every deployment.
+ *
+ * Does a targeted string replacement rather than overwriting with defaults, so
+ * any admin customizations to the rest of the template are preserved.
+ *
+ * Only patches the config template row; already-sent campaign records are left
+ * untouched.
+ */
+export async function patchWelcomeCampaignUrls(): Promise<void> {
+  const LEGACY_URL = "ftc.bd73.com/docs/extension";
+  const NEW_URL = "ftc.bd73.com/support";
+
+  const [config] = await db
+    .select()
+    .from(automatedCampaignConfigs)
+    .where(eq(automatedCampaignConfigs.key, "welcome"))
+    .limit(1);
+
+  if (!config) return;
+
+  const htmlNeedsPatch = config.htmlBody.includes(LEGACY_URL);
+  const textNeedsPatch = config.textBody?.includes(LEGACY_URL) ?? false;
+
+  if (!htmlNeedsPatch && !textNeedsPatch) return;
+
+  const patchedHtmlBody = htmlNeedsPatch
+    ? config.htmlBody.split(LEGACY_URL).join(NEW_URL)
+    : config.htmlBody;
+  const patchedTextBody = textNeedsPatch
+    ? config.textBody!.split(LEGACY_URL).join(NEW_URL)
+    : config.textBody;
+
+  await db
+    .update(automatedCampaignConfigs)
+    .set({
+      htmlBody: patchedHtmlBody,
+      textBody: patchedTextBody,
+      updatedAt: new Date(),
+    })
+    .where(eq(automatedCampaignConfigs.key, "welcome"));
+
+  console.log("[Patch] Welcome campaign URLs updated: /docs/extension → /support");
 }
 
 /**

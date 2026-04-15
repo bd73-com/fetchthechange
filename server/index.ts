@@ -261,7 +261,17 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
     const BOOTSTRAP_TIMEOUT_MS = 5_000;
     try {
       if (campaignConfigsReady) {
-        const { bootstrapWelcomeCampaign } = await import("./services/automatedCampaigns");
+        const { bootstrapWelcomeCampaign, patchWelcomeCampaignUrls } = await import("./services/automatedCampaigns");
+        // Run the URL patch in its own try-catch so a transient DB hiccup during
+        // the one-time migration cannot prevent the welcome campaign bootstrap.
+        try {
+          await patchWelcomeCampaignUrls();
+        } catch (err) {
+          console.error(
+            "[Patch] Welcome campaign URL patch failed, continuing to bootstrap:",
+            err instanceof Error ? err.message : String(err),
+          );
+        }
         const campaignPromise = bootstrapWelcomeCampaign();
         let timedOut = false;
         // Log outcome if the underlying promise fails after timeout fires.
