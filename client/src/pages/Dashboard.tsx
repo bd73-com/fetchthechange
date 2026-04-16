@@ -91,6 +91,16 @@ export default function Dashboard() {
     }
   }, [prefillParams]);
 
+  // Clear stale prefill values once the user has monitors (i.e. after
+  // successful creation). Without this, storedPrefill persists for the
+  // lifetime of the component mount, causing subsequent dialog opens to
+  // carry stale extension values long after the original prefill was used.
+  useEffect(() => {
+    if (monitors && monitors.length > 0 && storedPrefill) {
+      setStoredPrefill(null);
+    }
+  }, [monitors, storedPrefill]);
+
   // The header dialog is the single externally-controlled instance that
   // auto-opens when prefill params arrive. The empty-state dialog below
   // must NOT be externally controlled, or both dialogs race on the same

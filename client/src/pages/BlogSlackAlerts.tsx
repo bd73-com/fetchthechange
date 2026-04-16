@@ -131,24 +131,28 @@ export default function BlogSlackAlerts() {
           </p>
           <ul className="list-disc list-inside space-y-3 ml-4">
             <li>
-              <Link href="/blog/webhook-webpage-change-trigger" rel="nofollow" className="text-primary hover:underline">
+              <span className="text-muted-foreground">
                 Trigger any automation when a webpage changes using webhooks
-              </Link>
+              </span>
+              <span className="text-xs text-muted-foreground/60 ml-2">(coming soon)</span>
             </li>
             <li>
-              <Link href="/blog/zapier-webpage-change-automation" rel="nofollow" className="text-primary hover:underline">
+              <span className="text-muted-foreground">
                 Connect webpage monitoring to 7,000+ apps with Zapier
-              </Link>
+              </span>
+              <span className="text-xs text-muted-foreground/60 ml-2">(coming soon)</span>
             </li>
             <li>
-              <Link href="/blog/webpage-monitoring-api" rel="nofollow" className="text-primary hover:underline">
+              <span className="text-muted-foreground">
                 Monitor webpages programmatically with the FetchTheChange API
-              </Link>
+              </span>
+              <span className="text-xs text-muted-foreground/60 ml-2">(coming soon)</span>
             </li>
             <li>
-              <Link href="/blog/chrome-extension-webpage-monitor" rel="nofollow" className="text-primary hover:underline">
+              <span className="text-muted-foreground">
                 Monitor any element on any page without writing CSS selectors
-              </Link>
+              </span>
+              <span className="text-xs text-muted-foreground/60 ml-2">(coming soon)</span>
             </li>
           </ul>
         </div>

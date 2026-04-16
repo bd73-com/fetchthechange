@@ -208,57 +208,32 @@ describe("BlogSlackAlerts page integrity", () => {
     expect(slackAlertsSource).toContain(">Integrations<");
   });
 
-  it("includes stub links to the 4 planned series posts", () => {
-    // The spec requires stubbed Link hrefs to the other 4 integration
-    // series posts so they go live automatically when those posts ship.
-    const seriesSlugs = [
-      "/blog/webhook-webpage-change-trigger",
-      "/blog/zapier-webpage-change-automation",
-      "/blog/webpage-monitoring-api",
-      "/blog/chrome-extension-webpage-monitor",
+  it("mentions the 4 planned series post topics as coming-soon text", () => {
+    // The series section lists upcoming posts as non-clickable text with
+    // "(coming soon)" labels. Verify the topics are present.
+    const topics = [
+      "webhooks",
+      "Zapier",
+      "API",
+      "CSS selectors",
     ];
-    for (const href of seriesSlugs) {
-      expect(slackAlertsSource).toContain(`href="${href}"`);
+    for (const topic of topics) {
+      expect(slackAlertsSource.toLowerCase()).toContain(topic.toLowerCase());
     }
+    // All 4 entries should carry a "(coming soon)" indicator.
+    const comingSoonCount = (slackAlertsSource.match(/coming soon/g) || []).length;
+    expect(comingSoonCount).toBeGreaterThanOrEqual(4);
   });
 
-  it("every /blog/ href is either an existing route or a planned series stub", () => {
-    // This assertion intentionally replaces the standard "internal links
-    // point to existing blog routes" check. The four planned-series stubs
-    // are allowed because they ship as nofollow Links that go live when
-    // later posts in the series land. Any other /blog/ href (e.g. a typo
-    // in one of the stubs) must resolve to a real route today.
-    const plannedStubs = new Set([
-      "/blog/webhook-webpage-change-trigger",
-      "/blog/zapier-webpage-change-automation",
-      "/blog/webpage-monitoring-api",
-      "/blog/chrome-extension-webpage-monitor",
-    ]);
+  it("every /blog/ href points to an existing route (no dead links)", () => {
+    // Now that planned stubs are plain text (not <Link>), every actual
+    // href="/blog/..." must resolve to a real route.
     const hrefMatches = [
       ...slackAlertsSource.matchAll(/href="(\/blog\/[^"]+)"/g),
     ];
     const linkedPaths = hrefMatches.map((m) => m[1]);
-    expect(linkedPaths.length).toBeGreaterThanOrEqual(3);
     for (const href of linkedPaths) {
-      if (plannedStubs.has(href)) continue;
       expect(routes).toContain(href);
-    }
-  });
-
-  it("planned-series stub links carry rel=\"nofollow\"", () => {
-    // Prevents Google from treating the not-yet-routed targets as
-    // soft-404s during the window before each series post ships.
-    const plannedStubs = [
-      "/blog/webhook-webpage-change-trigger",
-      "/blog/zapier-webpage-change-automation",
-      "/blog/webpage-monitoring-api",
-      "/blog/chrome-extension-webpage-monitor",
-    ];
-    for (const href of plannedStubs) {
-      const pattern = new RegExp(
-        `href="${href.replace(/\//g, "\\/")}"[^>]*rel="nofollow"|rel="nofollow"[^>]*href="${href.replace(/\//g, "\\/")}"`,
-      );
-      expect(slackAlertsSource).toMatch(pattern);
     }
   });
 
