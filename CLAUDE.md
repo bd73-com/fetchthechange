@@ -49,6 +49,7 @@ See `README.md` for project overview, tech stack, structure, and setup.
 - `.claude/skills/add-notification-channel/` — adding a new notification channel (encrypted credentials, delivery service, tier gate, OAuth CSRF exemption)
 - `.claude/skills/changelog/` — keeping the changelog up to date (sync-changelog.ts workflow, never edit changelog.ts by hand, seed entries)
 - `.claude/skills/seo-audit/` — technical and on-page SEO diagnostics (crawlability, indexation, Core Web Vitals, content quality, E-E-A-T); includes AI writing detection reference
+- `.claude/skills/requesting-code-review/` — dispatching code-reviewer subagent to catch issues before they cascade; includes reviewer template with severity-based triage
 
 ## Agents
 
