@@ -894,9 +894,19 @@ describe("processAutomatedCampaigns", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    mockDbWhere.mockResolvedValue([config]);
-    // Make the inner select fail so we enter the catch path
-    mockDbLimit.mockRejectedValue(new Error("DB connection failed"));
+    let whereCallCount = 0;
+    mockDbWhere.mockImplementation(() => {
+      whereCallCount++;
+      if (whereCallCount === 1) {
+        // initial config fetch in processAutomatedCampaigns
+        return Promise.resolve([config]);
+      }
+      // claim + inner config load chain — limit rejects to simulate DB failure
+      return {
+        returning: vi.fn().mockResolvedValue([config]),
+        limit: vi.fn().mockRejectedValue(new Error("DB connection failed")),
+      };
+    });
     // Make ErrorLogger.error itself throw — the new try/catch should absorb it
     mockErrorLoggerError.mockRejectedValue(new Error("Logger DB also down"));
 
