@@ -60,11 +60,45 @@ A phase is complete when all blocking architectural issues have been remediated 
 
 ### Phase 4 of 9 — Code Review
 
-Read `.claude/commands/review-code.md` and execute every step in that file for the current branch.
+Dispatch an isolated code-reviewer subagent so the review happens in a fresh context, free from confirmation bias accumulated during phases 1–3.
 
-For every bug, regression risk, or quality issue identified, log a FOUND entry. Fix it immediately and log the FIXED entry. Do not proceed to Phase 5 while any identified issue remains open.
+**1. Gather context:**
 
-A phase is complete when all bugs and quality issues identified by the review have been resolved and `npm run check && npm run test` exit with code 0.
+```bash
+BRANCH=$(git branch --show-current)
+BASE_SHA=$(git merge-base main HEAD)
+HEAD_SHA=$(git rev-parse HEAD)
+DIFF_STAT=$(git diff --stat $BASE_SHA..$HEAD_SHA)
+```
+
+Build a one-paragraph `DESCRIPTION` summarising what the branch changes (from the commit log and diff stat).
+
+**2. Dispatch the reviewer:**
+
+Call the **Agent tool** with `subagent_type: "general-purpose"`. The prompt must include the full text of `.claude/skills/requesting-code-review/code-reviewer.md` with placeholders filled in:
+
+- `{WHAT_WAS_IMPLEMENTED}` — the description from step 1
+- `{PLAN_OR_REQUIREMENTS}` — "All changes on branch must pass npm run check && npm run test, follow project conventions in CLAUDE.md, and introduce no regressions."
+- `{DESCRIPTION}` — same as `{WHAT_WAS_IMPLEMENTED}`
+- `{PLAN_REFERENCE}` — "See CLAUDE.md for project conventions and verification steps."
+- `{BASE_SHA}` — the base SHA from step 1
+- `{HEAD_SHA}` — the head SHA from step 1
+
+Tell the subagent to read every changed file in full before reviewing, and to output findings using the exact format specified in the template.
+
+**3. Triage the reviewer's output:**
+
+Map the reviewer's severity categories to issue table entries:
+
+- **Critical** → log a FOUND entry, fix immediately, log FIXED. These block Phase 5.
+- **Important** → log a FOUND entry, fix immediately, log FIXED. These block Phase 5.
+- **Minor** → log a FOUND entry, fix immediately, log FIXED. Do not skip these — minor issues are cheap to fix now and expensive to revisit later.
+
+If the reviewer's Assessment says "Ready to merge: No", treat any unfixed findings as blockers.
+
+If a finding is clearly a pre-existing bug in unrelated code, apply the out-of-scope rule: mark `Fixed` as `→ Bug Report (Phase 6)`.
+
+A phase is complete when all findings from the reviewer have been resolved (or deferred to Phase 6) and `npm run check && npm run test` exit with code 0.
 
 ### Phase 5 of 9 — Skeptic Review
 
