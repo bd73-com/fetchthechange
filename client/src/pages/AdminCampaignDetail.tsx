@@ -46,6 +46,7 @@ const statusConfig: Record<string, { variant: "default" | "secondary" | "outline
   sent: { variant: "default", label: "Sent" },
   partially_sent: { variant: "secondary", label: "Partially Sent" },
   cancelled: { variant: "destructive", label: "Cancelled" },
+  failed: { variant: "destructive", label: "Failed" },
 };
 
 const recipientStatusConfig: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {

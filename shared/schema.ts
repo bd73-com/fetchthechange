@@ -144,7 +144,7 @@ export const campaigns = pgTable("campaigns", {
   subject: text("subject").notNull(),
   htmlBody: text("html_body").notNull(),
   textBody: text("text_body"),
-  status: text("status").default("draft").notNull(), // 'draft' | 'sending' | 'sent' | 'partially_sent' | 'cancelled'
+  status: text("status").default("draft").notNull(), // 'draft' | 'sending' | 'sent' | 'partially_sent' | 'cancelled' | 'failed'
   type: text("type").default("manual").notNull(), // 'manual' | 'automated'
   filters: jsonb("filters"), // { tier?: string[], signupBefore?, signupAfter?, minMonitors?, maxMonitors?, hasActiveMonitors? }
   totalRecipients: integer("total_recipients").default(0).notNull(),
