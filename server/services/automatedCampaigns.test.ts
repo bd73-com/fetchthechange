@@ -633,6 +633,35 @@ describe("runWelcomeCampaign", () => {
       configId: 1,
     })).rejects.toThrow("Original send error");
   });
+
+  it("attempts to mark a sending campaign as failed when triggerCampaignSend throws", async () => {
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockResolveRecipients.mockResolvedValue([
+      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+    ]);
+    mockDbReturning.mockResolvedValue([{ id: 42, ...config, status: "draft", type: "automated" }]);
+    mockTriggerCampaignSend.mockRejectedValue(new Error("Send failed mid-flight"));
+
+    await expect(runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 1,
+    })).rejects.toThrow("Send failed mid-flight");
+
+    // Draft delete fires first, then the "sending" → "failed" update.
+    // db.delete().where() is mockDbDeleteWhere, then db.update().set().where()
+    expect(mockDbDeleteWhere).toHaveBeenCalledTimes(1);
+    // The mark-as-failed path calls db.update().set({ status: "failed" }).where(...)
+    // set() is mockDbSet — it's called once for this path
+    expect(mockDbSet).toHaveBeenCalledTimes(1);
+    const setArg = mockDbSet.mock.calls[0][0];
+    expect(setArg).toEqual({ status: "failed" });
+  });
 });
 
 describe("processAutomatedCampaigns", () => {
@@ -848,5 +877,32 @@ describe("processAutomatedCampaigns", () => {
     expect(mockResolveRecipients).not.toHaveBeenCalled();
     expect(mockTriggerCampaignSend).not.toHaveBeenCalled();
     expect(mockErrorLoggerError).not.toHaveBeenCalled();
+  });
+
+  it("does not crash the loop when ErrorLogger itself throws", async () => {
+    const pastDate = new Date(Date.now() - 3600000);
+    const config = {
+      id: 1,
+      key: "welcome",
+      enabled: true,
+      lastRunAt: new Date("2025-03-20"),
+      nextRunAt: pastDate,
+      subject: "test",
+      htmlBody: "<html></html>",
+      textBody: null,
+      name: "Welcome",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockDbWhere.mockResolvedValue([config]);
+    // Make the inner select fail so we enter the catch path
+    mockDbLimit.mockRejectedValue(new Error("DB connection failed"));
+    // Make ErrorLogger.error itself throw — the new try/catch should absorb it
+    mockErrorLoggerError.mockRejectedValue(new Error("Logger DB also down"));
+
+    // processAutomatedCampaigns must not throw — the loop continues
+    await processAutomatedCampaigns();
+
+    expect(mockErrorLoggerError).toHaveBeenCalled();
   });
 });
