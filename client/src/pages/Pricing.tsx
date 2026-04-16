@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2 } from "lucide-react";
 import PublicNav from "@/components/PublicNav";
+import SEOHead from "@/components/SEOHead";
 import { Link } from "wouter";
 
 const plans = [
@@ -80,6 +81,13 @@ const plans = [
 export default function Pricing() {
   return (
     <div className="min-h-screen bg-background">
+      <SEOHead
+        title="Pricing — Free, Pro, and Power plans | FetchTheChange"
+        description="Simple, transparent pricing for website change monitoring. Start free with 3 monitors, or upgrade to Pro ($9/mo, 100 monitors) or Power ($29/mo, unlimited) for hourly checks, Slack, webhooks, and the REST API."
+        path="/pricing"
+        ogDescription="Free, Pro, and Power plans for website change monitoring. Start free; upgrade for hourly checks, Slack, webhooks, and the REST API."
+        twitterDescription="Free, Pro, and Power plans for website change monitoring. Start free; upgrade for hourly checks, Slack, webhooks, and the REST API."
+      />
       <PublicNav />
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20">

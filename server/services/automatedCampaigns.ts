@@ -292,16 +292,71 @@ export async function bootstrapWelcomeCampaign(): Promise<void> {
   const signupAfter = new Date("2025-03-19T00:00:00Z");
   const signupBefore = now;
 
-  const result = await runWelcomeCampaign({
-    signupAfter,
-    signupBefore,
-    configId: config.id,
-  });
+  try {
+    const result = await runWelcomeCampaign({
+      signupAfter,
+      signupBefore,
+      configId: config.id,
+    });
 
-  if ("skipped" in result) {
-    console.log("[Bootstrap] Welcome campaign bootstrap complete — no new recipients in window.");
-  } else {
-    console.log(`[Bootstrap] Welcome campaign bootstrap complete — sent campaign #${result.campaignId} to ${result.totalRecipients} recipients. Next run: ${nextRunAt.toISOString()}`);
+    if ("skipped" in result) {
+      console.log("[Bootstrap] Welcome campaign bootstrap complete — no new recipients in window.");
+    } else {
+      console.log(`[Bootstrap] Welcome campaign bootstrap complete — sent campaign #${result.campaignId} to ${result.totalRecipients} recipients. Next run: ${nextRunAt.toISOString()}`);
+    }
+  } catch (error) {
+    // Roll back the atomic claim so a future bootstrap (on restart) re-attempts
+    // the same early-adopter window. Without this, a transient failure during
+    // the very first send would permanently drop the entire cohort, because
+    // the next bootstrap call short-circuits on `config.lastRunAt` being set.
+    // Guard the rollback on `lastRunAt === now` so we don't overwrite a
+    // successful claim by a concurrent instance.
+    try {
+      const rolledBack = await db
+        .update(automatedCampaignConfigs)
+        .set({
+          lastRunAt: null,
+          nextRunAt: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(automatedCampaignConfigs.id, config.id),
+            eq(automatedCampaignConfigs.lastRunAt, now),
+          )
+        )
+        .returning();
+      if (rolledBack.length === 0) {
+        // Optimistic guard did not match — either another instance
+        // claimed in between, or a PG timestamp-precision mismatch
+        // defeated the equality check. Log a warning so operators
+        // can detect silent rollback no-ops.
+        console.warn(
+          `[Bootstrap] Rollback WHERE guard matched zero rows for config ${config.id}; the config row may remain in a permanently advanced state.`,
+        );
+      }
+    } catch (rollbackError) {
+      // Belt-and-suspenders: log to console too, in case ErrorLogger
+      // itself is failing because the DB is the root cause of both.
+      console.error(
+        `[Bootstrap] Welcome campaign bootstrap rollback failed:`,
+        rollbackError instanceof Error ? rollbackError.message : rollbackError,
+      );
+      try {
+        await ErrorLogger.error(
+          "scheduler",
+          "Welcome campaign bootstrap rollback failed",
+          rollbackError instanceof Error ? rollbackError : null,
+          { configId: config.id, configKey: config.key }
+        );
+      } catch {
+        // Logger itself failed — already logged to console above.
+      }
+    }
+
+    // Re-throw so the caller (server startup) knows the bootstrap failed —
+    // matches the pre-existing behavior where bootstrap errors propagated.
+    throw error;
   }
 }
 
@@ -355,12 +410,39 @@ export async function runWelcomeCampaign(opts: {
     })
     .returning();
 
-  // Use the existing triggerCampaignSend which handles batching, rate limiting, etc.
-  const sendResult = await triggerCampaignSend(campaign.id);
+  try {
+    // Use the existing triggerCampaignSend which handles batching, rate limiting, etc.
+    const sendResult = await triggerCampaignSend(campaign.id);
 
-  console.log(`[AutoCampaign] Sent welcome campaign #${campaign.id} to ${sendResult.totalRecipients} recipients.`);
+    console.log(`[AutoCampaign] Sent welcome campaign #${campaign.id} to ${sendResult.totalRecipients} recipients.`);
 
-  return { campaignId: campaign.id, totalRecipients: sendResult.totalRecipients };
+    return { campaignId: campaign.id, totalRecipients: sendResult.totalRecipients };
+  } catch (error) {
+    // Clean up the orphaned draft so a retry by the outer claim-rollback path
+    // does not leave duplicate draft rows for the same signup window. Only
+    // delete if still in draft — triggerCampaignSend may have flipped status
+    // to "sending" or "sent" before throwing, in which case we should not
+    // delete a partially-sent campaign (the outer caller may still roll back
+    // the cron cursor, but the campaign record is real history at that point).
+    try {
+      await db
+        .delete(campaigns)
+        .where(
+          and(
+            eq(campaigns.id, campaign.id),
+            eq(campaigns.status, "draft"),
+          )
+        );
+    } catch (cleanupError) {
+      // Don't swallow the original send error — just surface the cleanup
+      // failure to stdout. Caller will also log the send error.
+      console.error(
+        `[AutoCampaign] Failed to clean up orphaned draft campaign #${campaign.id}:`,
+        cleanupError instanceof Error ? cleanupError.message : cleanupError,
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -377,6 +459,14 @@ export async function processAutomatedCampaigns(): Promise<void> {
 
   for (const config of configs) {
     if (!config.nextRunAt || config.nextRunAt > now) continue;
+
+    // Capture the pre-claim values so we can roll them back if the send fails
+    // after we have advanced lastRunAt/nextRunAt. Without rollback, users who
+    // signed up during a failed run's window would be permanently excluded
+    // from the welcome email (signupAfter would advance past their signup).
+    const previousLastRunAt = config.lastRunAt;
+    const previousNextRunAt = config.nextRunAt;
+    let claimedThisRun = false;
 
     try {
       const signupAfter = config.lastRunAt || new Date("2025-03-19T00:00:00Z");
@@ -405,6 +495,8 @@ export async function processAutomatedCampaigns(): Promise<void> {
         continue;
       }
 
+      claimedThisRun = true;
+
       const result = await runWelcomeCampaign({
         signupAfter,
         signupBefore,
@@ -415,12 +507,81 @@ export async function processAutomatedCampaigns(): Promise<void> {
         console.log(`[AutoCampaign] Sent welcome campaign #${result.campaignId} to ${result.totalRecipients} recipients. Next run: ${nextRunAt.toISOString()}`);
       }
     } catch (error) {
-      await ErrorLogger.error(
-        "scheduler",
-        `Automated campaign '${config.key}' failed`,
-        error instanceof Error ? error : null,
-        { configId: config.id, configKey: config.key, errorMessage: error instanceof Error ? error.message : String(error) }
-      );
+      // If we successfully claimed the run but then failed to send, restore
+      // lastRunAt and nextRunAt so the next cron tick re-attempts the same
+      // user window. (See comment above the try block.)
+      //
+      // Guard the rollback on `lastRunAt === now` so we don't overwrite a
+      // successful claim by a concurrent instance that managed to claim
+      // between our failure and this rollback.
+      if (claimedThisRun) {
+        try {
+          const rolledBack = await db
+            .update(automatedCampaignConfigs)
+            .set({
+              lastRunAt: previousLastRunAt,
+              nextRunAt: previousNextRunAt,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(automatedCampaignConfigs.id, config.id),
+                eq(automatedCampaignConfigs.lastRunAt, now),
+              )
+            )
+            .returning();
+          if (rolledBack.length === 0) {
+            // Optimistic guard did not match — either a concurrent instance
+            // claimed in between, or a PG timestamp-precision mismatch
+            // defeated the equality check. Log a warning so operators can
+            // detect silent rollback no-ops (which would otherwise re-create
+            // the same user-window-skip bug this rollback is meant to fix).
+            console.warn(
+              `[AutoCampaign] Rollback WHERE guard matched zero rows for config '${config.key}' (id=${config.id}); the config row may remain in a permanently advanced state.`,
+            );
+          }
+        } catch (rollbackError) {
+          console.error(
+            `[AutoCampaign] Automated campaign '${config.key}' rollback failed:`,
+            rollbackError instanceof Error ? rollbackError.message : rollbackError,
+          );
+          try {
+            await ErrorLogger.error(
+              "scheduler",
+              `Automated campaign '${config.key}' rollback failed`,
+              rollbackError instanceof Error ? rollbackError : null,
+              {
+                configId: config.id,
+                configKey: config.key,
+                previousLastRunAt: previousLastRunAt?.toISOString() ?? null,
+                previousNextRunAt: previousNextRunAt?.toISOString() ?? null,
+              }
+            );
+          } catch {
+            // Logger itself failed — already logged to console above.
+          }
+        }
+      }
+
+      // Wrap the outer error log in try/catch too: if the DB is the root
+      // cause of the send failure, ErrorLogger.error will also throw and
+      // abort this for-loop, preventing any remaining configs from being
+      // processed. console.error ensures the error is always surfaced.
+      try {
+        await ErrorLogger.error(
+          "scheduler",
+          `Automated campaign '${config.key}' failed`,
+          error instanceof Error ? error : null,
+          { configId: config.id, configKey: config.key, errorMessage: error instanceof Error ? error.message : String(error) }
+        );
+      } catch (logError) {
+        console.error(
+          `[AutoCampaign] Automated campaign '${config.key}' failed (and error logger also failed):`,
+          error instanceof Error ? error.message : error,
+          "log error:",
+          logError instanceof Error ? logError.message : logError,
+        );
+      }
     }
   }
 }

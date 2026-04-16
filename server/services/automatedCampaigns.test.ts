@@ -15,6 +15,7 @@ const {
   mockDbUpdate,
   mockDbSet,
   mockDbOrderBy,
+  mockDbDeleteWhere,
   mockTriggerCampaignSend,
   mockResolveRecipients,
   mockErrorLoggerError,
@@ -30,6 +31,7 @@ const {
   mockDbUpdate: vi.fn(),
   mockDbSet: vi.fn(),
   mockDbOrderBy: vi.fn(),
+  mockDbDeleteWhere: vi.fn().mockResolvedValue(undefined),
   mockTriggerCampaignSend: vi.fn(),
   mockResolveRecipients: vi.fn(),
   mockErrorLoggerError: vi.fn().mockResolvedValue(undefined),
@@ -41,6 +43,7 @@ vi.mock("../db", () => ({
     select: () => ({ from: mockDbFrom }),
     insert: () => ({ values: mockDbValues }),
     update: () => ({ set: mockDbSet }),
+    delete: () => ({ where: mockDbDeleteWhere }),
   },
 }));
 
@@ -270,6 +273,63 @@ describe("bootstrapWelcomeCampaign", () => {
     // Should not have tried to resolve recipients or send
     expect(mockResolveRecipients).not.toHaveBeenCalled();
     expect(mockTriggerCampaignSend).not.toHaveBeenCalled();
+  });
+
+  it("rolls back the claim (lastRunAt → null) when the send throws, and re-raises", async () => {
+    // Start from a fresh config with no prior bootstrap.
+    const freshConfig = {
+      id: 1,
+      key: "welcome",
+      name: "Welcome — New Members",
+      subject: "Welcome",
+      htmlBody: "<html></html>",
+      textBody: "text",
+      enabled: true,
+      lastRunAt: null,
+      nextRunAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    // ensureWelcomeConfig() reads via select().from().where().limit()
+    // runWelcomeCampaign() reads the config again via a second select chain.
+    mockDbLimit.mockResolvedValue([freshConfig]);
+
+    // Differentiate where() calls:
+    // 1) atomic claim's update().set().where().returning() → returns [config]
+    // 2) rollback update().set().where() → just resolves
+    let whereCallCount = 0;
+    mockDbWhere.mockImplementation(() => {
+      whereCallCount++;
+      if (whereCallCount === 1) {
+        return {
+          returning: vi.fn().mockResolvedValue([freshConfig]),
+          limit: vi.fn().mockResolvedValue([freshConfig]),
+        };
+      }
+      // Subsequent where() calls: runWelcomeCampaign's inner select, and the
+      // rollback. We return a permissive chain object for both.
+      return {
+        returning: vi.fn().mockResolvedValue([freshConfig]),
+        limit: vi.fn().mockResolvedValue([freshConfig]),
+      };
+    });
+
+    // Make the send itself fail.
+    mockResolveRecipients.mockRejectedValue(new Error("Resend outage"));
+
+    // bootstrapWelcomeCampaign re-raises to surface startup errors.
+    await expect(bootstrapWelcomeCampaign()).rejects.toThrow("Resend outage");
+
+    // Two .set() calls: the claim, then the rollback.
+    expect(mockDbSet).toHaveBeenCalledTimes(2);
+
+    // Rollback restored lastRunAt and nextRunAt to NULL so a future bootstrap
+    // on restart can re-attempt the early-adopter cohort.
+    const rollbackSetArg = mockDbSet.mock.calls[1][0];
+    expect(rollbackSetArg.lastRunAt).toBeNull();
+    expect(rollbackSetArg.nextRunAt).toBeNull();
+    expect(rollbackSetArg.updatedAt).toBeInstanceOf(Date);
   });
 });
 
@@ -522,6 +582,57 @@ describe("runWelcomeCampaign", () => {
       configId: 999,
     })).rejects.toThrow("Automated campaign config not found");
   });
+
+  it("cleans up the orphaned draft campaign when triggerCampaignSend throws", async () => {
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockResolveRecipients.mockResolvedValue([
+      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+    ]);
+    // Campaign insert succeeds and returns a draft row.
+    mockDbReturning.mockResolvedValue([{ id: 42, ...config, status: "draft", type: "automated" }]);
+    // Send throws after the draft is created.
+    mockTriggerCampaignSend.mockRejectedValue(new Error("Resend blew up"));
+
+    await expect(runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 1,
+    })).rejects.toThrow("Resend blew up");
+
+    // Cleanup path must have fired — db.delete(campaigns).where(...) → mockDbDeleteWhere
+    expect(mockDbDeleteWhere).toHaveBeenCalledTimes(1);
+    // The WHERE arg should be an `and(eq(id, 42), eq(status, "draft"))` composite.
+    const whereArg = mockDbDeleteWhere.mock.calls[0][0];
+    expect(whereArg.type).toBe("and");
+  });
+
+  it("swallows cleanup errors but still re-throws the original send error", async () => {
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockResolveRecipients.mockResolvedValue([
+      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+    ]);
+    mockDbReturning.mockResolvedValue([{ id: 42, ...config, status: "draft", type: "automated" }]);
+    mockTriggerCampaignSend.mockRejectedValue(new Error("Original send error"));
+    // Cleanup fails too (e.g. DB momentarily down).
+    mockDbDeleteWhere.mockRejectedValueOnce(new Error("Cleanup DB error"));
+
+    // The original error must surface, not the cleanup error.
+    await expect(runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 1,
+    })).rejects.toThrow("Original send error");
+  });
 });
 
 describe("processAutomatedCampaigns", () => {
@@ -632,5 +743,110 @@ describe("processAutomatedCampaigns", () => {
       expect.any(Error),
       expect.objectContaining({ configKey: "welcome" }),
     );
+  });
+
+  it("rolls back lastRunAt and nextRunAt when send fails after the run is claimed", async () => {
+    const previousLastRunAt = new Date("2025-03-20T00:00:00Z");
+    const previousNextRunAt = new Date(Date.now() - 3600000); // 1 hour ago — eligible
+    const config = {
+      id: 1,
+      key: "welcome",
+      enabled: true,
+      lastRunAt: previousLastRunAt,
+      nextRunAt: previousNextRunAt,
+      subject: "test",
+      htmlBody: "<html></html>",
+      textBody: null,
+      name: "Welcome",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    // Differentiate where() calls:
+    // 1) initial select for configs → resolves to [config]
+    // 2) atomic claim update().set().where().returning() → returns [config]
+    // 3) runWelcomeCampaign's select().from().where().limit() → returns [config]
+    // 4) rollback update().set().where() → just resolves (no chained call)
+    let whereCallCount = 0;
+    mockDbWhere.mockImplementation(() => {
+      whereCallCount++;
+      if (whereCallCount === 1) {
+        return Promise.resolve([config]);
+      }
+      // For the claim and the inner config select, we want a non-empty
+      // returning() and limit() so the code proceeds into runWelcomeCampaign.
+      // For the rollback's plain `await ... .where(...)`, the awaited object
+      // is fine — `await {obj}` resolves to the object.
+      return {
+        returning: vi.fn().mockResolvedValue([config]),
+        limit: vi.fn().mockResolvedValue([config]),
+      };
+    });
+
+    // Make the send fail by having recipient resolution throw.
+    mockResolveRecipients.mockRejectedValue(new Error("Recipients lookup failed"));
+
+    await processAutomatedCampaigns();
+
+    // Two .set() calls: the atomic claim, then the rollback.
+    expect(mockDbSet).toHaveBeenCalledTimes(2);
+
+    // The claim advanced lastRunAt/nextRunAt to "now".
+    const claimSetArg = mockDbSet.mock.calls[0][0];
+    expect(claimSetArg.lastRunAt).toBeInstanceOf(Date);
+    expect(claimSetArg.nextRunAt).toBeInstanceOf(Date);
+
+    // The rollback restored the original values so the next cron tick can
+    // re-attempt the same user window.
+    const rollbackSetArg = mockDbSet.mock.calls[1][0];
+    expect(rollbackSetArg.lastRunAt).toBe(previousLastRunAt);
+    expect(rollbackSetArg.nextRunAt).toBe(previousNextRunAt);
+    expect(rollbackSetArg.updatedAt).toBeInstanceOf(Date);
+
+    expect(mockErrorLoggerError).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("'welcome' failed"),
+      expect.any(Error),
+      expect.objectContaining({ configKey: "welcome" }),
+    );
+  });
+
+  it("does not roll back when the claim itself loses to a concurrent run", async () => {
+    const pastDate = new Date(Date.now() - 3600000);
+    const config = {
+      id: 1,
+      key: "welcome",
+      enabled: true,
+      lastRunAt: new Date("2025-03-20T00:00:00Z"),
+      nextRunAt: pastDate,
+      subject: "test",
+      htmlBody: "<html></html>",
+      textBody: null,
+      name: "Welcome",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    let whereCallCount = 0;
+    mockDbWhere.mockImplementation(() => {
+      whereCallCount++;
+      if (whereCallCount === 1) {
+        // Initial select for configs
+        return Promise.resolve([config]);
+      }
+      // Atomic claim returning() returns empty — another instance already claimed.
+      return {
+        returning: vi.fn().mockResolvedValue([]),
+        limit: vi.fn().mockResolvedValue([]),
+      };
+    });
+
+    await processAutomatedCampaigns();
+
+    // Only one .set() call (the failed claim attempt). No rollback, no send.
+    expect(mockDbSet).toHaveBeenCalledTimes(1);
+    expect(mockResolveRecipients).not.toHaveBeenCalled();
+    expect(mockTriggerCampaignSend).not.toHaveBeenCalled();
+    expect(mockErrorLoggerError).not.toHaveBeenCalled();
   });
 });
