@@ -341,7 +341,7 @@ export async function bootstrapWelcomeCampaign(): Promise<void> {
         // claimed in between, or a PG timestamp-precision mismatch
         // defeated the equality check. Route through ErrorLogger so
         // this triggers alerting, not just a console warning.
-        const msg = `Rollback WHERE guard matched zero rows for config ${config.id}; the config row may remain in a permanently advanced state.`;
+        const msg = `Rollback WHERE guard matched zero rows for config ${config.id}; the config row may remain in a permanently advanced state. Recovery: UPDATE automated_campaign_configs SET last_run_at = NULL, next_run_at = NULL, updated_at = NOW() WHERE id = ${config.id};`;
         console.warn(`[Bootstrap] ${msg}`);
         try {
           await ErrorLogger.error("scheduler", msg, null, { configId: config.id, configKey: config.key });
@@ -564,7 +564,7 @@ export async function processAutomatedCampaigns(): Promise<void> {
             // claimed in between, or a PG timestamp-precision mismatch
             // defeated the equality check. Route through ErrorLogger so
             // this triggers alerting, not just a console warning.
-            const msg = `Rollback WHERE guard matched zero rows for config '${config.key}' (id=${config.id}); the config row may remain in a permanently advanced state.`;
+            const msg = `Rollback WHERE guard matched zero rows for config '${config.key}' (id=${config.id}); the config row may remain in a permanently advanced state. Recovery: UPDATE automated_campaign_configs SET last_run_at = ${previousLastRunAt ? `'${previousLastRunAt.toISOString()}'` : 'NULL'}, next_run_at = ${previousNextRunAt ? `'${previousNextRunAt.toISOString()}'` : 'NULL'}, updated_at = NOW() WHERE id = ${config.id};`;
             console.warn(`[AutoCampaign] ${msg}`);
             try {
               await ErrorLogger.error("scheduler", msg, null, { configId: config.id, configKey: config.key });

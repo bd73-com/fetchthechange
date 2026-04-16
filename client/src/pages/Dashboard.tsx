@@ -363,7 +363,10 @@ export default function Dashboard() {
                     instance inherits only the cached initialValues so that
                     clicking its trigger after dismissing the header dialog
                     still produces the prefilled form (fixes #415). */}
-                <CreateMonitorDialog initialValues={storedPrefill ?? undefined} />
+                <CreateMonitorDialog
+                  initialValues={storedPrefill ?? undefined}
+                  onExternalOpenChange={(v) => { if (!v) setStoredPrefill(null); }}
+                />
               </div>
             );
           }
