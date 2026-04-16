@@ -244,7 +244,7 @@ describe("BlogSlackAlerts page integrity", () => {
     const headlineMatch = slackAlertsSource.match(/headline:\s*"([^"]+)"/);
     expect(headlineMatch).not.toBeNull();
     const headline = headlineMatch![1];
-    const h1Pattern = new RegExp(`<h1[^>]*>\\s*${headline.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*</h1>`);
+    const h1Pattern = new RegExp(`<h1[^>]*>\\s*${headline.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*</h1>`);
     expect(slackAlertsSource).toMatch(h1Pattern);
   });
 });
