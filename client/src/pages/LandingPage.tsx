@@ -24,10 +24,18 @@ import {
   Zap
 } from "lucide-react";
 import PublicNav from "@/components/PublicNav";
+import SEOHead from "@/components/SEOHead";
 
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background">
+      <SEOHead
+        title="FetchTheChange — Monitor any web value. Get alerted when it changes."
+        description="Website change monitoring that works on modern, JavaScript-heavy sites. Track prices, availability, text, and any DOM value — and get told when tracking breaks, not just when values change."
+        path="/"
+        ogDescription="Monitor any web value. Get alerted when it changes. Works on JavaScript-heavy sites and tells you when tracking breaks."
+        twitterDescription="Monitor any web value. Get alerted when it changes. Works on JavaScript-heavy sites and tells you when tracking breaks."
+      />
       <PublicNav />
 
       {/* Hero Section */}
