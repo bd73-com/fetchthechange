@@ -538,7 +538,7 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
         FOR UPDATE
       `);
       const currentStatus = (statusResult.rows[0] as any)?.status;
-      const terminalStatuses = ["sent", "cancelled", "partially_sent"];
+      const terminalStatuses = ["sent", "cancelled", "partially_sent", "failed"];
       if (!currentStatus || terminalStatuses.includes(currentStatus)) {
         skipped = true;
         return;

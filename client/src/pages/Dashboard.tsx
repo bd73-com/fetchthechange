@@ -359,10 +359,10 @@ export default function Dashboard() {
                   Start tracking web pages for changes by creating your first monitor. We'll notify you when content updates.
                 </p>
                 {/* Empty-state dialog is NOT externally controlled — the
-                    header dialog above already auto-opens on prefill. This
-                    instance inherits only the cached initialValues so that
-                    clicking its trigger after dismissing the header dialog
-                    still produces the prefilled form (fixes #415). */}
+                    header dialog above already auto-opens on prefill.
+                    This instance can receive cached initialValues while
+                    prefill is active, and clears cached prefill on close
+                    to prevent stale extension values on later opens. */}
                 <CreateMonitorDialog
                   initialValues={storedPrefill ?? undefined}
                   onExternalOpenChange={(v) => { if (!v) setStoredPrefill(null); }}
