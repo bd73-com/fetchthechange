@@ -239,16 +239,26 @@ export async function patchWelcomeCampaignUrls(): Promise<void> {
     ? config.textBody!.split(LEGACY_URL).join(NEW_URL)
     : config.textBody;
 
-  await db
+  const [patched] = await db
     .update(automatedCampaignConfigs)
     .set({
       htmlBody: patchedHtmlBody,
       textBody: patchedTextBody,
       updatedAt: new Date(),
     })
-    .where(eq(automatedCampaignConfigs.key, "welcome"));
+    .where(
+      and(
+        eq(automatedCampaignConfigs.key, "welcome"),
+        eq(automatedCampaignConfigs.updatedAt, config.updatedAt),
+      )
+    )
+    .returning();
 
-  console.log("[Patch] Welcome campaign URLs updated: /docs/extension → /support");
+  if (patched) {
+    console.log("[Patch] Welcome campaign URLs updated: /docs/extension → /support");
+  } else {
+    console.warn("[Patch] Welcome campaign URL patch skipped — config row was modified concurrently.");
+  }
 }
 
 /**
@@ -329,11 +339,13 @@ export async function bootstrapWelcomeCampaign(): Promise<void> {
       if (rolledBack.length === 0) {
         // Optimistic guard did not match — either another instance
         // claimed in between, or a PG timestamp-precision mismatch
-        // defeated the equality check. Log a warning so operators
-        // can detect silent rollback no-ops.
-        console.warn(
-          `[Bootstrap] Rollback WHERE guard matched zero rows for config ${config.id}; the config row may remain in a permanently advanced state.`,
-        );
+        // defeated the equality check. Route through ErrorLogger so
+        // this triggers alerting, not just a console warning.
+        const msg = `Rollback WHERE guard matched zero rows for config ${config.id}; the config row may remain in a permanently advanced state.`;
+        console.warn(`[Bootstrap] ${msg}`);
+        try {
+          await ErrorLogger.error("scheduler", msg, null, { configId: config.id, configKey: config.key });
+        } catch { /* already logged to console */ }
       }
     } catch (rollbackError) {
       // Belt-and-suspenders: log to console too, in case ErrorLogger
@@ -418,12 +430,12 @@ export async function runWelcomeCampaign(opts: {
 
     return { campaignId: campaign.id, totalRecipients: sendResult.totalRecipients };
   } catch (error) {
-    // Clean up the orphaned draft so a retry by the outer claim-rollback path
-    // does not leave duplicate draft rows for the same signup window. Only
-    // delete if still in draft — triggerCampaignSend may have flipped status
-    // to "sending" or "sent" before throwing, in which case we should not
-    // delete a partially-sent campaign (the outer caller may still roll back
-    // the cron cursor, but the campaign record is real history at that point).
+    // Clean up the orphaned campaign so a retry by the outer claim-rollback
+    // path does not leave duplicate rows for the same signup window.
+    // - If still in draft: delete it (no emails were sent).
+    // - If in "sending": mark as "failed" so it is clearly an orphan, not a
+    //   campaign that might still be in progress. This prevents the next cron
+    //   run from creating a duplicate campaign record for the same window.
     try {
       await db
         .delete(campaigns)
@@ -434,11 +446,28 @@ export async function runWelcomeCampaign(opts: {
           )
         );
     } catch (cleanupError) {
-      // Don't swallow the original send error — just surface the cleanup
-      // failure to stdout. Caller will also log the send error.
       console.error(
         `[AutoCampaign] Failed to clean up orphaned draft campaign #${campaign.id}:`,
         cleanupError instanceof Error ? cleanupError.message : cleanupError,
+      );
+    }
+    // Mark a "sending" campaign as "failed" — it won't be deleted (it may
+    // have partially sent), but the explicit status prevents confusion in
+    // the admin view and avoids stale "sending" records accumulating.
+    try {
+      await db
+        .update(campaigns)
+        .set({ status: "failed" })
+        .where(
+          and(
+            eq(campaigns.id, campaign.id),
+            eq(campaigns.status, "sending"),
+          )
+        );
+    } catch (markFailedError) {
+      console.error(
+        `[AutoCampaign] Failed to mark orphaned sending campaign #${campaign.id} as failed:`,
+        markFailedError instanceof Error ? markFailedError.message : markFailedError,
       );
     }
     throw error;
@@ -533,12 +562,13 @@ export async function processAutomatedCampaigns(): Promise<void> {
           if (rolledBack.length === 0) {
             // Optimistic guard did not match — either a concurrent instance
             // claimed in between, or a PG timestamp-precision mismatch
-            // defeated the equality check. Log a warning so operators can
-            // detect silent rollback no-ops (which would otherwise re-create
-            // the same user-window-skip bug this rollback is meant to fix).
-            console.warn(
-              `[AutoCampaign] Rollback WHERE guard matched zero rows for config '${config.key}' (id=${config.id}); the config row may remain in a permanently advanced state.`,
-            );
+            // defeated the equality check. Route through ErrorLogger so
+            // this triggers alerting, not just a console warning.
+            const msg = `Rollback WHERE guard matched zero rows for config '${config.key}' (id=${config.id}); the config row may remain in a permanently advanced state.`;
+            console.warn(`[AutoCampaign] ${msg}`);
+            try {
+              await ErrorLogger.error("scheduler", msg, null, { configId: config.id, configKey: config.key });
+            } catch { /* already logged to console */ }
           }
         } catch (rollbackError) {
           console.error(
