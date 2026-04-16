@@ -96,4 +96,11 @@ describe("NotFound noindex meta tag", () => {
     expect(getByText("404 Page Not Found")).toBeDefined();
     unmount();
   });
+
+  it("renders user-facing description (not developer-facing copy)", () => {
+    const { getByText, queryByText, unmount } = render(<NotFound />);
+    expect(getByText(/doesn't exist or has been moved/)).toBeDefined();
+    expect(queryByText(/forget to add the page to the router/)).toBeNull();
+    unmount();
+  });
 });
