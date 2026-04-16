@@ -114,23 +114,23 @@ export default function Dashboard() {
 
   const handleRefresh = async () => {
     console.log("Refreshing monitors...");
-    // First refetch the list
-    await refetch();
-    
-    if (!monitors || monitors.length === 0) {
+    // Use the fresh data returned by refetch() instead of the stale closure variable
+    const { data: freshMonitors } = await refetch();
+
+    if (!freshMonitors || freshMonitors.length === 0) {
       toast({ title: "No monitors", description: "Create a monitor first to refresh data." });
       return;
     }
-    
+
     // Refresh all active monitors in parallel
-    const activeMonitors = monitors.filter(m => m.active);
+    const activeMonitors = freshMonitors.filter(m => m.active);
     if (activeMonitors.length === 0) {
       toast({ title: "No active monitors", description: "Please activate your monitors to refresh them." });
       return;
     }
 
     toast({ title: "Refreshing...", description: `Checking ${activeMonitors.length} active monitors for changes.` });
-    
+
     activeMonitors.forEach(m => {
       checkMonitor(m.id);
     });
