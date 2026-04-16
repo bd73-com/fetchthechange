@@ -487,7 +487,7 @@ async function finalizeCampaign(campaignId: number, status: string): Promise<voi
             completed_at = NOW()
             ${failedCount > 0 ? sql`, failed_count = COALESCE(failed_count, 0) + ${failedCount}` : sql``}
         WHERE id = ${campaignId}
-          AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+          AND status NOT IN ('sent', 'cancelled', 'partially_sent', 'failed')
       `);
     });
   } else {
@@ -497,7 +497,7 @@ async function finalizeCampaign(campaignId: number, status: string): Promise<voi
       SET status = ${status},
           completed_at = NOW()
       WHERE id = ${campaignId}
-        AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+        AND status NOT IN ('sent', 'cancelled', 'partially_sent', 'failed')
     `);
   }
 
@@ -538,7 +538,7 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
         FOR UPDATE
       `);
       const currentStatus = (statusResult.rows[0] as any)?.status;
-      const terminalStatuses = ["sent", "cancelled", "partially_sent"];
+      const terminalStatuses = ["sent", "cancelled", "partially_sent", "failed"];
       if (!currentStatus || terminalStatuses.includes(currentStatus)) {
         skipped = true;
         return;
@@ -563,7 +563,7 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
             completed_at = NOW()
             ${failedCount > 0 ? sql`, failed_count = COALESCE(failed_count, 0) + ${failedCount}` : sql``}
         WHERE id = ${campaignId}
-          AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+          AND status NOT IN ('sent', 'cancelled', 'partially_sent', 'failed')
       `);
     });
 
@@ -596,7 +596,7 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
         UPDATE campaigns
         SET failed_count = COALESCE(failed_count, 0) + ${actualCancelled}
         WHERE id = ${campaignId}
-          AND status NOT IN ('sent', 'cancelled', 'partially_sent')
+          AND status NOT IN ('sent', 'cancelled', 'partially_sent', 'failed')
       `);
     }
   });

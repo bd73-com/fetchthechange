@@ -77,6 +77,7 @@ const statusConfig: Record<string, { variant: "default" | "secondary" | "outline
   sent: { variant: "default", label: "Sent" },
   partially_sent: { variant: "secondary", label: "Partial" },
   cancelled: { variant: "destructive", label: "Cancelled" },
+  failed: { variant: "destructive", label: "Failed" },
 };
 
 function formatDate(dateStr: string | null | undefined): string {

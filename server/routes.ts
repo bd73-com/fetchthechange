@@ -2027,7 +2027,7 @@ export async function registerRoutes(
 
       const statusFilter = req.query.status as string | undefined;
       let results;
-      if (statusFilter && ["draft", "sending", "sent", "partially_sent", "cancelled"].includes(statusFilter)) {
+      if (statusFilter && ["draft", "sending", "sent", "partially_sent", "cancelled", "failed"].includes(statusFilter)) {
         results = await db
           .select()
           .from(campaignsTable)
@@ -2170,7 +2170,7 @@ export async function registerRoutes(
         .limit(1);
 
       if (!existing) return res.status(404).json({ message: "Campaign not found" });
-      if (existing.status !== "draft") return res.status(400).json({ message: "Only draft campaigns can be deleted" });
+      if (existing.status !== "draft" && existing.status !== "failed") return res.status(400).json({ message: "Only draft or failed campaigns can be deleted" });
 
       // Cascade delete recipients first
       await db.delete(campaignRecipientsTable).where(eq(campaignRecipientsTable.campaignId, id));

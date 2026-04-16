@@ -91,26 +91,25 @@ export default function Dashboard() {
     }
   }, [prefillParams]);
 
-  // Clear stale prefill values once the user has monitors (i.e. after
-  // successful creation). Without this, storedPrefill persists for the
-  // lifetime of the component mount, causing subsequent dialog opens to
-  // carry stale extension values long after the original prefill was used.
-  useEffect(() => {
-    if (monitors && monitors.length > 0 && storedPrefill) {
-      setStoredPrefill(null);
-    }
-  }, [monitors, storedPrefill]);
-
   // The header dialog is the single externally-controlled instance that
   // auto-opens when prefill params arrive. The empty-state dialog below
   // must NOT be externally controlled, or both dialogs race on the same
-  // externalOpen=true / onExternalOpenChange callback. Keep
-  // `storedPrefill` populated after a dismiss so the empty-state dialog
-  // can still open with the prefill via its own trigger button.
+  // externalOpen=true / onExternalOpenChange callback.
+  //
+  // Clear storedPrefill when the dialog closes so subsequent opens don't
+  // carry stale extension values. Keyed on dialog close (not monitor
+  // count) to avoid racing with React render batching.
   const prefillDialogProps = {
     initialValues: storedPrefill ?? undefined,
+    // `undefined` (not `false`) when closed — avoids externally controlling
+    // the dialog when there is no active prefill.
     externalOpen: prefillDialogOpen ? true : undefined,
-    onExternalOpenChange: (v: boolean) => { if (!v) setPrefillDialogOpen(false); },
+    onExternalOpenChange: (v: boolean) => {
+      if (!v) {
+        setPrefillDialogOpen(false);
+        setStoredPrefill(null);
+      }
+    },
   } as const;
 
   const handleRefresh = async () => {
@@ -360,11 +359,14 @@ export default function Dashboard() {
                   Start tracking web pages for changes by creating your first monitor. We'll notify you when content updates.
                 </p>
                 {/* Empty-state dialog is NOT externally controlled — the
-                    header dialog above already auto-opens on prefill. This
-                    instance inherits only the cached initialValues so that
-                    clicking its trigger after dismissing the header dialog
-                    still produces the prefilled form (fixes #415). */}
-                <CreateMonitorDialog initialValues={storedPrefill ?? undefined} />
+                    header dialog above already auto-opens on prefill.
+                    This instance can receive cached initialValues while
+                    prefill is active, and clears cached prefill on close
+                    to prevent stale extension values on later opens. */}
+                <CreateMonitorDialog
+                  initialValues={storedPrefill ?? undefined}
+                  onExternalOpenChange={(v) => { if (!v) setStoredPrefill(null); }}
+                />
               </div>
             );
           }
