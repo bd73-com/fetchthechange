@@ -204,20 +204,18 @@ describe("ErrorLogger deduplication", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("Browserless graceful degradation logs a single warning with preservation note", async () => {
-    // Contract test: when monitor has currentValue, the warning message includes
-    // "preserving last known value" so no separate Info entry is created.
-    const classified = "Rendered page extraction failed — the site may block automated browsers";
-    const withCurrentValue = ", preserving last known value. Will retry shortly.";
-    const withoutCurrentValue = ".";
+  it("Browserless warnings use monitor-agnostic message for infra failures so dedup aggregates across monitors", async () => {
+    // Contract test: infra-wide failures (service unavailable, circuit breaker open)
+    // emit a monitor-agnostic message so every affected monitor dedups into a single
+    // row in the admin UI. Site-specific failures still name the monitor.
+    const infraMsg = "Browserless service unavailable — preserving last known values";
+    const circuitMsg = "Browserless circuit breaker open — preserving last known values";
+    const siteSpecificMsg = `"My Monitor" — site blocking automated access`;
 
-    const msgWithValue = `"My Monitor" — rendered page extraction failed: ${classified}${withCurrentValue}`;
-    const msgWithoutValue = `"My Monitor" — rendered page extraction failed: ${classified}${withoutCurrentValue}`;
-
-    expect(msgWithValue).toMatch(/preserving last known value/);
-    expect(msgWithValue).not.toMatch(/Browserless temporarily unavailable/);
-    expect(msgWithoutValue).not.toMatch(/preserving last known value/);
-    expect(msgWithoutValue).toMatch(/\.$/);
+    expect(infraMsg).not.toMatch(/"My Monitor"/);
+    expect(circuitMsg).not.toMatch(/"My Monitor"/);
+    expect(siteSpecificMsg).toMatch(/"My Monitor"/);
+    expect(siteSpecificMsg).not.toMatch(/preserving last known value/);
   });
 
   it("convenience methods call log with correct level", async () => {

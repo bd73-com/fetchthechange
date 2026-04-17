@@ -5513,27 +5513,27 @@ describe("human-like delay before selector access", () => {
 // ---------------------------------------------------------------------------
 describe("classifyBrowserlessError", () => {
   it("classifies timeout errors", () => {
-    expect(classifyBrowserlessError("Navigation timeout of 30000ms exceeded")).toContain("took too long");
+    expect(classifyBrowserlessError("Navigation timeout of 30000ms exceeded")).toContain("timeout");
   });
 
   it("classifies timed out errors", () => {
-    expect(classifyBrowserlessError("page timed out waiting for selector")).toContain("took too long");
+    expect(classifyBrowserlessError("page timed out waiting for selector")).toContain("timeout");
   });
 
   it("classifies ENOTFOUND errors", () => {
-    expect(classifyBrowserlessError("getaddrinfo ENOTFOUND example.com")).toContain("domain could not be resolved");
+    expect(classifyBrowserlessError("getaddrinfo ENOTFOUND example.com")).toContain("DNS resolution failed");
   });
 
   it("classifies ECONNREFUSED errors", () => {
-    expect(classifyBrowserlessError("connect ECONNREFUSED 127.0.0.1:443")).toContain("refused the connection");
+    expect(classifyBrowserlessError("connect ECONNREFUSED 127.0.0.1:443")).toContain("connection refused");
   });
 
   it("classifies net::ERR_CONNECTION_REFUSED errors", () => {
-    expect(classifyBrowserlessError("net::ERR_CONNECTION_REFUSED at page.goto")).toContain("refused the connection");
+    expect(classifyBrowserlessError("net::ERR_CONNECTION_REFUSED at page.goto")).toContain("connection refused");
   });
 
   it("classifies ERR_TOO_MANY_REDIRECTS errors", () => {
-    expect(classifyBrowserlessError("net::ERR_TOO_MANY_REDIRECTS")).toContain("Too many redirects");
+    expect(classifyBrowserlessError("net::ERR_TOO_MANY_REDIRECTS")).toContain("too many redirects");
   });
 
   it("classifies 403 Forbidden errors", () => {
@@ -5553,11 +5553,11 @@ describe("classifyBrowserlessError", () => {
   });
 
   it("returns default message for unknown errors", () => {
-    expect(classifyBrowserlessError("some random error")).toContain("Rendered page extraction failed");
+    expect(classifyBrowserlessError("some random error")).toContain("extraction failed");
   });
 
   it("classifies ERR_NAME_NOT_RESOLVED errors", () => {
-    expect(classifyBrowserlessError("net::ERR_NAME_NOT_RESOLVED")).toContain("domain could not be resolved");
+    expect(classifyBrowserlessError("net::ERR_NAME_NOT_RESOLVED")).toContain("DNS resolution failed");
   });
 });
 

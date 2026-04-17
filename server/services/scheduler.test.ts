@@ -781,7 +781,7 @@ describe("daily metrics cleanup", () => {
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      "monitor_metrics cleanup failed (transient, will retry)",
+      "monitor_metrics cleanup failed",
       expect.objectContaining({
         errorMessage: "Connection terminated",
         retentionDays: 90,
@@ -949,7 +949,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      expect.stringContaining("Queued notification processing failed (transient, will retry)"),
+      "Queued notification processing failed",
       expect.objectContaining({
         errorMessage: "Connection terminated",
       })
@@ -966,7 +966,7 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      expect.stringContaining("Digest processing failed (transient, will retry)"),
+      "Digest processing failed",
       expect.objectContaining({
         errorMessage: "Connection terminated",
       })
@@ -1098,7 +1098,7 @@ describe("withDbRetry and re-entrancy guards", () => {
     // Transient DB errors are downgraded to warnings via logSchedulerError helper
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      expect.stringContaining("Scheduler iteration failed (transient, will retry)"),
+      "Scheduler iteration failed",
       expect.objectContaining({ activeChecks: 0 })
     );
   });
@@ -1214,7 +1214,7 @@ describe("withDbRetry and re-entrancy guards", () => {
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scheduler",
-      expect.stringContaining("Webhook retry processing failed (transient, will retry)"),
+      "Webhook retry processing failed",
       expect.objectContaining({
         errorMessage: "Connection terminated",
       })
