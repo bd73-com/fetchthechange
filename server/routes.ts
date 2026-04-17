@@ -2163,30 +2163,39 @@ export async function registerRoutes(
 
       const id = Number(req.params.id);
       if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid campaign ID" });
-      const [existing] = await db
-        .select()
-        .from(campaignsTable)
-        .where(eq(campaignsTable.id, id))
-        .limit(1);
 
-      if (!existing) return res.status(404).json({ message: "Campaign not found" });
-      if (existing.status !== "draft" && existing.status !== "failed") return res.status(400).json({ message: "Only draft or failed campaigns can be deleted" });
-
-      // Wrap the count-then-delete in a transaction with FOR UPDATE so a
-      // Resend webhook landing mid-delete cannot flip a recipient from pending
-      // → delivered between the guard and the cascade. Without the lock the
-      // audit trail #429 was opened to protect could still be wiped.
+      // Do the whole lookup+guard+delete inside a transaction with FOR UPDATE
+      // on the campaign row AND every recipient row (not only terminal ones).
+      // Rationale:
+      //   1. Re-read campaign.status inside the tx so a concurrent draft→
+      //      sending transition cannot slip under a stale outer read.
+      //   2. Lock ALL recipient rows — if we only locked terminal-status rows
+      //      and the failed campaign currently has only `pending` recipients,
+      //      FOR UPDATE would lock zero rows and a concurrent Resend webhook
+      //      could still flip pending → delivered between the guard and the
+      //      cascade. Wiping the audit trail #429 was opened to protect.
       const result = await db.transaction(async (tx) => {
-        if (existing.status === "failed") {
-          const [row] = await tx
-            .select({ count: sql<number>`count(*)::int` })
+        const [lockedCampaign] = await tx
+          .select({ status: campaignsTable.status })
+          .from(campaignsTable)
+          .where(eq(campaignsTable.id, id))
+          .for("update");
+
+        if (!lockedCampaign) {
+          return { status: 404 as const, body: { message: "Campaign not found" } };
+        }
+        if (lockedCampaign.status !== "draft" && lockedCampaign.status !== "failed") {
+          return { status: 400 as const, body: { message: "Only draft or failed campaigns can be deleted" } };
+        }
+
+        if (lockedCampaign.status === "failed") {
+          const lockedRecipients = await tx
+            .select({ status: campaignRecipientsTable.status })
             .from(campaignRecipientsTable)
-            .where(and(
-              eq(campaignRecipientsTable.campaignId, id),
-              inArray(campaignRecipientsTable.status, [...campaignEmailService.TERMINAL_RECIPIENT_STATUSES]),
-            ))
+            .where(eq(campaignRecipientsTable.campaignId, id))
             .for("update");
-          const sentCount = Number(row?.count ?? 0);
+          const terminalSet = new Set<string>(campaignEmailService.TERMINAL_RECIPIENT_STATUSES);
+          const sentCount = lockedRecipients.filter((r) => terminalSet.has(r.status)).length;
           if (sentCount > 0) {
             return { status: 400 as const, body: {
               message: `Cannot delete: ${sentCount} recipient${sentCount === 1 ? "" : "s"} already received this email. Deleting would erase the audit trail.`,

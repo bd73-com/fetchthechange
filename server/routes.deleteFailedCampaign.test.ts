@@ -15,26 +15,32 @@ const previousAppOwnerId = process.env.APP_OWNER_ID;
 const {
   mockGetUser,
   mockCampaignLookup,
-  mockTerminalRecipientCount,
+  mockRecipientLookup,
   mockDbDeleteWhere,
 } = vi.hoisted(() => ({
   mockGetUser: vi.fn(),
   mockCampaignLookup: vi.fn(),
-  mockTerminalRecipientCount: vi.fn(),
+  mockRecipientLookup: vi.fn(),
   mockDbDeleteWhere: vi.fn().mockResolvedValue(undefined),
 }));
 
-// db.select() outside the transaction is called once to look up the campaign
-// row (chain: .from().where().limit(1)). Inside the transaction tx.select is
-// called for the count-with-FOR-UPDATE chain: .from().where().for("update").
-let selectCallIndex = 0;
-
+// Inside the transaction tx.select is called up to twice:
+//   1. Campaign row lookup with FOR UPDATE → mockCampaignLookup resolves to
+//      [{ status }] or [] for not-found.
+//   2. (Only when the locked campaign is `failed`) recipients lookup with
+//      FOR UPDATE → mockRecipientLookup resolves to a list of
+//      { status } rows. The handler filters client-side for terminal
+//      statuses.
 function makeTx() {
+  let txSelectCallIndex = 0;
   return {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
-          for: vi.fn(() => mockTerminalRecipientCount()),
+          for: vi.fn(() => {
+            const call = txSelectCallIndex++;
+            return call === 0 ? mockCampaignLookup() : mockRecipientLookup();
+          }),
         })),
       })),
     })),
@@ -44,16 +50,15 @@ function makeTx() {
 
 vi.mock("./db", () => ({
   db: {
-    select: vi.fn(() => {
-      selectCallIndex++;
-      return {
-        from: vi.fn(() => ({
-          where: vi.fn(() => ({
-            limit: vi.fn(() => mockCampaignLookup()),
-          })),
+    // The route no longer reads the campaign row outside the transaction —
+    // the lookup + FOR UPDATE happens inside db.transaction.
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(() => Promise.resolve([])),
         })),
-      };
-    }),
+      })),
+    })),
     delete: vi.fn(() => ({ where: (...args: any[]) => mockDbDeleteWhere(...args) })),
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }),
     update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }) }),
@@ -226,14 +231,26 @@ describe("#429: DELETE /api/admin/campaigns/:id preserves audit trail for failed
   beforeEach(async () => {
     await ensureRoutes();
     vi.clearAllMocks();
-    selectCallIndex = 0;
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockDbDeleteWhere.mockResolvedValue(undefined);
+    // Default: no recipients. Individual tests override per case.
+    mockRecipientLookup.mockResolvedValue([]);
   });
 
   it("returns 400 when a failed campaign has recipients in terminal status", async () => {
-    mockCampaignLookup.mockResolvedValueOnce([{ id: 42, status: "failed" }]);
-    mockTerminalRecipientCount.mockResolvedValueOnce([{ count: 5 }]);
+    mockCampaignLookup.mockResolvedValueOnce([{ status: "failed" }]);
+    // Mix terminal + non-terminal — the handler counts terminal client-side
+    // after locking ALL recipients (so a concurrent webhook can't flip
+    // pending → delivered between the guard and the cascade).
+    mockRecipientLookup.mockResolvedValueOnce([
+      { status: "sent" },
+      { status: "delivered" },
+      { status: "sent" },
+      { status: "opened" },
+      { status: "clicked" },
+      { status: "pending" },
+      { status: "bounced" },
+    ]);
 
     const req = ownerReq({ params: { id: "42" } });
     const res = await callHandler("delete", "/api/admin/campaigns/:id", req);
@@ -246,8 +263,12 @@ describe("#429: DELETE /api/admin/campaigns/:id preserves audit trail for failed
   });
 
   it("allows deletion of a failed campaign with zero terminal recipients", async () => {
-    mockCampaignLookup.mockResolvedValueOnce([{ id: 43, status: "failed" }]);
-    mockTerminalRecipientCount.mockResolvedValueOnce([{ count: 0 }]);
+    mockCampaignLookup.mockResolvedValueOnce([{ status: "failed" }]);
+    mockRecipientLookup.mockResolvedValueOnce([
+      { status: "pending" },
+      { status: "bounced" },
+      { status: "failed" },
+    ]);
 
     const req = ownerReq({ params: { id: "43" } });
     const res = await callHandler("delete", "/api/admin/campaigns/:id", req);
@@ -258,21 +279,21 @@ describe("#429: DELETE /api/admin/campaigns/:id preserves audit trail for failed
   });
 
   it("skips the terminal-recipient check for draft campaigns", async () => {
-    mockCampaignLookup.mockResolvedValueOnce([{ id: 44, status: "draft" }]);
+    mockCampaignLookup.mockResolvedValueOnce([{ status: "draft" }]);
 
     const req = ownerReq({ params: { id: "44" } });
     const res = await callHandler("delete", "/api/admin/campaigns/:id", req);
 
     expect(res._status).toBe(204);
-    // The count query must not be invoked for draft campaigns — they have no
-    // audit trail concern since no sends have occurred.
-    expect(mockTerminalRecipientCount).not.toHaveBeenCalled();
+    // The recipient lookup must not be invoked for draft campaigns — they
+    // have no audit trail concern since no sends have occurred.
+    expect(mockRecipientLookup).not.toHaveBeenCalled();
     expect(mockDbDeleteWhere).toHaveBeenCalledTimes(2);
   });
 
-  it("treats null count row defensively as zero", async () => {
-    mockCampaignLookup.mockResolvedValueOnce([{ id: 45, status: "failed" }]);
-    mockTerminalRecipientCount.mockResolvedValueOnce([]);
+  it("allows deletion when a failed campaign has zero recipients at all", async () => {
+    mockCampaignLookup.mockResolvedValueOnce([{ status: "failed" }]);
+    mockRecipientLookup.mockResolvedValueOnce([]);
 
     const req = ownerReq({ params: { id: "45" } });
     const res = await callHandler("delete", "/api/admin/campaigns/:id", req);
@@ -281,8 +302,19 @@ describe("#429: DELETE /api/admin/campaigns/:id preserves audit trail for failed
     expect(mockDbDeleteWhere).toHaveBeenCalledTimes(2);
   });
 
+  it("returns 404 when the campaign no longer exists inside the transaction", async () => {
+    mockCampaignLookup.mockResolvedValueOnce([]);
+
+    const req = ownerReq({ params: { id: "47" } });
+    const res = await callHandler("delete", "/api/admin/campaigns/:id", req);
+
+    expect(res._status).toBe(404);
+    expect(res._json).toEqual({ message: "Campaign not found" });
+    expect(mockDbDeleteWhere).not.toHaveBeenCalled();
+  });
+
   it("rejects statuses other than draft or failed", async () => {
-    mockCampaignLookup.mockResolvedValueOnce([{ id: 46, status: "sent" }]);
+    mockCampaignLookup.mockResolvedValueOnce([{ status: "sent" }]);
 
     const req = ownerReq({ params: { id: "46" } });
     const res = await callHandler("delete", "/api/admin/campaigns/:id", req);

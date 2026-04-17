@@ -1,5 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
-import { useMonitors, useCheckMonitor, useCheckMonitorSilent } from "@/hooks/use-monitors";
+import { useMonitors, useCheckMonitor } from "@/hooks/use-monitors";
+import { useQueryClient } from "@tanstack/react-query";
+import { api, buildUrl } from "@shared/routes";
 import { CreateMonitorDialog } from "@/components/CreateMonitorDialog";
 import { MonitorCard } from "@/components/MonitorCard";
 import { UpgradeDialog } from "@/components/UpgradeDialog";
@@ -26,13 +28,20 @@ export default function Dashboard() {
   const { user, logout } = useAuth();
   const { data: monitors, isLoading, error, refetch } = useMonitors();
   const { mutate: checkMonitor, isPending: isChecking } = useCheckMonitor();
-  const { mutateAsync: checkMonitorSilent } = useCheckMonitorSilent();
+  const queryClient = useQueryClient();
   const [isBulkRefreshing, setIsBulkRefreshing] = useState(false);
   // Tracks whether the component is still mounted so an in-flight bulk refresh
   // can bail out early and skip state updates / toasts after unmount. Plain
-  // boolean via ref — we never re-render on the flip.
+  // boolean via ref — we never re-render on the flip. The effect body must
+  // re-set to true on mount because React 18 StrictMode runs the cleanup
+  // between its double-invoke mount cycle; without re-setting, mountedRef
+  // stays false for the rest of the component's life and handleRefresh bails
+  // out immediately.
   const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const { toast } = useToast();
   const searchString = useSearch();
 
@@ -147,6 +156,30 @@ export default function Dashboard() {
     let failed = 0;
     let rateLimited = 0;
 
+    // Fetch directly rather than via useCheckMonitorSilent: the hook's
+    // onSuccess invalidates three query keys per resolved mutation, which
+    // during a bulk run would fire 3×N invalidations and largely defeat the
+    // concurrency cap with a refetch storm. We invalidate once at the end.
+    // Also captures res.status on thrown errors so the summary toast can
+    // classify 429s distinctly from genuine check failures — the regex
+    // approach failed because the 429 body ("Free tier: You can check…")
+    // doesn't contain "rate limit".
+    const bulkCheckOne = async (id: number): Promise<{ changed: boolean }> => {
+      const res = await fetch(buildUrl(api.monitors.check.path, { id }), {
+        method: api.monitors.check.method,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const err = new Error(errorData.message || "Failed to check monitor") as Error & { status: number };
+        err.status = res.status;
+        throw err;
+      }
+      return api.monitors.check.responses[200].parse(await res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }));
+    };
+
     try {
       for (let i = 0; i < activeMonitors.length; i += REFRESH_CONCURRENCY) {
         // If the user navigated away mid-refresh, stop issuing new batches.
@@ -155,21 +188,25 @@ export default function Dashboard() {
         // the full N monitors.
         if (!mountedRef.current) return;
         const batch = activeMonitors.slice(i, i + REFRESH_CONCURRENCY);
-        const results = await Promise.allSettled(batch.map(m => checkMonitorSilent(m.id)));
+        const results = await Promise.allSettled(batch.map(m => bulkCheckOne(m.id)));
         for (const r of results) {
           if (r.status === "fulfilled") {
             if (r.value.changed) changed += 1; else unchanged += 1;
           } else {
-            // Distinguish tier rate-limit responses from genuine check
-            // failures so the summary toast doesn't misreport a quota-burn
-            // as a monitor problem.
-            const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
-            if (/rate limit/i.test(msg)) rateLimited += 1; else failed += 1;
+            const status = (r.reason as { status?: number } | undefined)?.status;
+            if (status === 429) rateLimited += 1; else failed += 1;
           }
         }
       }
     } finally {
       if (mountedRef.current) setIsBulkRefreshing(false);
+    }
+
+    // Single invalidation after the whole sweep (not per resolved check) —
+    // every card re-renders once with fresh data instead of N times during
+    // the sweep.
+    if (changed + unchanged > 0) {
+      queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
     }
 
     if (!mountedRef.current) return;
