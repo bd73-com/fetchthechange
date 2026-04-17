@@ -128,4 +128,41 @@ describe("SEOHead", () => {
       document.head.querySelector('meta[property="og:site_name"]'),
     ).toBeNull();
   });
+
+  it("restores pre-existing meta content on unmount (matches production path)", () => {
+    // index.html ships a static description + og:image; SEOHead mutates
+    // them in place. On unmount we must restore the original values, not
+    // strip them.
+    const staticDescription = document.createElement("meta");
+    staticDescription.setAttribute("name", "description");
+    staticDescription.setAttribute("content", "static index.html description");
+    document.head.appendChild(staticDescription);
+
+    const staticOgImage = document.createElement("meta");
+    staticOgImage.setAttribute("property", "og:image");
+    staticOgImage.setAttribute("content", "https://example.com/static.png");
+    document.head.appendChild(staticOgImage);
+
+    const { unmount } = render(
+      <SEOHead
+        title="T"
+        description="route description"
+        path="/pricing"
+        ogImage="/images/custom.png"
+      />,
+    );
+    expect(getMeta('meta[name="description"]')).toBe("route description");
+    expect(getMeta('meta[property="og:image"]')).toBe(
+      getCanonicalUrl("/images/custom.png"),
+    );
+
+    unmount();
+
+    expect(getMeta('meta[name="description"]')).toBe(
+      "static index.html description",
+    );
+    expect(getMeta('meta[property="og:image"]')).toBe(
+      "https://example.com/static.png",
+    );
+  });
 });

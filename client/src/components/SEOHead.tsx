@@ -28,6 +28,8 @@ export interface SEOHeadProps {
   jsonLd?: Record<string, unknown>;
 }
 
+// Mirrored as an absolute URL in client/index.html's static og:image fallback.
+// Keep in sync when renaming the asset.
 const DEFAULT_OG_IMAGE = "/images/fix-selector-showcase.png";
 
 export default function SEOHead({

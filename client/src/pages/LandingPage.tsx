@@ -157,7 +157,7 @@ export default function LandingPage() {
             </div>
             <div className="mt-6">
               <a 
-                href="/blog/" 
+                href="/blog" 
                 className="text-muted-foreground hover:text-primary transition-colors text-base underline underline-offset-4"
                 data-testid="link-blog"
               >

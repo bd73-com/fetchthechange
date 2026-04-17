@@ -82,6 +82,57 @@ describe("sitemap.xml", () => {
     }
   });
 
+  it("has a url entry for every PublicNav-rendering page", () => {
+    const PAGES_DIR = __dirname;
+    // Pages that render PublicNav but are intentionally not in the sitemap
+    // (auth-bound entry points, thin redirect landing pages, etc.)
+    const EXCLUDED_PAGES = new Set<string>([
+      "ExtensionAuth.tsx",
+      // Developer page is Power-tier gated (ProtectedRoute in App.tsx) and
+      // renders PublicNav for unauthenticated visitors only; not a public
+      // SEO surface.
+      "Developer.tsx",
+    ]);
+    // Map of filename -> canonical path, for pages whose file name doesn't
+    // trivially encode the route.
+    const FILE_TO_PATH: Record<string, string> = {
+      "LandingPage.tsx": "/",
+      "Blog.tsx": "/blog",
+      "Pricing.tsx": "/pricing",
+      "Support.tsx": "/support",
+      "Changelog.tsx": "/changelog",
+      "Privacy.tsx": "/privacy",
+      "DocsWebhooks.tsx": "/docs/webhooks",
+      "DocsZapier.tsx": "/docs/zapier",
+      "DocsMake.tsx": "/docs/make",
+    };
+    const publicPages = fs
+      .readdirSync(PAGES_DIR)
+      .filter((f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"))
+      .filter((f) => !EXCLUDED_PAGES.has(f))
+      .filter((f) => {
+        const src = fs.readFileSync(path.join(PAGES_DIR, f), "utf-8");
+        return src.includes("PublicNav");
+      });
+
+    // Blog post pages are asserted by the blog-slug test above; skip them here.
+    const topLevelPages = publicPages.filter((f) => !f.startsWith("Blog") || f === "Blog.tsx");
+
+    const sitemapSrc = fs.readFileSync(sitemapPath, "utf-8");
+    for (const file of topLevelPages) {
+      const expectedPath = FILE_TO_PATH[file];
+      expect(
+        expectedPath,
+        `No canonical path mapping for ${file} — add it to FILE_TO_PATH or EXCLUDED_PAGES`,
+      ).toBeDefined();
+      expect(sitemapSrc).toMatch(
+        new RegExp(
+          `<loc>https?://[^<]+${expectedPath!.replace(/\//g, "\\/")}</loc>`,
+        ),
+      );
+    }
+  });
+
   it("has a url entry for every public /docs/* route registered in App.tsx", () => {
     const appTsxPath = path.resolve(__dirname, "..", "App.tsx");
     const appSrc = fs.readFileSync(appTsxPath, "utf-8");
