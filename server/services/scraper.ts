@@ -1266,7 +1266,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             // Infra-wide outage: monitor-agnostic message so every affected monitor
             // dedups into a single row in the admin UI. Per-monitor details stay
             // in context for drill-down (last-writer-wins; occurrenceCount conveys scale).
-            await ErrorLogger.warning("scraper", "Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() });
+            // classifiedReason preserves the specific failure type (timeout/DNS/ECONNREFUSED)
+            // since the message itself is now constant across monitors.
+            await ErrorLogger.warning("scraper", "Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
           } else {
             // Site-specific failure: keep the monitor name because the site itself is the problem.
             await ErrorLogger.warning("scraper", `"${monitor.name}" — ${classifyBrowserlessError(rawBrowserlessMsg)}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() });
