@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { nanoid } from "nanoid";
 import { isCrawlerUserAgent, rewriteIndexHtmlForCrawler } from "./crawlerMeta";
+import { getAppUrl } from "./utils/appUrl";
 
 const viteLogger = createLogger();
 
@@ -52,9 +53,10 @@ export async function setupVite(server: Server, app: Express) {
       let page = await vite.transformIndexHtml(url, template);
       // Bots that can't execute JS (Facebook/X/Slack/LinkedIn/Discord/…)
       // need per-route OG/Twitter meta in the initial HTML. See issue #440.
+      // Use the pinned canonical origin (not req.get("host")) to prevent a
+      // spoofed Host header from being reflected into og:url / canonical.
       if (isCrawlerUserAgent(req.get("user-agent"))) {
-        const baseUrl = `${req.protocol}://${req.get("host")}`;
-        page = rewriteIndexHtmlForCrawler(page, req.path, baseUrl);
+        page = rewriteIndexHtmlForCrawler(page, req.path, getAppUrl());
       }
       res.status(200).set({ "Content-Type": "text/html" }).end(page);
     } catch (e) {

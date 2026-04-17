@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import fs from "fs";
+import path from "path";
 import {
   isCrawlerUserAgent,
   rewriteIndexHtmlForCrawler,
@@ -115,5 +117,46 @@ describe("getPageMetadata", () => {
   it("falls back to landing metadata for an unknown path", () => {
     const meta = getPageMetadata("/no-such-route-exists");
     expect(meta.title).toContain("FetchTheChange");
+  });
+});
+
+describe("rewriteIndexHtmlForCrawler runs against the real client/index.html", () => {
+  // Prevents silent drift: if someone edits client/index.html to reorder
+  // attributes, single-quote values, or split a tag across lines, the regex-
+  // based rewriter in crawlerMeta.ts would otherwise no-op and crawlers would
+  // keep seeing the landing-page fallback. See Phase 3 architecture review.
+  const clientIndexPath = path.resolve(__dirname, "..", "client", "index.html");
+  const realTemplate = fs.readFileSync(clientIndexPath, "utf-8");
+
+  it("rewrites every expected head tag in the real template", () => {
+    const out = rewriteIndexHtmlForCrawler(
+      realTemplate,
+      "/pricing",
+      "https://ftc.bd73.com",
+    );
+
+    const pricingMeta = getPageMetadata("/pricing");
+
+    // Every tag we claim to rewrite must actually be rewritten. We check by
+    // requiring the new content to be present — the old landing copy MUST
+    // have been replaced.
+    expect(out).toContain(`<title>${pricingMeta.title}</title>`);
+    expect(out).toContain(
+      '<link rel="canonical" href="https://ftc.bd73.com/pricing" />',
+    );
+    expect(out).toContain(
+      '<meta property="og:url" content="https://ftc.bd73.com/pricing" />',
+    );
+    expect(out).toContain(
+      `<meta property="og:title" content="${pricingMeta.title}" />`,
+    );
+    expect(out).toContain(
+      `<meta name="twitter:title" content="${pricingMeta.title}" />`,
+    );
+
+    // And the old landing copy must no longer appear in those slots.
+    expect(out).not.toContain(
+      '<meta property="og:title" content="FetchTheChange — Monitor any web value. Get alerted when it changes."',
+    );
   });
 });

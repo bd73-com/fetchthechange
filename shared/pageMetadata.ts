@@ -5,9 +5,10 @@
  * <head> with the entry from here so link previews unfurl with the correct
  * title/description/image instead of the landing page's.
  *
- * SEOHead on the client still owns the SPA-rendered head for human visitors —
- * these entries need to stay in rough sync with the corresponding page's
- * SEOHead props, but the authoritative copy for humans is the SEOHead call.
+ * SEOHead on the client still owns the SPA-rendered head for human visitors.
+ * `client/src/pages/page-metadata-parity.test.ts` enforces that every
+ * `<SEOHead path="X" title="Y" description="Z" />` matches PAGE_METADATA["X"],
+ * so editing one side without the other fails the test suite.
  *
  * Blog/doc URLs omit the `image` field on purpose: they inherit the default
  * OG image from client/index.html.
@@ -32,75 +33,76 @@ export const PAGE_METADATA: Record<string, PageMeta> = {
     ogType: "website",
   },
   "/pricing": {
-    title: "Pricing — FetchTheChange",
+    title: "Pricing — Free, Pro, and Power plans | FetchTheChange",
     description:
-      "Simple, transparent pricing for website change monitoring. Free for hobbyists, Pro for teams, Power for heavy users.",
+      "Simple, transparent pricing for website change monitoring. Start free with 3 monitors, or upgrade to Pro ($9/mo, 100 monitors) or Power ($29/mo, unlimited) for hourly checks, Slack, webhooks, and the REST API.",
     ogType: "website",
   },
   "/support": {
-    title: "Support — FetchTheChange",
+    title: "Support & Help | FetchTheChange",
     description:
-      "Get help with FetchTheChange: contact support, browse FAQs, and learn how to troubleshoot broken monitors.",
+      "Get help with FetchTheChange. Browse frequently asked questions about website monitoring, troubleshooting, and billing, or contact our support team.",
     ogType: "website",
   },
   "/privacy": {
-    title: "Privacy Policy — FetchTheChange",
+    title: "Privacy Policy | FetchTheChange",
     description:
-      "How FetchTheChange handles your data: what we collect, how we use it, and your rights.",
+      "FetchTheChange Privacy Policy. Learn how we collect, use, and protect your personal data in compliance with GDPR.",
     ogType: "website",
   },
   "/changelog": {
-    title: "Changelog — FetchTheChange",
+    title: "What's New | FetchTheChange",
     description:
-      "Release notes for FetchTheChange — new features, bug fixes, and platform improvements.",
+      "See what's new in FetchTheChange — latest features, bug fixes, and improvements.",
     ogType: "website",
   },
   "/blog": {
-    title: "Blog — FetchTheChange",
+    title:
+      "Blog — Website monitoring, change detection, and integrations | FetchTheChange",
     description:
-      "Guides on website change monitoring: selector stability, price tracking, competitor intelligence, and integrations.",
+      "Insights on web monitoring, change detection, CSS selector resilience, and integrations with Slack, webhooks, and Zapier. Read the FetchTheChange blog.",
     ogType: "website",
   },
   "/blog/why-website-change-monitors-fail-silently": {
     title:
-      "Why Website Change Monitors Fail Silently | FetchTheChange",
+      "Why Website Change Monitors Fail Silently on JavaScript-Heavy Sites | FetchTheChange",
     description:
-      "Most website change monitors go silent when selectors break, sites add bot protection, or JavaScript rewrites the DOM. Here is how to catch those failures.",
+      "Most website change monitors fail silently when JavaScript or CSS selectors break. Learn why this happens and how to detect it before you miss important changes.",
     ogType: "article",
   },
   "/blog/fetchthechange-vs-distill-visualping-hexowatch": {
     title:
-      "FetchTheChange vs. Distill, Visualping, Hexowatch | FetchTheChange",
+      "FetchTheChange vs Distill vs Visualping vs Hexowatch | Website Change Monitor Comparison",
     description:
-      "How FetchTheChange compares on selector stability, JS rendering, failure reporting, and pricing against the main website change monitoring tools.",
+      "A neutral comparison of website change monitoring tools for JavaScript-heavy sites, selector breakage detection, and value-level monitoring.",
     ogType: "article",
   },
   "/blog/monitor-competitor-prices-without-getting-blocked": {
     title:
-      "How to Monitor Competitor Prices Without Getting Blocked | FetchTheChange",
+      "How to Monitor Competitor Prices Without Getting Blocked (2026 Guide)",
     description:
-      "Practical guide to scraping competitor prices reliably: rendering JS pages, rotating through selectors, and handling bot-protection gracefully.",
+      "Learn how to monitor competitor prices on modern JavaScript-heavy websites without getting blocked — and how to avoid silent monitoring failures.",
     ogType: "article",
   },
   "/blog/css-selectors-keep-breaking-why-and-how-to-fix": {
     title:
-      "Why CSS Selectors Keep Breaking (and How to Fix Them) | FetchTheChange",
+      "CSS Selectors Keep Breaking? Why It Happens and How to Fix It | FetchTheChange",
     description:
-      "Why generated class names and nested indexes break your scraper every deploy, and concrete patterns that survive UI changes.",
+      "CSS selectors in website monitors break constantly due to hashed class names, DOM restructuring, and framework re-renders. Learn why it happens and how to build resilient selectors that survive site updates.",
     ogType: "article",
   },
   "/blog/website-change-monitoring-use-cases-beyond-price-tracking": {
     title:
-      "Website Change Monitoring Use Cases Beyond Price Tracking | FetchTheChange",
+      "5 Real-World Use Cases for Website Change Monitoring (Beyond Price Tracking) | FetchTheChange",
     description:
-      "From policy pages and job boards to release notes and SEO audits — the web change monitoring use cases teams actually ship with.",
+      "Website change monitoring isn't just for tracking prices. Learn five practical use cases — from regulatory compliance to job postings — with concrete examples and selector strategies for each.",
     ogType: "article",
   },
   "/blog/monitor-website-changes-without-writing-code": {
     title:
-      "Monitor Website Changes Without Writing Code | FetchTheChange",
+      "How to Monitor Website Changes Without Writing Code (Step-by-Step) | FetchTheChange",
     description:
-      "A no-code walkthrough for setting up website change monitors with selectors, conditions, and notifications — no scripts, no servers.",
+      "You don't need to be a developer to track changes on a website. Learn how to monitor any webpage — prices, availability, text, job postings — using a point-and-click browser extension. No coding required.",
     ogType: "article",
   },
   "/blog/slack-webpage-change-alerts": {
@@ -111,21 +113,27 @@ export const PAGE_METADATA: Record<string, PageMeta> = {
     ogType: "article",
   },
   "/docs/webhooks": {
-    title: "Webhooks — FetchTheChange Docs",
+    title: "Webhook Integration | FetchTheChange Developer Docs",
     description:
-      "Send monitor events to your own HTTP endpoint with signed webhook requests. Payload schema, retry behavior, and signature verification.",
+      "Learn how to receive FetchTheChange change alerts via webhooks. Covers payload format, HMAC signature verification, retries, and testing.",
     ogType: "article",
   },
   "/docs/zapier": {
-    title: "Zapier Integration — FetchTheChange Docs",
+    title: "Zapier Integration | FetchTheChange",
     description:
-      "Connect FetchTheChange to 6000+ apps via Zapier. Trigger Zaps when a monitor detects a change.",
+      "Connect FetchTheChange to 7,000+ apps via Zapier. Trigger Zaps when any monitored value changes — no server required. Power plan.",
     ogType: "article",
   },
   "/docs/make": {
-    title: "Make Integration — FetchTheChange Docs",
+    title: "Make Integration | FetchTheChange",
     description:
-      "Integrate FetchTheChange with Make (formerly Integromat) to automate workflows when web content changes.",
+      "Connect FetchTheChange to Make (Integromat) using webhooks. Receive change alerts in any Make scenario — no server required.",
+    ogType: "article",
+  },
+  "/developer": {
+    title: "REST API Documentation | FetchTheChange Developer Docs",
+    description:
+      "FetchTheChange REST API documentation. Create monitors, pull change history, and integrate website monitoring into your CI/CD pipelines. Power plan required.",
     ogType: "article",
   },
 };

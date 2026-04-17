@@ -741,3 +741,64 @@ describe("useUpdateMonitorSilent", () => {
     expect(patchedId).toBe("1");
   });
 });
+
+describe("useCheckMonitor AbortSignal behavior (#437)", () => {
+  it("aborts in-flight check fetches when the component unmounts", async () => {
+    let aborted = false;
+    server.use(
+      http.post(api.monitors.check.path, async ({ request }) => {
+        await new Promise<void>((resolve) => {
+          request.signal.addEventListener("abort", () => {
+            aborted = true;
+            resolve();
+          });
+        });
+        return new Promise(() => {}) as Promise<Response>;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useCheckMonitor(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate(1);
+    });
+
+    // Give the mutation a tick to dispatch the fetch
+    await new Promise((r) => setTimeout(r, 20));
+    unmount();
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(aborted).toBe(true);
+  });
+
+  it("useCheckMonitorSilent also aborts in-flight fetches on unmount", async () => {
+    let aborted = false;
+    server.use(
+      http.post(api.monitors.check.path, async ({ request }) => {
+        await new Promise<void>((resolve) => {
+          request.signal.addEventListener("abort", () => {
+            aborted = true;
+            resolve();
+          });
+        });
+        return new Promise(() => {}) as Promise<Response>;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useCheckMonitorSilent(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.mutate(1);
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    unmount();
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(aborted).toBe(true);
+  });
+});
