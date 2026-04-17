@@ -1966,7 +1966,7 @@ describe("failure tracking and auto-pause", () => {
       expect.objectContaining({
         monitorId: 1,
         monitorName: "My Watch",
-        classifiedReason: expect.any(String),
+        classifiedReason: expect.stringContaining("connection refused"),
       }),
     );
     // Every infra-warning call must omit the monitor name so dedup aggregates across monitors.
@@ -2008,7 +2008,12 @@ describe("failure tracking and auto-pause", () => {
     expect(ErrorLogger.warning).toHaveBeenCalledWith(
       "scraper",
       `"My Watch" — page timeout`,
-      expect.objectContaining({ monitorId: 1, monitorName: "My Watch" }),
+      expect.objectContaining({
+        monitorId: 1,
+        monitorName: "My Watch",
+        classifiedReason: "page timeout",
+        rawBrowserlessMsg: expect.stringContaining("Navigation timeout"),
+      }),
     );
 
     delete process.env.BROWSERLESS_TOKEN;

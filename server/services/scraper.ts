@@ -1273,7 +1273,24 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             await ErrorLogger.warning("scraper", "Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
           } else {
             // Site-specific failure: keep the monitor name because the site itself is the problem.
-            await ErrorLogger.warning("scraper", `"${monitor.name}" — ${classifyBrowserlessError(rawBrowserlessMsg)}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() });
+            // Mirror the infra branch's drill-down fields (classifiedReason + truncated raw
+            // error) so the admin UI has enough detail when the catchall "extraction failed"
+            // string fires. Logger sanitization (server/services/logger.ts:29-53) strips
+            // secrets from the raw error before persistence.
+            const classifiedReason = classifyBrowserlessError(rawBrowserlessMsg);
+            await ErrorLogger.warning(
+              "scraper",
+              `"${monitor.name}" — ${classifiedReason}`,
+              {
+                monitorId: monitor.id,
+                monitorName: monitor.name,
+                url: monitor.url,
+                selector: monitor.selector,
+                circuitState: browserlessCircuitBreaker.getState(),
+                classifiedReason,
+                rawBrowserlessMsg: rawBrowserlessMsg.slice(0, 500),
+              },
+            );
           }
         }
 
