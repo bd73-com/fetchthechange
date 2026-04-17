@@ -37,6 +37,7 @@ import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes } from "./services/ensureTables";
+import { renderRobotsTxt, renderSitemapXml } from "./services/seoFiles";
 
 
 // ------------------------------------------------------------------
@@ -145,7 +146,6 @@ export async function registerRoutes(
   // actual deploy hostname (REPLIT_DOMAINS) instead of a hardcoded
   // fallback. Must be registered before the rate limiter / auth so
   // Googlebot can fetch them without authentication.
-  const { renderRobotsTxt, renderSitemapXml } = await import("./services/seoFiles");
   app.get("/robots.txt", (_req, res) => {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=3600");
