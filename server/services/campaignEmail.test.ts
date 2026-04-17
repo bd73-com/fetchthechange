@@ -298,30 +298,33 @@ describe("resolveRecipients", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("adds a u.id NOT IN condition when excludeUserIds is provided (issue #428)", async () => {
+  it("anti-joins against automated campaign_recipients when excludeAutomatedRecipients is set (issue #428)", async () => {
     mockDbExecute.mockResolvedValueOnce({ rows: [] });
 
-    await resolveRecipients({ excludeUserIds: ["u1", "u2"] });
+    await resolveRecipients({ excludeAutomatedRecipients: true });
 
     // The SQL mock returns { strings, values } from the tagged template.
-    // The WHERE fragment is joined into the outer template and the raw IDs
-    // flow through as sql placeholders. Inspect the flattened tree for the
-    // telltale "u.id NOT IN" substring that our excludeUserIds branch emits.
+    // Verify the anti-join fragment made it into the compiled query, with all
+    // active recipient statuses present so concurrent `pending` rows are also
+    // excluded.
     const executed = mockDbExecute.mock.calls[0][0];
     const serialized = JSON.stringify(executed);
-    expect(serialized).toContain("u.id NOT IN");
-    expect(serialized).toContain("u1");
-    expect(serialized).toContain("u2");
+    expect(serialized).toContain("NOT EXISTS");
+    expect(serialized).toContain("campaign_recipients");
+    expect(serialized).toContain("type = 'automated'");
+    for (const status of ["pending", "sent", "delivered", "opened", "clicked"]) {
+      expect(serialized).toContain(status);
+    }
   });
 
-  it("ignores an empty excludeUserIds array", async () => {
+  it("omits the anti-join when excludeAutomatedRecipients is not set", async () => {
     mockDbExecute.mockResolvedValueOnce({ rows: [] });
 
-    await resolveRecipients({ excludeUserIds: [] });
+    await resolveRecipients({});
 
     const executed = mockDbExecute.mock.calls[0][0];
     const serialized = JSON.stringify(executed);
-    expect(serialized).not.toContain("u.id NOT IN");
+    expect(serialized).not.toContain("NOT EXISTS");
   });
 });
 

@@ -15,6 +15,14 @@ import { getAppUrl } from "../utils/appUrl";
 export const TERMINAL_RECIPIENT_STATUSES = ["sent", "delivered", "opened", "clicked"] as const;
 export type TerminalRecipientStatus = typeof TERMINAL_RECIPIENT_STATUSES[number];
 
+/**
+ * Statuses that indicate a user is either in-flight for delivery or has
+ * already received an automated campaign email. Used to guard against
+ * duplicate sends on retry — `pending` is included so a concurrent automated
+ * run's in-flight recipients are also excluded.
+ */
+export const ACTIVE_RECIPIENT_STATUSES = ["pending", ...TERMINAL_RECIPIENT_STATUSES] as const;
+
 export interface CampaignFilters {
   tier?: string[];
   signupBefore?: string;
@@ -22,10 +30,14 @@ export interface CampaignFilters {
   minMonitors?: number;
   maxMonitors?: number;
   hasActiveMonitors?: boolean;
-  // User IDs to exclude from recipient resolution. Used by automated campaigns
-  // (e.g. welcome) to prevent duplicate sends to users who already received the
-  // email from a prior partially-sent campaign in the same window.
-  excludeUserIds?: string[];
+  // When true, resolveRecipients anti-joins against campaign_recipients to
+  // exclude users who have an active (pending/sent/delivered/opened/clicked)
+  // row on any `type='automated'` campaign. Used by the welcome flow to avoid
+  // duplicate sends after a rollback+retry cycle and to avoid racing a
+  // concurrent automated run in the same signup window. Stored as a boolean
+  // so the campaigns.filters jsonb does not balloon with user id lists — the
+  // exclusion is evaluated against fresh DB state on every resolution.
+  excludeAutomatedRecipients?: boolean;
 }
 
 interface ResolvedRecipient {
@@ -87,9 +99,20 @@ export async function resolveRecipients(filters: CampaignFilters): Promise<Resol
     conditions.push(sql`u.created_at <= ${new Date(filters.signupBefore)}`);
   }
 
-  if (filters.excludeUserIds && filters.excludeUserIds.length > 0) {
-    const placeholders = filters.excludeUserIds.map((uid) => sql`${uid}`);
-    conditions.push(sql`u.id NOT IN (${sql.join(placeholders, sql`, `)})`);
+  if (filters.excludeAutomatedRecipients) {
+    // Anti-join rather than a user-id NOT IN list: keeps the campaigns.filters
+    // jsonb tiny (one bool), avoids breaching pg's 65535 bind-parameter limit,
+    // and evaluates against fresh DB state at resolve-time so a concurrent
+    // automated run's `pending` recipients are also excluded.
+    const activePlaceholders = ACTIVE_RECIPIENT_STATUSES.map((s) => sql`${s}`);
+    conditions.push(sql`NOT EXISTS (
+      SELECT 1
+      FROM campaign_recipients cr
+      JOIN campaigns c ON c.id = cr.campaign_id
+      WHERE cr.user_id = u.id
+        AND c.type = 'automated'
+        AND cr.status IN (${sql.join(activePlaceholders, sql`, `)})
+    )`);
   }
 
   const havingConditions: ReturnType<typeof sql>[] = [];

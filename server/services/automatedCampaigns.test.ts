@@ -16,7 +16,6 @@ const {
   mockDbSet,
   mockDbOrderBy,
   mockDbDeleteWhere,
-  mockDbSelectDistinctWhere,
   mockTriggerCampaignSend,
   mockResolveRecipients,
   mockErrorLoggerError,
@@ -33,7 +32,6 @@ const {
   mockDbSet: vi.fn(),
   mockDbOrderBy: vi.fn(),
   mockDbDeleteWhere: vi.fn().mockResolvedValue(undefined),
-  mockDbSelectDistinctWhere: vi.fn().mockResolvedValue([]),
   mockTriggerCampaignSend: vi.fn(),
   mockResolveRecipients: vi.fn(),
   mockErrorLoggerError: vi.fn().mockResolvedValue(undefined),
@@ -43,19 +41,6 @@ vi.mock("../db", () => ({
   db: {
     execute: mockDbExecute,
     select: () => ({ from: mockDbFrom }),
-    // selectDistinct().from().innerJoin(campaigns).innerJoin(users).where() —
-    // returns empty list of already-received user IDs by default so the welcome
-    // exclusion is a no-op. Tests override mockDbSelectDistinctWhere to
-    // simulate prior welcome sends in the current signup window.
-    selectDistinct: () => ({
-      from: () => ({
-        innerJoin: () => ({
-          innerJoin: () => ({
-            where: (...args: any[]) => mockDbSelectDistinctWhere(...args),
-          }),
-        }),
-      }),
-    }),
     insert: () => ({ values: mockDbValues }),
     update: () => ({ set: mockDbSet }),
     delete: () => ({ where: mockDbDeleteWhere }),
@@ -73,8 +58,6 @@ mockDbSet.mockReturnValue({ where: mockDbWhere });
 
 vi.mock("@shared/schema", () => ({
   campaigns: { id: "id", status: "status", type: "type" },
-  campaignRecipients: { id: "id", userId: "user_id", campaignId: "campaign_id", status: "status" },
-  users: { id: "id", createdAt: "created_at" },
   automatedCampaignConfigs: {
     id: "id",
     key: "key",
@@ -86,9 +69,6 @@ vi.mock("drizzle-orm", () => ({
   eq: (a: any, b: any) => ({ field: a, value: b }),
   and: (...args: any[]) => ({ type: "and", args }),
   isNull: (a: any) => ({ type: "isNull", field: a }),
-  lte: (a: any, b: any) => ({ type: "lte", field: a, value: b }),
-  gte: (a: any, b: any) => ({ type: "gte", field: a, value: b }),
-  inArray: (field: any, values: any[]) => ({ type: "inArray", field, values }),
   sql: Object.assign(
     (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
     { join: (items: any[], sep: any) => ({ items, sep }) }
@@ -99,7 +79,6 @@ vi.mock("drizzle-orm", () => ({
 vi.mock("./campaignEmail", () => ({
   triggerCampaignSend: (...args: any[]) => mockTriggerCampaignSend(...args),
   resolveRecipients: (...args: any[]) => mockResolveRecipients(...args),
-  TERMINAL_RECIPIENT_STATUSES: ["sent", "delivered", "opened", "clicked"] as const,
 }));
 
 vi.mock("./logger", () => ({
@@ -654,21 +633,20 @@ describe("runWelcomeCampaign", () => {
     })).rejects.toThrow("Original send error");
   });
 
-  it("excludes users who already received an automated campaign email", async () => {
-    // Issue #428: after a rollback + retry, users who received the email in the
-    // partially-sent prior campaign must not get a duplicate.
+  it("sets excludeAutomatedRecipients so resolveRecipients anti-joins against prior sends", async () => {
+    // Issue #428: after a rollback + retry (or a concurrent automated run) the
+    // welcome send must skip users who already have an active recipient row.
+    // We verify the flag flows through both resolveRecipients and the persisted
+    // campaigns.filters jsonb — triggerCampaignSend re-reads filters from the
+    // DB and re-resolves, so the flag must survive that round trip.
     const config = {
       id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
       htmlBody: "<html></html>", textBody: "text", enabled: true,
       lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
     };
     mockDbLimit.mockResolvedValue([config]);
-    mockDbSelectDistinctWhere.mockResolvedValueOnce([
-      { userId: "u1" },
-      { userId: "u2" },
-    ]);
     mockResolveRecipients.mockResolvedValue([
-      { id: "u3", email: "c@d.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
     ]);
     mockDbReturning.mockResolvedValue([{ id: 99, ...config, status: "draft", type: "automated" }]);
     mockTriggerCampaignSend.mockResolvedValue({ totalRecipients: 1 });
@@ -679,74 +657,14 @@ describe("runWelcomeCampaign", () => {
       configId: 1,
     });
 
-    // resolveRecipients must receive the exclude list so the user count check
-    // reflects the post-exclusion set.
     const filtersPassed = mockResolveRecipients.mock.calls[0][0];
-    expect(filtersPassed.excludeUserIds).toEqual(["u1", "u2"]);
-
-    // The campaign row must persist those exclusions — triggerCampaignSend
-    // re-reads filters from the DB and re-resolves recipients, so the exclusion
-    // must survive that round trip.
-    const insertedValues = mockDbValues.mock.calls[0][0];
-    expect(insertedValues.filters.excludeUserIds).toEqual(["u1", "u2"]);
-  });
-
-  it("scopes the already-received lookup to the current signup window", async () => {
-    // Without window scoping the excludeUserIds list grows unboundedly across
-    // cron runs and would eventually breach pg's bind-param limit. The query
-    // must filter users.created_at by the current window.
-    const config = {
-      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
-      htmlBody: "<html></html>", textBody: "text", enabled: true,
-      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
-    };
-    mockDbLimit.mockResolvedValue([config]);
-    mockDbSelectDistinctWhere.mockResolvedValueOnce([]);
-    mockResolveRecipients.mockResolvedValue([
-      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
-    ]);
-    mockDbReturning.mockResolvedValue([{ id: 101, ...config, status: "draft", type: "automated" }]);
-    mockTriggerCampaignSend.mockResolvedValue({ totalRecipients: 1 });
-
-    const signupAfter = new Date("2026-04-01T00:00:00Z");
-    const signupBefore = new Date("2026-04-15T00:00:00Z");
-    await runWelcomeCampaign({ signupAfter, signupBefore, configId: 1 });
-
-    // The WHERE predicate must reference both window bounds — serialize the
-    // mock's captured argument and look for the created_at filter markers.
-    const whereArg = mockDbSelectDistinctWhere.mock.calls[0][0];
-    const serialized = JSON.stringify(whereArg);
-    expect(serialized).toContain("gte");
-    expect(serialized).toContain("lte");
-    expect(serialized).toContain(signupAfter.toISOString());
-    expect(serialized).toContain(signupBefore.toISOString());
-  });
-
-  it("omits excludeUserIds entirely when no prior recipients exist", async () => {
-    // When no terminal-status recipients exist, the filter stays minimal — we
-    // don't want to store an empty array that would confuse future reads.
-    const config = {
-      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
-      htmlBody: "<html></html>", textBody: "text", enabled: true,
-      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
-    };
-    mockDbLimit.mockResolvedValue([config]);
-    mockDbSelectDistinctWhere.mockResolvedValueOnce([]);
-    mockResolveRecipients.mockResolvedValue([
-      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
-    ]);
-    mockDbReturning.mockResolvedValue([{ id: 100, ...config, status: "draft", type: "automated" }]);
-    mockTriggerCampaignSend.mockResolvedValue({ totalRecipients: 1 });
-
-    await runWelcomeCampaign({
-      signupAfter: new Date("2025-03-19"),
-      signupBefore: new Date(),
-      configId: 1,
-    });
-
-    const filtersPassed = mockResolveRecipients.mock.calls[0][0];
+    expect(filtersPassed.excludeAutomatedRecipients).toBe(true);
+    // No user-id list is persisted — keeps the jsonb tiny and dodges pg's
+    // bind-parameter limit.
     expect(filtersPassed.excludeUserIds).toBeUndefined();
+
     const insertedValues = mockDbValues.mock.calls[0][0];
+    expect(insertedValues.filters.excludeAutomatedRecipients).toBe(true);
     expect(insertedValues.filters.excludeUserIds).toBeUndefined();
   });
 

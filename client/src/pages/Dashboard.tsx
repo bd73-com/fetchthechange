@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { LayoutDashboard, RefreshCw, Loader2, Sparkles, X, Megaphone } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { TIER_LIMITS, TAG_LIMITS, type UserTier } from "@shared/models/auth";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearch } from "wouter";
 import { useTags } from "@/hooks/use-tags";
 import { TagManager } from "@/components/TagManager";
@@ -28,6 +28,11 @@ export default function Dashboard() {
   const { mutate: checkMonitor, isPending: isChecking } = useCheckMonitor();
   const { mutateAsync: checkMonitorSilent } = useCheckMonitorSilent();
   const [isBulkRefreshing, setIsBulkRefreshing] = useState(false);
+  // Tracks whether the component is still mounted so an in-flight bulk refresh
+  // can bail out early and skip state updates / toasts after unmount. Plain
+  // boolean via ref — we never re-render on the flip.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   const { toast } = useToast();
   const searchString = useSearch();
 
@@ -140,28 +145,44 @@ export default function Dashboard() {
     let changed = 0;
     let unchanged = 0;
     let failed = 0;
+    let rateLimited = 0;
 
     try {
       for (let i = 0; i < activeMonitors.length; i += REFRESH_CONCURRENCY) {
+        // If the user navigated away mid-refresh, stop issuing new batches.
+        // In-flight requests continue (no AbortController plumbing yet) but
+        // the orphaned-work blast radius is capped at one batch rather than
+        // the full N monitors.
+        if (!mountedRef.current) return;
         const batch = activeMonitors.slice(i, i + REFRESH_CONCURRENCY);
         const results = await Promise.allSettled(batch.map(m => checkMonitorSilent(m.id)));
         for (const r of results) {
           if (r.status === "fulfilled") {
             if (r.value.changed) changed += 1; else unchanged += 1;
           } else {
-            failed += 1;
+            // Distinguish tier rate-limit responses from genuine check
+            // failures so the summary toast doesn't misreport a quota-burn
+            // as a monitor problem.
+            const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+            if (/rate limit/i.test(msg)) rateLimited += 1; else failed += 1;
           }
         }
       }
     } finally {
-      setIsBulkRefreshing(false);
+      if (mountedRef.current) setIsBulkRefreshing(false);
     }
 
-    if (failed > 0) {
+    if (!mountedRef.current) return;
+
+    if (failed > 0 || rateLimited > 0) {
+      const parts = [`${changed} changed`, `${unchanged} unchanged`];
+      if (failed > 0) parts.push(`${failed} failed`);
+      if (rateLimited > 0) parts.push(`${rateLimited} rate-limited`);
+      const errorCount = failed + rateLimited;
       toast({
         variant: "destructive",
-        title: `Refreshed with ${failed} error${failed === 1 ? "" : "s"}`,
-        description: `${changed} changed, ${unchanged} unchanged, ${failed} failed.`,
+        title: `Refreshed with ${errorCount} error${errorCount === 1 ? "" : "s"}`,
+        description: parts.join(", ") + ".",
       });
     } else {
       toast({

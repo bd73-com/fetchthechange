@@ -2172,28 +2172,37 @@ export async function registerRoutes(
       if (!existing) return res.status(404).json({ message: "Campaign not found" });
       if (existing.status !== "draft" && existing.status !== "failed") return res.status(400).json({ message: "Only draft or failed campaigns can be deleted" });
 
-      // Failed campaigns may have partially sent before failing. Deleting them
-      // would erase the recipient audit trail and allow duplicate sends on retry.
-      if (existing.status === "failed") {
-        const [row] = await db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(campaignRecipientsTable)
-          .where(and(
-            eq(campaignRecipientsTable.campaignId, id),
-            inArray(campaignRecipientsTable.status, [...campaignEmailService.TERMINAL_RECIPIENT_STATUSES]),
-          ));
-        const sentCount = row?.count ?? 0;
-        if (sentCount > 0) {
-          return res.status(400).json({
-            message: `Cannot delete: ${sentCount} recipient${sentCount === 1 ? "" : "s"} already received this email. Deleting would erase the audit trail.`,
-          });
+      // Wrap the count-then-delete in a transaction with FOR UPDATE so a
+      // Resend webhook landing mid-delete cannot flip a recipient from pending
+      // → delivered between the guard and the cascade. Without the lock the
+      // audit trail #429 was opened to protect could still be wiped.
+      const result = await db.transaction(async (tx) => {
+        if (existing.status === "failed") {
+          const [row] = await tx
+            .select({ count: sql<number>`count(*)::int` })
+            .from(campaignRecipientsTable)
+            .where(and(
+              eq(campaignRecipientsTable.campaignId, id),
+              inArray(campaignRecipientsTable.status, [...campaignEmailService.TERMINAL_RECIPIENT_STATUSES]),
+            ))
+            .for("update");
+          const sentCount = Number(row?.count ?? 0);
+          if (sentCount > 0) {
+            return { status: 400 as const, body: {
+              message: `Cannot delete: ${sentCount} recipient${sentCount === 1 ? "" : "s"} already received this email. Deleting would erase the audit trail.`,
+            } };
+          }
         }
-      }
 
-      // Cascade delete recipients first
-      await db.delete(campaignRecipientsTable).where(eq(campaignRecipientsTable.campaignId, id));
-      await db.delete(campaignsTable).where(eq(campaignsTable.id, id));
-      res.status(204).send();
+        await tx.delete(campaignRecipientsTable).where(eq(campaignRecipientsTable.campaignId, id));
+        await tx.delete(campaignsTable).where(eq(campaignsTable.id, id));
+        return { status: 204 as const, body: null };
+      });
+
+      if (result.status === 204) {
+        return res.status(204).send();
+      }
+      return res.status(result.status).json(result.body);
     } catch (error: any) {
       console.error("Error deleting campaign:", error);
       res.status(500).json({ message: "Failed to delete campaign" });

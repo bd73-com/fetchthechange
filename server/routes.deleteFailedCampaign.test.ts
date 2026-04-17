@@ -24,26 +24,33 @@ const {
   mockDbDeleteWhere: vi.fn().mockResolvedValue(undefined),
 }));
 
-// db.select() is called twice in the DELETE handler:
-//   1. select from campaignsTable (chain: .from().where().limit(1))
-//   2. select { count } from campaignRecipientsTable (chain: .from().where())
-// We track call order to return the right resolver for each.
+// db.select() outside the transaction is called once to look up the campaign
+// row (chain: .from().where().limit(1)). Inside the transaction tx.select is
+// called for the count-with-FOR-UPDATE chain: .from().where().for("update").
 let selectCallIndex = 0;
+
+function makeTx() {
+  return {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          for: vi.fn(() => mockTerminalRecipientCount()),
+        })),
+      })),
+    })),
+    delete: vi.fn(() => ({ where: (...args: any[]) => mockDbDeleteWhere(...args) })),
+  };
+}
 
 vi.mock("./db", () => ({
   db: {
     select: vi.fn(() => {
-      const currentCall = selectCallIndex++;
+      selectCallIndex++;
       return {
         from: vi.fn(() => ({
-          where: vi.fn(() => {
-            if (currentCall === 0) {
-              // campaigns lookup — chains .limit(1)
-              return { limit: vi.fn(() => mockCampaignLookup()) };
-            }
-            // campaign_recipients count — awaited directly
-            return mockTerminalRecipientCount();
-          }),
+          where: vi.fn(() => ({
+            limit: vi.fn(() => mockCampaignLookup()),
+          })),
         })),
       };
     }),
@@ -51,6 +58,7 @@ vi.mock("./db", () => ({
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }),
     update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }) }),
     execute: vi.fn().mockResolvedValue({ rows: [] }),
+    transaction: vi.fn(async (fn: any) => fn(makeTx())),
   },
 }));
 
@@ -142,6 +150,7 @@ vi.mock("./services/campaignEmail", () => ({
   cancelCampaign: vi.fn().mockResolvedValue({ sentSoFar: 0, cancelled: 0 }),
   reconcileCampaignCounters: vi.fn().mockResolvedValue({}),
   TERMINAL_RECIPIENT_STATUSES: ["sent", "delivered", "opened", "clicked"] as const,
+  ACTIVE_RECIPIENT_STATUSES: ["pending", "sent", "delivered", "opened", "clicked"] as const,
 }));
 
 // ---------------------------------------------------------------------------

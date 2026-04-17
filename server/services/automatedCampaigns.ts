@@ -1,8 +1,8 @@
 import { db } from "../db";
-import { campaigns, campaignRecipients, automatedCampaignConfigs, users, type AutomatedCampaignConfig } from "@shared/schema";
-import { triggerCampaignSend, resolveRecipients, TERMINAL_RECIPIENT_STATUSES } from "./campaignEmail";
+import { campaigns, automatedCampaignConfigs, type AutomatedCampaignConfig } from "@shared/schema";
+import { triggerCampaignSend, resolveRecipients } from "./campaignEmail";
 import { ErrorLogger } from "./logger";
-import { eq, and, isNull, inArray, gte, lte, sql } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 
 export const WELCOME_CAMPAIGN_DEFAULTS = {
   key: "welcome",
@@ -395,41 +395,27 @@ export async function runWelcomeCampaign(opts: {
 
   if (!config) throw new Error(`Automated campaign config not found: id=${configId}`);
 
-  // Exclude users who already received an automated campaign email (terminal
-  // delivery statuses only). Guards against duplicates when a prior campaign in
-  // the same signup window partially sent before failing and the cron rolled
-  // back lastRunAt. See GitHub issue #428.
+  // Exclude users who already have an active campaign_recipients row
+  // (pending/sent/delivered/opened/clicked) on any `type='automated'` campaign.
+  // Guards against duplicates when a prior campaign in the same signup window
+  // partially sent before failing (and the cron rolled lastRunAt back), and
+  // against concurrent automated runs with overlapping windows. See GitHub
+  // issue #428.
   //
-  // Scope the lookup to users signed up within the current window — the
-  // recipient resolution is already constrained by signupAfter/signupBefore on
-  // users.created_at, so users outside that window cannot produce duplicates.
-  // Without this scope the exclusion list grows unboundedly across runs and
-  // would eventually breach pg's bind-parameter limit and balloon the
-  // persisted filters jsonb.
+  // Implementation: a boolean flag that resolveRecipients translates into an
+  // anti-join at resolve-time. The alternative (pre-computing a user-id list
+  // and persisting it into campaigns.filters jsonb) breaks down once the
+  // exclusion set grows — pg bind-param limit, jsonb bloat, and a stale
+  // snapshot that misses `pending` rows of concurrent runs.
   //
   // Invariant: assumes welcome is the only enabled automated campaign config.
-  // If a second automated config is ever enabled, the campaigns.type filter
-  // below will spuriously exclude users who received the *other* automated
-  // email. processAutomatedCampaigns logs a warning when this assumption is
-  // broken.
-  const alreadyReceived = await db
-    .selectDistinct({ userId: campaignRecipients.userId })
-    .from(campaignRecipients)
-    .innerJoin(campaigns, eq(campaigns.id, campaignRecipients.campaignId))
-    .innerJoin(users, eq(users.id, campaignRecipients.userId))
-    .where(and(
-      eq(campaigns.type, "automated"),
-      inArray(campaignRecipients.status, [...TERMINAL_RECIPIENT_STATUSES]),
-      gte(users.createdAt, signupAfter),
-      lte(users.createdAt, signupBefore),
-    ));
-  const excludeUserIds = alreadyReceived.map((r) => r.userId);
-
-  // Resolve recipients to check if there are any
+  // If a second automated config is ever enabled, the anti-join below will
+  // spuriously exclude users who received the *other* automated email.
+  // processAutomatedCampaigns logs a warning when this assumption is broken.
   const filters = {
     signupAfter: signupAfter.toISOString(),
     signupBefore: signupBefore.toISOString(),
-    ...(excludeUserIds.length > 0 ? { excludeUserIds } : {}),
+    excludeAutomatedRecipients: true as const,
   };
   const recipients = await resolveRecipients(filters);
 
