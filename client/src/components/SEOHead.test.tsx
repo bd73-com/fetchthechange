@@ -139,6 +139,24 @@ describe("SEOHead", () => {
     expect(JSON.parse(script!.text)).toEqual(schema);
   });
 
+  it("escapes < in JSON-LD so </script> cannot terminate the script tag", () => {
+    const schema = {
+      "@type": "FAQPage",
+      mainEntity: [
+        { "@type": "Question", name: "evil </script><img onerror=alert(1)>" },
+      ],
+    };
+    render(<SEOHead title="T" description="D" path="/" jsonLd={schema} />);
+    const script = document.head.querySelector<HTMLScriptElement>(
+      'script[type="application/ld+json"]',
+    );
+    expect(script).not.toBeNull();
+    // Raw `</script>` must not appear — it must be escaped to \u003c/script>.
+    expect(script!.text.toLowerCase()).not.toContain("</script>");
+    // The JSON-LD payload must still round-trip through JSON.parse.
+    expect(JSON.parse(script!.text)).toEqual(schema);
+  });
+
   it("does not emit a JSON-LD script when jsonLd is absent", () => {
     render(<SEOHead title="T" description="D" path="/" />);
     expect(

@@ -25,6 +25,11 @@ export interface SEOHeadProps {
   ogImage?: string;
   twitterTitle?: string;
   twitterDescription?: string;
+  /**
+   * Structured data emitted as <script type="application/ld+json">. Prefer a
+   * stable reference (e.g. wrap in useMemo) — passing a freshly-constructed
+   * object on every render will remove and re-inject the script tag each render.
+   */
   jsonLd?: Record<string, unknown>;
 }
 
@@ -121,7 +126,11 @@ export default function SEOHead({
     if (jsonLd) {
       jsonLdScript = document.createElement("script");
       jsonLdScript.type = "application/ld+json";
-      jsonLdScript.text = JSON.stringify(jsonLd);
+      // Escape `<` so a `</script>` (or `<!--`) appearing in any string value
+      // can't terminate the script tag and break out into HTML. This is the
+      // standard defensive pattern for inline JSON payloads and is required
+      // as soon as any caller embeds non-hardcoded content in the graph.
+      jsonLdScript.text = JSON.stringify(jsonLd).replace(/</g, "\\u003c");
       document.head.appendChild(jsonLdScript);
     }
 

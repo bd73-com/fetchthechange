@@ -88,11 +88,22 @@ export function renderRobotsTxt(baseUrl = getAppUrl()): string {
   );
 }
 
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 export function renderSitemapXml(baseUrl = getAppUrl()): string {
   const urls = PUBLIC_SITEMAP_ENTRIES.map((e) => {
-    const parts = [`    <loc>${baseUrl}${e.path}</loc>`];
-    if (e.lastmod) parts.push(`    <lastmod>${e.lastmod}</lastmod>`);
-    if (e.changefreq) parts.push(`    <changefreq>${e.changefreq}</changefreq>`);
+    const loc = escapeXml(`${baseUrl}${e.path}`);
+    const parts = [`    <loc>${loc}</loc>`];
+    if (e.lastmod) parts.push(`    <lastmod>${escapeXml(e.lastmod)}</lastmod>`);
+    if (e.changefreq)
+      parts.push(`    <changefreq>${escapeXml(e.changefreq)}</changefreq>`);
     if (e.priority !== undefined)
       parts.push(`    <priority>${e.priority.toFixed(1)}</priority>`);
     return `  <url>\n${parts.join("\n")}\n  </url>`;
