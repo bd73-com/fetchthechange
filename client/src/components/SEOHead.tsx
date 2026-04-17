@@ -47,7 +47,10 @@ export default function SEOHead({
   useEffect(() => {
     const canonicalUrl = getCanonicalUrl(path);
     const rawImage = ogImage ?? DEFAULT_OG_IMAGE;
-    const imageUrl = /^https?:\/\//.test(rawImage)
+    // Pass through anything that already specifies a scheme or is
+    // protocol-relative, a data URI, or another explicitly-absolute form.
+    // Only root-relative paths (/foo.png) get the canonical base prefix.
+    const imageUrl = /^(https?:)?\/\/|^data:/.test(rawImage)
       ? rawImage
       : getCanonicalUrl(rawImage);
 

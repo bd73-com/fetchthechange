@@ -83,6 +83,32 @@ describe("SEOHead", () => {
     );
   });
 
+  it("passes through protocol-relative and data: URL ogImage values", () => {
+    const { rerender } = render(
+      <SEOHead
+        title="T"
+        description="D"
+        path="/"
+        ogImage="//cdn.example.com/banner.png"
+      />,
+    );
+    expect(getMeta('meta[property="og:image"]')).toBe(
+      "//cdn.example.com/banner.png",
+    );
+
+    rerender(
+      <SEOHead
+        title="T"
+        description="D"
+        path="/"
+        ogImage="data:image/png;base64,iVBORw0KGgo="
+      />,
+    );
+    expect(getMeta('meta[property="og:image"]')).toBe(
+      "data:image/png;base64,iVBORw0KGgo=",
+    );
+  });
+
   it("re-runs the effect when ogImage changes", () => {
     const { rerender } = render(
       <SEOHead title="T" description="D" path="/" ogImage="/images/a.png" />,

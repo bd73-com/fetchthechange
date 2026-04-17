@@ -27,6 +27,39 @@ import { useMemo } from "react";
 import PublicNav from "@/components/PublicNav";
 import SEOHead, { getCanonicalUrl } from "@/components/SEOHead";
 
+// Single source of truth for the visible FAQ section *and* the FAQPage
+// JSON-LD. Google's structured-data policy requires the two to match;
+// rendering both from this array keeps them in sync.
+const FAQS: ReadonlyArray<{ q: string; a: string }> = [
+  {
+    q: "What is FetchTheChange?",
+    a: "FetchTheChange is a website change monitoring tool that tracks a specific value on a page and alerts you when it changes.",
+  },
+  {
+    q: "What can I monitor?",
+    a: "Anything visible on a page: prices, availability, metrics, text blocks, KPIs, or any DOM-based value you care about.",
+  },
+  {
+    q: "Does it work on JavaScript-heavy sites?",
+    a: "Yes. When needed, FetchTheChange renders the page with JavaScript and monitors the rendered DOM instead of the static HTML.",
+  },
+  {
+    q: "What happens when my selector stops matching?",
+    a: "FetchTheChange reports the failure instead of failing silently and can suggest alternative selectors to get you back to a working monitor.",
+  },
+];
+
+// Pricing shown in visible cards *and* in the SoftwareApplication
+// JSON-LD offers. Google's structured-data policy requires they match.
+export const LANDING_PLAN_PRICES_USD: ReadonlyArray<{
+  name: "Free" | "Pro" | "Power";
+  price: number;
+}> = [
+  { name: "Free", price: 0 },
+  { name: "Pro", price: 9 },
+  { name: "Power", price: 29 },
+];
+
 export default function LandingPage() {
   const jsonLd = useMemo(
     () => ({
@@ -53,48 +86,20 @@ export default function LandingPage() {
           operatingSystem: "Web",
           description:
             "Website change monitoring for modern, JavaScript-heavy sites. Track prices, availability, text, and any DOM value — and get told when tracking breaks.",
-          offers: [
-            { "@type": "Offer", price: "0", priceCurrency: "USD", name: "Free" },
-            { "@type": "Offer", price: "9", priceCurrency: "USD", name: "Pro" },
-            { "@type": "Offer", price: "29", priceCurrency: "USD", name: "Power" },
-          ],
+          offers: LANDING_PLAN_PRICES_USD.map((plan) => ({
+            "@type": "Offer",
+            price: String(plan.price),
+            priceCurrency: "USD",
+            name: plan.name,
+          })),
         },
         {
           "@type": "FAQPage",
-          mainEntity: [
-            {
-              "@type": "Question",
-              name: "What is FetchTheChange?",
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: "FetchTheChange is a website change monitoring tool that tracks a specific value on a page and alerts you when it changes.",
-              },
-            },
-            {
-              "@type": "Question",
-              name: "What can I monitor?",
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: "Anything visible on a page: prices, availability, metrics, text blocks, KPIs, or any DOM-based value you care about.",
-              },
-            },
-            {
-              "@type": "Question",
-              name: "Does it work on JavaScript-heavy sites?",
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: "Yes. When needed, FetchTheChange renders the page with JavaScript and monitors the rendered DOM instead of the static HTML.",
-              },
-            },
-            {
-              "@type": "Question",
-              name: "What happens when my selector stops matching?",
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: "FetchTheChange reports the failure instead of failing silently and can suggest alternative selectors to get you back to a working monitor.",
-              },
-            },
-          ],
+          mainEntity: FAQS.map((faq) => ({
+            "@type": "Question",
+            name: faq.q,
+            acceptedAnswer: { "@type": "Answer", text: faq.a },
+          })),
         },
       ],
     }),
@@ -479,7 +484,7 @@ export default function LandingPage() {
                 <CardTitle className="text-xl">Free</CardTitle>
                 <p className="text-muted-foreground text-sm">Perfect for getting started</p>
                 <div className="mt-4">
-                  <span className="text-4xl font-bold">$0</span>
+                  <span className="text-4xl font-bold">${LANDING_PLAN_PRICES_USD[0].price}</span>
                   <span className="text-muted-foreground">forever</span>
                 </div>
                 <p className="text-primary font-medium mt-2">3 monitors</p>
@@ -526,7 +531,7 @@ export default function LandingPage() {
                 <CardTitle className="text-xl">Pro</CardTitle>
                 <p className="text-muted-foreground text-sm">For users who need more monitors</p>
                 <div className="mt-4">
-                  <span className="text-4xl font-bold">$9</span>
+                  <span className="text-4xl font-bold">${LANDING_PLAN_PRICES_USD[1].price}</span>
                   <span className="text-muted-foreground">/month</span>
                 </div>
                 <p className="text-primary font-medium mt-2">100 monitors</p>
@@ -574,7 +579,7 @@ export default function LandingPage() {
                 <CardTitle className="text-xl">Power</CardTitle>
                 <p className="text-muted-foreground text-sm">For agencies and heavy users</p>
                 <div className="mt-4">
-                  <span className="text-4xl font-bold">$29</span>
+                  <span className="text-4xl font-bold">${LANDING_PLAN_PRICES_USD[2].price}</span>
                   <span className="text-muted-foreground">/month</span>
                 </div>
                 <p className="text-primary font-medium mt-2">Unlimited monitors</p>
@@ -665,41 +670,16 @@ export default function LandingPage() {
           </div>
 
           <div className="grid md:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">What is FetchTheChange?</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                FetchTheChange is a website change monitoring tool that tracks a specific value on a page and alerts you when it changes.
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">What can I monitor?</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                Anything visible on a page: prices, availability, metrics, text blocks, KPIs, or any DOM-based value you care about.
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">Does it work on JavaScript-heavy sites?</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                Yes. When needed, FetchTheChange renders the page with JavaScript and monitors the rendered DOM instead of the static HTML.
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-xl">What happens when my selector stops matching?</CardTitle>
-              </CardHeader>
-              <CardContent className="text-muted-foreground">
-                FetchTheChange reports the failure instead of failing silently and can suggest alternative selectors to get you back to a working monitor.
-              </CardContent>
-            </Card>
+            {FAQS.map((faq) => (
+              <Card key={faq.q}>
+                <CardHeader>
+                  <CardTitle className="text-xl">{faq.q}</CardTitle>
+                </CardHeader>
+                <CardContent className="text-muted-foreground">
+                  {faq.a}
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </div>
       </section>
