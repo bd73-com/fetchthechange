@@ -60,7 +60,18 @@ export const LANDING_PLAN_PRICES_USD: ReadonlyArray<{
   { name: "Power", price: 29 },
 ];
 
-export default function LandingPage() {
+interface LandingPageProps {
+  /**
+   * Override the path emitted in canonical / og:url / JSON-LD `@id`. Defaults
+   * to "/" (the intended public URL). ProtectedRoute passes the actual
+   * `window.location.pathname` when rendering LandingPage as the unauthed
+   * fallback on protected paths like `/dashboard`, so canonical and og:url
+   * reflect the real URL instead of lying about it. See GitHub issue #439.
+   */
+  path?: string;
+}
+
+export default function LandingPage({ path = "/" }: LandingPageProps = {}) {
   const jsonLd = useMemo(
     () => ({
       "@context": "https://schema.org",
@@ -111,7 +122,7 @@ export default function LandingPage() {
       <SEOHead
         title="FetchTheChange — Monitor any web value. Get alerted when it changes."
         description="Website change monitoring that works on modern, JavaScript-heavy sites. Track prices, availability, text, and any DOM value — and get told when tracking breaks, not just when values change."
-        path="/"
+        path={path}
         ogDescription="Monitor any web value. Get alerted when it changes. Works on JavaScript-heavy sites and tells you when tracking breaks."
         twitterDescription="Monitor any web value. Get alerted when it changes. Works on JavaScript-heavy sites and tells you when tracking breaks."
         jsonLd={jsonLd}

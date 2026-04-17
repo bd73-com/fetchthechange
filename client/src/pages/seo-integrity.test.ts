@@ -44,7 +44,10 @@ describe("LandingPage SEOHead props", () => {
     expect(src).toMatch(/description="[^"]+"/);
   });
 
-  it('uses path="/"', () => {
-    expect(src).toContain('path="/"');
+  it('defaults path to "/" (with optional override for ProtectedRoute fallback)', () => {
+    // LandingPage accepts an optional path prop so ProtectedRoute can render
+    // it at protected paths (/dashboard, /monitors/:id) with the real URL in
+    // canonical/og:url rather than lying about it being "/". See issue #439.
+    expect(src).toMatch(/path\s*=\s*"\/"/);
   });
 });

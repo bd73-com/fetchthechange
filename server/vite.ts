@@ -5,6 +5,7 @@ import viteConfig from "../vite.config";
 import fs from "fs";
 import path from "path";
 import { nanoid } from "nanoid";
+import { isCrawlerUserAgent, rewriteIndexHtmlForCrawler } from "./crawlerMeta";
 
 const viteLogger = createLogger();
 
@@ -48,7 +49,13 @@ export async function setupVite(server: Server, app: Express) {
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
-      const page = await vite.transformIndexHtml(url, template);
+      let page = await vite.transformIndexHtml(url, template);
+      // Bots that can't execute JS (Facebook/X/Slack/LinkedIn/Discord/…)
+      // need per-route OG/Twitter meta in the initial HTML. See issue #440.
+      if (isCrawlerUserAgent(req.get("user-agent"))) {
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        page = rewriteIndexHtmlForCrawler(page, req.path, baseUrl);
+      }
       res.status(200).set({ "Content-Type": "text/html" }).end(page);
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);

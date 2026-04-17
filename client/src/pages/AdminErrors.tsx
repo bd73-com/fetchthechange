@@ -14,6 +14,7 @@ import { ERROR_LOG_SOURCES } from "@shared/routes";
 import type { ErrorLog } from "@shared/schema";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { usePageTitle } from "@/hooks/use-page-title";
 import { ToastAction } from "@/components/ui/toast";
 
 /** JSON-serialized ErrorLog — Date fields become strings over the wire. */
@@ -65,6 +66,7 @@ const levelConfig: Record<string, { icon: typeof XCircle; variant: "destructive"
 const UNDO_TIMEOUT_MS = 5000;
 
 export default function AdminErrors() {
+  usePageTitle("Admin: Errors — FetchTheChange");
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<number | null>(null);

@@ -553,10 +553,12 @@ export async function cancelCampaign(campaignId: number): Promise<{ sentSoFar: n
     control.cancelled = true;
   }
 
-  // Count current state
+  // Count current state — build the IN list from TERMINAL_RECIPIENT_STATUSES so
+  // changes to the constant flow through automatically. See GitHub issue #434.
+  const terminalPlaceholders = TERMINAL_RECIPIENT_STATUSES.map((s) => sql`${s}`);
   const sentResult = await db.execute(sql`
     SELECT
-      COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened', 'clicked'))::int as "sentCount",
+      COUNT(*) FILTER (WHERE status IN (${sql.join(terminalPlaceholders, sql`, `)}))::int as "sentCount",
       COUNT(*) FILTER (WHERE status = 'pending')::int as "pendingCount"
     FROM campaign_recipients
     WHERE campaign_id = ${campaignId}
@@ -671,11 +673,14 @@ export async function reconcileCampaignCounters(campaignId: number): Promise<{
     clickedCount: campaign.clickedCount,
   };
 
-  // Compute actual counts from recipient rows
+  // Compute actual counts from recipient rows. Terminal "sent"-class statuses
+  // are driven by TERMINAL_RECIPIENT_STATUSES so the reconciler stays in sync
+  // with the rest of the code if the constant ever changes (GitHub #434).
+  const terminalFilterPlaceholders = TERMINAL_RECIPIENT_STATUSES.map((s) => sql`${s}`);
   const result = await db.execute(sql`
     SELECT
       COUNT(*)::int AS "totalRecipients",
-      COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'opened', 'clicked'))::int AS "sentCount",
+      COUNT(*) FILTER (WHERE status IN (${sql.join(terminalFilterPlaceholders, sql`, `)}))::int AS "sentCount",
       COUNT(*) FILTER (WHERE status IN ('failed', 'bounced', 'complained'))::int AS "failedCount",
       COUNT(*) FILTER (WHERE status IN ('delivered', 'opened', 'clicked'))::int AS "deliveredCount",
       COUNT(*) FILTER (WHERE status IN ('opened', 'clicked'))::int AS "openedCount",
