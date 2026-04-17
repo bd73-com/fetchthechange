@@ -57,7 +57,7 @@ mockDbReturning.mockResolvedValue([]);
 mockDbSet.mockReturnValue({ where: mockDbWhere });
 
 vi.mock("@shared/schema", () => ({
-  campaigns: { id: "id", status: "status" },
+  campaigns: { id: "id", status: "status", type: "type" },
   automatedCampaignConfigs: {
     id: "id",
     key: "key",
@@ -69,7 +69,6 @@ vi.mock("drizzle-orm", () => ({
   eq: (a: any, b: any) => ({ field: a, value: b }),
   and: (...args: any[]) => ({ type: "and", args }),
   isNull: (a: any) => ({ type: "isNull", field: a }),
-  lte: (a: any, b: any) => ({ type: "lte", field: a, value: b }),
   sql: Object.assign(
     (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
     { join: (items: any[], sep: any) => ({ items, sep }) }
@@ -632,6 +631,41 @@ describe("runWelcomeCampaign", () => {
       signupBefore: new Date(),
       configId: 1,
     })).rejects.toThrow("Original send error");
+  });
+
+  it("sets excludeAutomatedRecipients so resolveRecipients anti-joins against prior sends", async () => {
+    // Issue #428: after a rollback + retry (or a concurrent automated run) the
+    // welcome send must skip users who already have an active recipient row.
+    // We verify the flag flows through both resolveRecipients and the persisted
+    // campaigns.filters jsonb — triggerCampaignSend re-reads filters from the
+    // DB and re-resolves, so the flag must survive that round trip.
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockResolveRecipients.mockResolvedValue([
+      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+    ]);
+    mockDbReturning.mockResolvedValue([{ id: 99, ...config, status: "draft", type: "automated" }]);
+    mockTriggerCampaignSend.mockResolvedValue({ totalRecipients: 1 });
+
+    await runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 1,
+    });
+
+    const filtersPassed = mockResolveRecipients.mock.calls[0][0];
+    expect(filtersPassed.excludeAutomatedRecipients).toBe(true);
+    // No user-id list is persisted — keeps the jsonb tiny and dodges pg's
+    // bind-parameter limit.
+    expect(filtersPassed.excludeUserIds).toBeUndefined();
+
+    const insertedValues = mockDbValues.mock.calls[0][0];
+    expect(insertedValues.filters.excludeAutomatedRecipients).toBe(true);
+    expect(insertedValues.filters.excludeUserIds).toBeUndefined();
   });
 
   it("attempts to mark a sending campaign as failed when triggerCampaignSend throws", async () => {

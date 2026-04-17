@@ -1,7 +1,6 @@
 import { db } from "../db";
 import { campaigns, automatedCampaignConfigs, type AutomatedCampaignConfig } from "@shared/schema";
-import { triggerCampaignSend } from "./campaignEmail";
-import { resolveRecipients } from "./campaignEmail";
+import { triggerCampaignSend, resolveRecipients } from "./campaignEmail";
 import { ErrorLogger } from "./logger";
 import { eq, and, isNull } from "drizzle-orm";
 
@@ -396,10 +395,27 @@ export async function runWelcomeCampaign(opts: {
 
   if (!config) throw new Error(`Automated campaign config not found: id=${configId}`);
 
-  // Resolve recipients to check if there are any
+  // Exclude users who already have an active campaign_recipients row
+  // (pending/sent/delivered/opened/clicked) on any `type='automated'` campaign.
+  // Guards against duplicates when a prior campaign in the same signup window
+  // partially sent before failing (and the cron rolled lastRunAt back), and
+  // against concurrent automated runs with overlapping windows. See GitHub
+  // issue #428.
+  //
+  // Implementation: a boolean flag that resolveRecipients translates into an
+  // anti-join at resolve-time. The alternative (pre-computing a user-id list
+  // and persisting it into campaigns.filters jsonb) breaks down once the
+  // exclusion set grows — pg bind-param limit, jsonb bloat, and a stale
+  // snapshot that misses `pending` rows of concurrent runs.
+  //
+  // Invariant: assumes welcome is the only enabled automated campaign config.
+  // If a second automated config is ever enabled, the anti-join below will
+  // spuriously exclude users who received the *other* automated email.
+  // processAutomatedCampaigns logs a warning when this assumption is broken.
   const filters = {
     signupAfter: signupAfter.toISOString(),
     signupBefore: signupBefore.toISOString(),
+    excludeAutomatedRecipients: true as const,
   };
   const recipients = await resolveRecipients(filters);
 
@@ -408,7 +424,9 @@ export async function runWelcomeCampaign(opts: {
     return { skipped: true };
   }
 
-  // Create campaign record in draft status (triggerCampaignSend expects draft)
+  // Create campaign record in draft status (triggerCampaignSend expects draft).
+  // Persist the full filters (including excludeUserIds) so triggerCampaignSend's
+  // re-resolution applies the same exclusion.
   const [campaign] = await db
     .insert(campaigns)
     .values({
@@ -485,6 +503,20 @@ export async function processAutomatedCampaigns(): Promise<void> {
     .select()
     .from(automatedCampaignConfigs)
     .where(eq(automatedCampaignConfigs.enabled, true));
+
+  // runWelcomeCampaign's duplicate-prevention lookup filters campaigns by
+  // `type = "automated"` only (there is no config_key column on campaigns).
+  // With a single enabled automated config (welcome), that is equivalent to
+  // "this config's recipients". If a second automated config is ever enabled,
+  // the exclusion will spuriously skip users who received the *other* automated
+  // email — log a warning so this invariant is visible before it bites.
+  if (configs.length > 1) {
+    console.warn(
+      `[AutoCampaign] ${configs.length} enabled automated configs detected (${configs.map(c => c.key).join(", ")}). ` +
+      `runWelcomeCampaign's exclusion lookup is not yet scoped per-config; users may be spuriously excluded across campaign types. ` +
+      `Before enabling a second automated config, add a config_key column to campaigns or filter exclusion by config.`,
+    );
+  }
 
   for (const config of configs) {
     if (!config.nextRunAt || config.nextRunAt > now) continue;

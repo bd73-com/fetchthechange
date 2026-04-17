@@ -297,6 +297,35 @@ describe("resolveRecipients", () => {
 
     expect(result).toHaveLength(0);
   });
+
+  it("anti-joins against automated campaign_recipients when excludeAutomatedRecipients is set (issue #428)", async () => {
+    mockDbExecute.mockResolvedValueOnce({ rows: [] });
+
+    await resolveRecipients({ excludeAutomatedRecipients: true });
+
+    // The SQL mock returns { strings, values } from the tagged template.
+    // Verify the anti-join fragment made it into the compiled query, with all
+    // active recipient statuses present so concurrent `pending` rows are also
+    // excluded.
+    const executed = mockDbExecute.mock.calls[0][0];
+    const serialized = JSON.stringify(executed);
+    expect(serialized).toContain("NOT EXISTS");
+    expect(serialized).toContain("campaign_recipients");
+    expect(serialized).toContain("type = 'automated'");
+    for (const status of ["pending", "sent", "delivered", "opened", "clicked"]) {
+      expect(serialized).toContain(status);
+    }
+  });
+
+  it("omits the anti-join when excludeAutomatedRecipients is not set", async () => {
+    mockDbExecute.mockResolvedValueOnce({ rows: [] });
+
+    await resolveRecipients({});
+
+    const executed = mockDbExecute.mock.calls[0][0];
+    const serialized = JSON.stringify(executed);
+    expect(serialized).not.toContain("NOT EXISTS");
+  });
 });
 
 describe("previewRecipients", () => {
