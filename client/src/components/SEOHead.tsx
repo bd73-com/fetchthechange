@@ -126,7 +126,7 @@ export default function SEOHead({
       });
       jsonLdScript?.remove();
     };
-  }, [title, description, path, ogType, ogTitle, ogDescription, twitterTitle, twitterDescription, jsonLd]);
+  }, [title, description, path, ogType, ogTitle, ogDescription, ogImage, twitterTitle, twitterDescription, jsonLd]);
 
   return null;
 }
