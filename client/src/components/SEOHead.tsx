@@ -22,10 +22,20 @@ export interface SEOHeadProps {
   ogType?: "website" | "article";
   ogTitle?: string;
   ogDescription?: string;
+  ogImage?: string;
   twitterTitle?: string;
   twitterDescription?: string;
+  /**
+   * Structured data emitted as <script type="application/ld+json">. Prefer a
+   * stable reference (e.g. wrap in useMemo) — passing a freshly-constructed
+   * object on every render will remove and re-inject the script tag each render.
+   */
   jsonLd?: Record<string, unknown>;
 }
+
+// Mirrored as an absolute URL in client/index.html's static og:image fallback.
+// Keep in sync when renaming the asset.
+const DEFAULT_OG_IMAGE = "/images/fix-selector-showcase.png";
 
 export default function SEOHead({
   title,
@@ -34,27 +44,38 @@ export default function SEOHead({
   ogType = "website",
   ogTitle,
   ogDescription,
+  ogImage,
   twitterTitle,
   twitterDescription,
   jsonLd,
 }: SEOHeadProps) {
   useEffect(() => {
     const canonicalUrl = getCanonicalUrl(path);
+    const rawImage = ogImage ?? DEFAULT_OG_IMAGE;
+    // Pass through anything that already specifies a scheme or is
+    // protocol-relative, a data URI, or another explicitly-absolute form.
+    // Only root-relative paths (/foo.png) get the canonical base prefix.
+    const imageUrl = /^(https?:)?\/\/|^data:/.test(rawImage)
+      ? rawImage
+      : getCanonicalUrl(rawImage);
 
     document.title = title;
 
     const metaTags: MetaTag[] = [
       { name: "description", content: description },
+      { property: "og:site_name", content: "FetchTheChange" },
       { property: "og:title", content: ogTitle ?? title },
       { property: "og:description", content: ogDescription ?? description },
       { property: "og:type", content: ogType },
       { property: "og:url", content: canonicalUrl },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:image", content: imageUrl },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: twitterTitle ?? title },
       {
         name: "twitter:description",
         content: twitterDescription ?? description,
       },
+      { name: "twitter:image", content: imageUrl },
     ];
 
     const created: HTMLElement[] = [];
@@ -105,7 +126,11 @@ export default function SEOHead({
     if (jsonLd) {
       jsonLdScript = document.createElement("script");
       jsonLdScript.type = "application/ld+json";
-      jsonLdScript.text = JSON.stringify(jsonLd);
+      // Escape `<` so a `</script>` (or `<!--`) appearing in any string value
+      // can't terminate the script tag and break out into HTML. This is the
+      // standard defensive pattern for inline JSON payloads and is required
+      // as soon as any caller embeds non-hardcoded content in the graph.
+      jsonLdScript.text = JSON.stringify(jsonLd).replace(/</g, "\\u003c");
       document.head.appendChild(jsonLdScript);
     }
 
@@ -118,7 +143,7 @@ export default function SEOHead({
       });
       jsonLdScript?.remove();
     };
-  }, [title, description, path, ogType, ogTitle, ogDescription, twitterTitle, twitterDescription, jsonLd]);
+  }, [title, description, path, ogType, ogTitle, ogDescription, ogImage, twitterTitle, twitterDescription, jsonLd]);
 
   return null;
 }

@@ -37,6 +37,7 @@ import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes } from "./services/ensureTables";
+import { renderRobotsTxt, renderSitemapXml } from "./services/seoFiles";
 
 
 // ------------------------------------------------------------------
@@ -140,6 +141,21 @@ export async function registerRoutes(
     }
     return true;
   }
+
+  // SEO crawl assets — serve dynamically so the base URL reflects the
+  // actual deploy hostname (REPLIT_DOMAINS) instead of a hardcoded
+  // fallback. Must be registered before the rate limiter / auth so
+  // Googlebot can fetch them without authentication.
+  app.get("/robots.txt", (_req, res) => {
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.send(renderRobotsTxt());
+  });
+  app.get("/sitemap.xml", (_req, res) => {
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.send(renderSitemapXml());
+  });
 
   // Setup Auth (must be before rate limiter so req.user is populated)
   await setupAuth(app);
