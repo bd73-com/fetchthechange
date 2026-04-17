@@ -160,6 +160,13 @@ export const campaigns = pgTable("campaigns", {
 }, (table) => ({
   statusIdx: index("campaigns_status_idx").on(table.status),
   createdAtIdx: index("campaigns_created_at_idx").on(table.createdAt),
+  // Partial index on type='automated' so the welcome-exclusion anti-join in
+  // resolveRecipients can satisfy `c.type = 'automated'` via an index scan
+  // instead of a sequential scan over all campaigns. Partial because the
+  // automated set is small and stable. See GitHub issue #433.
+  typeAutomatedIdx: index("campaigns_type_automated_idx")
+    .on(table.id)
+    .where(sql`type = 'automated'`),
 }));
 
 export const campaignRecipients = pgTable("campaign_recipients", {
@@ -183,6 +190,13 @@ export const campaignRecipients = pgTable("campaign_recipients", {
     .where(sql`resend_id IS NOT NULL`),
   statusIdx: index("campaign_recipients_status_idx").on(table.status),
   campaignUserUniq: uniqueIndex("campaign_recipients_campaign_user_uniq").on(table.campaignId, table.userId),
+  // Partial composite index scoped to the active-status set used by the
+  // welcome-exclusion anti-join in resolveRecipients. Lets the planner answer
+  // the per-user probe from just the active subset instead of every historical
+  // recipient row for the user. See GitHub issue #436.
+  activeUserCampaignIdx: index("campaign_recipients_active_user_idx")
+    .on(table.userId, table.campaignId)
+    .where(sql`status IN ('pending', 'sent', 'delivered', 'opened', 'clicked')`),
 }));
 
 export const campaignsRelations = relations(campaigns, ({ many }) => ({

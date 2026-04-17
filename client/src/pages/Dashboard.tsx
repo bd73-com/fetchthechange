@@ -1,4 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
+import { usePageTitle } from "@/hooks/use-page-title";
 import { useMonitors, useCheckMonitor } from "@/hooks/use-monitors";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
@@ -25,6 +26,7 @@ const BANNER_CUTOFF = new Date("2026-02-27T00:00:00Z");
 const BANNER_KEY = "ftc-free-tier-banner-dismissed";
 
 export default function Dashboard() {
+  usePageTitle("Dashboard — FetchTheChange");
   const { user, logout } = useAuth();
   const { data: monitors, isLoading, error, refetch } = useMonitors();
   const { mutate: checkMonitor, isPending: isChecking } = useCheckMonitor();
@@ -131,7 +133,19 @@ export default function Dashboard() {
   const handleRefresh = async () => {
     console.log("Refreshing monitors...");
     // Use the fresh data returned by refetch() instead of the stale closure variable
-    const { data: freshMonitors } = await refetch();
+    const { data: freshMonitors, error: refetchError } = await refetch();
+
+    // refetch() resolves with {data:undefined,error} on network/HTTP failure —
+    // surface that distinctly so users aren't told "No monitors" when the real
+    // cause is a failed GET /api/monitors. See GitHub issue #435.
+    if (refetchError) {
+      toast({
+        variant: "destructive",
+        title: "Refresh failed",
+        description: refetchError.message || "Could not load monitors. Please try again.",
+      });
+      return;
+    }
 
     if (!freshMonitors || freshMonitors.length === 0) {
       toast({ title: "No monitors", description: "Create a monitor first to refresh data." });

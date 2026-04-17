@@ -62,7 +62,12 @@ function ProtectedRoute({ component: Component, requiredTier, ...rest }: any) {
   }
 
   if (!user) {
-    return <LandingPage />;
+    // Pass the actual URL so LandingPage emits canonical/og:url/JSON-LD for
+    // the real path (e.g. "/dashboard") instead of lying about it being "/".
+    // See GitHub issue #439.
+    const currentPath =
+      typeof window !== "undefined" ? window.location.pathname : "/";
+    return <LandingPage path={currentPath} />;
   }
 
   if (requiredTier && user.tier !== requiredTier) {

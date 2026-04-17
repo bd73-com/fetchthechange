@@ -1,7 +1,30 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { api, buildUrl } from "@shared/routes";
 import { type InsertMonitor } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
+
+/**
+ * Tracks a set of AbortControllers for in-flight mutation fetches and aborts
+ * them all on unmount. React Query v5's `mutationFn` does not receive a
+ * cancellation signal (unlike `queryFn`), so we plumb one in ourselves. Used
+ * by useCheckMonitor / useCheckMonitorSilent so an in-flight monitor check
+ * stops burning browserless/scraper quota once the user navigates away.
+ * See GitHub issue #437.
+ */
+function useAbortableFetchers() {
+  const controllersRef = useRef<Set<AbortController>>(new Set());
+  useEffect(() => {
+    // Capture the Set reference so the cleanup aborts the same object the
+    // effect opened with, even if the ref's .current is ever reassigned.
+    const controllers = controllersRef.current;
+    return () => {
+      controllers.forEach((c) => c.abort());
+      controllers.clear();
+    };
+  }, []);
+  return controllersRef;
+}
 
 // GET /api/monitors
 export function useMonitors() {
@@ -161,24 +184,32 @@ export function useDeleteMonitor() {
 export function useCheckMonitor() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const controllersRef = useAbortableFetchers();
 
   return useMutation({
     mutationFn: async (id: number) => {
+      const controller = new AbortController();
+      controllersRef.current.add(controller);
       const url = buildUrl(api.monitors.check.path, { id });
-      const res = await fetch(url, {
-        method: api.monitors.check.method,
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        if (res.status === 429) {
-          throw new Error(errorData.message || "Rate limit reached. Please try again later.");
+      try {
+        const res = await fetch(url, {
+          method: api.monitors.check.method,
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          if (res.status === 429) {
+            throw new Error(errorData.message || "Rate limit reached. Please try again later.");
+          }
+          throw new Error(errorData.message || "Failed to check monitor");
         }
-        throw new Error(errorData.message || "Failed to check monitor");
+        return api.monitors.check.responses[200].parse(await res.json().catch(() => {
+          throw new Error("Unexpected response format from server");
+        }));
+      } finally {
+        controllersRef.current.delete(controller);
       }
-      return api.monitors.check.responses[200].parse(await res.json().catch(() => {
-        throw new Error("Unexpected response format from server");
-      }));
     },
     onSuccess: (data, id) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });
@@ -200,21 +231,29 @@ export function useCheckMonitor() {
 // POST /api/monitors/:id/check (silent version for fix selector flow)
 export function useCheckMonitorSilent() {
   const queryClient = useQueryClient();
+  const controllersRef = useAbortableFetchers();
 
   return useMutation({
     mutationFn: async (id: number) => {
+      const controller = new AbortController();
+      controllersRef.current.add(controller);
       const url = buildUrl(api.monitors.check.path, { id });
-      const res = await fetch(url, {
-        method: api.monitors.check.method,
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || "Failed to check monitor");
+      try {
+        const res = await fetch(url, {
+          method: api.monitors.check.method,
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.message || "Failed to check monitor");
+        }
+        return api.monitors.check.responses[200].parse(await res.json().catch(() => {
+          throw new Error("Unexpected response format from server");
+        }));
+      } finally {
+        controllersRef.current.delete(controller);
       }
-      return api.monitors.check.responses[200].parse(await res.json().catch(() => {
-        throw new Error("Unexpected response format from server");
-      }));
     },
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: [api.monitors.list.path] });

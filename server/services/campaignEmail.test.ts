@@ -420,6 +420,26 @@ describe("cancelCampaign", () => {
     expect(result.cancelled).toBe(75);
   });
 
+  it("COUNT query for sentCount uses TERMINAL_RECIPIENT_STATUSES (issue #434)", async () => {
+    mockDbExecute.mockResolvedValueOnce({ rows: [{ sentCount: 0, pendingCount: 0 }] });
+    setupTransactionMock([
+      { rows: [{ status: "sending" }] },
+      { rows: [] },
+      { rows: [] },
+    ]);
+
+    await cancelCampaign(77);
+
+    // First execute call is the pre-transaction COUNT with the terminal IN list
+    const serialized = JSON.stringify(mockDbExecute.mock.calls[0][0]);
+    // All four terminal statuses are injected as bound values (not hardcoded literals)
+    for (const status of ["sent", "delivered", "opened", "clicked"]) {
+      expect(serialized).toContain(status);
+    }
+    // And the literal old-style inline list should no longer appear
+    expect(serialized).not.toContain("'sent', 'delivered', 'opened', 'clicked'");
+  });
+
   it("returns actual transaction cancelled count, not stale pendingCount", async () => {
     // Simulate race condition: pre-transaction COUNT sees 75 pending,
     // but batch sender processes 10 between COUNT and UPDATE, so only 65 are cancelled
@@ -882,6 +902,24 @@ describe("reconcileCampaignCounters", () => {
     expect(result.after).toEqual({
       totalRecipients: 0, sentCount: 0, failedCount: 0, deliveredCount: 0, openedCount: 0, clickedCount: 0,
     });
+  });
+
+  it("sentCount COUNT(*) FILTER uses TERMINAL_RECIPIENT_STATUSES (issue #434)", async () => {
+    mockDbLimit.mockResolvedValueOnce([{
+      id: 1, totalRecipients: 0, sentCount: 0, failedCount: 0, deliveredCount: 0, openedCount: 0, clickedCount: 0,
+    }]);
+    mockDbExecute.mockResolvedValueOnce({
+      rows: [{ totalRecipients: 0, sentCount: 0, failedCount: 0, deliveredCount: 0, openedCount: 0, clickedCount: 0 }],
+    });
+
+    await reconcileCampaignCounters(1);
+
+    const serialized = JSON.stringify(mockDbExecute.mock.calls[0][0]);
+    // Terminal statuses are bound, not hardcoded literals
+    for (const status of ["sent", "delivered", "opened", "clicked"]) {
+      expect(serialized).toContain(status);
+    }
+    expect(serialized).not.toContain("'sent', 'delivered', 'opened', 'clicked'");
   });
 });
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
+import { usePageTitle } from "@/hooks/use-page-title";
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle2, Chrome } from "lucide-react";
 
@@ -46,6 +47,7 @@ async function requestToken(): Promise<{ token: string; expiresAt: string }> {
 }
 
 export default function ExtensionAuth() {
+  usePageTitle("Connect Extension — FetchTheChange");
   const { user, isLoading } = useAuth();
   const [tokenSent, setTokenSent] = useState(false);
   const [error, setError] = useState<string | null>(null);

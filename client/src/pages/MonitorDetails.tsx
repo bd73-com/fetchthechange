@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useRoute, Link } from "wouter";
 import { formatDateTime } from "@/lib/date-format";
 import { useAuth } from "@/hooks/use-auth";
+import { usePageTitle } from "@/hooks/use-page-title";
 import { useMonitor, useMonitorHistory, useCheckMonitor, useDeleteMonitor, useUpdateMonitor } from "@/hooks/use-monitors";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +41,7 @@ export default function MonitorDetails() {
   const [isEditing, setIsEditing] = useState(false);
   
   const { data: monitor, isLoading: loadingMonitor, error } = useMonitor(id);
+  usePageTitle(monitor ? `${monitor.name} — FetchTheChange` : "Monitor — FetchTheChange");
   const { data: history, isLoading: loadingHistory } = useMonitorHistory(id);
   const { mutate: checkNow, isPending: isChecking } = useCheckMonitor();
   const { mutate: deleteMonitor, isPending: isDeleting } = useDeleteMonitor();

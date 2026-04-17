@@ -55,6 +55,7 @@ import {
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import DashboardNav from "@/components/DashboardNav";
+import { usePageTitle } from "@/hooks/use-page-title";
 import {
   useCampaigns,
   useCampaignDashboard,
@@ -696,6 +697,7 @@ function AutomatedCampaignsTab() {
 }
 
 export default function AdminCampaigns() {
+  usePageTitle("Admin: Campaigns — FetchTheChange");
   const [, navigate] = useLocation();
   const { data: campaigns, isLoading } = useCampaigns();
   const { data: dashboard } = useCampaignDashboard();

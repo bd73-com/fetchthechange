@@ -2,7 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <!--
+      No maximum-scale so low-vision users can still pinch-zoom (WCAG 2.1 SC
+      1.4.4, Level AA). The iOS auto-zoom-on-input behavior is handled by
+      ensuring form inputs use 16px+ font-size, not by suppressing zoom.
+      See issue #444.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#14b8a6" />
 
@@ -25,6 +31,16 @@
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!--
+      Direct <link> instead of a CSS @import so the font stylesheet fetches in
+      parallel with index.css rather than serially blocking it on first paint.
+      Kept in sync with the font families referenced from client/src/index.css
+      — update both when changing fonts. See issue #443.
+    -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap"
+    />
   </head>
   <body>
     <div id="root"></div>

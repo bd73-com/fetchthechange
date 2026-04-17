@@ -39,6 +39,7 @@ import { Link, useParams } from "wouter";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import DashboardNav from "@/components/DashboardNav";
 import { useCampaignAnalytics, useCancelCampaign } from "@/hooks/use-campaigns";
+import { usePageTitle } from "@/hooks/use-page-title";
 
 const statusConfig: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
   draft: { variant: "outline", label: "Draft" },
@@ -74,6 +75,7 @@ export default function AdminCampaignDetail() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
   const { data, isLoading } = useCampaignAnalytics(id);
+  usePageTitle(data?.campaign?.name ? `${data.campaign.name} — FetchTheChange` : "Campaign — FetchTheChange");
   const cancelCampaign = useCancelCampaign();
 
   if (isLoading || !data) {
