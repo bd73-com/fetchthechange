@@ -14,6 +14,10 @@ export interface CampaignFilters {
   minMonitors?: number;
   maxMonitors?: number;
   hasActiveMonitors?: boolean;
+  // User IDs to exclude from recipient resolution. Used by automated campaigns
+  // (e.g. welcome) to prevent duplicate sends to users who already received the
+  // email from a prior partially-sent campaign in the same window.
+  excludeUserIds?: string[];
 }
 
 interface ResolvedRecipient {
@@ -73,6 +77,11 @@ export async function resolveRecipients(filters: CampaignFilters): Promise<Resol
 
   if (filters.signupBefore) {
     conditions.push(sql`u.created_at <= ${new Date(filters.signupBefore)}`);
+  }
+
+  if (filters.excludeUserIds && filters.excludeUserIds.length > 0) {
+    const placeholders = filters.excludeUserIds.map((uid) => sql`${uid}`);
+    conditions.push(sql`u.id NOT IN (${sql.join(placeholders, sql`, `)})`);
   }
 
   const havingConditions: ReturnType<typeof sql>[] = [];

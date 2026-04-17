@@ -1,9 +1,9 @@
 import { db } from "../db";
-import { campaigns, automatedCampaignConfigs, type AutomatedCampaignConfig } from "@shared/schema";
+import { campaigns, campaignRecipients, automatedCampaignConfigs, type AutomatedCampaignConfig } from "@shared/schema";
 import { triggerCampaignSend } from "./campaignEmail";
 import { resolveRecipients } from "./campaignEmail";
 import { ErrorLogger } from "./logger";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, inArray, sql } from "drizzle-orm";
 
 export const WELCOME_CAMPAIGN_DEFAULTS = {
   key: "welcome",
@@ -396,10 +396,25 @@ export async function runWelcomeCampaign(opts: {
 
   if (!config) throw new Error(`Automated campaign config not found: id=${configId}`);
 
+  // Exclude users who already received an automated campaign email (terminal
+  // delivery statuses only). Guards against duplicates when a prior campaign in
+  // the same signup window partially sent before failing and the cron rolled
+  // back lastRunAt. See GitHub issue #428.
+  const alreadyReceived = await db
+    .selectDistinct({ userId: campaignRecipients.userId })
+    .from(campaignRecipients)
+    .innerJoin(campaigns, eq(campaigns.id, campaignRecipients.campaignId))
+    .where(and(
+      eq(campaigns.type, "automated"),
+      inArray(campaignRecipients.status, ["sent", "delivered", "opened", "clicked"]),
+    ));
+  const excludeUserIds = alreadyReceived.map((r) => r.userId);
+
   // Resolve recipients to check if there are any
   const filters = {
     signupAfter: signupAfter.toISOString(),
     signupBefore: signupBefore.toISOString(),
+    ...(excludeUserIds.length > 0 ? { excludeUserIds } : {}),
   };
   const recipients = await resolveRecipients(filters);
 
@@ -408,7 +423,9 @@ export async function runWelcomeCampaign(opts: {
     return { skipped: true };
   }
 
-  // Create campaign record in draft status (triggerCampaignSend expects draft)
+  // Create campaign record in draft status (triggerCampaignSend expects draft).
+  // Persist the full filters (including excludeUserIds) so triggerCampaignSend's
+  // re-resolution applies the same exclusion.
   const [campaign] = await db
     .insert(campaigns)
     .values({

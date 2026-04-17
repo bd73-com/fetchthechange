@@ -452,10 +452,7 @@ export async function startScheduler() {
     try {
       await processAutomatedCampaigns();
     } catch (error) {
-      await ErrorLogger.error("scheduler", "Automated campaign processing failed",
-        error instanceof Error ? error : null,
-        { errorMessage: error instanceof Error ? error.message : String(error) }
-      );
+      await logSchedulerError("Automated campaign processing failed", error);
     }
   }, { timezone: "UTC" }));
 

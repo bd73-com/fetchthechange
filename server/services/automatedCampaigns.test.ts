@@ -41,6 +41,15 @@ vi.mock("../db", () => ({
   db: {
     execute: mockDbExecute,
     select: () => ({ from: mockDbFrom }),
+    // selectDistinct().from().innerJoin().where() — returns empty list of
+    // already-received user IDs by default, so the welcome exclusion is a no-op.
+    selectDistinct: () => ({
+      from: () => ({
+        innerJoin: () => ({
+          where: () => Promise.resolve([]),
+        }),
+      }),
+    }),
     insert: () => ({ values: mockDbValues }),
     update: () => ({ set: mockDbSet }),
     delete: () => ({ where: mockDbDeleteWhere }),
@@ -57,7 +66,8 @@ mockDbReturning.mockResolvedValue([]);
 mockDbSet.mockReturnValue({ where: mockDbWhere });
 
 vi.mock("@shared/schema", () => ({
-  campaigns: { id: "id", status: "status" },
+  campaigns: { id: "id", status: "status", type: "type" },
+  campaignRecipients: { id: "id", userId: "user_id", campaignId: "campaign_id", status: "status" },
   automatedCampaignConfigs: {
     id: "id",
     key: "key",
@@ -70,6 +80,7 @@ vi.mock("drizzle-orm", () => ({
   and: (...args: any[]) => ({ type: "and", args }),
   isNull: (a: any) => ({ type: "isNull", field: a }),
   lte: (a: any, b: any) => ({ type: "lte", field: a, value: b }),
+  inArray: (field: any, values: any[]) => ({ type: "inArray", field, values }),
   sql: Object.assign(
     (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
     { join: (items: any[], sep: any) => ({ items, sep }) }

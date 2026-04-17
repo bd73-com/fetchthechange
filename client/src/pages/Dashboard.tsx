@@ -1,5 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
-import { useMonitors, useCheckMonitor } from "@/hooks/use-monitors";
+import { useMonitors, useCheckMonitor, useCheckMonitorSilent } from "@/hooks/use-monitors";
 import { CreateMonitorDialog } from "@/components/CreateMonitorDialog";
 import { MonitorCard } from "@/components/MonitorCard";
 import { UpgradeDialog } from "@/components/UpgradeDialog";
@@ -26,6 +26,8 @@ export default function Dashboard() {
   const { user, logout } = useAuth();
   const { data: monitors, isLoading, error, refetch } = useMonitors();
   const { mutate: checkMonitor, isPending: isChecking } = useCheckMonitor();
+  const { mutateAsync: checkMonitorSilent } = useCheckMonitorSilent();
+  const [isBulkRefreshing, setIsBulkRefreshing] = useState(false);
   const { toast } = useToast();
   const searchString = useSearch();
 
@@ -122,7 +124,6 @@ export default function Dashboard() {
       return;
     }
 
-    // Refresh all active monitors in parallel
     const activeMonitors = freshMonitors.filter(m => m.active);
     if (activeMonitors.length === 0) {
       toast({ title: "No active monitors", description: "Please activate your monitors to refresh them." });
@@ -131,9 +132,43 @@ export default function Dashboard() {
 
     toast({ title: "Refreshing...", description: `Checking ${activeMonitors.length} active monitors for changes.` });
 
-    activeMonitors.forEach(m => {
-      checkMonitor(m.id);
-    });
+    // Cap client-side concurrency so users with many monitors don't flood the
+    // server (browser pool saturation, rate-limit bursts) or get spammed with
+    // per-monitor toasts. See GitHub issue #431.
+    const REFRESH_CONCURRENCY = 3;
+    setIsBulkRefreshing(true);
+    let changed = 0;
+    let unchanged = 0;
+    let failed = 0;
+
+    try {
+      for (let i = 0; i < activeMonitors.length; i += REFRESH_CONCURRENCY) {
+        const batch = activeMonitors.slice(i, i + REFRESH_CONCURRENCY);
+        const results = await Promise.allSettled(batch.map(m => checkMonitorSilent(m.id)));
+        for (const r of results) {
+          if (r.status === "fulfilled") {
+            if (r.value.changed) changed += 1; else unchanged += 1;
+          } else {
+            failed += 1;
+          }
+        }
+      }
+    } finally {
+      setIsBulkRefreshing(false);
+    }
+
+    if (failed > 0) {
+      toast({
+        variant: "destructive",
+        title: `Refreshed with ${failed} error${failed === 1 ? "" : "s"}`,
+        description: `${changed} changed, ${unchanged} unchanged, ${failed} failed.`,
+      });
+    } else {
+      toast({
+        title: changed > 0 ? `${changed} change${changed === 1 ? "" : "s"} detected` : "No changes",
+        description: `${changed} changed, ${unchanged} unchanged.`,
+      });
+    }
   };
 
   if (isLoading && !monitors) {
@@ -237,15 +272,15 @@ export default function Dashboard() {
             })()}
           </div>
           <div className="flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              size="icon" 
+            <Button
+              variant="outline"
+              size="icon"
               onClick={handleRefresh}
-              disabled={isLoading || isChecking}
+              disabled={isLoading || isChecking || isBulkRefreshing}
               title="Refresh all active monitors"
               data-testid="button-refresh"
             >
-               {isLoading || isChecking ? (
+               {isLoading || isChecking || isBulkRefreshing ? (
                  <Loader2 className="h-4 w-4 animate-spin" />
                ) : (
                  <RefreshCw className="h-4 w-4" />
