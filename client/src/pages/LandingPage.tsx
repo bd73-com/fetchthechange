@@ -23,10 +23,84 @@ import {
   Target,
   Zap
 } from "lucide-react";
+import { useMemo } from "react";
 import PublicNav from "@/components/PublicNav";
-import SEOHead from "@/components/SEOHead";
+import SEOHead, { getCanonicalUrl } from "@/components/SEOHead";
 
 export default function LandingPage() {
+  const jsonLd = useMemo(
+    () => ({
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": `${getCanonicalUrl("/")}#organization`,
+          name: "FetchTheChange",
+          url: getCanonicalUrl("/"),
+          logo: getCanonicalUrl("/favicon.png"),
+        },
+        {
+          "@type": "WebSite",
+          "@id": `${getCanonicalUrl("/")}#website`,
+          url: getCanonicalUrl("/"),
+          name: "FetchTheChange",
+          publisher: { "@id": `${getCanonicalUrl("/")}#organization` },
+        },
+        {
+          "@type": "SoftwareApplication",
+          name: "FetchTheChange",
+          applicationCategory: "BusinessApplication",
+          operatingSystem: "Web",
+          description:
+            "Website change monitoring for modern, JavaScript-heavy sites. Track prices, availability, text, and any DOM value — and get told when tracking breaks.",
+          offers: [
+            { "@type": "Offer", price: "0", priceCurrency: "USD", name: "Free" },
+            { "@type": "Offer", price: "9", priceCurrency: "USD", name: "Pro" },
+            { "@type": "Offer", price: "29", priceCurrency: "USD", name: "Power" },
+          ],
+        },
+        {
+          "@type": "FAQPage",
+          mainEntity: [
+            {
+              "@type": "Question",
+              name: "What is FetchTheChange?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "FetchTheChange is a website change monitoring tool that tracks a specific value on a page and alerts you when it changes.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "What can I monitor?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "Anything visible on a page: prices, availability, metrics, text blocks, KPIs, or any DOM-based value you care about.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "Does it work on JavaScript-heavy sites?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "Yes. When needed, FetchTheChange renders the page with JavaScript and monitors the rendered DOM instead of the static HTML.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "What happens when my selector stops matching?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "FetchTheChange reports the failure instead of failing silently and can suggest alternative selectors to get you back to a working monitor.",
+              },
+            },
+          ],
+        },
+      ],
+    }),
+    [],
+  );
+
   return (
     <div className="min-h-screen bg-background">
       <SEOHead
@@ -35,6 +109,7 @@ export default function LandingPage() {
         path="/"
         ogDescription="Monitor any web value. Get alerted when it changes. Works on JavaScript-heavy sites and tells you when tracking breaks."
         twitterDescription="Monitor any web value. Get alerted when it changes. Works on JavaScript-heavy sites and tells you when tracking breaks."
+        jsonLd={jsonLd}
       />
       <PublicNav />
 
@@ -54,10 +129,14 @@ export default function LandingPage() {
               Works on modern, JavaScript-heavy websites — and tells you when tracking breaks, not just when values change.
             </p>
             <div className="mt-8 mb-4">
-              <img 
-                src="/images/fix-selector-showcase.png" 
-                alt="Fix Selector feature showing selector suggestions" 
-                className="rounded-lg shadow-2xl border border-border mx-auto max-w-full md:max-w-2xl"
+              <img
+                src="/images/fix-selector-showcase.png"
+                alt="FetchTheChange Fix Selector tool suggesting replacement CSS selectors for a broken monitor"
+                width="1157"
+                height="797"
+                fetchPriority="high"
+                decoding="async"
+                className="rounded-lg shadow-2xl border border-border mx-auto max-w-full md:max-w-2xl h-auto"
               />
               <p className="text-muted-foreground mt-4 text-base">
                 When a site changes, FetchTheChange shows you what broke and helps you fix it.

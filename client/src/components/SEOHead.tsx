@@ -22,10 +22,13 @@ export interface SEOHeadProps {
   ogType?: "website" | "article";
   ogTitle?: string;
   ogDescription?: string;
+  ogImage?: string;
   twitterTitle?: string;
   twitterDescription?: string;
   jsonLd?: Record<string, unknown>;
 }
+
+const DEFAULT_OG_IMAGE = "/images/fix-selector-showcase.png";
 
 export default function SEOHead({
   title,
@@ -34,27 +37,32 @@ export default function SEOHead({
   ogType = "website",
   ogTitle,
   ogDescription,
+  ogImage,
   twitterTitle,
   twitterDescription,
   jsonLd,
 }: SEOHeadProps) {
   useEffect(() => {
     const canonicalUrl = getCanonicalUrl(path);
+    const imageUrl = getCanonicalUrl(ogImage ?? DEFAULT_OG_IMAGE);
 
     document.title = title;
 
     const metaTags: MetaTag[] = [
       { name: "description", content: description },
+      { property: "og:site_name", content: "FetchTheChange" },
       { property: "og:title", content: ogTitle ?? title },
       { property: "og:description", content: ogDescription ?? description },
       { property: "og:type", content: ogType },
       { property: "og:url", content: canonicalUrl },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:image", content: imageUrl },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: twitterTitle ?? title },
       {
         name: "twitter:description",
         content: twitterDescription ?? description,
       },
+      { name: "twitter:image", content: imageUrl },
     ];
 
     const created: HTMLElement[] = [];

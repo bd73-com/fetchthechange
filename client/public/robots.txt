@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /dashboard
+Disallow: /monitors/
+Disallow: /developer
+Disallow: /extension-auth
+
+Sitemap: https://fetch-the-change.replit.app/sitemap.xml
