@@ -1942,6 +1942,112 @@ describe("failure tracking and auto-pause", () => {
     delete process.env.BROWSERLESS_TOKEN;
   });
 
+  it("Browserless infrastructure failures emit a monitor-agnostic warning so affected monitors dedup into one row", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+    mockConnectOverCDP.mockRejectedValue(new Error("connectOverCDP failed: ECONNREFUSED"));
+
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+
+    const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
+    await runWithTimers(monitor);
+
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scraper",
+      "Browserless service unavailable — preserving last known values",
+      expect.objectContaining({
+        monitorId: 1,
+        monitorName: "My Watch",
+        classifiedReason: expect.stringContaining("connection refused"),
+      }),
+    );
+    // Every infra-warning call must omit the monitor name so dedup aggregates across monitors.
+    const infraCalls = (ErrorLogger.warning as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c) => c[0] === "scraper" && String(c[1]).includes("Browserless service unavailable"));
+    expect(infraCalls.length).toBeGreaterThanOrEqual(1);
+    for (const c of infraCalls) {
+      expect(c[1]).not.toContain("My Watch");
+    }
+
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  it("Browserless site-specific failures include the monitor name for per-site drill-down", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+    // Timeout message matches classifyBrowserlessError's "timeout" branch but not
+    // any isInfra pattern — so the site-specific warning path fires.
+    mockConnectOverCDP.mockRejectedValue(new Error("Navigation timeout of 30000ms exceeded"));
+
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+
+    const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
+    // Non-infra failures retry once with BASE_RETRY_MS + jitter (up to ~3.5s).
+    // Bound to 10s so future refactors adding recursive setTimeout in this path
+    // produce a test timeout rather than an infinite loop.
+    const promise = checkMonitor(monitor);
+    await vi.advanceTimersByTimeAsync(10000);
+    await promise;
+
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scraper",
+      `"My Watch" — page timeout`,
+      expect.objectContaining({
+        monitorId: 1,
+        monitorName: "My Watch",
+        classifiedReason: "page timeout",
+        rawBrowserlessMsg: expect.stringContaining("Navigation timeout"),
+      }),
+    );
+
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
+  it("Browserless circuit-breaker-open warning is monitor-agnostic", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    (browserlessCircuitBreaker.isAvailable as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
+
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+
+    const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
+    await runWithTimers(monitor);
+
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scraper",
+      "Browserless circuit breaker open — preserving last known values",
+      expect.objectContaining({ monitorId: 1, monitorName: "My Watch" }),
+    );
+    const circuitCalls = (ErrorLogger.warning as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c) => c[0] === "scraper" && String(c[1]).includes("circuit breaker open"));
+    for (const c of circuitCalls) {
+      expect(c[1]).not.toContain("My Watch");
+    }
+
+    delete process.env.BROWSERLESS_TOKEN;
+  });
+
   it("falls back to free tier threshold when user tier is unknown", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
     // free threshold: DB returns active=false to indicate SQL CASE triggered
@@ -5513,27 +5619,27 @@ describe("human-like delay before selector access", () => {
 // ---------------------------------------------------------------------------
 describe("classifyBrowserlessError", () => {
   it("classifies timeout errors", () => {
-    expect(classifyBrowserlessError("Navigation timeout of 30000ms exceeded")).toContain("took too long");
+    expect(classifyBrowserlessError("Navigation timeout of 30000ms exceeded")).toContain("timeout");
   });
 
   it("classifies timed out errors", () => {
-    expect(classifyBrowserlessError("page timed out waiting for selector")).toContain("took too long");
+    expect(classifyBrowserlessError("page timed out waiting for selector")).toContain("timeout");
   });
 
   it("classifies ENOTFOUND errors", () => {
-    expect(classifyBrowserlessError("getaddrinfo ENOTFOUND example.com")).toContain("domain could not be resolved");
+    expect(classifyBrowserlessError("getaddrinfo ENOTFOUND example.com")).toContain("DNS resolution failed");
   });
 
   it("classifies ECONNREFUSED errors", () => {
-    expect(classifyBrowserlessError("connect ECONNREFUSED 127.0.0.1:443")).toContain("refused the connection");
+    expect(classifyBrowserlessError("connect ECONNREFUSED 127.0.0.1:443")).toContain("connection refused");
   });
 
   it("classifies net::ERR_CONNECTION_REFUSED errors", () => {
-    expect(classifyBrowserlessError("net::ERR_CONNECTION_REFUSED at page.goto")).toContain("refused the connection");
+    expect(classifyBrowserlessError("net::ERR_CONNECTION_REFUSED at page.goto")).toContain("connection refused");
   });
 
   it("classifies ERR_TOO_MANY_REDIRECTS errors", () => {
-    expect(classifyBrowserlessError("net::ERR_TOO_MANY_REDIRECTS")).toContain("Too many redirects");
+    expect(classifyBrowserlessError("net::ERR_TOO_MANY_REDIRECTS")).toContain("too many redirects");
   });
 
   it("classifies 403 Forbidden errors", () => {
@@ -5553,11 +5659,11 @@ describe("classifyBrowserlessError", () => {
   });
 
   it("returns default message for unknown errors", () => {
-    expect(classifyBrowserlessError("some random error")).toContain("Rendered page extraction failed");
+    expect(classifyBrowserlessError("some random error")).toContain("extraction failed");
   });
 
   it("classifies ERR_NAME_NOT_RESOLVED errors", () => {
-    expect(classifyBrowserlessError("net::ERR_NAME_NOT_RESOLVED")).toContain("domain could not be resolved");
+    expect(classifyBrowserlessError("net::ERR_NAME_NOT_RESOLVED")).toContain("DNS resolution failed");
   });
 });
 

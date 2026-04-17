@@ -921,21 +921,21 @@ async function tryDismissConsent(page: any): Promise<boolean> {
  */
 export function classifyBrowserlessError(errMsg: string): string {
   if (/timeout|Timeout|timed out/.test(errMsg)) {
-    return "Page took too long to load — the site may be slow or blocking headless browsers";
+    return "page timeout";
   }
   if (/net::ERR_NAME_NOT_RESOLVED|getaddrinfo|ENOTFOUND/.test(errMsg)) {
-    return "The domain could not be resolved — check the URL is correct";
+    return "DNS resolution failed";
   }
   if (/net::ERR_CONNECTION_REFUSED|ECONNREFUSED/.test(errMsg)) {
-    return "The site refused the connection — it may be down";
+    return "connection refused (site down?)";
   }
   if (/net::ERR_TOO_MANY_REDIRECTS/.test(errMsg)) {
-    return "Too many redirects — the page may require a login or cookie";
+    return "too many redirects";
   }
   if (/403|Forbidden|access denied|bot detection|challenge/i.test(errMsg)) {
-    return "The site is actively blocking automated access — try a less frequent check interval";
+    return "site blocking automated access";
   }
-  return "Rendered page extraction failed — the site may block automated browsers";
+  return "extraction failed";
 }
 
 /**
@@ -1262,19 +1262,35 @@ export async function checkMonitor(monitor: Monitor): Promise<{
               lastBrowserlessErr instanceof Error ? lastBrowserlessErr : null,
               { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector },
             ).catch(() => {});
+          } else if (browserlessInfraFailure) {
+            // Infra-wide outage: monitor-agnostic message so every affected monitor
+            // dedups into a single row in the admin UI. Per-monitor details stay
+            // in context for drill-down. NOTE: context is last-writer-wins
+            // (server/services/logger.ts:99), so during a mixed-mode outage
+            // monitorId/monitorName/url/classifiedReason reflect only the most
+            // recent writer, not an aggregate across affected monitors.
+            // occurrenceCount is the only signal of outage scope.
+            await ErrorLogger.warning("scraper", "Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
           } else {
-            // Downgrade to warning: Browserless failures are expected for sites that
-            // block headless browsers. The circuit breaker and retry logic handle recovery.
-            const classified = browserlessInfraFailure
-              ? "Browserless service connection refused (infrastructure issue)"
-              : classifyBrowserlessError(rawBrowserlessMsg);
-            // Suffix varies by cached-value state — intentionally creates two dedup
-            // buckets in error_logs so the admin UI distinguishes first-check failures
-            // from degraded-but-cached monitors.
-            const degradationNote = monitor.currentValue
-              ? ", preserving last known value. Will retry shortly."
-              : ".";
-            await ErrorLogger.warning("scraper", `"${monitor.name}" — rendered page extraction failed: ${classified}${degradationNote}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() });
+            // Site-specific failure: keep the monitor name because the site itself is the problem.
+            // Mirror the infra branch's drill-down fields (classifiedReason + truncated raw
+            // error) so the admin UI has enough detail when the catchall "extraction failed"
+            // string fires. Logger sanitization (server/services/logger.ts:29-53) strips
+            // secrets from the raw error before persistence.
+            const classifiedReason = classifyBrowserlessError(rawBrowserlessMsg);
+            await ErrorLogger.warning(
+              "scraper",
+              `"${monitor.name}" — ${classifiedReason}`,
+              {
+                monitorId: monitor.id,
+                monitorName: monitor.name,
+                url: monitor.url,
+                selector: monitor.selector,
+                circuitState: browserlessCircuitBreaker.getState(),
+                classifiedReason,
+                rawBrowserlessMsg: rawBrowserlessMsg.slice(0, 500),
+              },
+            );
           }
         }
 
@@ -1309,7 +1325,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         if (skippedDueToOpenCircuit) {
           await ErrorLogger.warning(
             "scraper",
-            `"${monitor.name}" — rendered page extraction failed: Browserless circuit breaker open, preserving last known value. Will retry shortly.`,
+            "Browserless circuit breaker open — preserving last known values",
             { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
           );
         }

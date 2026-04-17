@@ -49,7 +49,7 @@ async function logSchedulerError(
 ): Promise<void> {
   try {
     if (isTransientDbError(error)) {
-      await ErrorLogger.warning("scheduler", `${message} (transient, will retry)`, {
+      await ErrorLogger.warning("scheduler", message, {
         errorMessage: error instanceof Error ? error.message : String(error),
         ...context,
       });
