@@ -2180,7 +2180,7 @@ export async function registerRoutes(
           .from(campaignRecipientsTable)
           .where(and(
             eq(campaignRecipientsTable.campaignId, id),
-            inArray(campaignRecipientsTable.status, ["sent", "delivered", "opened", "clicked"]),
+            inArray(campaignRecipientsTable.status, [...campaignEmailService.TERMINAL_RECIPIENT_STATUSES]),
           ));
         const sentCount = row?.count ?? 0;
         if (sentCount > 0) {

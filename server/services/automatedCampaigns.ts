@@ -1,9 +1,8 @@
 import { db } from "../db";
-import { campaigns, campaignRecipients, automatedCampaignConfigs, type AutomatedCampaignConfig } from "@shared/schema";
-import { triggerCampaignSend } from "./campaignEmail";
-import { resolveRecipients } from "./campaignEmail";
+import { campaigns, campaignRecipients, automatedCampaignConfigs, users, type AutomatedCampaignConfig } from "@shared/schema";
+import { triggerCampaignSend, resolveRecipients, TERMINAL_RECIPIENT_STATUSES } from "./campaignEmail";
 import { ErrorLogger } from "./logger";
-import { eq, and, isNull, inArray, sql } from "drizzle-orm";
+import { eq, and, isNull, inArray, gte, lte, sql } from "drizzle-orm";
 
 export const WELCOME_CAMPAIGN_DEFAULTS = {
   key: "welcome",
@@ -400,13 +399,23 @@ export async function runWelcomeCampaign(opts: {
   // delivery statuses only). Guards against duplicates when a prior campaign in
   // the same signup window partially sent before failing and the cron rolled
   // back lastRunAt. See GitHub issue #428.
+  //
+  // Scope the lookup to users signed up within the current window — the
+  // recipient resolution is already constrained by signupAfter/signupBefore on
+  // users.created_at, so users outside that window cannot produce duplicates.
+  // Without this scope the exclusion list grows unboundedly across runs and
+  // would eventually breach pg's bind-parameter limit and balloon the
+  // persisted filters jsonb.
   const alreadyReceived = await db
     .selectDistinct({ userId: campaignRecipients.userId })
     .from(campaignRecipients)
     .innerJoin(campaigns, eq(campaigns.id, campaignRecipients.campaignId))
+    .innerJoin(users, eq(users.id, campaignRecipients.userId))
     .where(and(
       eq(campaigns.type, "automated"),
-      inArray(campaignRecipients.status, ["sent", "delivered", "opened", "clicked"]),
+      inArray(campaignRecipients.status, [...TERMINAL_RECIPIENT_STATUSES]),
+      gte(users.createdAt, signupAfter),
+      lte(users.createdAt, signupBefore),
     ));
   const excludeUserIds = alreadyReceived.map((r) => r.userId);
 

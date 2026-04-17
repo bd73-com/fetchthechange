@@ -141,6 +141,7 @@ vi.mock("./services/campaignEmail", () => ({
   triggerCampaignSend: vi.fn().mockResolvedValue({ totalRecipients: 0 }),
   cancelCampaign: vi.fn().mockResolvedValue({ sentSoFar: 0, cancelled: 0 }),
   reconcileCampaignCounters: vi.fn().mockResolvedValue({}),
+  TERMINAL_RECIPIENT_STATUSES: ["sent", "delivered", "opened", "clicked"] as const,
 }));
 
 // ---------------------------------------------------------------------------

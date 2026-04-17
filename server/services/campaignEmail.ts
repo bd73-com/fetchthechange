@@ -7,6 +7,14 @@ import { ErrorLogger } from "./logger";
 import { eq, and, inArray, gte, lte, sql, count, SQL } from "drizzle-orm";
 import { getAppUrl } from "../utils/appUrl";
 
+/**
+ * Recipient statuses indicating the email was successfully handed off to the
+ * user — once any of these is set we can no longer pretend the email wasn't
+ * sent, so these rows anchor the audit trail and duplicate-prevention logic.
+ */
+export const TERMINAL_RECIPIENT_STATUSES = ["sent", "delivered", "opened", "clicked"] as const;
+export type TerminalRecipientStatus = typeof TERMINAL_RECIPIENT_STATUSES[number];
+
 export interface CampaignFilters {
   tier?: string[];
   signupBefore?: string;

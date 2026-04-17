@@ -43,13 +43,16 @@ vi.mock("../db", () => ({
   db: {
     execute: mockDbExecute,
     select: () => ({ from: mockDbFrom }),
-    // selectDistinct().from().innerJoin().where() — returns empty list of
-    // already-received user IDs by default, so the welcome exclusion is a no-op.
-    // Tests override mockDbSelectDistinctWhere to simulate prior welcome sends.
+    // selectDistinct().from().innerJoin(campaigns).innerJoin(users).where() —
+    // returns empty list of already-received user IDs by default so the welcome
+    // exclusion is a no-op. Tests override mockDbSelectDistinctWhere to
+    // simulate prior welcome sends in the current signup window.
     selectDistinct: () => ({
       from: () => ({
         innerJoin: () => ({
-          where: (...args: any[]) => mockDbSelectDistinctWhere(...args),
+          innerJoin: () => ({
+            where: (...args: any[]) => mockDbSelectDistinctWhere(...args),
+          }),
         }),
       }),
     }),
@@ -71,6 +74,7 @@ mockDbSet.mockReturnValue({ where: mockDbWhere });
 vi.mock("@shared/schema", () => ({
   campaigns: { id: "id", status: "status", type: "type" },
   campaignRecipients: { id: "id", userId: "user_id", campaignId: "campaign_id", status: "status" },
+  users: { id: "id", createdAt: "created_at" },
   automatedCampaignConfigs: {
     id: "id",
     key: "key",
@@ -83,6 +87,7 @@ vi.mock("drizzle-orm", () => ({
   and: (...args: any[]) => ({ type: "and", args }),
   isNull: (a: any) => ({ type: "isNull", field: a }),
   lte: (a: any, b: any) => ({ type: "lte", field: a, value: b }),
+  gte: (a: any, b: any) => ({ type: "gte", field: a, value: b }),
   inArray: (field: any, values: any[]) => ({ type: "inArray", field, values }),
   sql: Object.assign(
     (strings: TemplateStringsArray, ...values: any[]) => ({ strings, values }),
@@ -94,6 +99,7 @@ vi.mock("drizzle-orm", () => ({
 vi.mock("./campaignEmail", () => ({
   triggerCampaignSend: (...args: any[]) => mockTriggerCampaignSend(...args),
   resolveRecipients: (...args: any[]) => mockResolveRecipients(...args),
+  TERMINAL_RECIPIENT_STATUSES: ["sent", "delivered", "opened", "clicked"] as const,
 }));
 
 vi.mock("./logger", () => ({
@@ -683,6 +689,37 @@ describe("runWelcomeCampaign", () => {
     // must survive that round trip.
     const insertedValues = mockDbValues.mock.calls[0][0];
     expect(insertedValues.filters.excludeUserIds).toEqual(["u1", "u2"]);
+  });
+
+  it("scopes the already-received lookup to the current signup window", async () => {
+    // Without window scoping the excludeUserIds list grows unboundedly across
+    // cron runs and would eventually breach pg's bind-param limit. The query
+    // must filter users.created_at by the current window.
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockDbSelectDistinctWhere.mockResolvedValueOnce([]);
+    mockResolveRecipients.mockResolvedValue([
+      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+    ]);
+    mockDbReturning.mockResolvedValue([{ id: 101, ...config, status: "draft", type: "automated" }]);
+    mockTriggerCampaignSend.mockResolvedValue({ totalRecipients: 1 });
+
+    const signupAfter = new Date("2026-04-01T00:00:00Z");
+    const signupBefore = new Date("2026-04-15T00:00:00Z");
+    await runWelcomeCampaign({ signupAfter, signupBefore, configId: 1 });
+
+    // The WHERE predicate must reference both window bounds — serialize the
+    // mock's captured argument and look for the created_at filter markers.
+    const whereArg = mockDbSelectDistinctWhere.mock.calls[0][0];
+    const serialized = JSON.stringify(whereArg);
+    expect(serialized).toContain("gte");
+    expect(serialized).toContain("lte");
+    expect(serialized).toContain(signupAfter.toISOString());
+    expect(serialized).toContain(signupBefore.toISOString());
   });
 
   it("omits excludeUserIds entirely when no prior recipients exist", async () => {
