@@ -34,30 +34,42 @@ const TERMINAL_RECIPIENT_STATUSES = extractStatusList(
 // ACTIVE = ["pending", ...TERMINAL]
 const ACTIVE_RECIPIENT_STATUSES = ["pending", ...TERMINAL_RECIPIENT_STATUSES];
 
-describe("campaign_recipients_active_user_idx predicate matches ACTIVE_RECIPIENT_STATUSES", () => {
+function extractActiveUserIdxPredicate(): string {
   // Extract the `.where(sql\`…\`)` clause of the activeUserCampaignIdx entry.
-  const indexBlock = SCHEMA_SRC.match(
+  const match = SCHEMA_SRC.match(
     /activeUserCampaignIdx[\s\S]*?\.where\(sql`([^`]+)`\)/,
   );
+  if (!match) {
+    throw new Error(
+      "failed to extract activeUserCampaignIdx predicate from shared/schema.ts — " +
+        "did the index definition move, split across multiple sql`` fragments, " +
+        "or introduce an escaped backtick? The invariant test cannot validate " +
+        "the predicate until this regex matches the index shape again.",
+    );
+  }
+  return match[1];
+}
 
-  it("finds the activeUserCampaignIdx definition", () => {
-    expect(indexBlock).not.toBeNull();
-  });
+// Known non-active recipient statuses per the column comment in
+// shared/schema.ts:170. Kept in lockstep there — if a new terminal status is
+// added to the schema but the partial-index predicate isn't updated, this
+// list catches the leak before the planner regresses silently.
+const NON_ACTIVE_RECIPIENT_STATUSES = ["bounced", "complained"] as const;
 
+describe("campaign_recipients_active_user_idx predicate matches ACTIVE_RECIPIENT_STATUSES", () => {
   it("predicate references every status in ACTIVE_RECIPIENT_STATUSES", () => {
-    const predicate = indexBlock![1];
+    const predicate = extractActiveUserIdxPredicate();
     for (const status of ACTIVE_RECIPIENT_STATUSES) {
       expect(predicate).toContain(`'${status}'`);
     }
   });
 
-  it("predicate does not reference any terminal status outside ACTIVE_RECIPIENT_STATUSES", () => {
-    const predicate = indexBlock![1];
-    const known = new Set<string>([...ACTIVE_RECIPIENT_STATUSES]);
-    // These statuses exist in the schema but must NOT be in the active set.
-    for (const status of ["bounced", "complained"]) {
-      expect(known.has(status)).toBe(false);
-      // Status either appears inside `'...'` in the predicate (bad) or not (good).
+  it("predicate does not reference known non-active recipient statuses (bounced, complained)", () => {
+    const predicate = extractActiveUserIdxPredicate();
+    const active = new Set<string>([...ACTIVE_RECIPIENT_STATUSES]);
+    for (const status of NON_ACTIVE_RECIPIENT_STATUSES) {
+      // Safety: our exclusion list must actually be outside the active set.
+      expect(active.has(status)).toBe(false);
       expect(predicate).not.toContain(`'${status}'`);
     }
   });

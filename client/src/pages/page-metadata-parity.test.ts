@@ -25,11 +25,15 @@ function readPage(file: string): string {
   return fs.readFileSync(path.join(PAGES_DIR, file), "utf-8");
 }
 
+// Match both the self-closing form (`<SEOHead ... />`) and the element form
+// (`<SEOHead ...>children</SEOHead>`). Without the second branch, any page
+// that adds SEOHead children (or accidentally wraps props such that the tag
+// closes with `>` instead of `/>`) silently bypasses the parity test — which
+// is exactly the drift scenario this file exists to catch.
+const SEO_BLOCK_RE = /<SEOHead\b[\s\S]*?(?:\/>|>)/;
+
 function extractSEOProp(src: string, prop: string): string | null {
-  // Match prop="..." inside a <SEOHead> block. Doesn't handle JSX expressions
-  // like title={foo} — those pages are excluded from the parity check
-  // because they compute metadata dynamically.
-  const seoBlock = src.match(/<SEOHead[\s\S]*?\/>/);
+  const seoBlock = src.match(SEO_BLOCK_RE);
   if (!seoBlock) return null;
   const m = seoBlock[0].match(
     new RegExp(`${prop}\\s*=\\s*"((?:[^"\\\\]|\\\\.)*)"`),
@@ -38,7 +42,7 @@ function extractSEOProp(src: string, prop: string): string | null {
 }
 
 function extractSEOPath(src: string): string | null {
-  const seoBlock = src.match(/<SEOHead[\s\S]*?\/>/);
+  const seoBlock = src.match(SEO_BLOCK_RE);
   if (!seoBlock) return null;
   const staticPath = seoBlock[0].match(/path\s*=\s*"([^"]+)"/);
   if (staticPath) return staticPath[1];
@@ -55,18 +59,40 @@ function extractSEOPath(src: string): string | null {
   return constDef ? constDef[1] : null;
 }
 
+// LandingPage intentionally computes its path prop dynamically (to support
+// ProtectedRoute rendering it at /dashboard / /monitors/:id for logged-out
+// visitors — see issue #439). Every OTHER SEOHead-rendering public page must
+// resolve to a literal path and survive parity. Keeping this opt-out list
+// explicit so the "no silent bypass" assertion below can include LandingPage
+// in the denominator without false-positiving.
+const INTENTIONALLY_DYNAMIC_PAGES = new Set(["LandingPage.tsx"]);
+
 // Pages where SEOHead receives a path literal AND the title/description are
-// also literals — those are the ones we can statically compare. LandingPage
-// takes an optional path prop so its SEOHead call uses {path}, skipped here.
+// also literals — those are the ones we can statically compare.
 const publicPageFiles = fs
   .readdirSync(PAGES_DIR)
   .filter((f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"))
   .filter((f) => readPage(f).includes("PublicNav"))
+  .filter((f) => !INTENTIONALLY_DYNAMIC_PAGES.has(f))
   .filter((f) => extractSEOPath(readPage(f)) !== null);
 
 describe("PAGE_METADATA ↔ SEOHead parity (issue #440)", () => {
   it("finds at least 5 pages to compare (sanity)", () => {
     expect(publicPageFiles.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("covers every PublicNav page that renders <SEOHead> (no silent bypass)", () => {
+    // If a page adds <SEOHead ...> but extractSEOPath fails to resolve its
+    // path (e.g., a new non-literal prop pattern), this assertion flags the
+    // gap instead of letting the page silently drop out of coverage.
+    // LandingPage is excluded because its path prop is intentionally dynamic.
+    const allSeoPages = fs
+      .readdirSync(PAGES_DIR)
+      .filter((f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"))
+      .filter((f) => readPage(f).includes("PublicNav"))
+      .filter((f) => !INTENTIONALLY_DYNAMIC_PAGES.has(f))
+      .filter((f) => readPage(f).includes("<SEOHead"));
+    expect(publicPageFiles.length).toBe(allSeoPages.length);
   });
 
   for (const file of publicPageFiles) {

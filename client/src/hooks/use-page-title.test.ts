@@ -31,6 +31,14 @@ describe("usePageTitle", () => {
     expect(document.title).toBe("unchanged");
   });
 
+  it("does not change title when given an empty string", () => {
+    // Locks down the `!title` guard so a future tightening to `=== undefined`
+    // doesn't silently clobber document.title with "".
+    document.title = "unchanged";
+    renderHook(() => usePageTitle(""));
+    expect(document.title).toBe("unchanged");
+  });
+
   it("updates title when the prop changes", () => {
     const { rerender } = renderHook(
       ({ title }: { title: string }) => usePageTitle(title),

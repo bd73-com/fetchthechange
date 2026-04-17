@@ -139,10 +139,17 @@ export const PAGE_METADATA: Record<string, PageMeta> = {
 };
 
 /**
- * Fallback entry used when no per-path metadata exists. Frozen because
- * getPageMetadata returns this reference directly on cache-miss — mutating
- * it would corrupt the landing metadata for every subsequent request.
+ * Freeze every entry so a consumer that mutates a returned PageMeta (e.g.,
+ * `meta.title = "..."` in a future rewrite helper) trips an error in strict
+ * mode instead of silently corrupting the map for every subsequent crawler
+ * request. getPageMetadata returns references directly — no clone-on-read —
+ * so this freeze is what keeps the map immutable at the callsite boundary.
  */
+for (const key of Object.keys(PAGE_METADATA)) {
+  Object.freeze(PAGE_METADATA[key]);
+}
+
+/** Fallback entry used when no per-path metadata exists. */
 export const DEFAULT_PAGE_METADATA: PageMeta = Object.freeze({
   ...PAGE_METADATA["/"]!,
 });

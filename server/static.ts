@@ -15,9 +15,12 @@ export function serveStatic(app: Express) {
   app.use(express.static(distPath));
 
   const indexPath = path.resolve(distPath, "index.html");
-  // Cache the template once at startup — it's built in, so it does not change
-  // between deploys. Avoids a per-request fs.readFileSync on the crawler path
-  // that could otherwise be amplified by a UA-spoofed flood.
+  // Lazy cache: the template is read on the first crawler hit and reused for
+  // the life of the process (index.html doesn't change between deploys —
+  // Replit restarts the process on deploy, which is the invalidation point).
+  // Avoids a per-request fs.readFileSync on the crawler path that would
+  // otherwise be amplifiable by a UA-spoofed flood. Trade-off: a
+  // missing/corrupt index.html surfaces on first-unfurl rather than at boot.
   let cachedTemplate: string | null = null;
   const getCachedTemplate = (): string => {
     if (cachedTemplate === null) {

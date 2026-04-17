@@ -93,12 +93,22 @@ describe("rewriteIndexHtmlForCrawler", () => {
     );
   });
 
-  it("escapes special characters in title/description", () => {
+  it("HTML-escapes metadata before emitting into attributes/text", () => {
     const out = rewriteIndexHtmlForCrawler(TEMPLATE, "/pricing", "https://ftc.bd73.com");
-    // no stray unescaped quote breaking the attribute
-    const ogDescMatch = out.match(/<meta\s+property="og:description"\s+content="([^"]*)"/);
+    // The attribute-context captured group cannot contain a bare quote or
+    // angle bracket — escapeAttr would emit &quot; / &lt; / &gt;.
+    const ogDescMatch = out.match(
+      /<meta\s+property="og:description"\s+content="([^"]*)"/,
+    );
     expect(ogDescMatch).not.toBeNull();
-    expect(ogDescMatch?.[1]).not.toMatch(/[^&]".*"/); // no unescaped quote pairs
+    expect(ogDescMatch?.[1]).not.toContain("<");
+    expect(ogDescMatch?.[1]).not.toContain(">");
+    // Title is text-context, not attribute — escapeHtmlText replaces &/</>
+    // but leaves quotes. Prove the angle brackets never leak through.
+    const titleMatch = out.match(/<title>([\s\S]*?)<\/title>/);
+    expect(titleMatch).not.toBeNull();
+    expect(titleMatch?.[1]).not.toContain("<");
+    expect(titleMatch?.[1]).not.toContain(">");
   });
 
   it("rewrites tags even when attributes are split across multiple lines", () => {
@@ -191,6 +201,21 @@ describe("rewriteIndexHtmlForCrawler noindex for unknown paths (Concern 2)", () 
       "https://ftc.bd73.com",
     );
     expect(out).not.toContain('<meta name="robots" content="noindex" />');
+  });
+
+  it("tolerates a trailing slash on baseUrl (no double-slash in og:url)", () => {
+    const out = rewriteIndexHtmlForCrawler(
+      TEMPLATE,
+      "/pricing",
+      "https://ftc.bd73.com/",
+    );
+    expect(out).toContain(
+      '<link rel="canonical" href="https://ftc.bd73.com/pricing" />',
+    );
+    expect(out).toContain(
+      '<meta property="og:url" content="https://ftc.bd73.com/pricing" />',
+    );
+    expect(out).not.toContain("com//pricing");
   });
 
   it("normalizes trailing slash so /pricing/ is treated as known", () => {

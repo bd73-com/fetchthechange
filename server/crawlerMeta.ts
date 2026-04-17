@@ -89,12 +89,22 @@ export function rewriteIndexHtmlForCrawler(
   const normalized = normalizePath(path);
   const meta = getPageMetadata(normalized);
   const isKnown = hasKnownPageMetadata(normalized);
-  const canonicalUrl = `${baseUrl}${normalized}`;
+  // Defensive normalization: if a caller ever passes `https://host/` as the
+  // base, naive concatenation yields `//pricing`, which crawlers treat as a
+  // distinct URL and silently breaks canonicalization.
+  const cleanBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  const canonicalUrl = `${cleanBase}${normalized}`;
+  // Accept absolute `https://` / `http://` and protocol-relative `//cdn/…`;
+  // everything else is treated as a site-relative path and prefixed with the
+  // canonical origin. `startsWith("http")` was too loose — it matched
+  // `httpunknown:…` and missed protocol-relative.
+  const isAbsolute = (u: string): boolean =>
+    /^https?:\/\//i.test(u) || u.startsWith("//");
   const ogImage = meta.image
-    ? meta.image.startsWith("http")
+    ? isAbsolute(meta.image)
       ? meta.image
-      : `${baseUrl}${meta.image}`
-    : `${baseUrl}/images/fix-selector-showcase.png`;
+      : `${cleanBase}${meta.image}`
+    : `${cleanBase}/images/fix-selector-showcase.png`;
   const ogType = meta.ogType ?? "website";
 
   const titleAttr = escapeHtmlText(meta.title);
@@ -153,11 +163,12 @@ export function rewriteIndexHtmlForCrawler(
 
   if (!isKnown) {
     // Inject noindex so Googlebot doesn't index typo / stale URLs as 200s.
-    // Prepend into <head> — the test suite asserts this flags unknown paths
-    // distinctly so clients can tell whether a bot fetched a known page.
+    // Prepend into <head> — the regex tolerates attributes on the head tag
+    // (e.g., `<head lang="en">` or `<head prefix="og: …">`) so the injection
+    // doesn't silently no-op when someone adds one.
     out = out.replace(
-      /<head>/i,
-      '<head>\n    <meta name="robots" content="noindex" />',
+      /<head(\s[^>]*)?>/i,
+      (match) => `${match}\n    <meta name="robots" content="noindex" />`,
     );
   }
 
