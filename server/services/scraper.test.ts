@@ -1998,10 +1998,11 @@ describe("failure tracking and auto-pause", () => {
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
     const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
-    // Non-infra failures retry once with BASE_RETRY_MS + jitter (up to ~3.5s), so
-    // drain all pending timers rather than advancing a fixed amount.
+    // Non-infra failures retry once with BASE_RETRY_MS + jitter (up to ~3.5s).
+    // Bound to 10s so future refactors adding recursive setTimeout in this path
+    // produce a test timeout rather than an infinite loop.
     const promise = checkMonitor(monitor);
-    await vi.runAllTimersAsync();
+    await vi.advanceTimersByTimeAsync(10000);
     await promise;
 
     expect(ErrorLogger.warning).toHaveBeenCalledWith(

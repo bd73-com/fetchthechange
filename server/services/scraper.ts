@@ -1265,9 +1265,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           } else if (browserlessInfraFailure) {
             // Infra-wide outage: monitor-agnostic message so every affected monitor
             // dedups into a single row in the admin UI. Per-monitor details stay
-            // in context for drill-down (last-writer-wins; occurrenceCount conveys scale).
-            // classifiedReason preserves the specific failure type (timeout/DNS/ECONNREFUSED)
-            // since the message itself is now constant across monitors.
+            // in context for drill-down. NOTE: context is last-writer-wins
+            // (server/services/logger.ts:99), so during a mixed-mode outage
+            // monitorId/monitorName/url/classifiedReason reflect only the most
+            // recent writer, not an aggregate across affected monitors.
+            // occurrenceCount is the only signal of outage scope.
             await ErrorLogger.warning("scraper", "Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
           } else {
             // Site-specific failure: keep the monitor name because the site itself is the problem.
