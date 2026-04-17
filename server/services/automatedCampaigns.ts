@@ -406,6 +406,12 @@ export async function runWelcomeCampaign(opts: {
   // Without this scope the exclusion list grows unboundedly across runs and
   // would eventually breach pg's bind-parameter limit and balloon the
   // persisted filters jsonb.
+  //
+  // Invariant: assumes welcome is the only enabled automated campaign config.
+  // If a second automated config is ever enabled, the campaigns.type filter
+  // below will spuriously exclude users who received the *other* automated
+  // email. processAutomatedCampaigns logs a warning when this assumption is
+  // broken.
   const alreadyReceived = await db
     .selectDistinct({ userId: campaignRecipients.userId })
     .from(campaignRecipients)
@@ -511,6 +517,20 @@ export async function processAutomatedCampaigns(): Promise<void> {
     .select()
     .from(automatedCampaignConfigs)
     .where(eq(automatedCampaignConfigs.enabled, true));
+
+  // runWelcomeCampaign's duplicate-prevention lookup filters campaigns by
+  // `type = "automated"` only (there is no config_key column on campaigns).
+  // With a single enabled automated config (welcome), that is equivalent to
+  // "this config's recipients". If a second automated config is ever enabled,
+  // the exclusion will spuriously skip users who received the *other* automated
+  // email — log a warning so this invariant is visible before it bites.
+  if (configs.length > 1) {
+    console.warn(
+      `[AutoCampaign] ${configs.length} enabled automated configs detected (${configs.map(c => c.key).join(", ")}). ` +
+      `runWelcomeCampaign's exclusion lookup is not yet scoped per-config; users may be spuriously excluded across campaign types. ` +
+      `Before enabling a second automated config, add a config_key column to campaigns or filter exclusion by config.`,
+    );
+  }
 
   for (const config of configs) {
     if (!config.nextRunAt || config.nextRunAt > now) continue;
