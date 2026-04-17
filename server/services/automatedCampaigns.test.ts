@@ -16,6 +16,7 @@ const {
   mockDbSet,
   mockDbOrderBy,
   mockDbDeleteWhere,
+  mockDbSelectDistinctWhere,
   mockTriggerCampaignSend,
   mockResolveRecipients,
   mockErrorLoggerError,
@@ -32,6 +33,7 @@ const {
   mockDbSet: vi.fn(),
   mockDbOrderBy: vi.fn(),
   mockDbDeleteWhere: vi.fn().mockResolvedValue(undefined),
+  mockDbSelectDistinctWhere: vi.fn().mockResolvedValue([]),
   mockTriggerCampaignSend: vi.fn(),
   mockResolveRecipients: vi.fn(),
   mockErrorLoggerError: vi.fn().mockResolvedValue(undefined),
@@ -43,10 +45,11 @@ vi.mock("../db", () => ({
     select: () => ({ from: mockDbFrom }),
     // selectDistinct().from().innerJoin().where() — returns empty list of
     // already-received user IDs by default, so the welcome exclusion is a no-op.
+    // Tests override mockDbSelectDistinctWhere to simulate prior welcome sends.
     selectDistinct: () => ({
       from: () => ({
         innerJoin: () => ({
-          where: () => Promise.resolve([]),
+          where: (...args: any[]) => mockDbSelectDistinctWhere(...args),
         }),
       }),
     }),
@@ -643,6 +646,71 @@ describe("runWelcomeCampaign", () => {
       signupBefore: new Date(),
       configId: 1,
     })).rejects.toThrow("Original send error");
+  });
+
+  it("excludes users who already received an automated campaign email", async () => {
+    // Issue #428: after a rollback + retry, users who received the email in the
+    // partially-sent prior campaign must not get a duplicate.
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockDbSelectDistinctWhere.mockResolvedValueOnce([
+      { userId: "u1" },
+      { userId: "u2" },
+    ]);
+    mockResolveRecipients.mockResolvedValue([
+      { id: "u3", email: "c@d.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+    ]);
+    mockDbReturning.mockResolvedValue([{ id: 99, ...config, status: "draft", type: "automated" }]);
+    mockTriggerCampaignSend.mockResolvedValue({ totalRecipients: 1 });
+
+    await runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 1,
+    });
+
+    // resolveRecipients must receive the exclude list so the user count check
+    // reflects the post-exclusion set.
+    const filtersPassed = mockResolveRecipients.mock.calls[0][0];
+    expect(filtersPassed.excludeUserIds).toEqual(["u1", "u2"]);
+
+    // The campaign row must persist those exclusions — triggerCampaignSend
+    // re-reads filters from the DB and re-resolves recipients, so the exclusion
+    // must survive that round trip.
+    const insertedValues = mockDbValues.mock.calls[0][0];
+    expect(insertedValues.filters.excludeUserIds).toEqual(["u1", "u2"]);
+  });
+
+  it("omits excludeUserIds entirely when no prior recipients exist", async () => {
+    // When no terminal-status recipients exist, the filter stays minimal — we
+    // don't want to store an empty array that would confuse future reads.
+    const config = {
+      id: 1, key: "welcome", name: "Welcome", subject: "Welcome",
+      htmlBody: "<html></html>", textBody: "text", enabled: true,
+      lastRunAt: null, nextRunAt: null, createdAt: new Date(), updatedAt: new Date(),
+    };
+    mockDbLimit.mockResolvedValue([config]);
+    mockDbSelectDistinctWhere.mockResolvedValueOnce([]);
+    mockResolveRecipients.mockResolvedValue([
+      { id: "u1", email: "a@b.com", firstName: null, tier: "free", monitorCount: 0, unsubscribeToken: "tok" },
+    ]);
+    mockDbReturning.mockResolvedValue([{ id: 100, ...config, status: "draft", type: "automated" }]);
+    mockTriggerCampaignSend.mockResolvedValue({ totalRecipients: 1 });
+
+    await runWelcomeCampaign({
+      signupAfter: new Date("2025-03-19"),
+      signupBefore: new Date(),
+      configId: 1,
+    });
+
+    const filtersPassed = mockResolveRecipients.mock.calls[0][0];
+    expect(filtersPassed.excludeUserIds).toBeUndefined();
+    const insertedValues = mockDbValues.mock.calls[0][0];
+    expect(insertedValues.filters.excludeUserIds).toBeUndefined();
   });
 
   it("attempts to mark a sending campaign as failed when triggerCampaignSend throws", async () => {

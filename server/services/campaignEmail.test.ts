@@ -297,6 +297,32 @@ describe("resolveRecipients", () => {
 
     expect(result).toHaveLength(0);
   });
+
+  it("adds a u.id NOT IN condition when excludeUserIds is provided (issue #428)", async () => {
+    mockDbExecute.mockResolvedValueOnce({ rows: [] });
+
+    await resolveRecipients({ excludeUserIds: ["u1", "u2"] });
+
+    // The SQL mock returns { strings, values } from the tagged template.
+    // The WHERE fragment is joined into the outer template and the raw IDs
+    // flow through as sql placeholders. Inspect the flattened tree for the
+    // telltale "u.id NOT IN" substring that our excludeUserIds branch emits.
+    const executed = mockDbExecute.mock.calls[0][0];
+    const serialized = JSON.stringify(executed);
+    expect(serialized).toContain("u.id NOT IN");
+    expect(serialized).toContain("u1");
+    expect(serialized).toContain("u2");
+  });
+
+  it("ignores an empty excludeUserIds array", async () => {
+    mockDbExecute.mockResolvedValueOnce({ rows: [] });
+
+    await resolveRecipients({ excludeUserIds: [] });
+
+    const executed = mockDbExecute.mock.calls[0][0];
+    const serialized = JSON.stringify(executed);
+    expect(serialized).not.toContain("u.id NOT IN");
+  });
 });
 
 describe("previewRecipients", () => {
