@@ -44,7 +44,10 @@ export default function SEOHead({
 }: SEOHeadProps) {
   useEffect(() => {
     const canonicalUrl = getCanonicalUrl(path);
-    const imageUrl = getCanonicalUrl(ogImage ?? DEFAULT_OG_IMAGE);
+    const rawImage = ogImage ?? DEFAULT_OG_IMAGE;
+    const imageUrl = /^https?:\/\//.test(rawImage)
+      ? rawImage
+      : getCanonicalUrl(rawImage);
 
     document.title = title;
 

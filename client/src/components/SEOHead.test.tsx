@@ -66,6 +66,23 @@ describe("SEOHead", () => {
     expect(getMeta('meta[name="twitter:image"]')).toBe(expected);
   });
 
+  it("passes through absolute http(s) URLs for ogImage without prefixing", () => {
+    render(
+      <SEOHead
+        title="T"
+        description="D"
+        path="/"
+        ogImage="https://cdn.example.com/banner.png"
+      />,
+    );
+    expect(getMeta('meta[property="og:image"]')).toBe(
+      "https://cdn.example.com/banner.png",
+    );
+    expect(getMeta('meta[name="twitter:image"]')).toBe(
+      "https://cdn.example.com/banner.png",
+    );
+  });
+
   it("re-runs the effect when ogImage changes", () => {
     const { rerender } = render(
       <SEOHead title="T" description="D" path="/" ogImage="/images/a.png" />,

@@ -76,7 +76,27 @@ describe("sitemap.xml", () => {
 
     const sitemapSrc = fs.readFileSync(sitemapPath, "utf-8");
     for (const slug of slugs) {
-      expect(sitemapSrc).toContain(`/blog/${slug}`);
+      expect(sitemapSrc).toMatch(
+        new RegExp(`<loc>https?://[^<]+/blog/${slug}</loc>`),
+      );
+    }
+  });
+
+  it("has a url entry for every public /docs/* route registered in App.tsx", () => {
+    const appTsxPath = path.resolve(__dirname, "..", "App.tsx");
+    const appSrc = fs.readFileSync(appTsxPath, "utf-8");
+    const docPaths = [
+      ...appSrc.matchAll(/path="(\/docs\/[^"]+)"/g),
+    ].map((m) => m[1]);
+    expect(docPaths.length).toBeGreaterThanOrEqual(1);
+
+    const sitemapSrc = fs.readFileSync(sitemapPath, "utf-8");
+    for (const docPath of docPaths) {
+      expect(sitemapSrc).toMatch(
+        new RegExp(
+          `<loc>https?://[^<]+${docPath.replace(/\//g, "\\/")}</loc>`,
+        ),
+      );
     }
   });
 });
