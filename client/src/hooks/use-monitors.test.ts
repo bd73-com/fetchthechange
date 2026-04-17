@@ -744,9 +744,11 @@ describe("useUpdateMonitorSilent", () => {
 
 describe("useCheckMonitor AbortSignal behavior (#437)", () => {
   it("aborts in-flight check fetches when the component unmounts", async () => {
+    let fetchStarted = false;
     let aborted = false;
     server.use(
       http.post(api.monitors.check.path, async ({ request }) => {
+        fetchStarted = true;
         await new Promise<void>((resolve) => {
           request.signal.addEventListener("abort", () => {
             aborted = true;
@@ -765,18 +767,17 @@ describe("useCheckMonitor AbortSignal behavior (#437)", () => {
       result.current.mutate(1);
     });
 
-    // Give the mutation a tick to dispatch the fetch
-    await new Promise((r) => setTimeout(r, 20));
+    await waitFor(() => expect(fetchStarted).toBe(true));
     unmount();
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(aborted).toBe(true);
+    await waitFor(() => expect(aborted).toBe(true));
   });
 
   it("useCheckMonitorSilent also aborts in-flight fetches on unmount", async () => {
+    let fetchStarted = false;
     let aborted = false;
     server.use(
       http.post(api.monitors.check.path, async ({ request }) => {
+        fetchStarted = true;
         await new Promise<void>((resolve) => {
           request.signal.addEventListener("abort", () => {
             aborted = true;
@@ -795,10 +796,8 @@ describe("useCheckMonitor AbortSignal behavior (#437)", () => {
       result.current.mutate(1);
     });
 
-    await new Promise((r) => setTimeout(r, 20));
+    await waitFor(() => expect(fetchStarted).toBe(true));
     unmount();
-    await new Promise((r) => setTimeout(r, 20));
-
-    expect(aborted).toBe(true);
+    await waitFor(() => expect(aborted).toBe(true));
   });
 });

@@ -100,6 +100,46 @@ describe("rewriteIndexHtmlForCrawler", () => {
     expect(ogDescMatch).not.toBeNull();
     expect(ogDescMatch?.[1]).not.toMatch(/[^&]".*"/); // no unescaped quote pairs
   });
+
+  it("rewrites tags even when attributes are split across multiple lines", () => {
+    // \s+ in JS regex matches newlines by default, but lock that in so a
+    // future prettier reformat or hand-edit that line-wraps attributes
+    // doesn't silently break the rewriter.
+    const multilineTemplate = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta
+      name="description"
+      content="landing description"
+    />
+    <meta
+      property="og:title"
+      content="landing title"
+    />
+    <meta
+      property="og:url"
+      content="https://old.example.com/"
+    />
+  </head>
+</html>`;
+    const out = rewriteIndexHtmlForCrawler(
+      multilineTemplate,
+      "/pricing",
+      "https://ftc.bd73.com",
+    );
+    const pricingMeta = getPageMetadata("/pricing");
+    expect(out).toContain(
+      `<meta name="description" content="${pricingMeta.description.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" />`,
+    );
+    expect(out).toContain(
+      `<meta property="og:title" content="${pricingMeta.title}" />`,
+    );
+    expect(out).toContain(
+      '<meta property="og:url" content="https://ftc.bd73.com/pricing" />',
+    );
+    expect(out).not.toContain("landing description");
+    expect(out).not.toContain("landing title");
+  });
 });
 
 describe("getPageMetadata", () => {
@@ -117,6 +157,82 @@ describe("getPageMetadata", () => {
   it("falls back to landing metadata for an unknown path", () => {
     const meta = getPageMetadata("/no-such-route-exists");
     expect(meta.title).toContain("FetchTheChange");
+  });
+
+  it("normalizes trailing slash before lookup (#440 skeptic Concern 7)", () => {
+    expect(getPageMetadata("/pricing/").title).toBe(
+      getPageMetadata("/pricing").title,
+    );
+  });
+
+  it("does not strip the root path's slash", () => {
+    expect(getPageMetadata("/").title).toContain("FetchTheChange");
+  });
+});
+
+describe("rewriteIndexHtmlForCrawler noindex for unknown paths (Concern 2)", () => {
+  it("injects robots noindex when the path has no PAGE_METADATA entry", () => {
+    const out = rewriteIndexHtmlForCrawler(
+      TEMPLATE,
+      "/no-such-path",
+      "https://ftc.bd73.com",
+    );
+    expect(out).toContain('<meta name="robots" content="noindex" />');
+    // og:url still reflects the real path so a caller can see what was hit
+    expect(out).toContain(
+      '<meta property="og:url" content="https://ftc.bd73.com/no-such-path" />',
+    );
+  });
+
+  it("does NOT inject noindex for known paths", () => {
+    const out = rewriteIndexHtmlForCrawler(
+      TEMPLATE,
+      "/pricing",
+      "https://ftc.bd73.com",
+    );
+    expect(out).not.toContain('<meta name="robots" content="noindex" />');
+  });
+
+  it("normalizes trailing slash so /pricing/ is treated as known", () => {
+    const out = rewriteIndexHtmlForCrawler(
+      TEMPLATE,
+      "/pricing/",
+      "https://ftc.bd73.com",
+    );
+    expect(out).not.toContain('<meta name="robots" content="noindex" />');
+    // Canonical should point at the trailing-slash-stripped URL
+    expect(out).toContain(
+      '<link rel="canonical" href="https://ftc.bd73.com/pricing" />',
+    );
+  });
+});
+
+describe("client/index.html contains exactly one of each rewritten tag", () => {
+  // The regex rewriter replaces only the first occurrence. A duplicate meta
+  // tag (from a Vite plugin injection or hand-edit) would leave the second
+  // copy showing landing-page content. Lock in the invariant. See Phase 5
+  // skeptic Concern 7.
+  const clientIndex = fs.readFileSync(
+    path.resolve(__dirname, "..", "client", "index.html"),
+    "utf-8",
+  );
+  const countOccurrences = (re: RegExp): number =>
+    (clientIndex.match(re) ?? []).length;
+
+  it.each([
+    ["<title>", /<title>/gi],
+    ["description", /<meta\s+name="description"/gi],
+    ["canonical link", /<link\s+rel="canonical"/gi],
+    ["og:type", /<meta\s+property="og:type"/gi],
+    ["og:title", /<meta\s+property="og:title"/gi],
+    ["og:description", /<meta\s+property="og:description"/gi],
+    ["og:url", /<meta\s+property="og:url"/gi],
+    ["og:image", /<meta\s+property="og:image"/gi],
+    ["twitter:title", /<meta\s+name="twitter:title"/gi],
+    ["twitter:description", /<meta\s+name="twitter:description"/gi],
+    ["twitter:image", /<meta\s+name="twitter:image"/gi],
+  ])("has exactly one %s tag", (_label, re) => {
+    expect(countOccurrences(re)).toBe(1);
   });
 });
 

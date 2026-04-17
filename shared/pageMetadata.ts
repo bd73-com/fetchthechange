@@ -138,5 +138,11 @@ export const PAGE_METADATA: Record<string, PageMeta> = {
   },
 };
 
-/** Fallback entry used when no per-path metadata exists. */
-export const DEFAULT_PAGE_METADATA: PageMeta = PAGE_METADATA["/"]!;
+/**
+ * Fallback entry used when no per-path metadata exists. Frozen because
+ * getPageMetadata returns this reference directly on cache-miss — mutating
+ * it would corrupt the landing metadata for every subsequent request.
+ */
+export const DEFAULT_PAGE_METADATA: PageMeta = Object.freeze({
+  ...PAGE_METADATA["/"]!,
+});

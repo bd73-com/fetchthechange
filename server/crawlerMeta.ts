@@ -50,8 +50,24 @@ function escapeHtmlText(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
+/**
+ * Normalize a request path for metadata lookup: strip trailing slash (except
+ * for root "/"). Without this, `/pricing/` would miss PAGE_METADATA and fall
+ * back to the landing metadata with a non-canonical `og:url`. See Phase 5
+ * skeptic Concern 7.
+ */
+function normalizePath(path: string): string {
+  if (path.length > 1 && path.endsWith("/")) return path.slice(0, -1);
+  return path;
+}
+
 export function getPageMetadata(path: string): PageMeta {
-  return PAGE_METADATA[path] ?? DEFAULT_PAGE_METADATA;
+  return PAGE_METADATA[normalizePath(path)] ?? DEFAULT_PAGE_METADATA;
+}
+
+/** Returns true when the given path has a known PAGE_METADATA entry. */
+export function hasKnownPageMetadata(path: string): boolean {
+  return PAGE_METADATA[normalizePath(path)] !== undefined;
 }
 
 /**
@@ -59,14 +75,21 @@ export function getPageMetadata(path: string): PageMeta {
  * with per-path metadata. Uses regex replacements against the well-known tag
  * shape emitted from client/index.html — when that template changes, this
  * pattern-matching may need to change too (covered by crawlerMeta.test.ts).
+ *
+ * When the path has no PAGE_METADATA entry (e.g., a typo or stale URL), the
+ * rewriter additionally injects `<meta name="robots" content="noindex">` so
+ * crawlers don't index arbitrary 404-equivalent paths with landing-page
+ * content. See Phase 5 skeptic Concern 2.
  */
 export function rewriteIndexHtmlForCrawler(
   template: string,
   path: string,
   baseUrl: string,
 ): string {
-  const meta = getPageMetadata(path);
-  const canonicalUrl = `${baseUrl}${path}`;
+  const normalized = normalizePath(path);
+  const meta = getPageMetadata(normalized);
+  const isKnown = hasKnownPageMetadata(normalized);
+  const canonicalUrl = `${baseUrl}${normalized}`;
   const ogImage = meta.image
     ? meta.image.startsWith("http")
       ? meta.image
@@ -127,6 +150,16 @@ export function rewriteIndexHtmlForCrawler(
     /<meta\s+name="twitter:image"\s+content="[^"]*"\s*\/?>/i,
     `<meta name="twitter:image" content="${imageA}" />`,
   );
+
+  if (!isKnown) {
+    // Inject noindex so Googlebot doesn't index typo / stale URLs as 200s.
+    // Prepend into <head> — the test suite asserts this flags unknown paths
+    // distinctly so clients can tell whether a bot fetched a known page.
+    out = out.replace(
+      /<head>/i,
+      '<head>\n    <meta name="robots" content="noindex" />',
+    );
+  }
 
   return out;
 }

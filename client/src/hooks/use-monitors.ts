@@ -14,9 +14,18 @@ import { useToast } from "@/hooks/use-toast";
  */
 function useAbortableFetchers() {
   const controllersRef = useRef<Set<AbortController>>(new Set());
+  // Tracks whether the component is currently mounted. Without this, React 18
+  // StrictMode's double-invoke (mount → cleanup → mount) would abort every
+  // controller started in the mount window and leave the hook permanently
+  // cleared. Mutations started after the real mount re-set this to true.
+  const mountedRef = useRef(true);
   useEffect(() => {
+    mountedRef.current = true;
+    // Capture the Set reference so the cleanup aborts the same object the
+    // effect opened with, even if the ref's .current is ever reassigned.
     const controllers = controllersRef.current;
     return () => {
+      mountedRef.current = false;
       controllers.forEach((c) => c.abort());
       controllers.clear();
     };

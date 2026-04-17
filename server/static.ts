@@ -26,6 +26,14 @@ export function serveStatic(app: Express) {
     return cachedTemplate;
   };
 
+  // Cache the rewritten HTML per-path so a crawler flood against many paths
+  // doesn't redo the regex work on every hit. Bounded by the number of
+  // PAGE_METADATA entries plus some unknown paths; evict on size > 200 so a
+  // UA-spoofed crawl of thousands of distinct paths can't grow it unbounded.
+  // See Phase 5 skeptic Concern 4.
+  const rewriteCache = new Map<string, string>();
+  const REWRITE_CACHE_MAX = 200;
+
   // fall through to index.html if the file doesn't exist
   app.use("/{*path}", (req, res) => {
     // Bots that don't execute JS need per-route OG/Twitter meta in the
@@ -33,15 +41,22 @@ export function serveStatic(app: Express) {
     // See GitHub issue #440.
     if (isCrawlerUserAgent(req.get("user-agent"))) {
       try {
-        // Use the pinned canonical origin from REPLIT_DOMAINS, not the
-        // request's Host header. A crafted Host would otherwise be reflected
-        // into og:url / canonical for crawlers and could be cached as SEO
-        // poisoning or fake unfurl previews.
-        const html = rewriteIndexHtmlForCrawler(
-          getCachedTemplate(),
-          req.path,
-          getAppUrl(),
-        );
+        const baseUrl = getAppUrl();
+        const cacheKey = `${baseUrl}${req.path}`;
+        let html = rewriteCache.get(cacheKey);
+        if (html === undefined) {
+          // Use the pinned canonical origin from REPLIT_DOMAINS, not the
+          // request's Host header. A crafted Host would otherwise be reflected
+          // into og:url / canonical for crawlers and could be cached as SEO
+          // poisoning or fake unfurl previews.
+          html = rewriteIndexHtmlForCrawler(
+            getCachedTemplate(),
+            req.path,
+            baseUrl,
+          );
+          if (rewriteCache.size >= REWRITE_CACHE_MAX) rewriteCache.clear();
+          rewriteCache.set(cacheKey, html);
+        }
         res.status(200).set({ "Content-Type": "text/html" }).send(html);
         return;
       } catch {

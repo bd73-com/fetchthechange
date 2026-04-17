@@ -41,7 +41,18 @@ function extractSEOPath(src: string): string | null {
   const seoBlock = src.match(/<SEOHead[\s\S]*?\/>/);
   if (!seoBlock) return null;
   const staticPath = seoBlock[0].match(/path\s*=\s*"([^"]+)"/);
-  return staticPath ? staticPath[1] : null;
+  if (staticPath) return staticPath[1];
+  // Resolve one level of const indirection (e.g., blog pages use
+  // `path={BLOG_PATH}` with `const BLOG_PATH = "..."` defined in the same
+  // file). Without this, all 7 blog posts silently bypass the parity test —
+  // exactly the surface most likely to drift (Phase 5 skeptic Concern 1).
+  const constRefMatch = seoBlock[0].match(/path\s*=\s*\{(\w+)\}/);
+  if (!constRefMatch) return null;
+  const varName = constRefMatch[1];
+  const constDef = src.match(
+    new RegExp(`const\\s+${varName}\\s*=\\s*"([^"]+)"`),
+  );
+  return constDef ? constDef[1] : null;
 }
 
 // Pages where SEOHead receives a path literal AND the title/description are
