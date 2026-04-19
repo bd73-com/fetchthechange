@@ -1,6 +1,6 @@
 import { useAuth } from "@/hooks/use-auth";
 import { usePageTitle } from "@/hooks/use-page-title";
-import { useMonitors, useCheckMonitor } from "@/hooks/use-monitors";
+import { useMonitors, useCheckMonitor, useAbortableFetchers } from "@/hooks/use-monitors";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 import { CreateMonitorDialog } from "@/components/CreateMonitorDialog";
@@ -40,20 +40,16 @@ export default function Dashboard() {
   // stays false for the rest of the component's life and handleRefresh bails
   // out immediately.
   const mountedRef = useRef(true);
-  // Tracks AbortControllers for in-flight bulk-refresh fetches so we can abort
-  // them on unmount. Without this, the direct-fetch path bypasses
-  // useAbortableFetchers (the hook path the typed mutations use) and the
-  // browser keeps in-flight requests running on the server, burning
-  // Browserless / Resend quota after the user has navigated away. See GitHub
+  // Shared with the hook-path fetchers (useCheckMonitor / useCheckMonitorSilent)
+  // so the Dashboard's bulk-refresh direct-fetch path gets the same
+  // abort-on-unmount guarantee without duplicating the Set bookkeeping. The
+  // direct fetch bypasses the typed hooks to avoid an N-way query
+  // invalidation storm; this keeps the abort semantics aligned. See GitHub
   // issue #446.
-  const bulkAbortControllers = useRef<Set<AbortController>>(new Set());
+  const bulkAbortControllers = useAbortableFetchers();
   useEffect(() => {
     mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      bulkAbortControllers.current.forEach(c => c.abort());
-      bulkAbortControllers.current.clear();
-    };
+    return () => { mountedRef.current = false; };
   }, []);
   const { toast } = useToast();
   const searchString = useSearch();
