@@ -24,6 +24,10 @@ const LOGGER_SRC = fs.readFileSync(
   path.resolve(__dirname, "services", "logger.ts"),
   "utf-8",
 );
+const ENSURE_TABLES_SRC = fs.readFileSync(
+  path.resolve(__dirname, "services", "ensureTables.ts"),
+  "utf-8",
+);
 
 function extractStatusList(label: string): string[] {
   const re = new RegExp(`${label}\\s*=\\s*\\[([^\\]]+)\\]`);
@@ -136,6 +140,74 @@ function extractLoggerConflictTargetColumns(): string[] {
   }
   return Array.from(m[1].matchAll(/errorLogs\.(\w+)/g)).map((mm) => mm[1]);
 }
+
+// -----------------------------------------------------------------------------
+// schema.ts <-> ensureTables.ts predicate parity for partial indexes.
+// Every partial index declared in shared/schema.ts that we rely on Postgres
+// to bootstrap via ensureTables must be present there with a byte-identical
+// WHERE predicate. A mismatch causes:
+//   - ON CONFLICT inference failure (Postgres requires strict predicate
+//     equality), which surfaces as the logger/backfill catch block swallowing
+//     the error and silently disabling the feature.
+//   - Endless drizzle-kit push churn (the diff flips the index back and forth).
+// See GitHub issues #448, #452, #453.
+// -----------------------------------------------------------------------------
+
+type BootstrapRequiredIndex = {
+  name: string;
+  schemaKey: string;
+};
+
+const BOOTSTRAP_REQUIRED_PARTIAL_INDEXES: BootstrapRequiredIndex[] = [
+  { name: "error_logs_unresolved_dedup_idx", schemaKey: "unresolvedDedupIdx" },
+  { name: "campaigns_type_automated_idx", schemaKey: "typeAutomatedIdx" },
+  { name: "campaign_recipients_active_user_idx", schemaKey: "activeUserCampaignIdx" },
+  { name: "automation_subscriptions_dedup_with_monitor", schemaKey: "dedupWithMonitor" },
+  { name: "automation_subscriptions_dedup_global", schemaKey: "dedupGlobal" },
+];
+
+function normalizeWhitespace(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function extractEnsureTablesPredicate(indexName: string): string {
+  // Match the CREATE [UNIQUE] INDEX [CONCURRENTLY] [IF NOT EXISTS] <name>
+  // ... WHERE <predicate> pattern. Allow the statement to span multiple lines
+  // (the error_logs bootstrap uses a multi-line template literal). Stop at the
+  // closing backtick or the end of statement punctuation so we don't bleed
+  // into trailing SQL fragments.
+  const re = new RegExp(
+    `CREATE\\s+(?:UNIQUE\\s+)?INDEX\\s+(?:CONCURRENTLY\\s+)?(?:IF\\s+NOT\\s+EXISTS\\s+)?${indexName}\\b[\\s\\S]*?WHERE\\s+([\\s\\S]*?)\`\\s*\\)`,
+  );
+  const m = ENSURE_TABLES_SRC.match(re);
+  if (!m) {
+    throw new Error(
+      `failed to extract WHERE predicate for ${indexName} from server/services/ensureTables.ts — ` +
+        "missing bootstrap for this partial index, or the CREATE INDEX " +
+        "statement changed shape (split across db.execute calls, different " +
+        "name, etc.). Add or repair the bootstrap so schema and DDL stay " +
+        "byte-identical.",
+    );
+  }
+  return normalizeWhitespace(m[1]);
+}
+
+function extractSchemaPredicate(schemaKey: string): string {
+  const re = new RegExp(`${schemaKey}[\\s\\S]*?\\.where\\(sql\`([^\`]+)\`\\)`);
+  const m = SCHEMA_SRC.match(re);
+  if (!m) throw new Error(`failed to extract ${schemaKey} predicate from shared/schema.ts`);
+  return normalizeWhitespace(m[1]);
+}
+
+describe("partial-index bootstrap parity between schema.ts and ensureTables.ts", () => {
+  for (const idx of BOOTSTRAP_REQUIRED_PARTIAL_INDEXES) {
+    it(`${idx.name}: ensureTables bootstrap exists and its WHERE predicate byte-matches shared/schema.ts`, () => {
+      const schemaPredicate = extractSchemaPredicate(idx.schemaKey);
+      const ddlPredicate = extractEnsureTablesPredicate(idx.name);
+      expect(ddlPredicate).toBe(schemaPredicate);
+    });
+  }
+});
 
 describe("error_logs_unresolved_dedup_idx predicate matches ErrorLogger upsert targetWhere", () => {
   it("index WHERE clause and onConflictDoUpdate targetWhere are byte-for-byte equal", () => {

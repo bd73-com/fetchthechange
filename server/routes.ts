@@ -36,7 +36,7 @@ import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encry
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes } from "./services/ensureTables";
+import { ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes, ensureCampaignPartialIndexes } from "./services/ensureTables";
 import { renderRobotsTxt, renderSitemapXml } from "./services/seoFiles";
 
 
@@ -84,6 +84,7 @@ export async function registerRoutes(
   const apiKeysReady = await ensureApiKeysTable();
   await ensureChannelTables();
   await ensureMonitorChangesIndexes();
+  await ensureCampaignPartialIndexes();
   const notificationQueueReady = await ensureNotificationQueueColumns();
   if (!notificationQueueReady) {
     console.error("CRITICAL: notification_queue columns missing — notification cron queries will fail");

@@ -506,13 +506,15 @@ export const automationSubscriptions = pgTable("automation_subscriptions", {
 }, (table) => ({
   userIdx: index("automation_subscriptions_user_idx").on(table.userId),
   platformIdx: index("automation_subscriptions_platform_idx").on(table.platform),
-  // Dedup: one active sub per (user, platform, hookUrlHash, monitorId) — split into two partial indexes
+  // Dedup: one active sub per (user, platform, hookUrlHash, monitorId) — split into two partial indexes.
+  // Predicate must stay byte-identical to the DDL in ensureAutomationSubscriptionsTable so
+  // a future ON CONFLICT against these indexes can match (see GitHub issue #453 and #448).
   dedupWithMonitor: uniqueIndex("automation_subscriptions_dedup_with_monitor")
     .on(table.userId, table.platform, table.hookUrlHash, table.monitorId)
-    .where(sql`active = true AND monitor_id IS NOT NULL`),
+    .where(sql`active = true AND monitor_id IS NOT NULL AND hook_url_hash IS NOT NULL`),
   dedupGlobal: uniqueIndex("automation_subscriptions_dedup_global")
     .on(table.userId, table.platform, table.hookUrlHash)
-    .where(sql`active = true AND monitor_id IS NULL`),
+    .where(sql`active = true AND monitor_id IS NULL AND hook_url_hash IS NOT NULL`),
 }));
 
 export const automationSubscriptionsRelations = relations(automationSubscriptions, ({ one }) => ({

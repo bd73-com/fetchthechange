@@ -407,6 +407,58 @@ export async function ensureMonitorChangesIndexes(): Promise<void> {
 }
 
 /**
+ * Ensures the partial indexes on `campaigns(id) WHERE type='automated'` and
+ * `campaign_recipients(user_id, campaign_id) WHERE status IN (<active>)` exist
+ * (PR #447). Without them, the welcome-exclusion anti-join in
+ * resolveRecipients (server/services/campaignEmail.ts) falls back to a Seq
+ * Scan + Hash Anti Join whose runtime scales O(N) in total historical
+ * recipient rows — see GitHub issue #452.
+ *
+ * Predicates are kept byte-identical to shared/schema.ts. The
+ * partial-index-invariants test asserts this parity so drift between schema
+ * and DDL is caught before it ships.
+ */
+export async function ensureCampaignPartialIndexes(): Promise<void> {
+  try {
+    // campaigns_type_automated_idx
+    const existingCampaignIdx = await db.execute(sql`
+      SELECT i.indisvalid
+      FROM pg_indexes ix
+      JOIN pg_class c ON c.relname = ix.indexname
+      JOIN pg_index i ON i.indexrelid = c.oid
+      WHERE ix.indexname = 'campaigns_type_automated_idx'
+    `);
+    const campaignRows = (existingCampaignIdx as any).rows as Array<{ indisvalid: boolean }> | undefined;
+    if (campaignRows && campaignRows.length > 0) {
+      if (!campaignRows[0].indisvalid) {
+        console.warn("[ensureTables] Dropping invalid index campaigns_type_automated_idx");
+        await db.execute(sql`DROP INDEX IF EXISTS campaigns_type_automated_idx`);
+      }
+    }
+    await db.execute(sql`CREATE INDEX CONCURRENTLY IF NOT EXISTS campaigns_type_automated_idx ON campaigns(id) WHERE type = 'automated'`);
+
+    // campaign_recipients_active_user_idx — predicate must byte-match schema.ts
+    const existingRecipientIdx = await db.execute(sql`
+      SELECT i.indisvalid
+      FROM pg_indexes ix
+      JOIN pg_class c ON c.relname = ix.indexname
+      JOIN pg_index i ON i.indexrelid = c.oid
+      WHERE ix.indexname = 'campaign_recipients_active_user_idx'
+    `);
+    const recipientRows = (existingRecipientIdx as any).rows as Array<{ indisvalid: boolean }> | undefined;
+    if (recipientRows && recipientRows.length > 0) {
+      if (!recipientRows[0].indisvalid) {
+        console.warn("[ensureTables] Dropping invalid index campaign_recipients_active_user_idx");
+        await db.execute(sql`DROP INDEX IF EXISTS campaign_recipients_active_user_idx`);
+      }
+    }
+    await db.execute(sql`CREATE INDEX CONCURRENTLY IF NOT EXISTS campaign_recipients_active_user_idx ON campaign_recipients(user_id, campaign_id) WHERE status IN ('pending', 'sent', 'delivered', 'opened', 'clicked')`);
+  } catch (e) {
+    console.warn("Could not ensure campaign partial indexes:", e);
+  }
+}
+
+/**
  * Ensures tags and monitor_tags tables exist (added in PR #86).
  * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
  */
