@@ -87,6 +87,14 @@ export class ErrorLogger {
       // "Browserless service unavailable" warning) both miss the SELECT and
       // both INSERT, producing duplicate rows in the admin UI. See GitHub
       // issue #448.
+      //
+      // Stack/context semantics: `COALESCE(EXCLUDED.col, currentTable.col)`
+      // is last-writer-wins when the incoming call supplies a non-null value,
+      // and preserves the prior value when the incoming call doesn't. The
+      // admin UI therefore shows the most recent caller's stack/context for
+      // a dedup bucket, not the first-observed one. `firstOccurrence` is set
+      // only on INSERT — the conflict update path deliberately does not
+      // touch it, preserving the original event time.
       const now = new Date();
       await db
         .insert(errorLogs)

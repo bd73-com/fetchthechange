@@ -40,12 +40,13 @@ export default function Dashboard() {
   // stays false for the rest of the component's life and handleRefresh bails
   // out immediately.
   const mountedRef = useRef(true);
-  // Shared with the hook-path fetchers (useCheckMonitor / useCheckMonitorSilent)
-  // so the Dashboard's bulk-refresh direct-fetch path gets the same
-  // abort-on-unmount guarantee without duplicating the Set bookkeeping. The
-  // direct fetch bypasses the typed hooks to avoid an N-way query
-  // invalidation storm; this keeps the abort semantics aligned. See GitHub
-  // issue #446.
+  // Uses the same abort-on-unmount abstraction as the hook-path fetchers
+  // (useCheckMonitor / useCheckMonitorSilent); each hook call returns its
+  // own Set, so Dashboard's direct-fetch controllers are tracked separately
+  // from any concurrent hook-path mutations (MonitorCard etc). Dashboard
+  // bypasses the typed hooks on the bulk path to avoid an N-way query
+  // invalidation storm; reusing the helper keeps the abort semantics
+  // aligned. See GitHub issue #446.
   const bulkAbortControllers = useAbortableFetchers();
   useEffect(() => {
     mountedRef.current = true;

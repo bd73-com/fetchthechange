@@ -1317,12 +1317,12 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     // admin UI has an entry for the degradation episode — regardless of
     // whether the monitor has a cached value (graceful degradation) or is a
     // first-check monitor that falls through to selector_missing. Gated on
-    // `!newValue` so we don't spam admins when static extraction actually
-    // succeeded (rare: newValue set AND block.blocked flipped true, forcing
-    // the Browserless path). The message is monitor-agnostic so affected
-    // monitors dedup into a single row via the unresolved-dedup index (#448).
-    // See GitHub issue #449.
-    if (skippedDueToOpenCircuit && !newValue) {
+    // `newValue == null` (explicit null/undefined, not falsy) so a monitor
+    // whose selector legitimately resolves to an empty string isn't flagged
+    // when static extraction succeeded. The message is monitor-agnostic so
+    // affected monitors dedup into a single row via the unresolved-dedup
+    // index (#448). See GitHub issue #449.
+    if (skippedDueToOpenCircuit && newValue == null) {
       await ErrorLogger.warning(
         "scraper",
         "Browserless circuit breaker open — preserving last known values",

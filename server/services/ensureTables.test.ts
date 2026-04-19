@@ -73,10 +73,48 @@ describe("ensureErrorLogColumns", () => {
     mockExecute.mockReset();
   });
 
-  it("executes 3 ALTER TABLE statements without throwing", async () => {
-    mockExecute.mockResolvedValue([]);
+  it("executes ALTERs, pg_indexes check, dedup tx, and CONCURRENTLY index creation without throwing", async () => {
+    // Default empty rows → no existing valid index, proceed to dedup + create.
+    mockExecute.mockResolvedValue({ rows: [] });
     await ensureErrorLogColumns();
-    expect(mockExecute).toHaveBeenCalledTimes(3);
+    // 3 ALTER TABLE + 1 pg_indexes check + 4 in-tx (SET LOCAL, advisory
+    // lock, UPDATE, DELETE) + 1 CREATE UNIQUE INDEX CONCURRENTLY = 9
+    expect(mockExecute).toHaveBeenCalledTimes(9);
+    const stmts = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(stmts.some((s: string) => s.includes("first_occurrence"))).toBe(true);
+    expect(stmts.some((s: string) => s.includes("occurrence_count"))).toBe(true);
+    expect(stmts.some((s: string) => s.includes("pg_indexes"))).toBe(true);
+    expect(stmts.some((s: string) => s.includes("pg_advisory_xact_lock"))).toBe(true);
+    expect(stmts.some((s: string) => s.includes("CREATE UNIQUE INDEX") && s.includes("CONCURRENTLY") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(true);
+  });
+
+  it("skips DDL entirely when a valid index already exists", async () => {
+    // pg_indexes check returns a valid row → fast-path return.
+    mockExecute
+      .mockResolvedValueOnce({ rows: [] }) // ALTER first_occurrence
+      .mockResolvedValueOnce({ rows: [] }) // ALTER occurrence_count
+      .mockResolvedValueOnce({ rows: [] }) // ALTER deleted_at
+      .mockResolvedValueOnce({ rows: [{ indisvalid: true }] }); // pg_indexes check
+    await ensureErrorLogColumns();
+    expect(mockExecute).toHaveBeenCalledTimes(4); // ALTERs + pg_indexes only
+  });
+
+  it("drops invalid index before rebuilding", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockExecute
+      .mockResolvedValueOnce({ rows: [] }) // ALTER first_occurrence
+      .mockResolvedValueOnce({ rows: [] }) // ALTER occurrence_count
+      .mockResolvedValueOnce({ rows: [] }) // ALTER deleted_at
+      .mockResolvedValueOnce({ rows: [{ indisvalid: false }] }) // pg_indexes check → invalid
+      .mockResolvedValue({ rows: [] }); // DROP + tx statements + CREATE
+    await ensureErrorLogColumns();
+    const stmts = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(stmts.some((s: string) => s.includes("DROP INDEX") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(true);
+    warnSpy.mockRestore();
   });
 
   it("catches errors and does not throw", async () => {
@@ -89,7 +127,7 @@ describe("ensureErrorLogColumns", () => {
     mockExecute.mockRejectedValue(new Error("permission denied"));
     await ensureErrorLogColumns();
     expect(warnSpy).toHaveBeenCalledWith(
-      "Could not ensure error_logs columns:",
+      "Could not ensure error_logs columns/index:",
       expect.any(Error),
     );
     warnSpy.mockRestore();

@@ -13,9 +13,19 @@ import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken, isEncryptionA
  * silently disabling DB-backed error logging for the entire deploy window
  * between code ship and `npm run schema:push`.
  *
- * Pre-existing duplicate unresolved rows (the bug #448 is fixing) would block
- * a naive `CREATE UNIQUE INDEX`, so we dedupe first: keep the newest row per
- * `(level, source, message)` group and sum `occurrence_count` into it.
+ * Migration strategy:
+ * 1. Fast-path idempotency: if a VALID unique index already exists, skip the
+ *    whole migration. If an INVALID one exists (leftover from an interrupted
+ *    CREATE CONCURRENTLY), drop it so we can rebuild.
+ * 2. Dedup pre-existing duplicate unresolved rows (the bug being fixed!) in
+ *    a transaction gated by a pg_advisory_xact_lock so concurrent instances
+ *    in a rolling deploy don't race on overlapping DELETEs. Cap the rolled-
+ *    up `occurrence_count` at INT32_MAX to avoid an overflow-rollback loop
+ *    on busy tables.
+ * 3. CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS — outside the tx so we
+ *    don't take a SHARE lock that would block every ErrorLogger.log caller
+ *    on the entire app during index build. Mirrors the pattern established
+ *    by ensureMonitorChangesIndexes below.
  */
 export async function ensureErrorLogColumns(): Promise<void> {
   try {
@@ -23,22 +33,37 @@ export async function ensureErrorLogColumns(): Promise<void> {
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS occurrence_count INTEGER NOT NULL DEFAULT 1`);
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP`);
 
-    // Skip the dedup + index step if the index already exists (idempotent
-    // across restarts). Check catalog directly so we don't do work on every
-    // boot after the initial migration has landed.
+    // Check if a valid unique index already exists — skip DDL entirely if so.
+    // Uses pg_index.indisvalid so an INVALID index (interrupted build) is
+    // detected and rebuilt, matching the ensureMonitorChangesIndexes pattern.
     const existing = await db.execute(sql`
-      SELECT 1 FROM pg_indexes WHERE indexname = 'error_logs_unresolved_dedup_idx' LIMIT 1
+      SELECT i.indisvalid
+      FROM pg_indexes ix
+      JOIN pg_class c ON c.relname = ix.indexname
+      JOIN pg_index i ON i.indexrelid = c.oid
+      WHERE ix.indexname = 'error_logs_unresolved_dedup_idx'
     `);
-    const alreadyExists = ((existing as any).rows?.length ?? 0) > 0;
-    if (alreadyExists) return;
+    const rows = (existing as any).rows as Array<{ indisvalid: boolean }> | undefined;
+    if (rows && rows.length > 0) {
+      if (rows[0].indisvalid) return; // Valid index — nothing to do
+      console.warn("[ensureTables] Dropping invalid index error_logs_unresolved_dedup_idx");
+      await db.execute(sql`DROP INDEX IF EXISTS error_logs_unresolved_dedup_idx`);
+    }
 
     // Dedupe pre-existing unresolved rows produced by the old racy
     // SELECT-then-INSERT path. Keep the newest row per
     // (level, source, message) group and roll up `occurrence_count` into it
-    // so the dedup bucket's total event count is preserved. Wrapped in a
-    // transaction so concurrent writers don't split the dedup mid-flight.
+    // so the dedup bucket's total event count is preserved. The advisory
+    // xact lock serializes concurrent boots in a rolling deploy so only one
+    // instance performs the dedup at a time; follow-up boots find nothing
+    // to merge and fall through to the idempotent CONCURRENTLY step below.
+    // LEAST(INT32_MAX, SUM) caps the rolled-up count so a site with many
+    // already-huge duplicate rows doesn't blow past integer range and
+    // rollback the whole transaction.
     await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL lock_timeout = '10s'`);
+      // Advisory lock key is a stable 64-bit hash of the migration identifier.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('error_logs_unresolved_dedup_migration', 0))`);
       await tx.execute(sql`
         WITH dups AS (
           SELECT id,
@@ -46,9 +71,9 @@ export async function ensureErrorLogColumns(): Promise<void> {
                    PARTITION BY level, source, message
                    ORDER BY timestamp DESC, id DESC
                  ) AS rn,
-                 SUM(occurrence_count) OVER (
+                 LEAST(2147483647, SUM(occurrence_count) OVER (
                    PARTITION BY level, source, message
-                 ) AS total_count
+                 ))::int AS total_count
           FROM error_logs
           WHERE resolved = false
         )
@@ -69,12 +94,16 @@ export async function ensureErrorLogColumns(): Promise<void> {
           ) d WHERE rn > 1
         )
       `);
-      await tx.execute(sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS error_logs_unresolved_dedup_idx
-        ON error_logs(level, source, message)
-        WHERE resolved = false
-      `);
     });
+
+    // CONCURRENTLY cannot run inside a transaction. IF NOT EXISTS makes this
+    // safe if another rolling-deploy instance beat us to it between the
+    // dedup tx above and this statement.
+    await db.execute(sql`
+      CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS error_logs_unresolved_dedup_idx
+      ON error_logs(level, source, message)
+      WHERE resolved = false
+    `);
   } catch (e) {
     console.warn("Could not ensure error_logs columns/index:", e);
   }
