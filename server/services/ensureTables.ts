@@ -3,17 +3,80 @@ import { sql } from "drizzle-orm";
 import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken, isEncryptionAvailable } from "../utils/encryption";
 
 /**
- * Ensures error_logs deduplication columns exist (added in PR #56).
- * Without this, db.select().from(errorLogs) fails when the schema
- * references columns the database doesn't have yet.
+ * Ensures error_logs deduplication columns and the partial unique index used
+ * by ErrorLogger's atomic upsert (see GitHub issue #448) exist.
+ *
+ * Without the index, `INSERT … ON CONFLICT (level, source, message) WHERE
+ * resolved = false` fails at runtime with "there is no unique or exclusion
+ * constraint matching the ON CONFLICT specification", which ErrorLogger's
+ * catch block at server/services/logger.ts swallows to `console.error` —
+ * silently disabling DB-backed error logging for the entire deploy window
+ * between code ship and `npm run schema:push`.
+ *
+ * Pre-existing duplicate unresolved rows (the bug #448 is fixing) would block
+ * a naive `CREATE UNIQUE INDEX`, so we dedupe first: keep the newest row per
+ * `(level, source, message)` group and sum `occurrence_count` into it.
  */
 export async function ensureErrorLogColumns(): Promise<void> {
   try {
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS first_occurrence TIMESTAMP NOT NULL DEFAULT NOW()`);
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS occurrence_count INTEGER NOT NULL DEFAULT 1`);
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP`);
+
+    // Skip the dedup + index step if the index already exists (idempotent
+    // across restarts). Check catalog directly so we don't do work on every
+    // boot after the initial migration has landed.
+    const existing = await db.execute(sql`
+      SELECT 1 FROM pg_indexes WHERE indexname = 'error_logs_unresolved_dedup_idx' LIMIT 1
+    `);
+    const alreadyExists = ((existing as any).rows?.length ?? 0) > 0;
+    if (alreadyExists) return;
+
+    // Dedupe pre-existing unresolved rows produced by the old racy
+    // SELECT-then-INSERT path. Keep the newest row per
+    // (level, source, message) group and roll up `occurrence_count` into it
+    // so the dedup bucket's total event count is preserved. Wrapped in a
+    // transaction so concurrent writers don't split the dedup mid-flight.
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL lock_timeout = '10s'`);
+      await tx.execute(sql`
+        WITH dups AS (
+          SELECT id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY level, source, message
+                   ORDER BY timestamp DESC, id DESC
+                 ) AS rn,
+                 SUM(occurrence_count) OVER (
+                   PARTITION BY level, source, message
+                 ) AS total_count
+          FROM error_logs
+          WHERE resolved = false
+        )
+        UPDATE error_logs
+        SET occurrence_count = dups.total_count
+        FROM dups
+        WHERE error_logs.id = dups.id AND dups.rn = 1
+      `);
+      await tx.execute(sql`
+        DELETE FROM error_logs
+        WHERE id IN (
+          SELECT id FROM (
+            SELECT id, ROW_NUMBER() OVER (
+              PARTITION BY level, source, message
+              ORDER BY timestamp DESC, id DESC
+            ) AS rn
+            FROM error_logs WHERE resolved = false
+          ) d WHERE rn > 1
+        )
+      `);
+      await tx.execute(sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS error_logs_unresolved_dedup_idx
+        ON error_logs(level, source, message)
+        WHERE resolved = false
+      `);
+    });
   } catch (e) {
-    console.warn("Could not ensure error_logs columns:", e);
+    console.warn("Could not ensure error_logs columns/index:", e);
   }
 }
 

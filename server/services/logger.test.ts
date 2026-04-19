@@ -73,6 +73,11 @@ describe("ErrorLogger atomic upsert", () => {
     expect(insertedValues.occurrenceCount).toBe(1);
     expect(insertedValues.firstOccurrence).toBeInstanceOf(Date);
     expect(insertedValues.timestamp).toBeInstanceOf(Date);
+    // null error → errorType/stackTrace must be null (not undefined) so the
+    // COALESCE(EXCLUDED.*, current.*) clause in the conflict update keeps
+    // prior non-null values on subsequent racing writes.
+    expect(insertedValues.errorType).toBeNull();
+    expect(insertedValues.stackTrace).toBeNull();
   });
 
   it("configures onConflictDoUpdate against the partial unique index", async () => {
