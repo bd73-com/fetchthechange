@@ -64,6 +64,17 @@ vi.mock("./db", () => ({
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }),
     update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }) }),
     execute: (...args: any[]) => mockDbExecute(...args),
+    // Delegate tx.execute back to the same mockDbExecute so the
+    // ensureErrorLogColumns migration's in-transaction SQL (SET LOCAL,
+    // pg_advisory_xact_lock, dedup UPDATE, dedup DELETE) is actually
+    // exercised under the migration mock sequences below. Without this,
+    // db.transaction is undefined and the whole migration falls into its
+    // catch block — silently making the 9-call sequence assertions pass
+    // for the wrong reason.
+    transaction: async (fn: (tx: any) => Promise<any>) => {
+      const tx = { execute: (...args: any[]) => mockDbExecute(...args) };
+      return fn(tx);
+    },
   },
 }));
 
@@ -246,7 +257,7 @@ describe("error_logs dedup column migration at startup", () => {
     await registerRoutes(app as any, app as any);
 
     expect(warnSpy).toHaveBeenCalledWith(
-      "Could not ensure error_logs columns:",
+      "Could not ensure error_logs columns/index:",
       migrationError,
     );
     warnSpy.mockRestore();
@@ -403,14 +414,22 @@ describe("error_logs dedup column migration at startup", () => {
   it("logs error and continues when notification channel table creation fails", async () => {
     vi.clearAllMocks();
     const channelError = new Error("permission denied for schema public");
-    // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs ALTERs succeed (3), api_keys succeed (2), then channel tables fail
+    // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs
+    // migration succeeds (3 ALTERs + 1 pg_indexes check + 4 in-tx + 1 CREATE
+    // INDEX CONCURRENTLY = 9), api_keys succeed (2), then channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors pending_retry_at
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 1
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 2
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 3
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs first_occurrence
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs occurrence_count
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs deleted_at
+      .mockResolvedValueOnce({ rows: [] }) // pg_indexes check (no existing idx)
+      .mockResolvedValueOnce({ rows: [] }) // SET LOCAL lock_timeout
+      .mockResolvedValueOnce({ rows: [] }) // pg_advisory_xact_lock
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE dedup
+      .mockResolvedValueOnce({ rows: [] }) // DELETE dedup
+      .mockResolvedValueOnce({ rows: [] }) // CREATE UNIQUE INDEX CONCURRENTLY
       .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
       .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
       .mockRejectedValueOnce(channelError); // notification_channels fails
@@ -443,14 +462,22 @@ describe("error_logs dedup column migration at startup", () => {
   it("registers channel routes even when notification channel tables fail to create", async () => {
     vi.clearAllMocks();
     const channelError = new Error("connection timeout");
-    // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs and api_keys succeed, channel tables fail
+    // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs
+    // migration succeeds (3 ALTERs + 1 pg_indexes check + 4 in-tx + 1 CREATE
+    // INDEX CONCURRENTLY = 9), api_keys succeed (2), channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors pending_retry_at
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 1
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 2
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs 3
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs first_occurrence
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs occurrence_count
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs deleted_at
+      .mockResolvedValueOnce({ rows: [] }) // pg_indexes check (no existing idx)
+      .mockResolvedValueOnce({ rows: [] }) // SET LOCAL lock_timeout
+      .mockResolvedValueOnce({ rows: [] }) // pg_advisory_xact_lock
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE dedup
+      .mockResolvedValueOnce({ rows: [] }) // DELETE dedup
+      .mockResolvedValueOnce({ rows: [] }) // CREATE UNIQUE INDEX CONCURRENTLY
       .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
       .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
       .mockRejectedValueOnce(channelError); // notification_channels fails

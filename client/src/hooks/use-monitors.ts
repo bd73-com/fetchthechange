@@ -10,9 +10,12 @@ import { useToast } from "@/hooks/use-toast";
  * cancellation signal (unlike `queryFn`), so we plumb one in ourselves. Used
  * by useCheckMonitor / useCheckMonitorSilent so an in-flight monitor check
  * stops burning browserless/scraper quota once the user navigates away.
- * See GitHub issue #437.
+ * Also reused by Dashboard's bulk-refresh direct-fetch path (#446), which
+ * intentionally bypasses these hooks to avoid an N-way query invalidation
+ * storm but still needs the same abort-on-unmount guarantee.
+ * See GitHub issues #437 and #446.
  */
-function useAbortableFetchers() {
+export function useAbortableFetchers() {
   const controllersRef = useRef<Set<AbortController>>(new Set());
   useEffect(() => {
     // Capture the Set reference so the cleanup aborts the same object the

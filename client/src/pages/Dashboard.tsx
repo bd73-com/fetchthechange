@@ -1,6 +1,6 @@
 import { useAuth } from "@/hooks/use-auth";
 import { usePageTitle } from "@/hooks/use-page-title";
-import { useMonitors, useCheckMonitor } from "@/hooks/use-monitors";
+import { useMonitors, useCheckMonitor, useAbortableFetchers } from "@/hooks/use-monitors";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 import { CreateMonitorDialog } from "@/components/CreateMonitorDialog";
@@ -40,6 +40,14 @@ export default function Dashboard() {
   // stays false for the rest of the component's life and handleRefresh bails
   // out immediately.
   const mountedRef = useRef(true);
+  // Uses the same abort-on-unmount abstraction as the hook-path fetchers
+  // (useCheckMonitor / useCheckMonitorSilent); each hook call returns its
+  // own Set, so Dashboard's direct-fetch controllers are tracked separately
+  // from any concurrent hook-path mutations (MonitorCard etc). Dashboard
+  // bypasses the typed hooks on the bulk path to avoid an N-way query
+  // invalidation storm; reusing the helper keeps the abort semantics
+  // aligned. See GitHub issue #446.
+  const bulkAbortControllers = useAbortableFetchers();
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -179,27 +187,34 @@ export default function Dashboard() {
     // approach failed because the 429 body ("Free tier: You can check…")
     // doesn't contain "rate limit".
     const bulkCheckOne = async (id: number): Promise<{ changed: boolean }> => {
-      const res = await fetch(buildUrl(api.monitors.check.path, { id }), {
-        method: api.monitors.check.method,
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        const err = new Error(errorData.message || "Failed to check monitor") as Error & { status: number };
-        err.status = res.status;
-        throw err;
+      const controller = new AbortController();
+      bulkAbortControllers.current.add(controller);
+      try {
+        const res = await fetch(buildUrl(api.monitors.check.path, { id }), {
+          method: api.monitors.check.method,
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          const err = new Error(errorData.message || "Failed to check monitor") as Error & { status: number };
+          err.status = res.status;
+          throw err;
+        }
+        return api.monitors.check.responses[200].parse(await res.json().catch(() => {
+          throw new Error("Unexpected response format from server");
+        }));
+      } finally {
+        bulkAbortControllers.current.delete(controller);
       }
-      return api.monitors.check.responses[200].parse(await res.json().catch(() => {
-        throw new Error("Unexpected response format from server");
-      }));
     };
 
     try {
       for (let i = 0; i < activeMonitors.length; i += REFRESH_CONCURRENCY) {
         // If the user navigated away mid-refresh, stop issuing new batches.
-        // In-flight requests continue (no AbortController plumbing yet) but
-        // the orphaned-work blast radius is capped at one batch rather than
-        // the full N monitors.
+        // In-flight requests from prior batches are aborted by
+        // `useAbortableFetchers`' unmount cleanup (#446); this early-return
+        // just stops queuing additional work.
         if (!mountedRef.current) return;
         const batch = activeMonitors.slice(i, i + REFRESH_CONCURRENCY);
         const results = await Promise.allSettled(batch.map(m => bulkCheckOne(m.id)));
@@ -207,8 +222,16 @@ export default function Dashboard() {
           if (r.status === "fulfilled") {
             if (r.value.changed) changed += 1; else unchanged += 1;
           } else {
-            const status = (r.reason as { status?: number } | undefined)?.status;
-            if (status === 429) rateLimited += 1; else failed += 1;
+            // AbortError rejections come from the unmount cleanup, not a real
+            // check failure — they should never inflate the `failed` tally.
+            // Today the summary toast is suppressed below by the `return`
+            // guarded on `!mountedRef.current`, but filtering here keeps the
+            // tally correct even if a future refactor hoists the toast above
+            // that guard, or aborts controllers for non-unmount reasons
+            // (e.g. a "cancel refresh" button).
+            const reason = r.reason as { status?: number; name?: string } | undefined;
+            if (reason?.name === "AbortError") continue;
+            if (reason?.status === 429) rateLimited += 1; else failed += 1;
           }
         }
       }

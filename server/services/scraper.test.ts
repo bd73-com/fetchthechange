@@ -3908,6 +3908,29 @@ describe("self-healing recovery", () => {
     expect(result.error).toBe("Selector not found (rendering service temporarily unavailable)");
   });
 
+  it("logs circuit-breaker-open warning for first-check monitors (no currentValue). See GitHub issue #449", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    const cbMock = browserlessCircuitBreaker as unknown as { isAvailable: ReturnType<typeof vi.fn>; recordSuccess: ReturnType<typeof vi.fn>; recordInfraFailure: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
+    cbMock.isAvailable.mockReturnValue(false);
+
+    const monitor = makeMonitor({ selector: ".missing", currentValue: null });
+    await runWithTimers(monitor);
+
+    // Admin UI must see a circuit-open entry regardless of whether the monitor
+    // has a cached value (graceful degradation) or is first-check. The message
+    // is monitor-agnostic so affected monitors dedup into a single row via the
+    // partial unique index (#448).
+    expect(ErrorLogger.warning).toHaveBeenCalledWith(
+      "scraper",
+      "Browserless circuit breaker open — preserving last known values",
+      expect.objectContaining({ monitorId: 1 }),
+    );
+  });
+
   it("falls through to blocked when no currentValue, infra failure, and page is blocked", async () => {
     // Page has a captcha element (triggers block detection)
     const blockedHtml = `<html><body><div class="captcha-container">Please verify</div></body></html>`;

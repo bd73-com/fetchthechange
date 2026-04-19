@@ -4,9 +4,9 @@
  * causes the planner to regress because the index no longer covers the new
  * status values. See Phase 5 skeptic Concern 3.
  *
- * Reads the campaignEmail.ts and schema.ts source as text rather than
- * importing them — the service module pulls in db.ts which requires a live
- * DATABASE_URL, and this test only needs to compare string predicates.
+ * Reads the campaignEmail.ts / logger.ts / schema.ts source as text rather
+ * than importing them — the service modules pull in db.ts which requires a
+ * live DATABASE_URL, and these tests only compare string predicates.
  */
 import { describe, it, expect } from "vitest";
 import fs from "fs";
@@ -18,6 +18,10 @@ const CAMPAIGN_EMAIL_SRC = fs.readFileSync(
 );
 const SCHEMA_SRC = fs.readFileSync(
   path.resolve(__dirname, "..", "shared", "schema.ts"),
+  "utf-8",
+);
+const LOGGER_SRC = fs.readFileSync(
+  path.resolve(__dirname, "services", "logger.ts"),
   "utf-8",
 );
 
@@ -83,5 +87,80 @@ describe("TERMINAL_RECIPIENT_STATUSES is a subset of ACTIVE_RECIPIENT_STATUSES",
     for (const status of TERMINAL_RECIPIENT_STATUSES) {
       expect(active.has(status)).toBe(true);
     }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// error_logs_unresolved_dedup_idx — the ErrorLogger upsert's ON CONFLICT
+// partial-index predicate must exactly match the index's WHERE clause.
+// Postgres matches ON CONFLICT inference specs by strict predicate equality;
+// a mismatch produces a runtime error ("there is no unique or exclusion
+// constraint matching the ON CONFLICT specification") that ErrorLogger's
+// catch block swallows, silently disabling logging. See GitHub issue #448.
+// -----------------------------------------------------------------------------
+
+function extractIndexPredicate(indexName: string): string {
+  const re = new RegExp(`${indexName}[\\s\\S]*?\\.where\\(sql\`([^\`]+)\`\\)`);
+  const m = SCHEMA_SRC.match(re);
+  if (!m) throw new Error(`failed to extract ${indexName} predicate from shared/schema.ts`);
+  return m[1].trim();
+}
+
+function extractLoggerTargetWherePredicate(): string {
+  const m = LOGGER_SRC.match(/targetWhere:\s*sql`([^`]+)`/);
+  if (!m) {
+    throw new Error(
+      "failed to extract targetWhere predicate from server/services/logger.ts — " +
+        "did the onConflictDoUpdate call move, split the predicate across " +
+        "fragments, or switch to a non-sql`` expression? The invariant test " +
+        "cannot validate the upsert until this regex matches the call shape again.",
+    );
+  }
+  return m[1].trim();
+}
+
+function extractLoggerConflictTargetColumns(): string[] {
+  // Match `target: [errorLogs.level, errorLogs.source, errorLogs.message]` on
+  // the onConflictDoUpdate call. Extracts the column names after the
+  // `errorLogs.` prefix so they can be compared against the schema's .on(...)
+  // tuple directly. If this regex stops matching, the caller-side assertion
+  // throws a descriptive error so the drift is caught rather than silently
+  // skipped.
+  const m = LOGGER_SRC.match(/target:\s*\[([^\]]+)\]/);
+  if (!m) {
+    throw new Error(
+      "failed to extract onConflictDoUpdate target column list from server/services/logger.ts — " +
+        "did the target tuple move, use a spread, or split across lines? The invariant test " +
+        "cannot validate the upsert target until this regex matches the call shape again.",
+    );
+  }
+  return Array.from(m[1].matchAll(/errorLogs\.(\w+)/g)).map((mm) => mm[1]);
+}
+
+describe("error_logs_unresolved_dedup_idx predicate matches ErrorLogger upsert targetWhere", () => {
+  it("index WHERE clause and onConflictDoUpdate targetWhere are byte-for-byte equal", () => {
+    const indexPredicate = extractIndexPredicate("unresolvedDedupIdx");
+    const loggerPredicate = extractLoggerTargetWherePredicate();
+    expect(loggerPredicate).toBe(indexPredicate);
+  });
+
+  it("schema index .on(...) and ErrorLogger target [...] both list exactly (level, source, message)", () => {
+    // Match the exact .on(...) column list for the unresolved-dedup index.
+    // If new columns are added or the order changes, the ErrorLogger upsert's
+    // `target: [errorLogs.level, errorLogs.source, errorLogs.message]` tuple
+    // must be updated in lockstep or Postgres rejects the conflict spec. We
+    // assert both sides match the canonical tuple AND each other, so schema-
+    // only or logger-only drift both fail the test.
+    const m = SCHEMA_SRC.match(
+      /unresolvedDedupIdx[\s\S]*?\.on\(([^)]+)\)/,
+    );
+    if (!m) throw new Error("failed to extract unresolvedDedupIdx .on(...) columns");
+    const schemaColumns = m[1]
+      .split(",")
+      .map((c) => c.trim().replace(/^table\./, ""))
+      .filter(Boolean);
+    const loggerColumns = extractLoggerConflictTargetColumns();
+    expect(schemaColumns).toEqual(["level", "source", "message"]);
+    expect(loggerColumns).toEqual(schemaColumns);
   });
 });

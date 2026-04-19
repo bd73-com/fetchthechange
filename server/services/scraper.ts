@@ -1265,11 +1265,13 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           } else if (browserlessInfraFailure) {
             // Infra-wide outage: monitor-agnostic message so every affected monitor
             // dedups into a single row in the admin UI. Per-monitor details stay
-            // in context for drill-down. NOTE: context is last-writer-wins
-            // (server/services/logger.ts:99), so during a mixed-mode outage
-            // monitorId/monitorName/url/classifiedReason reflect only the most
-            // recent writer, not an aggregate across affected monitors.
-            // occurrenceCount is the only signal of outage scope.
+            // in context for drill-down. NOTE: context is last-writer-wins at the
+            // DB level — the ON CONFLICT upsert in ErrorLogger.log uses
+            // COALESCE(EXCLUDED.context, current.context), so during a mixed-mode
+            // outage monitorId/monitorName/url/classifiedReason reflect only the
+            // most recent writer that supplied a non-null context, not an
+            // aggregate across affected monitors. occurrenceCount is the only
+            // signal of outage scope.
             await ErrorLogger.warning("scraper", "Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
           } else {
             // Site-specific failure: keep the monitor name because the site itself is the problem.
@@ -1305,9 +1307,28 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     }
 
     const oldValue = monitor.currentValue;
-    
+
     let finalStatus: "ok" | "blocked" | "selector_missing" | "error" = "ok";
     let finalError: string | null = null;
+
+    // When the circuit breaker was already OPEN before we even attempted
+    // extraction, the warning inside the `capCheck.allowed` block never fires
+    // (capCheck is forced to `{allowed:false}` above). Log one here so the
+    // admin UI has an entry for the degradation episode — regardless of
+    // whether the monitor has a cached value (graceful degradation) or is a
+    // first-check monitor that falls through to selector_missing. Gated on
+    // `newValue == null` (explicit null/undefined, not falsy) so a monitor
+    // whose selector legitimately resolves to an empty string isn't flagged
+    // when static extraction succeeded. The message is monitor-agnostic so
+    // affected monitors dedup into a single row via the unresolved-dedup
+    // index (#448). See GitHub issue #449.
+    if (skippedDueToOpenCircuit && newValue == null) {
+      await ErrorLogger.warning(
+        "scraper",
+        "Browserless circuit breaker open — preserving last known values",
+        { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
+      );
+    }
 
     if (!newValue) {
       if (browserlessInfraFailure && monitor.currentValue) {
@@ -1317,18 +1338,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         monitorsNeedingRetry.add(monitor.id);
         await storage.updateMonitor(monitor.id, { lastChecked: new Date() });
         console.log(`[SelfHeal] Monitor ${monitor.id}: Browserless unavailable, preserving last known value`);
-        // When the circuit breaker was already open before we tried extraction,
-        // the warning in the capCheck.allowed block never fires — log one here
-        // so the admin UI still shows an entry for this degradation episode.
-        // Use the flag (not live breaker state) to avoid a duplicate warning
-        // when an attempted extraction just opened the breaker.
-        if (skippedDueToOpenCircuit) {
-          await ErrorLogger.warning(
-            "scraper",
-            "Browserless circuit breaker open — preserving last known values",
-            { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
-          );
-        }
         return {
           changed: false,
           currentValue: monitor.currentValue,
