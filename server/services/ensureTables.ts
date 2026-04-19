@@ -420,18 +420,30 @@ export async function ensureMonitorChangesIndexes(): Promise<void> {
  */
 export async function ensureCampaignPartialIndexes(): Promise<void> {
   try {
-    // campaigns_type_automated_idx
+    // campaigns_type_automated_idx — also check pg_get_indexdef so a stale
+    // same-name index with wrong columns/predicate gets dropped and rebuilt
+    // (CREATE INDEX CONCURRENTLY IF NOT EXISTS is name-based only). Matches
+    // the ensureErrorLogColumns pattern — see CodeRabbit review on PR #455.
     const existingCampaignIdx = await db.execute(sql`
-      SELECT i.indisvalid
+      SELECT i.indisvalid, pg_get_indexdef(i.indexrelid) AS indexdef
       FROM pg_indexes ix
       JOIN pg_class c ON c.relname = ix.indexname
       JOIN pg_index i ON i.indexrelid = c.oid
       WHERE ix.indexname = 'campaigns_type_automated_idx'
     `);
-    const campaignRows = (existingCampaignIdx as any).rows as Array<{ indisvalid: boolean }> | undefined;
+    const campaignRows = (existingCampaignIdx as any).rows as Array<{ indisvalid: boolean; indexdef: string }> | undefined;
     if (campaignRows && campaignRows.length > 0) {
-      if (!campaignRows[0].indisvalid) {
-        console.warn("[ensureTables] Dropping invalid index campaigns_type_automated_idx");
+      const { indisvalid, indexdef } = campaignRows[0];
+      // Postgres canonicalizes `type = 'automated'` and may emit ::text casts
+      // and extra parens; match the key tokens rather than the raw string.
+      const defIsCorrect =
+        / ON [^.]*\.?campaigns\b/i.test(indexdef) &&
+        /\(id\)/.test(indexdef) &&
+        /type\s*=\s*'automated'/i.test(indexdef);
+      if (!indisvalid || !defIsCorrect) {
+        console.warn(
+          `[ensureTables] Dropping existing campaigns_type_automated_idx (valid=${indisvalid} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
+        );
         await db.execute(sql`DROP INDEX IF EXISTS campaigns_type_automated_idx`);
       }
     }
@@ -439,16 +451,27 @@ export async function ensureCampaignPartialIndexes(): Promise<void> {
 
     // campaign_recipients_active_user_idx — predicate must byte-match schema.ts
     const existingRecipientIdx = await db.execute(sql`
-      SELECT i.indisvalid
+      SELECT i.indisvalid, pg_get_indexdef(i.indexrelid) AS indexdef
       FROM pg_indexes ix
       JOIN pg_class c ON c.relname = ix.indexname
       JOIN pg_index i ON i.indexrelid = c.oid
       WHERE ix.indexname = 'campaign_recipients_active_user_idx'
     `);
-    const recipientRows = (existingRecipientIdx as any).rows as Array<{ indisvalid: boolean }> | undefined;
+    const recipientRows = (existingRecipientIdx as any).rows as Array<{ indisvalid: boolean; indexdef: string }> | undefined;
     if (recipientRows && recipientRows.length > 0) {
-      if (!recipientRows[0].indisvalid) {
-        console.warn("[ensureTables] Dropping invalid index campaign_recipients_active_user_idx");
+      const { indisvalid, indexdef } = recipientRows[0];
+      // Postgres rewrites `status IN ('a','b',...)` as
+      // `status = ANY (ARRAY['a'::text, ...])`, so check for each status
+      // literal and the column tuple rather than the raw `IN (...)` form.
+      const activeStatuses = ["pending", "sent", "delivered", "opened", "clicked"];
+      const defIsCorrect =
+        / ON [^.]*\.?campaign_recipients\b/i.test(indexdef) &&
+        /\(user_id,\s*campaign_id\)/.test(indexdef) &&
+        activeStatuses.every((s) => indexdef.includes(`'${s}'`));
+      if (!indisvalid || !defIsCorrect) {
+        console.warn(
+          `[ensureTables] Dropping existing campaign_recipients_active_user_idx (valid=${indisvalid} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
+        );
         await db.execute(sql`DROP INDEX IF EXISTS campaign_recipients_active_user_idx`);
       }
     }
