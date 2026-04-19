@@ -119,6 +119,24 @@ function extractLoggerTargetWherePredicate(): string {
   return m[1].trim();
 }
 
+function extractLoggerConflictTargetColumns(): string[] {
+  // Match `target: [errorLogs.level, errorLogs.source, errorLogs.message]` on
+  // the onConflictDoUpdate call. Extracts the column names after the
+  // `errorLogs.` prefix so they can be compared against the schema's .on(...)
+  // tuple directly. If this regex stops matching, the caller-side assertion
+  // throws a descriptive error so the drift is caught rather than silently
+  // skipped.
+  const m = LOGGER_SRC.match(/target:\s*\[([^\]]+)\]/);
+  if (!m) {
+    throw new Error(
+      "failed to extract onConflictDoUpdate target column list from server/services/logger.ts — " +
+        "did the target tuple move, use a spread, or split across lines? The invariant test " +
+        "cannot validate the upsert target until this regex matches the call shape again.",
+    );
+  }
+  return Array.from(m[1].matchAll(/errorLogs\.(\w+)/g)).map((mm) => mm[1]);
+}
+
 describe("error_logs_unresolved_dedup_idx predicate matches ErrorLogger upsert targetWhere", () => {
   it("index WHERE clause and onConflictDoUpdate targetWhere are byte-for-byte equal", () => {
     const indexPredicate = extractIndexPredicate("unresolvedDedupIdx");
@@ -126,19 +144,23 @@ describe("error_logs_unresolved_dedup_idx predicate matches ErrorLogger upsert t
     expect(loggerPredicate).toBe(indexPredicate);
   });
 
-  it("index covers exactly the (level, source, message) tuple", () => {
+  it("schema index .on(...) and ErrorLogger target [...] both list exactly (level, source, message)", () => {
     // Match the exact .on(...) column list for the unresolved-dedup index.
     // If new columns are added or the order changes, the ErrorLogger upsert's
     // `target: [errorLogs.level, errorLogs.source, errorLogs.message]` tuple
-    // must be updated in lockstep or Postgres rejects the conflict spec.
+    // must be updated in lockstep or Postgres rejects the conflict spec. We
+    // assert both sides match the canonical tuple AND each other, so schema-
+    // only or logger-only drift both fail the test.
     const m = SCHEMA_SRC.match(
       /unresolvedDedupIdx[\s\S]*?\.on\(([^)]+)\)/,
     );
     if (!m) throw new Error("failed to extract unresolvedDedupIdx .on(...) columns");
-    const columns = m[1]
+    const schemaColumns = m[1]
       .split(",")
       .map((c) => c.trim().replace(/^table\./, ""))
       .filter(Boolean);
-    expect(columns).toEqual(["level", "source", "message"]);
+    const loggerColumns = extractLoggerConflictTargetColumns();
+    expect(schemaColumns).toEqual(["level", "source", "message"]);
+    expect(loggerColumns).toEqual(schemaColumns);
   });
 });

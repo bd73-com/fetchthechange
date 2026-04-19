@@ -114,7 +114,14 @@ export class ErrorLogger {
           targetWhere: sql`resolved = false`,
           set: {
             timestamp: now,
-            occurrenceCount: sql`${errorLogs.occurrenceCount} + 1`,
+            // Clamp at INT32_MAX to match the ensureErrorLogColumns dedup
+            // migration's rollup cap. Without this, a hot error bucket that
+            // accumulates past 2,147,483,647 occurrences would overflow the
+            // `integer` column on the next increment, Postgres would reject
+            // the UPDATE, and the catch block below would silently disable
+            // logging for this dedup key. Cast via bigint so the arithmetic
+            // stays in range until the LEAST reduces it back to int.
+            occurrenceCount: sql`LEAST(2147483647::bigint, ${errorLogs.occurrenceCount}::bigint + 1)::int`,
             stackTrace: sql`COALESCE(EXCLUDED.stack_trace, ${errorLogs.stackTrace})`,
             context: sql`COALESCE(EXCLUDED.context, ${errorLogs.context})`,
           },

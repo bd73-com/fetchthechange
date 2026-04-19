@@ -64,6 +64,17 @@ vi.mock("./db", () => ({
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }),
     update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }) }),
     execute: (...args: any[]) => mockDbExecute(...args),
+    // Delegate tx.execute back to the same mockDbExecute so the
+    // ensureErrorLogColumns migration's in-transaction SQL (SET LOCAL,
+    // pg_advisory_xact_lock, dedup UPDATE, dedup DELETE) is actually
+    // exercised under the migration mock sequences below. Without this,
+    // db.transaction is undefined and the whole migration falls into its
+    // catch block — silently making the 9-call sequence assertions pass
+    // for the wrong reason.
+    transaction: async (fn: (tx: any) => Promise<any>) => {
+      const tx = { execute: (...args: any[]) => mockDbExecute(...args) };
+      return fn(tx);
+    },
   },
 }));
 

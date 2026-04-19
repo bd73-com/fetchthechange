@@ -33,20 +33,35 @@ export async function ensureErrorLogColumns(): Promise<void> {
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS occurrence_count INTEGER NOT NULL DEFAULT 1`);
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP`);
 
-    // Check if a valid unique index already exists — skip DDL entirely if so.
-    // Uses pg_index.indisvalid so an INVALID index (interrupted build) is
-    // detected and rebuilt, matching the ensureMonitorChangesIndexes pattern.
+    // Check if a VALID, UNIQUE, correctly-shaped index already exists — skip
+    // DDL entirely if so. Validates four invariants simultaneously:
+    //   1. `indisvalid` — not a leftover INVALID build
+    //   2. `indisunique` — ON CONFLICT inference requires uniqueness
+    //   3. `pg_get_indexdef` exposes the column tuple + predicate so we can
+    //      assert the index covers (level, source, message) with the
+    //      `WHERE resolved = false` partial predicate
+    // A stale index with the same name but a different definition (wrong
+    // columns, non-unique, missing predicate) fails this check and is
+    // dropped and rebuilt. Without the definition check, a drifted index
+    // would pass the fast path and ON CONFLICT would fail silently at
+    // runtime, swallowed by ErrorLogger.log's catch block.
     const existing = await db.execute(sql`
-      SELECT i.indisvalid
+      SELECT i.indisvalid, i.indisunique, pg_get_indexdef(i.indexrelid) AS indexdef
       FROM pg_indexes ix
       JOIN pg_class c ON c.relname = ix.indexname
       JOIN pg_index i ON i.indexrelid = c.oid
       WHERE ix.indexname = 'error_logs_unresolved_dedup_idx'
     `);
-    const rows = (existing as any).rows as Array<{ indisvalid: boolean }> | undefined;
+    const rows = (existing as any).rows as Array<{ indisvalid: boolean; indisunique: boolean; indexdef: string }> | undefined;
     if (rows && rows.length > 0) {
-      if (rows[0].indisvalid) return; // Valid index — nothing to do
-      console.warn("[ensureTables] Dropping invalid index error_logs_unresolved_dedup_idx");
+      const { indisvalid, indisunique, indexdef } = rows[0];
+      const defIsCorrect =
+        indexdef.includes("(level, source, message)") &&
+        /WHERE\s+\(?resolved\s*=\s*false\)?/i.test(indexdef);
+      if (indisvalid && indisunique && defIsCorrect) return;
+      console.warn(
+        `[ensureTables] Dropping existing error_logs_unresolved_dedup_idx (valid=${indisvalid} unique=${indisunique} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
+      );
       await db.execute(sql`DROP INDEX IF EXISTS error_logs_unresolved_dedup_idx`);
     }
 

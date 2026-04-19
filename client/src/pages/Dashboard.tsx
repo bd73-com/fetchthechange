@@ -212,9 +212,9 @@ export default function Dashboard() {
     try {
       for (let i = 0; i < activeMonitors.length; i += REFRESH_CONCURRENCY) {
         // If the user navigated away mid-refresh, stop issuing new batches.
-        // In-flight requests continue (no AbortController plumbing yet) but
-        // the orphaned-work blast radius is capped at one batch rather than
-        // the full N monitors.
+        // In-flight requests from prior batches are aborted by
+        // `useAbortableFetchers`' unmount cleanup (#446); this early-return
+        // just stops queuing additional work.
         if (!mountedRef.current) return;
         const batch = activeMonitors.slice(i, i + REFRESH_CONCURRENCY);
         const results = await Promise.allSettled(batch.map(m => bulkCheckOne(m.id)));
@@ -222,8 +222,16 @@ export default function Dashboard() {
           if (r.status === "fulfilled") {
             if (r.value.changed) changed += 1; else unchanged += 1;
           } else {
-            const status = (r.reason as { status?: number } | undefined)?.status;
-            if (status === 429) rateLimited += 1; else failed += 1;
+            // AbortError rejections come from the unmount cleanup, not a real
+            // check failure — they should never inflate the `failed` tally.
+            // Today the summary toast is suppressed below by the `return`
+            // guarded on `!mountedRef.current`, but filtering here keeps the
+            // tally correct even if a future refactor hoists the toast above
+            // that guard, or aborts controllers for non-unmount reasons
+            // (e.g. a "cancel refresh" button).
+            const reason = r.reason as { status?: number; name?: string } | undefined;
+            if (reason?.name === "AbortError") continue;
+            if (reason?.status === 429) rateLimited += 1; else failed += 1;
           }
         }
       }
