@@ -2,54 +2,37 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock variables
+//
+// After GitHub issue #448, ErrorLogger.log uses a single atomic
+// `INSERT … ON CONFLICT (level, source, message) WHERE resolved = false
+// DO UPDATE SET …` upsert instead of the prior SELECT-then-INSERT/UPDATE
+// flow. The mock chain tracks `.insert(table).values(row).onConflictDoUpdate(cfg)`.
 // ---------------------------------------------------------------------------
 const {
-  mockDbSelect,
   mockDbInsert,
-  mockDbUpdate,
-  mockSelectLimitFn,
-  mockSelectWhereFn,
-  mockSelectFromFn,
   mockInsertValuesFn,
-  mockUpdateSetFn,
-  mockUpdateWhereFn,
+  mockOnConflictDoUpdateFn,
 } = vi.hoisted(() => {
-  const mockSelectLimitFn = vi.fn();
-  const mockSelectWhereFn = vi.fn(() => ({ limit: mockSelectLimitFn }));
-  const mockSelectFromFn = vi.fn(() => ({ where: mockSelectWhereFn }));
-  const mockDbSelect = vi.fn(() => ({ from: mockSelectFromFn }));
-
-  const mockInsertValuesFn = vi.fn().mockResolvedValue(undefined);
+  const mockOnConflictDoUpdateFn = vi.fn().mockResolvedValue(undefined);
+  const mockInsertValuesFn = vi.fn(() => ({ onConflictDoUpdate: mockOnConflictDoUpdateFn }));
   const mockDbInsert = vi.fn(() => ({ values: mockInsertValuesFn }));
 
-  const mockUpdateWhereFn = vi.fn().mockResolvedValue(undefined);
-  const mockUpdateSetFn = vi.fn(() => ({ where: mockUpdateWhereFn }));
-  const mockDbUpdate = vi.fn(() => ({ set: mockUpdateSetFn }));
-
   return {
-    mockDbSelect,
     mockDbInsert,
-    mockDbUpdate,
-    mockSelectLimitFn,
-    mockSelectWhereFn,
-    mockSelectFromFn,
     mockInsertValuesFn,
-    mockUpdateSetFn,
-    mockUpdateWhereFn,
+    mockOnConflictDoUpdateFn,
   };
 });
 
 vi.mock("../db", () => ({
   db: {
-    select: (...args: any[]) => mockDbSelect(...args),
     insert: (...args: any[]) => mockDbInsert(...args),
-    update: (...args: any[]) => mockDbUpdate(...args),
   },
 }));
 
 import { ErrorLogger } from "./logger";
 
-describe("ErrorLogger deduplication", () => {
+describe("ErrorLogger atomic upsert", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
   let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
@@ -57,23 +40,13 @@ describe("ErrorLogger deduplication", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Suppress expected logger output during tests
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    // Reset chain mocks
-    mockSelectWhereFn.mockReturnValue({ limit: mockSelectLimitFn });
-    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
-    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
-    mockInsertValuesFn.mockResolvedValue(undefined);
+    mockOnConflictDoUpdateFn.mockResolvedValue(undefined);
+    mockInsertValuesFn.mockReturnValue({ onConflictDoUpdate: mockOnConflictDoUpdateFn });
     mockDbInsert.mockReturnValue({ values: mockInsertValuesFn });
-    mockUpdateWhereFn.mockResolvedValue(undefined);
-    mockUpdateSetFn.mockReturnValue({ where: mockUpdateWhereFn });
-    mockDbUpdate.mockReturnValue({ set: mockUpdateSetFn });
-
-    // Default: no existing entry found
-    mockSelectLimitFn.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -82,13 +55,16 @@ describe("ErrorLogger deduplication", () => {
     consoleLogSpy.mockRestore();
   });
 
-  it("inserts a new entry when no duplicate exists", async () => {
-    mockSelectLimitFn.mockResolvedValue([]);
-
+  it("issues a single atomic insert+onConflictDoUpdate per log call", async () => {
     await ErrorLogger.error("stripe", "Webhook signature validation failed", null, { ip: "1.2.3.4" });
 
-    expect(mockDbInsert).toHaveBeenCalled();
-    expect(mockDbUpdate).not.toHaveBeenCalled();
+    expect(mockDbInsert).toHaveBeenCalledTimes(1);
+    expect(mockInsertValuesFn).toHaveBeenCalledTimes(1);
+    expect(mockOnConflictDoUpdateFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("inserts values with correct fields on first call", async () => {
+    await ErrorLogger.error("stripe", "Webhook signature validation failed", null, { ip: "1.2.3.4" });
 
     const insertedValues = mockInsertValuesFn.mock.calls[0][0];
     expect(insertedValues.level).toBe("error");
@@ -99,41 +75,26 @@ describe("ErrorLogger deduplication", () => {
     expect(insertedValues.timestamp).toBeInstanceOf(Date);
   });
 
-  it("updates existing entry when a duplicate is found", async () => {
-    mockSelectLimitFn.mockResolvedValue([{ id: 42 }]);
+  it("configures onConflictDoUpdate against the partial unique index", async () => {
+    await ErrorLogger.warning("scraper", "Browserless service unavailable — preserving last known values", { monitorId: 1 });
 
-    await ErrorLogger.error("stripe", "Webhook signature validation failed", null, { ip: "5.6.7.8" });
-
-    expect(mockDbUpdate).toHaveBeenCalled();
-    expect(mockDbInsert).not.toHaveBeenCalled();
-
-    // Verify update was called with the correct ID
-    expect(mockUpdateWhereFn).toHaveBeenCalled();
-
-    // Verify the set call includes timestamp and occurrenceCount
-    const setArg = mockUpdateSetFn.mock.calls[0][0];
-    expect(setArg.timestamp).toBeInstanceOf(Date);
-    expect(setArg.occurrenceCount).toBeDefined();
-  });
-
-  it("queries for unresolved entries matching level+source+message", async () => {
-    mockSelectLimitFn.mockResolvedValue([]);
-
-    await ErrorLogger.warning("scraper", "Page returned empty response", { monitorId: 1 });
-
-    // Verify select was called to check for duplicates
-    expect(mockDbSelect).toHaveBeenCalled();
-    expect(mockSelectFromFn).toHaveBeenCalled();
-    expect(mockSelectWhereFn).toHaveBeenCalled();
-    expect(mockSelectLimitFn).toHaveBeenCalled();
+    const conflictConfig = mockOnConflictDoUpdateFn.mock.calls[0][0];
+    // target must be the three-column tuple matching the unique index
+    expect(Array.isArray(conflictConfig.target)).toBe(true);
+    expect(conflictConfig.target).toHaveLength(3);
+    // targetWhere must encode the `resolved = false` partial predicate —
+    // without it Postgres rejects the ON CONFLICT on a partial index.
+    expect(conflictConfig.targetWhere).toBeDefined();
+    // set must bump timestamp and occurrenceCount; stack/context use COALESCE
+    expect(conflictConfig.set.timestamp).toBeInstanceOf(Date);
+    expect(conflictConfig.set.occurrenceCount).toBeDefined();
+    expect(conflictConfig.set.stackTrace).toBeDefined();
+    expect(conflictConfig.set.context).toBeDefined();
   });
 
   it("inserts new entry with correct fields for info level", async () => {
-    mockSelectLimitFn.mockResolvedValue([]);
-
     await ErrorLogger.info("scheduler", "Scheduler run completed");
 
-    expect(mockDbInsert).toHaveBeenCalled();
     const insertedValues = mockInsertValuesFn.mock.calls[0][0];
     expect(insertedValues.level).toBe("info");
     expect(insertedValues.source).toBe("scheduler");
@@ -143,8 +104,6 @@ describe("ErrorLogger deduplication", () => {
   });
 
   it("includes error type and sanitized stack trace when error is provided", async () => {
-    mockSelectLimitFn.mockResolvedValue([]);
-
     const err = new Error("Something went wrong");
     await ErrorLogger.error("api", "Unhandled error", err, { route: "/test" });
 
@@ -154,30 +113,7 @@ describe("ErrorLogger deduplication", () => {
     expect(insertedValues.context).toEqual({ route: "/test" });
   });
 
-  it("updates stack trace and context on duplicate when provided", async () => {
-    mockSelectLimitFn.mockResolvedValue([{ id: 7 }]);
-
-    const err = new Error("New stack");
-    await ErrorLogger.error("email", "Send failed", err, { to: "user@example.com" });
-
-    const setArg = mockUpdateSetFn.mock.calls[0][0];
-    expect(setArg.stackTrace).toContain("New stack");
-    expect(setArg.context).toEqual({ to: "user@example.com" });
-  });
-
-  it("does not overwrite stack/context with undefined when not provided on duplicate", async () => {
-    mockSelectLimitFn.mockResolvedValue([{ id: 7 }]);
-
-    await ErrorLogger.warning("scraper", "Minor issue");
-
-    const setArg = mockUpdateSetFn.mock.calls[0][0];
-    expect(setArg.stackTrace).toBeUndefined();
-    expect(setArg.context).toBeUndefined();
-  });
-
-  it("sanitizes sensitive data in the message before checking for duplicates", async () => {
-    mockSelectLimitFn.mockResolvedValue([]);
-
+  it("sanitizes sensitive data in the message", async () => {
     await ErrorLogger.error("api", "Failed connecting to postgres://user:pass@host/db");
 
     const insertedValues = mockInsertValuesFn.mock.calls[0][0];
@@ -186,8 +122,6 @@ describe("ErrorLogger deduplication", () => {
   });
 
   it("sanitizes sensitive context keys", async () => {
-    mockSelectLimitFn.mockResolvedValue([]);
-
     await ErrorLogger.error("api", "Auth error", null, { password: "secret123", userId: "user-1" });
 
     const insertedValues = mockInsertValuesFn.mock.calls[0][0];
@@ -196,9 +130,8 @@ describe("ErrorLogger deduplication", () => {
   });
 
   it("handles database error gracefully without throwing", async () => {
-    mockSelectLimitFn.mockRejectedValue(new Error("DB connection lost"));
+    mockOnConflictDoUpdateFn.mockRejectedValueOnce(new Error("DB connection lost"));
 
-    // Should not throw
     await expect(
       ErrorLogger.error("api", "Some error")
     ).resolves.toBeUndefined();
@@ -207,7 +140,8 @@ describe("ErrorLogger deduplication", () => {
   it("Browserless warnings use monitor-agnostic message for infra failures so dedup aggregates across monitors", async () => {
     // Contract test: infra-wide failures (service unavailable, circuit breaker open)
     // emit a monitor-agnostic message so every affected monitor dedups into a single
-    // row in the admin UI. Site-specific failures still name the monitor.
+    // row in the admin UI via the partial unique index. Site-specific failures still
+    // name the monitor.
     const infraMsg = "Browserless service unavailable — preserving last known values";
     const circuitMsg = "Browserless circuit breaker open — preserving last known values";
     const siteSpecificMsg = `"My Monitor" — site blocking automated access`;
@@ -219,32 +153,21 @@ describe("ErrorLogger deduplication", () => {
   });
 
   it("convenience methods call log with correct level", async () => {
-    mockSelectLimitFn.mockResolvedValue([]);
-
     await ErrorLogger.error("stripe", "error msg");
-    let insertedValues = mockInsertValuesFn.mock.calls[0][0];
-    expect(insertedValues.level).toBe("error");
+    expect(mockInsertValuesFn.mock.calls[0][0].level).toBe("error");
 
     vi.clearAllMocks();
-    mockSelectWhereFn.mockReturnValue({ limit: mockSelectLimitFn });
-    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
-    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    mockInsertValuesFn.mockReturnValue({ onConflictDoUpdate: mockOnConflictDoUpdateFn });
     mockDbInsert.mockReturnValue({ values: mockInsertValuesFn });
-    mockSelectLimitFn.mockResolvedValue([]);
 
     await ErrorLogger.warning("email", "warning msg");
-    insertedValues = mockInsertValuesFn.mock.calls[0][0];
-    expect(insertedValues.level).toBe("warning");
+    expect(mockInsertValuesFn.mock.calls[0][0].level).toBe("warning");
 
     vi.clearAllMocks();
-    mockSelectWhereFn.mockReturnValue({ limit: mockSelectLimitFn });
-    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn });
-    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    mockInsertValuesFn.mockReturnValue({ onConflictDoUpdate: mockOnConflictDoUpdateFn });
     mockDbInsert.mockReturnValue({ values: mockInsertValuesFn });
-    mockSelectLimitFn.mockResolvedValue([]);
 
     await ErrorLogger.info("scheduler", "info msg");
-    insertedValues = mockInsertValuesFn.mock.calls[0][0];
-    expect(insertedValues.level).toBe("info");
+    expect(mockInsertValuesFn.mock.calls[0][0].level).toBe("info");
   });
 });

@@ -106,6 +106,14 @@ export const errorLogs = pgTable("error_logs", {
   levelIdx: index("error_logs_level_idx").on(table.level),
   sourceIdx: index("error_logs_source_idx").on(table.source),
   timestampIdx: index("error_logs_timestamp_idx").on(table.timestamp),
+  // Partial unique index collapses the SELECT-then-INSERT dedup race in
+  // ErrorLogger.log: concurrent writers with the same (level, source, message)
+  // while resolved=false deterministically upsert into a single row instead
+  // of racing past a preceding SELECT miss and inserting duplicates. See
+  // GitHub issue #448.
+  unresolvedDedupIdx: uniqueIndex("error_logs_unresolved_dedup_idx")
+    .on(table.level, table.source, table.message)
+    .where(sql`resolved = false`),
 }));
 
 export type ErrorLog = typeof errorLogs.$inferSelect;

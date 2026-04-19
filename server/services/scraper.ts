@@ -1305,9 +1305,26 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     }
 
     const oldValue = monitor.currentValue;
-    
+
     let finalStatus: "ok" | "blocked" | "selector_missing" | "error" = "ok";
     let finalError: string | null = null;
+
+    // When the circuit breaker was already OPEN before we even attempted
+    // extraction, the warning inside the `capCheck.allowed` block never fires
+    // (capCheck is forced to `{allowed:false}` above). Log one here so the
+    // admin UI always has an entry for the degradation episode — regardless
+    // of whether the monitor has a cached value (graceful degradation) or is
+    // a first-check monitor that falls through to selector_missing. The
+    // message is monitor-agnostic so every affected monitor dedups into a
+    // single row via ErrorLogger's unresolved-dedup index (#448). See GitHub
+    // issue #449.
+    if (skippedDueToOpenCircuit) {
+      await ErrorLogger.warning(
+        "scraper",
+        "Browserless circuit breaker open — preserving last known values",
+        { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
+      );
+    }
 
     if (!newValue) {
       if (browserlessInfraFailure && monitor.currentValue) {
@@ -1317,18 +1334,6 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         monitorsNeedingRetry.add(monitor.id);
         await storage.updateMonitor(monitor.id, { lastChecked: new Date() });
         console.log(`[SelfHeal] Monitor ${monitor.id}: Browserless unavailable, preserving last known value`);
-        // When the circuit breaker was already open before we tried extraction,
-        // the warning in the capCheck.allowed block never fires — log one here
-        // so the admin UI still shows an entry for this degradation episode.
-        // Use the flag (not live breaker state) to avoid a duplicate warning
-        // when an attempted extraction just opened the breaker.
-        if (skippedDueToOpenCircuit) {
-          await ErrorLogger.warning(
-            "scraper",
-            "Browserless circuit breaker open — preserving last known values",
-            { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
-          );
-        }
         return {
           changed: false,
           currentValue: monitor.currentValue,

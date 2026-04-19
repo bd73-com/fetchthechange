@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { errorLogs } from "@shared/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { ERROR_LOG_SOURCES } from "@shared/routes";
 
 type LogLevel = "error" | "warning" | "info";
@@ -72,48 +72,45 @@ export class ErrorLogger {
     }
 
     const sanitizedMessage = sanitizeString(message);
+    const sanitizedStack = error?.stack ? sanitizeString(error.stack) : null;
+    const sanitizedContext = context ? sanitizeContext(context) : null;
+    const errorType = error?.constructor?.name || null;
 
     try {
-      // Check for existing unresolved entry with same level+source+message
-      const [existing] = await db
-        .select({ id: errorLogs.id })
-        .from(errorLogs)
-        .where(
-          and(
-            eq(errorLogs.level, level),
-            eq(errorLogs.source, source),
-            eq(errorLogs.message, sanitizedMessage),
-            eq(errorLogs.resolved, false)
-          )
-        )
-        .limit(1);
-
-      if (existing) {
-        // Update existing entry: bump timestamp, increment count, update stack/context
-        await db
-          .update(errorLogs)
-          .set({
-            timestamp: new Date(),
-            occurrenceCount: sql`${errorLogs.occurrenceCount} + 1`,
-            stackTrace: error?.stack ? sanitizeString(error.stack) : undefined,
-            context: context ? sanitizeContext(context) : undefined,
-          })
-          .where(eq(errorLogs.id, existing.id));
-      } else {
-        // Insert new entry
-        const now = new Date();
-        await db.insert(errorLogs).values({
+      // Atomic upsert against the partial unique index
+      // `error_logs_unresolved_dedup_idx` (level, source, message) WHERE
+      // resolved = false. Collapses the read-modify-write window of the old
+      // SELECT-then-INSERT dedup path so concurrent writers with the same
+      // (level, source, message) deterministically land in a single row with
+      // `occurrence_count` bumped by every caller. Without this index +
+      // upsert, concurrent writers with shared messages (e.g. the compacted
+      // "Browserless service unavailable" warning) both miss the SELECT and
+      // both INSERT, producing duplicate rows in the admin UI. See GitHub
+      // issue #448.
+      const now = new Date();
+      await db
+        .insert(errorLogs)
+        .values({
           level,
           source,
           message: sanitizedMessage,
-          errorType: error?.constructor?.name || null,
-          stackTrace: error?.stack ? sanitizeString(error.stack) : null,
-          context: context ? sanitizeContext(context) : null,
+          errorType,
+          stackTrace: sanitizedStack,
+          context: sanitizedContext,
           firstOccurrence: now,
           timestamp: now,
           occurrenceCount: 1,
+        })
+        .onConflictDoUpdate({
+          target: [errorLogs.level, errorLogs.source, errorLogs.message],
+          targetWhere: sql`resolved = false`,
+          set: {
+            timestamp: now,
+            occurrenceCount: sql`${errorLogs.occurrenceCount} + 1`,
+            stackTrace: sql`COALESCE(EXCLUDED.stack_trace, ${errorLogs.stackTrace})`,
+            context: sql`COALESCE(EXCLUDED.context, ${errorLogs.context})`,
+          },
         });
-      }
     } catch (dbError) {
       console.error(`[ErrorLogger] Failed to write log to database:`, dbError);
     }

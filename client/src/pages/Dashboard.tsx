@@ -40,9 +40,20 @@ export default function Dashboard() {
   // stays false for the rest of the component's life and handleRefresh bails
   // out immediately.
   const mountedRef = useRef(true);
+  // Tracks AbortControllers for in-flight bulk-refresh fetches so we can abort
+  // them on unmount. Without this, the direct-fetch path bypasses
+  // useAbortableFetchers (the hook path the typed mutations use) and the
+  // browser keeps in-flight requests running on the server, burning
+  // Browserless / Resend quota after the user has navigated away. See GitHub
+  // issue #446.
+  const bulkAbortControllers = useRef<Set<AbortController>>(new Set());
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      bulkAbortControllers.current.forEach(c => c.abort());
+      bulkAbortControllers.current.clear();
+    };
   }, []);
   const { toast } = useToast();
   const searchString = useSearch();
@@ -179,19 +190,26 @@ export default function Dashboard() {
     // approach failed because the 429 body ("Free tier: You can check…")
     // doesn't contain "rate limit".
     const bulkCheckOne = async (id: number): Promise<{ changed: boolean }> => {
-      const res = await fetch(buildUrl(api.monitors.check.path, { id }), {
-        method: api.monitors.check.method,
-        credentials: "include",
-      });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        const err = new Error(errorData.message || "Failed to check monitor") as Error & { status: number };
-        err.status = res.status;
-        throw err;
+      const controller = new AbortController();
+      bulkAbortControllers.current.add(controller);
+      try {
+        const res = await fetch(buildUrl(api.monitors.check.path, { id }), {
+          method: api.monitors.check.method,
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          const err = new Error(errorData.message || "Failed to check monitor") as Error & { status: number };
+          err.status = res.status;
+          throw err;
+        }
+        return api.monitors.check.responses[200].parse(await res.json().catch(() => {
+          throw new Error("Unexpected response format from server");
+        }));
+      } finally {
+        bulkAbortControllers.current.delete(controller);
       }
-      return api.monitors.check.responses[200].parse(await res.json().catch(() => {
-        throw new Error("Unexpected response format from server");
-      }));
     };
 
     try {
