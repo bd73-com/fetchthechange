@@ -407,6 +407,81 @@ export async function ensureMonitorChangesIndexes(): Promise<void> {
 }
 
 /**
+ * Ensures the partial indexes on `campaigns(id) WHERE type='automated'` and
+ * `campaign_recipients(user_id, campaign_id) WHERE status IN (<active>)` exist
+ * (PR #447). Without them, the welcome-exclusion anti-join in
+ * resolveRecipients (server/services/campaignEmail.ts) falls back to a Seq
+ * Scan + Hash Anti Join whose runtime scales O(N) in total historical
+ * recipient rows — see GitHub issue #452.
+ *
+ * Predicates are kept byte-identical to shared/schema.ts. The
+ * partial-index-invariants test asserts this parity so drift between schema
+ * and DDL is caught before it ships.
+ */
+export async function ensureCampaignPartialIndexes(): Promise<void> {
+  try {
+    // campaigns_type_automated_idx — also check pg_get_indexdef so a stale
+    // same-name index with wrong columns/predicate gets dropped and rebuilt
+    // (CREATE INDEX CONCURRENTLY IF NOT EXISTS is name-based only). Matches
+    // the ensureErrorLogColumns pattern — see CodeRabbit review on PR #455.
+    const existingCampaignIdx = await db.execute(sql`
+      SELECT i.indisvalid, pg_get_indexdef(i.indexrelid) AS indexdef
+      FROM pg_indexes ix
+      JOIN pg_class c ON c.relname = ix.indexname
+      JOIN pg_index i ON i.indexrelid = c.oid
+      WHERE ix.indexname = 'campaigns_type_automated_idx'
+    `);
+    const campaignRows = (existingCampaignIdx as any).rows as Array<{ indisvalid: boolean; indexdef: string }> | undefined;
+    if (campaignRows && campaignRows.length > 0) {
+      const { indisvalid, indexdef } = campaignRows[0];
+      // Postgres canonicalizes `type = 'automated'` and may emit ::text casts
+      // and extra parens; match the key tokens rather than the raw string.
+      const defIsCorrect =
+        / ON [^.]*\.?campaigns\b/i.test(indexdef) &&
+        /\(id\)/.test(indexdef) &&
+        /type\s*=\s*'automated'/i.test(indexdef);
+      if (!indisvalid || !defIsCorrect) {
+        console.warn(
+          `[ensureTables] Dropping existing campaigns_type_automated_idx (valid=${indisvalid} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
+        );
+        await db.execute(sql`DROP INDEX IF EXISTS campaigns_type_automated_idx`);
+      }
+    }
+    await db.execute(sql`CREATE INDEX CONCURRENTLY IF NOT EXISTS campaigns_type_automated_idx ON campaigns(id) WHERE type = 'automated'`);
+
+    // campaign_recipients_active_user_idx — predicate must byte-match schema.ts
+    const existingRecipientIdx = await db.execute(sql`
+      SELECT i.indisvalid, pg_get_indexdef(i.indexrelid) AS indexdef
+      FROM pg_indexes ix
+      JOIN pg_class c ON c.relname = ix.indexname
+      JOIN pg_index i ON i.indexrelid = c.oid
+      WHERE ix.indexname = 'campaign_recipients_active_user_idx'
+    `);
+    const recipientRows = (existingRecipientIdx as any).rows as Array<{ indisvalid: boolean; indexdef: string }> | undefined;
+    if (recipientRows && recipientRows.length > 0) {
+      const { indisvalid, indexdef } = recipientRows[0];
+      // Postgres rewrites `status IN ('a','b',...)` as
+      // `status = ANY (ARRAY['a'::text, ...])`, so check for each status
+      // literal and the column tuple rather than the raw `IN (...)` form.
+      const activeStatuses = ["pending", "sent", "delivered", "opened", "clicked"];
+      const defIsCorrect =
+        / ON [^.]*\.?campaign_recipients\b/i.test(indexdef) &&
+        /\(user_id,\s*campaign_id\)/.test(indexdef) &&
+        activeStatuses.every((s) => indexdef.includes(`'${s}'`));
+      if (!indisvalid || !defIsCorrect) {
+        console.warn(
+          `[ensureTables] Dropping existing campaign_recipients_active_user_idx (valid=${indisvalid} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
+        );
+        await db.execute(sql`DROP INDEX IF EXISTS campaign_recipients_active_user_idx`);
+      }
+    }
+    await db.execute(sql`CREATE INDEX CONCURRENTLY IF NOT EXISTS campaign_recipients_active_user_idx ON campaign_recipients(user_id, campaign_id) WHERE status IN ('pending', 'sent', 'delivered', 'opened', 'clicked')`);
+  } catch (e) {
+    console.warn("Could not ensure campaign partial indexes:", e);
+  }
+}
+
+/**
  * Ensures tags and monitor_tags tables exist (added in PR #86).
  * Without this, getMonitorsWithTags() fails when the tables have not been created yet.
  */
