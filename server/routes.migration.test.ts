@@ -64,13 +64,6 @@ vi.mock("./db", () => ({
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }),
     update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }) }),
     execute: (...args: any[]) => mockDbExecute(...args),
-    // Delegate tx.execute back to the same mockDbExecute so the
-    // ensureErrorLogColumns migration's in-transaction SQL (SET LOCAL,
-    // pg_advisory_xact_lock, dedup UPDATE, dedup DELETE) is actually
-    // exercised under the migration mock sequences below. Without this,
-    // db.transaction is undefined and the whole migration falls into its
-    // catch block — silently making the 9-call sequence assertions pass
-    // for the wrong reason.
     transaction: async (fn: (tx: any) => Promise<any>) => {
       const tx = { execute: (...args: any[]) => mockDbExecute(...args) };
       return fn(tx);
@@ -348,12 +341,13 @@ describe("registerRoutes DDL migrations at startup", () => {
   it("logs error and continues when notification channel table creation fails", async () => {
     vi.clearAllMocks();
     const channelError = new Error("permission denied for schema public");
-    // monitor health ALTERs succeed (2), pending_retry_at (1), api_keys
-    // succeed (2), then channel tables fail
+    // monitor health ALTERs succeed (2), pending_retry_at (1), legacy
+    // error_logs drop (1), api_keys succeed (2), then channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors pending_retry_at
+      .mockResolvedValueOnce({ rows: [] }) // DROP TABLE IF EXISTS error_logs
       .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
       .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
       .mockRejectedValueOnce(channelError); // notification_channels fails
@@ -385,12 +379,13 @@ describe("registerRoutes DDL migrations at startup", () => {
   it("registers channel routes even when notification channel tables fail to create", async () => {
     vi.clearAllMocks();
     const channelError = new Error("connection timeout");
-    // monitor health ALTERs succeed (2), pending_retry_at (1), api_keys
-    // succeed (2), channel tables fail
+    // monitor health ALTERs succeed (2), pending_retry_at (1), legacy
+    // error_logs drop (1), api_keys succeed (2), channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors pending_retry_at
+      .mockResolvedValueOnce({ rows: [] }) // DROP TABLE IF EXISTS error_logs
       .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
       .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
       .mockRejectedValueOnce(channelError); // notification_channels fails

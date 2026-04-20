@@ -3,6 +3,21 @@ import { sql } from "drizzle-orm";
 import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken, isEncryptionAvailable } from "../utils/encryption";
 
 /**
+ * Drops the legacy `error_logs` table if it still exists. The admin error
+ * logging feature was removed; this hook cleans up the table in-place during
+ * the next deploy since the project uses `drizzle-kit push` rather than a
+ * versioned migrator (so `migrations/0001_drop_error_logs.sql` would not be
+ * applied automatically).
+ */
+export async function ensureErrorLogsDropped(): Promise<void> {
+  try {
+    await db.execute(sql`DROP TABLE IF EXISTS error_logs`);
+  } catch (e) {
+    console.warn("Could not drop legacy error_logs table:", e);
+  }
+}
+
+/**
  * Ensures the api_keys table exists (added in PR #77).
  * Returns true if the table is ready, false if creation failed.
  */

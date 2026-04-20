@@ -35,7 +35,7 @@ import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encry
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import { ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes, ensureCampaignPartialIndexes } from "./services/ensureTables";
+import { ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes, ensureCampaignPartialIndexes, ensureErrorLogsDropped } from "./services/ensureTables";
 import { renderRobotsTxt, renderSitemapXml } from "./services/seoFiles";
 
 
@@ -69,6 +69,7 @@ export async function registerRoutes(
   if (!pendingRetryReady) {
     console.error("CRITICAL: monitors.pending_retry_at column missing — auto-retry scheduling will fail");
   }
+  await ensureErrorLogsDropped();
   const apiKeysReady = await ensureApiKeysTable();
   await ensureChannelTables();
   await ensureMonitorChangesIndexes();
@@ -2696,7 +2697,11 @@ export async function registerRoutes(
     if (err.message === "Not allowed by CORS") {
       return res.status(403).json({ message: "Not allowed by CORS", code: "CORS_FORBIDDEN" });
     }
-    console.error(`[api] ${err.message || "Unhandled API error"}`, err instanceof Error ? err.stack || err.message : "", { status: err.status || 500 });
+    // Log message only (no stack) so DSNs, bearer tokens, and provider keys
+    // embedded in framework/library error stacks don't land in the Replit log
+    // stream. See security review M1 — the old ErrorLogger sanitized the
+    // stack via regex; the console sink has no sanitizer.
+    console.error(`[api] ${err.message || "Unhandled API error"}`, { status: err.status || 500 });
     res.status(err.status || 500).json({ message: "Internal server error" });
   });
 

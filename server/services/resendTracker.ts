@@ -6,7 +6,11 @@ import { sql, eq, and, gte, count, desc } from "drizzle-orm";
 
 // In-memory cooldown tracking for threshold alert logs. Previously persisted
 // via error_logs; now kept in-memory with a 6h cooldown per alert key. Lost
-// on restart — acceptable given rare restarts and the coarse cadence.
+// on restart — acceptable given rare restarts and the coarse cadence. NOTE:
+// Replit autoscale can run multiple replicas; under concurrent scale-out
+// each replica owns its own map, so a threshold crossing during a traffic
+// spike may emit up to one console.warn per replica instead of a single
+// global alert.
 const recentResendAlerts = new Map<string, number>();
 
 function getMonthStart(): Date {

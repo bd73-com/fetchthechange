@@ -8,7 +8,10 @@ import { sql, eq, and, gte, count, desc } from "drizzle-orm";
 // In-memory cooldown tracking for threshold alert emails. The 6h cooldown
 // was previously enforced via error_logs rows; since that table is gone,
 // keep a lightweight map keyed by threshold. Lost on restart — acceptable
-// given rare restarts and the coarse 6h cadence.
+// given rare restarts and the coarse 6h cadence. NOTE: Replit autoscale
+// can run multiple replicas; under concurrent scale-out each replica owns
+// its own map, so a threshold crossing during a traffic spike may send up
+// to one alert email per replica instead of a single global alert.
 const recentThresholdAlerts = new Map<string, number>();
 
 function getMonthStart(): Date {
