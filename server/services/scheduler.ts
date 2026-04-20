@@ -3,12 +3,12 @@ import { storage, PENDING_WEBHOOK_RETRY_QUERY_LIMIT } from "../storage";
 import { checkMonitor, monitorsNeedingRetry } from "./scraper";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery";
-import { ErrorLogger } from "./logger";
 import { notificationTablesExist } from "./notificationReady";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { ensureMonitorConditionsTable } from "./ensureTables";
 import { processAutomatedCampaigns } from "./automatedCampaigns";
 import { isTransientDbError } from "../utils/dbErrors";
+import { safeHostname } from "./monitorValidation";
 import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
 import { db } from "../db";
 import { eq, sql } from "drizzle-orm";
@@ -42,26 +42,16 @@ async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** Log a caught error as warning (transient) or error (non-transient) based on isTransientDbError. */
-async function logSchedulerError(
+function logSchedulerError(
   message: string,
   error: unknown,
   context?: Record<string, any>,
-): Promise<void> {
-  try {
-    if (isTransientDbError(error)) {
-      await ErrorLogger.warning("scheduler", message, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        ...context,
-      });
-    } else {
-      await ErrorLogger.error("scheduler", message, error instanceof Error ? error : null, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        ...context,
-      });
-    }
-  } catch {
-    // If logging itself fails (e.g., logging DB also down), don't mask the original error
-    console.error(`[Scheduler] Failed to log error: ${message}`, error instanceof Error ? error.message : error);
+): void {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  if (isTransientDbError(error)) {
+    console.warn(`[scheduler] ${message}`, { errorMessage, ...context });
+  } else {
+    console.error(`[scheduler] ${message}`, errorMessage, context ?? {});
   }
 }
 
@@ -125,11 +115,10 @@ async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]): P
     }
     return true;
   } catch (error) {
-    await ErrorLogger.error("scheduler", `"${monitor.name}" — scheduled check failed. This is usually a temporary issue. If it persists, verify the URL is still valid and the selector matches the page.`, error instanceof Error ? error : null, {
+    console.error(`[scheduler] "${monitor.name}" — scheduled check failed. This is usually a temporary issue. If it persists, verify the URL is still valid and the selector matches the page.`, error instanceof Error ? error.message : String(error), {
       monitorId: monitor.id,
       monitorName: monitor.name,
-      url: monitor.url,
-      selector: monitor.selector,
+      hostname: safeHostname(monitor.url),
     });
     return true;
   } finally {
@@ -176,7 +165,7 @@ export async function startScheduler() {
   try {
     await storage.cleanupPollutedValues();
   } catch (error) {
-    await ErrorLogger.warning("scheduler", "cleanupPollutedValues failed (non-fatal)", { errorMessage: error instanceof Error ? error.message : String(error) });
+    console.warn("[scheduler] cleanupPollutedValues failed (non-fatal)", { errorMessage: error instanceof Error ? error.message : String(error) });
   }
 
   // Wire circuit breaker recovery: immediately retry pending monitors when Browserless comes back
@@ -259,7 +248,7 @@ export async function startScheduler() {
         }
       }
     } catch (error) {
-      await logSchedulerError("Scheduler iteration failed", error, { activeChecks, phase: "fetching active monitors" });
+      logSchedulerError("Scheduler iteration failed", error, { activeChecks, phase: "fetching active monitors" });
     } finally {
       mainCronRunning = false;
     }
@@ -282,12 +271,12 @@ export async function startScheduler() {
           // could cause duplicate email/webhook/Slack deliveries.
           await processQueuedNotifications();
         } catch (error) {
-          await logSchedulerError("Queued notification processing failed", error);
+          logSchedulerError("Queued notification processing failed", error);
         }
         try {
           await processDigestCron();
         } catch (error) {
-          await logSchedulerError("Digest processing failed", error);
+          logSchedulerError("Digest processing failed", error);
         }
       } finally {
         notificationCronRunning = false;
@@ -388,7 +377,7 @@ export async function startScheduler() {
           }
         }
       } catch (error) {
-        await logSchedulerError("Webhook retry processing failed", error);
+        logSchedulerError("Webhook retry processing failed", error);
       } finally {
         webhookCronRunning = false;
       }
@@ -408,7 +397,7 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${deleted} monitor_metrics rows older than 90 days`);
       }
     } catch (error) {
-      await logSchedulerError("monitor_metrics cleanup failed", error, { retentionDays: 90, table: "monitor_metrics" });
+      logSchedulerError("monitor_metrics cleanup failed", error, { retentionDays: 90, table: "monitor_metrics" });
     }
 
     // Delivery log cleanup: prune entries older than 30 days
@@ -419,7 +408,7 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${entriesDeleted} delivery_log rows older than 30 days`);
       }
     } catch (error) {
-      await logSchedulerError("delivery_log cleanup failed", error, { retentionDays: 30, table: "delivery_log" });
+      logSchedulerError("delivery_log cleanup failed", error, { retentionDays: 30, table: "delivery_log" });
     }
 
     // Notification queue cleanup: prune permanently failed entries older than 7 days
@@ -431,7 +420,7 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${deleted} permanently failed notification_queue rows older than 7 days`);
       }
     } catch (error) {
-      await logSchedulerError("notification_queue cleanup failed", error, { retentionDays: 7, table: "notification_queue" });
+      logSchedulerError("notification_queue cleanup failed", error, { retentionDays: 7, table: "notification_queue" });
     }
 
     // Automation subscriptions cleanup: hard-delete inactive subscriptions older than retention period
@@ -443,7 +432,7 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${deleted} inactive automation_subscriptions rows older than ${retentionDays} days`);
       }
     } catch (error) {
-      await logSchedulerError("automation_subscriptions cleanup failed", error, { retentionDays: AUTOMATION_SUBSCRIPTION_LIMITS.cleanupRetentionDays, table: "automation_subscriptions" });
+      logSchedulerError("automation_subscriptions cleanup failed", error, { retentionDays: AUTOMATION_SUBSCRIPTION_LIMITS.cleanupRetentionDays, table: "automation_subscriptions" });
     }
   }));
 
@@ -452,7 +441,7 @@ export async function startScheduler() {
     try {
       await processAutomatedCampaigns();
     } catch (error) {
-      await logSchedulerError("Automated campaign processing failed", error);
+      logSchedulerError("Automated campaign processing failed", error);
     }
   }, { timezone: "UTC" }));
 

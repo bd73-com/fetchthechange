@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock storage
 const mockGetActiveAutomationSubscriptions = vi.fn();
@@ -18,16 +18,6 @@ vi.mock("../storage", () => ({
 const mockSsrfSafeFetch = vi.fn();
 vi.mock("../utils/ssrf", () => ({
   ssrfSafeFetch: (...args: any[]) => mockSsrfSafeFetch(...args),
-}));
-
-// Mock logger
-const mockLoggerInfo = vi.fn().mockResolvedValue(undefined);
-const mockLoggerWarning = vi.fn().mockResolvedValue(undefined);
-vi.mock("./logger", () => ({
-  ErrorLogger: {
-    info: (...args: any[]) => mockLoggerInfo(...args),
-    warning: (...args: any[]) => mockLoggerWarning(...args),
-  },
 }));
 
 import { deliverToAutomationSubscriptions } from "./automationDelivery";
@@ -83,9 +73,19 @@ function makeSub(overrides?: Partial<AutomationSubscription>): AutomationSubscri
 }
 
 describe("deliverToAutomationSubscriptions", () => {
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockIncrementAutomationSubscriptionFailures.mockResolvedValue(1);
+    consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleWarnSpy.mockRestore();
+    consoleLogSpy.mockRestore();
   });
 
   it("returns immediately when no active subscriptions", async () => {
@@ -129,18 +129,15 @@ describe("deliverToAutomationSubscriptions", () => {
     expect(mockTouchAndResetAutomationSubscription).toHaveBeenCalledWith(7);
   });
 
-  it("logs success via console.log, not ErrorLogger", async () => {
-    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("logs success via console.log", async () => {
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub()]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: true, status: 200 });
 
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
-    expect(consoleSpy).toHaveBeenCalledWith(
+    expect(consoleLogSpy).toHaveBeenCalledWith(
       expect.stringContaining("[Automation] Delivered successfully"),
     );
-    expect(mockLoggerInfo).not.toHaveBeenCalled();
-    consoleSpy.mockRestore();
   });
 
   it("increments consecutive failures on non-2xx response", async () => {
@@ -150,8 +147,7 @@ describe("deliverToAutomationSubscriptions", () => {
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
     expect(mockIncrementAutomationSubscriptionFailures).toHaveBeenCalledWith(3);
-    expect(mockLoggerWarning).toHaveBeenCalledWith(
-      "scheduler",
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining("Automation delivery failed"),
       expect.objectContaining({ error: "HTTP 500", consecutiveFailures: 1 }),
     );
@@ -165,8 +161,7 @@ describe("deliverToAutomationSubscriptions", () => {
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
     expect(mockIncrementAutomationSubscriptionFailures).toHaveBeenCalledWith(3);
-    expect(mockLoggerWarning).toHaveBeenCalledWith(
-      "scheduler",
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining("Automation delivery failed"),
       expect.objectContaining({ error: "ECONNREFUSED", consecutiveFailures: 1 }),
     );
@@ -178,7 +173,7 @@ describe("deliverToAutomationSubscriptions", () => {
 
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
-    const loggedError = mockLoggerWarning.mock.calls[0][2].error;
+    const loggedError = (consoleWarnSpy.mock.calls[0][1] as any).error;
     expect(loggedError).not.toContain("hooks.zapier.com");
     expect(loggedError).toContain("[redacted-url]");
   });
@@ -191,8 +186,7 @@ describe("deliverToAutomationSubscriptions", () => {
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
     expect(mockDeactivateAutomationSubscription).toHaveBeenCalledWith(9, "user1");
-    expect(mockLoggerWarning).toHaveBeenCalledWith(
-      "scheduler",
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining("auto-deactivated"),
       expect.objectContaining({ consecutiveFailures: 15 }),
     );

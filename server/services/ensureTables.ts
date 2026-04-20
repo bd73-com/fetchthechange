@@ -3,124 +3,28 @@ import { sql } from "drizzle-orm";
 import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken, isEncryptionAvailable } from "../utils/encryption";
 
 /**
- * Ensures error_logs deduplication columns and the partial unique index used
- * by ErrorLogger's atomic upsert (see GitHub issue #448) exist.
+ * Drops the legacy `error_logs` table. The admin error logging feature
+ * was removed, but this drop is NOT wired into registerRoutes because a
+ * rolling deploy of this PR would leave old replicas still writing to
+ * the table via the old ErrorLogger code path while the new replica
+ * DROPs it, producing a flood of failed INSERTs on the old replicas.
  *
- * Without the index, `INSERT … ON CONFLICT (level, source, message) WHERE
- * resolved = false` fails at runtime with "there is no unique or exclusion
- * constraint matching the ON CONFLICT specification", which ErrorLogger's
- * catch block at server/services/logger.ts swallows to `console.error` —
- * silently disabling DB-backed error logging for the entire deploy window
- * between code ship and `npm run schema:push`.
- *
- * Migration strategy:
- * 1. Fast-path idempotency: if a VALID unique index already exists, skip the
- *    whole migration. If an INVALID one exists (leftover from an interrupted
- *    CREATE CONCURRENTLY), drop it so we can rebuild.
- * 2. Dedup pre-existing duplicate unresolved rows (the bug being fixed!) in
- *    a transaction gated by a pg_advisory_xact_lock so concurrent instances
- *    in a rolling deploy don't race on overlapping DELETEs. Cap the rolled-
- *    up `occurrence_count` at INT32_MAX to avoid an overflow-rollback loop
- *    on busy tables.
- * 3. CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS — outside the tx so we
- *    don't take a SHARE lock that would block every ErrorLogger.log caller
- *    on the entire app during index build. Mirrors the pattern established
- *    by ensureMonitorChangesIndexes below.
+ * Operator runbook: after this PR fully rolls out and no replica is
+ * running the old code anymore, drop the table manually — either by
+ * `psql $DATABASE_URL -c 'DROP TABLE IF EXISTS error_logs'` or by
+ * invoking this helper from a one-shot script. Idempotent. The table
+ * is inert (zero writers) once the new code is everywhere, so leaving
+ * it a few hours past cutover is harmless.
  */
-export async function ensureErrorLogColumns(): Promise<void> {
-  try {
-    await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS first_occurrence TIMESTAMP NOT NULL DEFAULT NOW()`);
-    await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS occurrence_count INTEGER NOT NULL DEFAULT 1`);
-    await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP`);
-
-    // Check if a VALID, UNIQUE, correctly-shaped index already exists — skip
-    // DDL entirely if so. Validates four invariants simultaneously:
-    //   1. `indisvalid` — not a leftover INVALID build
-    //   2. `indisunique` — ON CONFLICT inference requires uniqueness
-    //   3. `pg_get_indexdef` exposes the column tuple + predicate so we can
-    //      assert the index covers (level, source, message) with the
-    //      `WHERE resolved = false` partial predicate
-    // A stale index with the same name but a different definition (wrong
-    // columns, non-unique, missing predicate) fails this check and is
-    // dropped and rebuilt. Without the definition check, a drifted index
-    // would pass the fast path and ON CONFLICT would fail silently at
-    // runtime, swallowed by ErrorLogger.log's catch block.
-    const existing = await db.execute(sql`
-      SELECT i.indisvalid, i.indisunique, pg_get_indexdef(i.indexrelid) AS indexdef
-      FROM pg_indexes ix
-      JOIN pg_class c ON c.relname = ix.indexname
-      JOIN pg_index i ON i.indexrelid = c.oid
-      WHERE ix.indexname = 'error_logs_unresolved_dedup_idx'
-    `);
-    const rows = (existing as any).rows as Array<{ indisvalid: boolean; indisunique: boolean; indexdef: string }> | undefined;
-    if (rows && rows.length > 0) {
-      const { indisvalid, indisunique, indexdef } = rows[0];
-      const defIsCorrect =
-        indexdef.includes("(level, source, message)") &&
-        /WHERE\s+\(?resolved\s*=\s*false\)?/i.test(indexdef);
-      if (indisvalid && indisunique && defIsCorrect) return;
-      console.warn(
-        `[ensureTables] Dropping existing error_logs_unresolved_dedup_idx (valid=${indisvalid} unique=${indisunique} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
-      );
-      await db.execute(sql`DROP INDEX IF EXISTS error_logs_unresolved_dedup_idx`);
-    }
-
-    // Dedupe pre-existing unresolved rows produced by the old racy
-    // SELECT-then-INSERT path. Keep the newest row per
-    // (level, source, message) group and roll up `occurrence_count` into it
-    // so the dedup bucket's total event count is preserved. The advisory
-    // xact lock serializes concurrent boots in a rolling deploy so only one
-    // instance performs the dedup at a time; follow-up boots find nothing
-    // to merge and fall through to the idempotent CONCURRENTLY step below.
-    // LEAST(INT32_MAX, SUM) caps the rolled-up count so a site with many
-    // already-huge duplicate rows doesn't blow past integer range and
-    // rollback the whole transaction.
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL lock_timeout = '10s'`);
-      // Advisory lock key is a stable 64-bit hash of the migration identifier.
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('error_logs_unresolved_dedup_migration', 0))`);
-      await tx.execute(sql`
-        WITH dups AS (
-          SELECT id,
-                 ROW_NUMBER() OVER (
-                   PARTITION BY level, source, message
-                   ORDER BY timestamp DESC, id DESC
-                 ) AS rn,
-                 LEAST(2147483647, SUM(occurrence_count) OVER (
-                   PARTITION BY level, source, message
-                 ))::int AS total_count
-          FROM error_logs
-          WHERE resolved = false
-        )
-        UPDATE error_logs
-        SET occurrence_count = dups.total_count
-        FROM dups
-        WHERE error_logs.id = dups.id AND dups.rn = 1
-      `);
-      await tx.execute(sql`
-        DELETE FROM error_logs
-        WHERE id IN (
-          SELECT id FROM (
-            SELECT id, ROW_NUMBER() OVER (
-              PARTITION BY level, source, message
-              ORDER BY timestamp DESC, id DESC
-            ) AS rn
-            FROM error_logs WHERE resolved = false
-          ) d WHERE rn > 1
-        )
-      `);
-    });
-
-    // CONCURRENTLY cannot run inside a transaction. IF NOT EXISTS makes this
-    // safe if another rolling-deploy instance beat us to it between the
-    // dedup tx above and this statement.
-    await db.execute(sql`
-      CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS error_logs_unresolved_dedup_idx
-      ON error_logs(level, source, message)
-      WHERE resolved = false
-    `);
-  } catch (e) {
-    console.warn("Could not ensure error_logs columns/index:", e);
+export async function dropLegacyErrorLogsTable(): Promise<void> {
+  // Propagate errors so the one-shot operator script sees the failure
+  // instead of a silent `console.error`. This is a manual utility, not
+  // a boot hook, so throwing is the right posture.
+  await db.execute(sql`DROP TABLE IF EXISTS error_logs`);
+  const check = await db.execute(sql`SELECT to_regclass('error_logs') AS exists`);
+  const stillExists = (check as any).rows?.[0]?.exists;
+  if (stillExists) {
+    throw new Error(`DROP TABLE error_logs completed but to_regclass still resolves — table survived (value=${String(stillExists)})`);
   }
 }
 
@@ -422,8 +326,9 @@ export async function ensureCampaignPartialIndexes(): Promise<void> {
   try {
     // campaigns_type_automated_idx — also check pg_get_indexdef so a stale
     // same-name index with wrong columns/predicate gets dropped and rebuilt
-    // (CREATE INDEX CONCURRENTLY IF NOT EXISTS is name-based only). Matches
-    // the ensureErrorLogColumns pattern — see CodeRabbit review on PR #455.
+    // (CREATE INDEX CONCURRENTLY IF NOT EXISTS is name-based only). Mirrors
+    // the pg_get_indexdef-based validation pattern used elsewhere in this
+    // file — see CodeRabbit review on PR #455.
     const existingCampaignIdx = await db.execute(sql`
       SELECT i.indisvalid, pg_get_indexdef(i.indexrelid) AS indexdef
       FROM pg_indexes ix

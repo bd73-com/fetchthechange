@@ -3,7 +3,6 @@ import { db } from "../db";
 import { getResendClient } from "./resendClient";
 import { users, campaigns, campaignRecipients, monitors } from "@shared/schema";
 import { ResendUsageTracker } from "./resendTracker";
-import { ErrorLogger } from "./logger";
 import { eq, and, inArray, gte, lte, sql, count, SQL } from "drizzle-orm";
 import { getAppUrl } from "../utils/appUrl";
 
@@ -405,7 +404,7 @@ export async function triggerCampaignSend(campaignId: number): Promise<{ totalRe
   const sendControl = { cancelled: false };
   activeSends.set(campaignId, sendControl);
   sendCampaignBatch(campaignId, campaign, sendControl).catch(async (err) => {
-    await ErrorLogger.error("email", `Campaign ${campaignId} batch send error`, err instanceof Error ? err : null, { campaignId });
+    console.error(`[email] Campaign ${campaignId} batch send error`, err instanceof Error ? err.message : String(err), { campaignId });
     await finalizeCampaign(campaignId, "partially_sent");
     activeSends.delete(campaignId);
   });

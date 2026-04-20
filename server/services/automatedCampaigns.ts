@@ -1,7 +1,6 @@
 import { db } from "../db";
 import { campaigns, automatedCampaignConfigs, type AutomatedCampaignConfig } from "@shared/schema";
 import { triggerCampaignSend, resolveRecipients } from "./campaignEmail";
-import { ErrorLogger } from "./logger";
 import { eq, and, isNull } from "drizzle-orm";
 
 export const WELCOME_CAMPAIGN_DEFAULTS = {
@@ -336,33 +335,15 @@ export async function bootstrapWelcomeCampaign(): Promise<void> {
         )
         .returning();
       if (rolledBack.length === 0) {
-        // Optimistic guard did not match — either another instance
-        // claimed in between, or a PG timestamp-precision mismatch
-        // defeated the equality check. Route through ErrorLogger so
-        // this triggers alerting, not just a console warning.
         const msg = `Rollback WHERE guard matched zero rows for config ${config.id}; the config row may remain in a permanently advanced state. Recovery: UPDATE automated_campaign_configs SET last_run_at = NULL, next_run_at = NULL, updated_at = NOW() WHERE id = ${config.id};`;
-        console.warn(`[Bootstrap] ${msg}`);
-        try {
-          await ErrorLogger.error("scheduler", msg, null, { configId: config.id, configKey: config.key });
-        } catch { /* already logged to console */ }
+        console.error(`[scheduler] ${msg}`, { configId: config.id, configKey: config.key });
       }
     } catch (rollbackError) {
-      // Belt-and-suspenders: log to console too, in case ErrorLogger
-      // itself is failing because the DB is the root cause of both.
       console.error(
-        `[Bootstrap] Welcome campaign bootstrap rollback failed:`,
+        `[scheduler] Welcome campaign bootstrap rollback failed`,
         rollbackError instanceof Error ? rollbackError.message : rollbackError,
+        { configId: config.id, configKey: config.key },
       );
-      try {
-        await ErrorLogger.error(
-          "scheduler",
-          "Welcome campaign bootstrap rollback failed",
-          rollbackError instanceof Error ? rollbackError : null,
-          { configId: config.id, configKey: config.key }
-        );
-      } catch {
-        // Logger itself failed — already logged to console above.
-      }
     }
 
     // Re-throw so the caller (server startup) knows the bootstrap failed —
@@ -592,58 +573,28 @@ export async function processAutomatedCampaigns(): Promise<void> {
             )
             .returning();
           if (rolledBack.length === 0) {
-            // Optimistic guard did not match — either a concurrent instance
-            // claimed in between, or a PG timestamp-precision mismatch
-            // defeated the equality check. Route through ErrorLogger so
-            // this triggers alerting, not just a console warning.
             const msg = `Rollback WHERE guard matched zero rows for config '${config.key}' (id=${config.id}); the config row may remain in a permanently advanced state. Recovery: UPDATE automated_campaign_configs SET last_run_at = ${previousLastRunAt ? `'${previousLastRunAt.toISOString()}'` : 'NULL'}, next_run_at = ${previousNextRunAt ? `'${previousNextRunAt.toISOString()}'` : 'NULL'}, updated_at = NOW() WHERE id = ${config.id};`;
-            console.warn(`[AutoCampaign] ${msg}`);
-            try {
-              await ErrorLogger.error("scheduler", msg, null, { configId: config.id, configKey: config.key });
-            } catch { /* already logged to console */ }
+            console.error(`[scheduler] ${msg}`, { configId: config.id, configKey: config.key });
           }
         } catch (rollbackError) {
           console.error(
-            `[AutoCampaign] Automated campaign '${config.key}' rollback failed:`,
+            `[scheduler] Automated campaign '${config.key}' rollback failed`,
             rollbackError instanceof Error ? rollbackError.message : rollbackError,
+            {
+              configId: config.id,
+              configKey: config.key,
+              previousLastRunAt: previousLastRunAt?.toISOString() ?? null,
+              previousNextRunAt: previousNextRunAt?.toISOString() ?? null,
+            },
           );
-          try {
-            await ErrorLogger.error(
-              "scheduler",
-              `Automated campaign '${config.key}' rollback failed`,
-              rollbackError instanceof Error ? rollbackError : null,
-              {
-                configId: config.id,
-                configKey: config.key,
-                previousLastRunAt: previousLastRunAt?.toISOString() ?? null,
-                previousNextRunAt: previousNextRunAt?.toISOString() ?? null,
-              }
-            );
-          } catch {
-            // Logger itself failed — already logged to console above.
-          }
         }
       }
 
-      // Wrap the outer error log in try/catch too: if the DB is the root
-      // cause of the send failure, ErrorLogger.error will also throw and
-      // abort this for-loop, preventing any remaining configs from being
-      // processed. console.error ensures the error is always surfaced.
-      try {
-        await ErrorLogger.error(
-          "scheduler",
-          `Automated campaign '${config.key}' failed`,
-          error instanceof Error ? error : null,
-          { configId: config.id, configKey: config.key, errorMessage: error instanceof Error ? error.message : String(error) }
-        );
-      } catch (logError) {
-        console.error(
-          `[AutoCampaign] Automated campaign '${config.key}' failed (and error logger also failed):`,
-          error instanceof Error ? error.message : error,
-          "log error:",
-          logError instanceof Error ? logError.message : logError,
-        );
-      }
+      console.error(
+        `[scheduler] Automated campaign '${config.key}' failed`,
+        error instanceof Error ? error.message : String(error),
+        { configId: config.id, configKey: config.key, errorMessage: error instanceof Error ? error.message : String(error) }
+      );
     }
   }
 }
