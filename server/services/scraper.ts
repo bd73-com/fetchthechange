@@ -1260,6 +1260,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
               { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector },
             );
           } else if (browserlessInfraFailure) {
+            // Monitor-agnostic message so grep-based triage aggregates infra
+            // outages across affected monitors into a single log pattern.
+            // Per-monitor drill-down details stay in the context object.
             console.warn("[scraper] Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
           } else {
             const classifiedReason = classifyBrowserlessError(rawBrowserlessMsg);

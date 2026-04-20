@@ -248,7 +248,7 @@ export async function startScheduler() {
         }
       }
     } catch (error) {
-      await logSchedulerError("Scheduler iteration failed", error, { activeChecks, phase: "fetching active monitors" });
+      logSchedulerError("Scheduler iteration failed", error, { activeChecks, phase: "fetching active monitors" });
     } finally {
       mainCronRunning = false;
     }
@@ -271,12 +271,12 @@ export async function startScheduler() {
           // could cause duplicate email/webhook/Slack deliveries.
           await processQueuedNotifications();
         } catch (error) {
-          await logSchedulerError("Queued notification processing failed", error);
+          logSchedulerError("Queued notification processing failed", error);
         }
         try {
           await processDigestCron();
         } catch (error) {
-          await logSchedulerError("Digest processing failed", error);
+          logSchedulerError("Digest processing failed", error);
         }
       } finally {
         notificationCronRunning = false;
@@ -377,7 +377,7 @@ export async function startScheduler() {
           }
         }
       } catch (error) {
-        await logSchedulerError("Webhook retry processing failed", error);
+        logSchedulerError("Webhook retry processing failed", error);
       } finally {
         webhookCronRunning = false;
       }
@@ -397,7 +397,7 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${deleted} monitor_metrics rows older than 90 days`);
       }
     } catch (error) {
-      await logSchedulerError("monitor_metrics cleanup failed", error, { retentionDays: 90, table: "monitor_metrics" });
+      logSchedulerError("monitor_metrics cleanup failed", error, { retentionDays: 90, table: "monitor_metrics" });
     }
 
     // Delivery log cleanup: prune entries older than 30 days
@@ -408,7 +408,7 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${entriesDeleted} delivery_log rows older than 30 days`);
       }
     } catch (error) {
-      await logSchedulerError("delivery_log cleanup failed", error, { retentionDays: 30, table: "delivery_log" });
+      logSchedulerError("delivery_log cleanup failed", error, { retentionDays: 30, table: "delivery_log" });
     }
 
     // Notification queue cleanup: prune permanently failed entries older than 7 days
@@ -420,7 +420,7 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${deleted} permanently failed notification_queue rows older than 7 days`);
       }
     } catch (error) {
-      await logSchedulerError("notification_queue cleanup failed", error, { retentionDays: 7, table: "notification_queue" });
+      logSchedulerError("notification_queue cleanup failed", error, { retentionDays: 7, table: "notification_queue" });
     }
 
     // Automation subscriptions cleanup: hard-delete inactive subscriptions older than retention period
@@ -432,7 +432,7 @@ export async function startScheduler() {
         console.log(`[Cleanup] Pruned ${deleted} inactive automation_subscriptions rows older than ${retentionDays} days`);
       }
     } catch (error) {
-      await logSchedulerError("automation_subscriptions cleanup failed", error, { retentionDays: AUTOMATION_SUBSCRIPTION_LIMITS.cleanupRetentionDays, table: "automation_subscriptions" });
+      logSchedulerError("automation_subscriptions cleanup failed", error, { retentionDays: AUTOMATION_SUBSCRIPTION_LIMITS.cleanupRetentionDays, table: "automation_subscriptions" });
     }
   }));
 
@@ -441,7 +441,7 @@ export async function startScheduler() {
     try {
       await processAutomatedCampaigns();
     } catch (error) {
-      await logSchedulerError("Automated campaign processing failed", error);
+      logSchedulerError("Automated campaign processing failed", error);
     }
   }, { timezone: "UTC" }));
 

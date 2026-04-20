@@ -315,8 +315,9 @@ export async function ensureCampaignPartialIndexes(): Promise<void> {
   try {
     // campaigns_type_automated_idx — also check pg_get_indexdef so a stale
     // same-name index with wrong columns/predicate gets dropped and rebuilt
-    // (CREATE INDEX CONCURRENTLY IF NOT EXISTS is name-based only). Matches
-    // the ensureErrorLogColumns pattern — see CodeRabbit review on PR #455.
+    // (CREATE INDEX CONCURRENTLY IF NOT EXISTS is name-based only). Mirrors
+    // the pg_get_indexdef-based validation pattern used elsewhere in this
+    // file — see CodeRabbit review on PR #455.
     const existingCampaignIdx = await db.execute(sql`
       SELECT i.indisvalid, pg_get_indexdef(i.indexrelid) AS indexdef
       FROM pg_indexes ix
