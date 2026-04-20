@@ -341,13 +341,12 @@ describe("registerRoutes DDL migrations at startup", () => {
   it("logs error and continues when notification channel table creation fails", async () => {
     vi.clearAllMocks();
     const channelError = new Error("permission denied for schema public");
-    // monitor health ALTERs succeed (2), pending_retry_at (1), legacy
-    // error_logs drop (1), api_keys succeed (2), then channel tables fail
+    // monitor health ALTERs succeed (2), pending_retry_at (1), api_keys
+    // succeed (2), then channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors pending_retry_at
-      .mockResolvedValueOnce({ rows: [] }) // DROP TABLE IF EXISTS error_logs
       .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
       .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
       .mockRejectedValueOnce(channelError); // notification_channels fails
@@ -379,13 +378,12 @@ describe("registerRoutes DDL migrations at startup", () => {
   it("registers channel routes even when notification channel tables fail to create", async () => {
     vi.clearAllMocks();
     const channelError = new Error("connection timeout");
-    // monitor health ALTERs succeed (2), pending_retry_at (1), legacy
-    // error_logs drop (1), api_keys succeed (2), channel tables fail
+    // monitor health ALTERs succeed (2), pending_retry_at (1), api_keys
+    // succeed (2), channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors pending_retry_at
-      .mockResolvedValueOnce({ rows: [] }) // DROP TABLE IF EXISTS error_logs
       .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
       .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
       .mockRejectedValueOnce(channelError); // notification_channels fails

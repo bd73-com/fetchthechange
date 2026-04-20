@@ -1557,7 +1557,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     // Note: "database error" (schema/constraint issues) is NOT transient and stays at error level.
     // Note: ENOTFOUND, certificate/ssl/tls errors are permanent misconfigurations, not transient.
     // Note: EAI_AGAIN is transient (temporary DNS resolver failure), so it is NOT in this list.
-    const errMsg = error instanceof Error ? error.message : "";
+    const errMsg = error instanceof Error ? error.message : String(error);
     const isPermanentNetworkError = /ENOTFOUND|certificate|ssl|tls/i.test(errMsg);
     const isTransient = (logContext === "network error" && !isPermanentNetworkError) || logContext === "database connection error";
     const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
@@ -1566,7 +1566,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     } else {
       console.error(
         `[scraper] ${logMessage}`,
-        error instanceof Error ? error.message : "",
+        error instanceof Error ? error.message : String(error),
         { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }
       );
     }

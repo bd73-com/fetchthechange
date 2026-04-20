@@ -3,16 +3,29 @@ import { sql } from "drizzle-orm";
 import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken, isEncryptionAvailable } from "../utils/encryption";
 
 /**
- * Drops the legacy `error_logs` table if it still exists. The admin error
- * logging feature was removed; since the project uses `drizzle-kit push`
- * rather than a versioned migrator, the drop must run from an ensure hook
- * rather than a SQL migration file. Idempotent — safe to run every deploy.
+ * Drops the legacy `error_logs` table. The admin error logging feature
+ * was removed, but this drop is NOT wired into registerRoutes because a
+ * rolling deploy of this PR would leave old replicas still writing to
+ * the table via the old ErrorLogger code path while the new replica
+ * DROPs it, producing a flood of failed INSERTs on the old replicas.
+ *
+ * Operator runbook: after this PR fully rolls out and no replica is
+ * running the old code anymore, drop the table manually — either by
+ * `psql $DATABASE_URL -c 'DROP TABLE IF EXISTS error_logs'` or by
+ * invoking this helper from a one-shot script. Idempotent. The table
+ * is inert (zero writers) once the new code is everywhere, so leaving
+ * it a few hours past cutover is harmless.
  */
-export async function ensureErrorLogsDropped(): Promise<void> {
+export async function dropLegacyErrorLogsTable(): Promise<void> {
   try {
     await db.execute(sql`DROP TABLE IF EXISTS error_logs`);
+    const check = await db.execute(sql`SELECT to_regclass('error_logs') AS exists`);
+    const stillExists = (check as any).rows?.[0]?.exists;
+    if (stillExists) {
+      console.error("[ensureTables] DROP TABLE error_logs completed but to_regclass still resolves — table survived", { stillExists });
+    }
   } catch (e) {
-    console.warn("Could not drop legacy error_logs table:", e);
+    console.error("Could not drop legacy error_logs table:", e);
   }
 }
 

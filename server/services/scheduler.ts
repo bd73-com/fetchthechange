@@ -114,7 +114,7 @@ async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]): P
     }
     return true;
   } catch (error) {
-    console.error(`[scheduler] "${monitor.name}" — scheduled check failed. This is usually a temporary issue. If it persists, verify the URL is still valid and the selector matches the page.`, error instanceof Error ? error.message : "", {
+    console.error(`[scheduler] "${monitor.name}" — scheduled check failed. This is usually a temporary issue. If it persists, verify the URL is still valid and the selector matches the page.`, error instanceof Error ? error.message : String(error), {
       monitorId: monitor.id,
       monitorName: monitor.name,
       url: monitor.url,

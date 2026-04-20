@@ -107,7 +107,7 @@ export class WebhookHandlers {
             console.error(`[Stripe] Failed to send downgrade email for user ${user.id}:`, err));
         }
       } catch (error) {
-        console.error(`[stripe] Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error.message : "", { userId: user.id });
+        console.error(`[stripe] Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error.message : String(error), { userId: user.id });
       }
       // Deactivate automation subscriptions (Power-only feature)
       try {
@@ -116,7 +116,7 @@ export class WebhookHandlers {
           console.log(`[Stripe] Deactivated ${deactivated} automation subscription(s) for user ${user.id}`);
         }
       } catch (error) {
-        console.error(`[stripe] Failed to deactivate automation subscriptions for user ${user.id}`, error instanceof Error ? error.message : "", { userId: user.id });
+        console.error(`[stripe] Failed to deactivate automation subscriptions for user ${user.id}`, error instanceof Error ? error.message : String(error), { userId: user.id });
       }
       console.log(`[Stripe] User ${user.id} subscription inactive, set to free tier`);
       return;
@@ -140,7 +140,7 @@ export class WebhookHandlers {
       const product = price.product as any;
       newTier = determineTierFromProduct(product);
     } catch (error: any) {
-      console.error(`[stripe] Error retrieving price ${priceId}`, error instanceof Error ? error.message : "", { customerId, priceId, subscriptionId: subscription.id });
+      console.error(`[stripe] Error retrieving price ${priceId}`, error instanceof Error ? error.message : String(error), { customerId, priceId, subscriptionId: subscription.id });
       await authStorage.updateUser(user.id, {
         stripeSubscriptionId: subscription.id,
       });
@@ -162,7 +162,7 @@ export class WebhookHandlers {
             console.error(`[Stripe] Failed to send downgrade email for user ${user.id}:`, err));
         }
       } catch (error) {
-        console.error(`[stripe] Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error.message : "", { userId: user.id, newTier });
+        console.error(`[stripe] Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error.message : String(error), { userId: user.id, newTier });
       }
     }
 
@@ -174,7 +174,7 @@ export class WebhookHandlers {
           console.log(`[Stripe] Deactivated ${deactivated} automation subscription(s) for user ${user.id}`);
         }
       } catch (error) {
-        console.error(`[stripe] Failed to deactivate automation subscriptions for user ${user.id}`, error instanceof Error ? error.message : "", { userId: user.id, newTier });
+        console.error(`[stripe] Failed to deactivate automation subscriptions for user ${user.id}`, error instanceof Error ? error.message : String(error), { userId: user.id, newTier });
       }
     }
 
@@ -202,7 +202,7 @@ export class WebhookHandlers {
           console.error(`[Stripe] Failed to send downgrade email for user ${user.id}:`, err));
       }
     } catch (error) {
-      console.error(`[stripe] Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error.message : "", { userId: user.id });
+      console.error(`[stripe] Failed to downgrade hourly monitors for user ${user.id}`, error instanceof Error ? error.message : String(error), { userId: user.id });
     }
     // Deactivate automation subscriptions (Power-only feature)
     try {
@@ -211,7 +211,7 @@ export class WebhookHandlers {
         console.log(`[Stripe] Deactivated ${deactivated} automation subscription(s) for user ${user.id}`);
       }
     } catch (error) {
-      console.error(`[stripe] Failed to deactivate automation subscriptions for user ${user.id}`, error instanceof Error ? error.message : "", { userId: user.id });
+      console.error(`[stripe] Failed to deactivate automation subscriptions for user ${user.id}`, error instanceof Error ? error.message : String(error), { userId: user.id });
     }
 
     console.log(`[Stripe] User ${user.id} downgraded to free tier`);

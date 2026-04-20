@@ -5,12 +5,15 @@ import { RESEND_CAPS } from "@shared/models/auth";
 import { sql, eq, and, gte, count, desc } from "drizzle-orm";
 
 // In-memory cooldown tracking for threshold alert logs. Previously persisted
-// via error_logs; now kept in-memory with a 6h cooldown per alert key. Lost
-// on restart — acceptable given rare restarts and the coarse cadence. NOTE:
-// Replit autoscale can run multiple replicas; under concurrent scale-out
-// each replica owns its own map, so a threshold crossing during a traffic
-// spike may emit up to one console.warn per replica instead of a single
-// global alert.
+// via error_logs; now kept in-memory with a 6h cooldown per alert key.
+// Tradeoffs mirror browserlessTracker:
+//   - RESTART-RESET: two deploys within 6h during an already-elevated usage
+//     window can re-fire the same threshold warn, because the Map is
+//     per-process and starts empty on each boot.
+//   - AUTOSCALE FAN-OUT: Replit autoscale replicas each hold their own
+//     Map, so a threshold crossing during scale-out can emit up to one
+//     console.warn per replica instead of a single global alert.
+// Both are accepted as documented tradeoffs for the removal branch.
 const recentResendAlerts = new Map<string, number>();
 
 function getMonthStart(): Date {

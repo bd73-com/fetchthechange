@@ -35,7 +35,7 @@ import { encryptToken, decryptToken, isValidEncryptedToken } from "./utils/encry
 import { validateHost } from "./utils/hostValidation";
 import { createHmac } from "node:crypto";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import { ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes, ensureCampaignPartialIndexes, ensureErrorLogsDropped } from "./services/ensureTables";
+import { ensureApiKeysTable, ensureChannelTables, ensureTagTables, ensureMonitorHealthColumns, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes, ensureCampaignPartialIndexes } from "./services/ensureTables";
 import { renderRobotsTxt, renderSitemapXml } from "./services/seoFiles";
 
 
@@ -69,7 +69,6 @@ export async function registerRoutes(
   if (!pendingRetryReady) {
     console.error("CRITICAL: monitors.pending_retry_at column missing — auto-retry scheduling will fail");
   }
-  await ensureErrorLogsDropped();
   const apiKeysReady = await ensureApiKeysTable();
   await ensureChannelTables();
   await ensureMonitorChangesIndexes();
@@ -2697,11 +2696,16 @@ export async function registerRoutes(
     if (err.message === "Not allowed by CORS") {
       return res.status(403).json({ message: "Not allowed by CORS", code: "CORS_FORBIDDEN" });
     }
-    // Log message only (no stack) so DSNs, bearer tokens, and provider keys
-    // embedded in framework/library error stacks don't land in the Replit log
-    // stream. See security review M1 — the old ErrorLogger sanitized the
-    // stack via regex; the console sink has no sanitizer.
-    console.error(`[api] ${err.message || "Unhandled API error"}`, { status: err.status || 500 });
+    // Log err.name + err.code + err.message + status; skip err.stack so DSNs,
+    // bearer tokens, and provider keys embedded in framework/library stack
+    // traces don't land in the Replit log stream. The removed ErrorLogger
+    // sanitized the stack via regex; the console sink has no sanitizer. name
+    // and code give most of the diagnostic signal without the secret-leak
+    // surface (they come from our code, not library internals).
+    const name = (err && typeof err === "object" && typeof err.name === "string") ? err.name : "Error";
+    const code = (err && typeof err === "object" && (err as any).code) ? String((err as any).code) : undefined;
+    const message = (err && typeof err === "object" && typeof err.message === "string" && err.message) || "Unhandled API error";
+    console.error(`[api] ${name}: ${message}`, { status: err.status || 500, ...(code ? { code } : {}) });
     res.status(err.status || 500).json({ message: "Internal server error" });
   });
 

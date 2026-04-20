@@ -163,7 +163,6 @@ vi.mock("express-rate-limit", () => ({
 }));
 
 vi.mock("./services/ensureTables", () => ({
-  ensureErrorLogsDropped: vi.fn().mockResolvedValue(undefined),
   ensureApiKeysTable: vi.fn().mockResolvedValue(undefined),
   ensureChannelTables: vi.fn().mockResolvedValue(undefined),
   ensureNotificationQueueColumns: vi.fn().mockResolvedValue(true),

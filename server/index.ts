@@ -151,11 +151,11 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       } catch (error: any) {
         const msg = error.message || '';
         if (msg.includes('signature') || msg.includes('No signatures found') || msg.includes('timestamp')) {
-          console.error('[stripe] Webhook signature validation failed', error instanceof Error ? error.message : "", { ip: req.ip });
+          console.error('[stripe] Webhook signature validation failed', error instanceof Error ? error.message : String(error), { ip: req.ip });
           return res.status(401).json({ error: 'Invalid signature' });
         }
 
-        console.error('[stripe] Webhook processing failed', error instanceof Error ? error.message : "");
+        console.error('[stripe] Webhook processing failed', error instanceof Error ? error.message : String(error));
         return res.status(500).json({ error: 'Processing failed' });
       }
     }
@@ -179,11 +179,11 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       } catch (error: any) {
         const msg = error.message || '';
         if (msg.includes('signature') || msg.includes('timestamp') || msg.includes('No signatures found')) {
-          console.error('[email] Resend webhook signature validation failed', error instanceof Error ? error.message : "", { ip: req.ip });
+          console.error('[email] Resend webhook signature validation failed', error instanceof Error ? error.message : String(error), { ip: req.ip });
           return res.status(401).json({ error: 'Invalid signature' });
         }
 
-        console.error('[email] Resend webhook processing failed', error instanceof Error ? error.message : "");
+        console.error('[email] Resend webhook processing failed', error instanceof Error ? error.message : String(error));
         return res.status(500).json({ error: 'Processing failed' });
       }
     }

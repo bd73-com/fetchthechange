@@ -320,7 +320,7 @@ async function deliverToChannels(
       } else if (ch.channel === "slack" && !result.slack) {
         result.slack = { success: false, error: msg };
       }
-      console.error(`[email] Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err.message : "", { monitorId: monitor.id, channel: ch.channel });
+      console.error(`[email] Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err.message : String(err), { monitorId: monitor.id, channel: ch.channel });
     }
   });
 
@@ -480,7 +480,7 @@ async function deliverDigestToChannels(
       } else if (ch.channel === "slack" && !result.slack) {
         result.slack = { success: false, error: msg };
       }
-      console.error(`[email] Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err.message : "", { monitorId: monitor.id, channel: ch.channel });
+      console.error(`[email] Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err.message : String(err), { monitorId: monitor.id, channel: ch.channel });
     }
   });
 
@@ -685,7 +685,7 @@ export async function processQueuedNotifications(): Promise<void> {
         }
       }
     } catch (error) {
-      console.error(`[scheduler] Failed to process queued notifications for monitor ${monitorId}`, error instanceof Error ? error.message : "", { monitorId });
+      console.error(`[scheduler] Failed to process queued notifications for monitor ${monitorId}`, error instanceof Error ? error.message : String(error), { monitorId });
     }
   }
 
@@ -739,7 +739,7 @@ export async function processDigestCron(): Promise<void> {
         emailsSent++;
       }
     } catch (error) {
-      console.error(`[scheduler] Failed to process digest for monitor ${prefs.monitorId}`, error instanceof Error ? error.message : "", { monitorId: prefs.monitorId });
+      console.error(`[scheduler] Failed to process digest for monitor ${prefs.monitorId}`, error instanceof Error ? error.message : String(error), { monitorId: prefs.monitorId });
     }
   }
 

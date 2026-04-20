@@ -6,12 +6,18 @@ import { BROWSERLESS_CAPS, users, type UserTier } from "@shared/models/auth";
 import { sql, eq, and, gte, count, desc } from "drizzle-orm";
 
 // In-memory cooldown tracking for threshold alert emails. The 6h cooldown
-// was previously enforced via error_logs rows; since that table is gone,
-// keep a lightweight map keyed by threshold. Lost on restart — acceptable
-// given rare restarts and the coarse 6h cadence. NOTE: Replit autoscale
-// can run multiple replicas; under concurrent scale-out each replica owns
-// its own map, so a threshold crossing during a traffic spike may send up
-// to one alert email per replica instead of a single global alert.
+// was previously enforced via error_logs rows that persisted across deploys
+// and were shared across replicas; that table is gone. Tradeoffs now:
+//   - RESTART-RESET: two deploys within 6h while usage is already >80%
+//     can re-fire the same threshold email because the Map is per-process
+//     and starts empty on each boot.
+//   - AUTOSCALE FAN-OUT: Replit autoscale may run multiple replicas; each
+//     holds its own Map, so a threshold crossing during a traffic spike
+//     can send up to one alert email per replica instead of a single
+//     global alert.
+// Both are accepted: alert emails are coarse operational signals, burst
+// duplication is annoying but not harmful, and persisting cooldown to a
+// new alert_state table is scope creep for this removal branch.
 const recentThresholdAlerts = new Map<string, number>();
 
 function getMonthStart(): Date {

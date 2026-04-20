@@ -404,7 +404,7 @@ export async function triggerCampaignSend(campaignId: number): Promise<{ totalRe
   const sendControl = { cancelled: false };
   activeSends.set(campaignId, sendControl);
   sendCampaignBatch(campaignId, campaign, sendControl).catch(async (err) => {
-    console.error(`[email] Campaign ${campaignId} batch send error`, err instanceof Error ? err.message : "", { campaignId });
+    console.error(`[email] Campaign ${campaignId} batch send error`, err instanceof Error ? err.message : String(err), { campaignId });
     await finalizeCampaign(campaignId, "partially_sent");
     activeSends.delete(campaignId);
   });
