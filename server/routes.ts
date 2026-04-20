@@ -61,13 +61,20 @@ export async function registerRoutes(
   app: Express
 ): Promise<{ httpServer: Server; campaignConfigsReady: boolean }> {
 
+  // Columns/tables referenced directly by Drizzle-generated SELECTs must be
+  // provisioned before we accept traffic. If any of these fail, every
+  // downstream query would throw `column … does not exist` for the life of
+  // the process. Rather than serving partial-liveness (port open, every
+  // user-facing request 500s), install a global /api 503 gate so clients
+  // receive a clear SCHEMA_NOT_READY signal. See GitHub issue #457.
+  const criticalSchemaFailures: string[] = [];
   const healthColumnsReady = await ensureMonitorHealthColumns();
   if (!healthColumnsReady) {
-    console.error("CRITICAL: Monitor health columns missing — health alerts and recovery emails will be disabled");
+    criticalSchemaFailures.push("monitor health columns");
   }
   const pendingRetryReady = await ensureMonitorPendingRetryColumn();
   if (!pendingRetryReady) {
-    console.error("CRITICAL: monitors.pending_retry_at column missing — auto-retry scheduling will fail");
+    criticalSchemaFailures.push("monitors.pending_retry_at column");
   }
   const apiKeysReady = await ensureApiKeysTable();
   await ensureChannelTables();
@@ -75,12 +82,21 @@ export async function registerRoutes(
   await ensureCampaignPartialIndexes();
   const notificationQueueReady = await ensureNotificationQueueColumns();
   if (!notificationQueueReady) {
-    console.error("CRITICAL: notification_queue columns missing — notification cron queries will fail");
+    criticalSchemaFailures.push("notification_queue columns");
   }
   await ensureTagTables();
   const automationSubsReady = await ensureAutomationSubscriptionsTable();
   if (!automationSubsReady) {
-    console.error("CRITICAL: automation_subscriptions table missing — Zapier endpoints and automation delivery will fail");
+    criticalSchemaFailures.push("automation_subscriptions table");
+  }
+  if (criticalSchemaFailures.length > 0) {
+    const detail = criticalSchemaFailures.join(", ");
+    console.error(
+      `CRITICAL: required schema missing — ${detail}. All /api/* routes will return 503 SCHEMA_NOT_READY until the server restarts on a healthy DB.`,
+    );
+    app.use("/api", (_req, res) => {
+      res.status(503).json({ message: `Schema not ready: ${detail}`, code: "SCHEMA_NOT_READY" });
+    });
   }
   let campaignConfigsReady = await ensureAutomatedCampaignConfigsTable();
   if (!campaignConfigsReady) {

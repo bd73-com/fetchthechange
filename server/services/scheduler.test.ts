@@ -29,6 +29,18 @@ vi.mock("../storage", () => ({
     getAllActiveMonitors: mockGetAllActiveMonitors,
     cleanupPollutedValues: mockCleanupPollutedValues,
     getPendingWebhookRetries: vi.fn().mockResolvedValue([]),
+    claimWebhookDeliveryForRetry: vi.fn().mockImplementation(async (id: number, attempt: number) => ({
+      id, attempt, channel: "webhook", status: "processing", createdAt: new Date(),
+      monitorId: id, changeId: id, response: null, deliveredAt: null, claimedAt: new Date(),
+    })),
+    claimDeliveryForRetry: vi.fn().mockImplementation(async (id: number, attempt: number, channel: string) => ({
+      id, attempt, channel, status: "processing", createdAt: new Date(),
+      monitorId: id, changeId: id, response: null, deliveredAt: null, claimedAt: new Date(),
+    })),
+    recoverStalledWebhookDeliveries: vi.fn().mockResolvedValue(0),
+    recoverStalledDeliveries: vi.fn().mockResolvedValue(0),
+    getPendingAutomationRetries: vi.fn().mockResolvedValue([]),
+    getAutomationSubscriptionById: vi.fn().mockResolvedValue(undefined),
     getMonitorChannels: vi.fn().mockResolvedValue([]),
     getMonitor: vi.fn().mockResolvedValue(undefined),
     getMonitorChanges: vi.fn().mockResolvedValue([]),
@@ -50,6 +62,12 @@ vi.mock("./notification", () => ({
 
 vi.mock("./webhookDelivery", () => ({
   deliver: (...args: any[]) => mockDeliverWebhook(...args),
+  buildWebhookPayload: (_m: any, c: any) => ({ event: "change.detected", id: c?.id ?? 0 }),
+}));
+
+vi.mock("./automationDelivery", () => ({
+  performAutomationDelivery: vi.fn().mockResolvedValue({ kind: "success", statusCode: 200 }),
+  finalizeAutomationRetry: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../db", () => ({
@@ -916,6 +934,11 @@ describe("withDbRetry and re-entrancy guards", () => {
     const callbacks = cronCallbacks["*/1 * * * *"];
     // Fire webhook cron (index 1) without awaiting — it blocks on getPendingWebhookRetries
     const firstRun = callbacks[1]();
+    // Flush microtasks so the first run progresses past recoverStalledWebhookDeliveries
+    // and is actually parked on the hanging getPendingWebhookRetries promise.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
 
     // Fire webhook cron again while first is blocked — guard should skip it
     await callbacks[1]();
@@ -1026,7 +1049,7 @@ describe("webhook retry cumulative backoff", () => {
     await runCron("*/1 * * * *");
 
     expect(mockStorage.getMonitor).toHaveBeenCalledWith(1);
-    expect(mockStorage.updateDeliveryLog).toHaveBeenCalledWith(1, { status: "failed" });
+    expect(mockStorage.updateDeliveryLog).toHaveBeenCalledWith(1, expect.objectContaining({ status: "failed" }));
   });
 
   it("retries updateDeliveryLog with withDbRetry after successful webhook delivery", async () => {

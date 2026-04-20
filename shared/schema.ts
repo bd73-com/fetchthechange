@@ -315,11 +315,16 @@ export const deliveryLog = pgTable("delivery_log", {
   id: serial("id").primaryKey(),
   monitorId: integer("monitor_id").notNull().references(() => monitors.id, { onDelete: "cascade" }),
   changeId: integer("change_id").notNull().references(() => monitorChanges.id),
-  channel: text("channel").notNull(), // "email" | "webhook" | "slack"
-  status: text("status").notNull(), // "success" | "failed" | "pending"
+  channel: text("channel").notNull(), // "email" | "webhook" | "slack" | "automation"
+  status: text("status").notNull(), // "success" | "failed" | "pending" | "processing"
   attempt: integer("attempt").default(1).notNull(),
   response: jsonb("response").$type<Record<string, unknown> | null>(),
   deliveredAt: timestamp("delivered_at"),
+  // Timestamp of the current in-flight delivery attempt. Set atomically when a
+  // replica transitions status='pending' → 'processing'; cleared when the final
+  // status is written. Stale 'processing' rows (claimed_at older than the
+  // recovery threshold) are re-queued to 'pending' by the retry cron.
+  claimedAt: timestamp("claimed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
   monitorCreatedIdx: index("delivery_log_monitor_created_idx").on(table.monitorId, table.createdAt),

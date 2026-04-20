@@ -2,7 +2,8 @@ import cron from "node-cron";
 import { storage, PENDING_WEBHOOK_RETRY_QUERY_LIMIT } from "../storage";
 import { checkMonitor, monitorsNeedingRetry } from "./scraper";
 import { processQueuedNotifications, processDigestCron } from "./notification";
-import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery";
+import { deliver as deliverWebhook, type WebhookConfig, buildWebhookPayload } from "./webhookDelivery";
+import { performAutomationDelivery, finalizeAutomationRetry } from "./automationDelivery";
 import { notificationTablesExist } from "./notificationReady";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { ensureMonitorConditionsTable } from "./ensureTables";
@@ -76,7 +77,7 @@ export function waitForActiveChecks(timeoutMs: number): Promise<void> {
       if (activeChecks === 0 || Date.now() - start > timeoutMs) {
         resolve();
       } else {
-        setTimeout(check, 100);
+        trackTimeout(check, 100);
       }
     };
     check();
@@ -288,12 +289,27 @@ export async function startScheduler() {
     // backlogs within a few minutes after a server restart.
     const MAX_WEBHOOK_RETRIES_PER_TICK = 10;
     const WEBHOOK_BACKLOG_WARN_INTERVAL_MS = 15 * 60 * 1000;
+    // Rows claimed (status='processing') but not finalized within this window
+    // are presumed orphaned by a crashed replica and re-queued to 'pending'.
+    // Must exceed the webhook delivery timeout (5s) plus update latency by a
+    // comfortable margin so a still-in-flight delivery is never re-queued.
+    const WEBHOOK_CLAIM_RECOVERY_MS = 5 * 60 * 1000;
     let lastWebhookBacklogWarnAt = 0;
     let webhookCronRunning = false;
     cronTasks.push(cron.schedule("*/1 * * * *", async () => {
       if (webhookCronRunning) return;
       webhookCronRunning = true;
       try {
+        // Recover any rows stuck in 'processing' from a prior crashed replica.
+        try {
+          const recovered = await withDbRetry(() => storage.recoverStalledWebhookDeliveries(new Date(Date.now() - WEBHOOK_CLAIM_RECOVERY_MS)));
+          if (recovered > 0) {
+            console.warn(`[Webhook] Recovered ${recovered} stalled delivery row(s) from 'processing' back to 'pending'`);
+          }
+        } catch (recoveryErr) {
+          logSchedulerError("Webhook stalled-delivery recovery failed", recoveryErr);
+        }
+
         const pendingRetries = await withDbRetry(() => storage.getPendingWebhookRetries());
         if (pendingRetries.length >= PENDING_WEBHOOK_RETRY_QUERY_LIMIT) {
           const nowMs = Date.now();
@@ -318,28 +334,34 @@ export async function startScheduler() {
           const requiredWait = cumulativeBackoffMs[entry.attempt] || 155000;
           if (elapsed < requiredWait) continue;
 
+          // Atomic cross-replica claim: transition 'pending' → 'processing'.
+          // If another replica claimed this row between our SELECT and the
+          // UPDATE, the attempt counter won't match and we'll get null.
+          const claimed = await withDbRetry(() => storage.claimWebhookDeliveryForRetry(entry.id, entry.attempt));
+          if (!claimed) continue;
+
           const monitor = await storage.getMonitor(entry.monitorId);
           if (!monitor) {
-            await storage.updateDeliveryLog(entry.id, { status: "failed" });
+            await storage.updateDeliveryLog(entry.id, { status: "failed", claimedAt: null });
             continue;
           }
 
           const channels = await storage.getMonitorChannels(monitor.id);
           const webhookChannel = channels.find((c) => c.channel === "webhook" && c.enabled);
           if (!webhookChannel) {
-            await storage.updateDeliveryLog(entry.id, { status: "failed" });
+            await storage.updateDeliveryLog(entry.id, { status: "failed", claimedAt: null });
             continue;
           }
 
           const config = webhookChannel.config as unknown as WebhookConfig;
           if (!config?.url || !config?.secret) {
-            await storage.updateDeliveryLog(entry.id, { status: "failed" });
+            await storage.updateDeliveryLog(entry.id, { status: "failed", claimedAt: null });
             continue;
           }
 
           const change = await storage.getMonitorChangeById(entry.changeId);
           if (!change || change.monitorId !== monitor.id) {
-            await storage.updateDeliveryLog(entry.id, { status: "failed" });
+            await storage.updateDeliveryLog(entry.id, { status: "failed", claimedAt: null });
             continue;
           }
 
@@ -353,6 +375,7 @@ export async function startScheduler() {
                 status: "success",
                 attempt: nextAttempt,
                 deliveredAt: new Date(),
+                claimedAt: null,
                 response: { statusCode: result.statusCode } as Record<string, unknown>,
               }));
             } catch (dbErr) {
@@ -364,6 +387,7 @@ export async function startScheduler() {
             await withDbRetry(() => storage.updateDeliveryLog(entry.id, {
               status: "failed",
               attempt: nextAttempt,
+              claimedAt: null,
               response: { error: result.error } as Record<string, unknown>,
             }));
             console.error(`[Webhook] Delivery failed after all retries (monitorId=${monitor.id}, domain=${urlDomain})`);
@@ -371,6 +395,7 @@ export async function startScheduler() {
             await withDbRetry(() => storage.updateDeliveryLog(entry.id, {
               status: "pending",
               attempt: nextAttempt,
+              claimedAt: null,
               response: { error: result.error } as Record<string, unknown>,
             }));
             console.warn(`[Webhook] Delivery failed, scheduling retry (monitorId=${monitor.id}, attempt=${nextAttempt}, error=${result.error})`);
@@ -380,6 +405,108 @@ export async function startScheduler() {
         logSchedulerError("Webhook retry processing failed", error);
       } finally {
         webhookCronRunning = false;
+      }
+    }));
+
+    // Automation retry cron: every minute, re-attempt transient automation
+    // (Zapier REST Hooks etc.) deliveries that failed on first try (see #456).
+    // Mirrors the webhook retry cron's cumulative-backoff + atomic-claim pattern.
+    const MAX_AUTOMATION_RETRIES_PER_TICK = 10;
+    let automationCronRunning = false;
+    cronTasks.push(cron.schedule("*/1 * * * *", async () => {
+      if (automationCronRunning) return;
+      automationCronRunning = true;
+      try {
+        try {
+          const recovered = await withDbRetry(() => storage.recoverStalledDeliveries("automation", new Date(Date.now() - WEBHOOK_CLAIM_RECOVERY_MS)));
+          if (recovered > 0) {
+            console.warn(`[Automation] Recovered ${recovered} stalled delivery row(s) from 'processing' back to 'pending'`);
+          }
+        } catch (recoveryErr) {
+          logSchedulerError("Automation stalled-delivery recovery failed", recoveryErr);
+        }
+
+        const pendingRetries = await withDbRetry(() => storage.getPendingAutomationRetries());
+        const now = Date.now();
+        const cumulativeBackoffMs: Record<number, number> = { 1: 5000, 2: 35000, 3: 155000 };
+
+        let processed = 0;
+        for (const entry of pendingRetries) {
+          if (processed >= MAX_AUTOMATION_RETRIES_PER_TICK) break;
+
+          const elapsed = now - new Date(entry.createdAt).getTime();
+          const requiredWait = cumulativeBackoffMs[entry.attempt] || 155000;
+          if (elapsed < requiredWait) continue;
+
+          const claimed = await withDbRetry(() => storage.claimDeliveryForRetry(entry.id, entry.attempt, "automation"));
+          if (!claimed) continue;
+
+          const respMeta = (entry.response ?? {}) as { subscriptionId?: number; platform?: string };
+          const subscriptionId = respMeta.subscriptionId;
+          const platform = respMeta.platform ?? "unknown";
+
+          if (!subscriptionId) {
+            await storage.updateDeliveryLog(entry.id, { status: "failed", claimedAt: null });
+            continue;
+          }
+
+          const monitor = await storage.getMonitor(entry.monitorId);
+          const change = await storage.getMonitorChangeById(entry.changeId);
+          const sub = await storage.getAutomationSubscriptionById(subscriptionId);
+
+          if (!monitor || !change || change.monitorId !== monitor.id || !sub || !sub.active) {
+            await storage.updateDeliveryLog(entry.id, { status: "failed", claimedAt: null });
+            continue;
+          }
+
+          const payload = buildWebhookPayload(monitor, change);
+          const body = JSON.stringify({ ...payload, id: change.id });
+
+          const outcome = await performAutomationDelivery(sub.hookUrl, body);
+          processed++;
+          const nextAttempt = entry.attempt + 1;
+
+          if (outcome.kind === "success") {
+            await withDbRetry(() => storage.updateDeliveryLog(entry.id, {
+              status: "success",
+              attempt: nextAttempt,
+              deliveredAt: new Date(),
+              claimedAt: null,
+              response: { statusCode: outcome.statusCode } as Record<string, unknown>,
+            }));
+            await finalizeAutomationRetry(sub.id, monitor, platform, outcome);
+          } else if (outcome.kind === "persistent" || nextAttempt >= 3) {
+            await withDbRetry(() => storage.updateDeliveryLog(entry.id, {
+              status: "failed",
+              attempt: nextAttempt,
+              claimedAt: null,
+              response: {
+                subscriptionId: sub.id,
+                platform,
+                error: outcome.error,
+                transient: outcome.kind === "transient",
+              } as Record<string, unknown>,
+            }));
+            await finalizeAutomationRetry(sub.id, monitor, platform, outcome);
+          } else {
+            await withDbRetry(() => storage.updateDeliveryLog(entry.id, {
+              status: "pending",
+              attempt: nextAttempt,
+              claimedAt: null,
+              response: {
+                subscriptionId: sub.id,
+                platform,
+                error: outcome.error,
+                transient: true,
+              } as Record<string, unknown>,
+            }));
+            console.warn(`[Automation] Delivery failed, scheduling retry (monitorId=${monitor.id}, subscriptionId=${sub.id}, attempt=${nextAttempt}, error=${outcome.error})`);
+          }
+        }
+      } catch (error) {
+        logSchedulerError("Automation retry processing failed", error);
+      } finally {
+        automationCronRunning = false;
       }
     }));
   }

@@ -440,7 +440,7 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
-  async updateDeliveryLog(id: number, updates: Partial<Pick<DeliveryLogEntry, "status" | "attempt" | "response" | "deliveredAt">>): Promise<void> {
+  async updateDeliveryLog(id: number, updates: Partial<Pick<DeliveryLogEntry, "status" | "attempt" | "response" | "deliveredAt" | "claimedAt">>): Promise<void> {
     await db.update(deliveryLog).set(updates).where(eq(deliveryLog.id, id));
   }
 
@@ -453,6 +453,84 @@ export class DatabaseStorage implements IStorage {
       ))
       .orderBy(deliveryLog.createdAt)
       .limit(PENDING_WEBHOOK_RETRY_QUERY_LIMIT);
+  }
+
+  /**
+   * Atomically claim a single pending delivery for retry. Transitions
+   * `status` from 'pending' to 'processing' and stamps `claimed_at=now()`.
+   * The `attempt` filter acts as an optimistic concurrency check: if another
+   * replica already claimed the row (and thereby bumped `attempt`), the
+   * UPDATE matches zero rows and this returns null.
+   *
+   * This prevents multi-replica double-delivery of retries under Replit
+   * autoscale (see issue #458 for webhooks, #456 for automation).
+   */
+  async claimDeliveryForRetry(id: number, expectedAttempt: number, channel: string): Promise<DeliveryLogEntry | null> {
+    const [row] = await db.update(deliveryLog)
+      .set({ status: "processing", claimedAt: new Date() })
+      .where(and(
+        eq(deliveryLog.id, id),
+        eq(deliveryLog.channel, channel),
+        eq(deliveryLog.status, "pending"),
+        eq(deliveryLog.attempt, expectedAttempt),
+      ))
+      .returning();
+    return row ?? null;
+  }
+
+  /** @deprecated use claimDeliveryForRetry(id, attempt, "webhook") */
+  async claimWebhookDeliveryForRetry(id: number, expectedAttempt: number): Promise<DeliveryLogEntry | null> {
+    return this.claimDeliveryForRetry(id, expectedAttempt, "webhook");
+  }
+
+  /**
+   * Re-queue deliveries stuck in 'processing' for longer than the recovery
+   * threshold — happens when a replica crashed mid-delivery after claiming
+   * a row but before writing the final status. Safe to run every cron tick;
+   * idempotent.
+   */
+  async recoverStalledDeliveries(channel: string, olderThan: Date): Promise<number> {
+    const rows = await db.update(deliveryLog)
+      .set({ status: "pending", claimedAt: null })
+      .where(and(
+        eq(deliveryLog.channel, channel),
+        eq(deliveryLog.status, "processing"),
+        lt(deliveryLog.claimedAt, olderThan),
+      ))
+      .returning({ id: deliveryLog.id });
+    return rows.length;
+  }
+
+  /** @deprecated use recoverStalledDeliveries("webhook", olderThan) */
+  async recoverStalledWebhookDeliveries(olderThan: Date): Promise<number> {
+    return this.recoverStalledDeliveries("webhook", olderThan);
+  }
+
+  /**
+   * Pending retries for automation subscription deliveries (Zapier REST Hooks
+   * etc). Mirrors getPendingWebhookRetries but for channel='automation'.
+   */
+  async getPendingAutomationRetries(): Promise<DeliveryLogEntry[]> {
+    return await db.select().from(deliveryLog)
+      .where(and(
+        eq(deliveryLog.channel, "automation"),
+        eq(deliveryLog.status, "pending"),
+        lt(deliveryLog.attempt, 3)
+      ))
+      .orderBy(deliveryLog.createdAt)
+      .limit(PENDING_WEBHOOK_RETRY_QUERY_LIMIT);
+  }
+
+  async getAutomationSubscriptionById(id: number): Promise<AutomationSubscription | undefined> {
+    const [row] = await db.select().from(automationSubscriptions)
+      .where(eq(automationSubscriptions.id, id));
+    if (!row) return undefined;
+    try {
+      return { ...row, hookUrl: decryptUrl(row.hookUrl) };
+    } catch {
+      console.warn(`[Automation] getAutomationSubscriptionById(${id}): hookUrl decryption failed`);
+      return undefined;
+    }
   }
 
   async cleanupOldDeliveryLogs(olderThan: Date): Promise<number> {

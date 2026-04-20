@@ -92,6 +92,8 @@ export async function ensureChannelTables(): Promise<void> {
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS delivery_log_monitor_created_idx ON delivery_log(monitor_id, created_at)`);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS delivery_log_channel_status_attempt_idx ON delivery_log(channel, status, created_at, attempt)`);
+    // claimed_at column for multi-replica atomic claim coordination (see scheduler webhook retry cron).
+    await db.execute(sql`ALTER TABLE delivery_log ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP`);
 
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS slack_connections (
@@ -502,20 +504,26 @@ async function backfillNotificationChannelWebhookUrls(): Promise<void> {
           const secretNeedsEncrypt = secret && !isValidEncryptedToken(secret);
           if (!urlNeedsEncrypt && !secretNeedsEncrypt) continue;
 
-          // Validate that plaintext values look like URLs/secrets before encrypting
-          // to avoid double-encrypting corrupted/already-encrypted data
+          // Validate each plaintext value independently before encrypting so a
+          // corrupted URL does not block encryption of a valid secret (and vice versa).
+          let urlSkipped = false;
+          let secretSkipped = false;
           if (urlNeedsEncrypt && url && !/^https?:\/\//i.test(url)) {
-            console.warn(`[ensureTables] Skipping notification channel ${row.id}: URL does not look like a valid http(s) URL`);
-            continue;
+            console.warn(`[ensureTables] Skipping URL encryption for notification channel ${row.id}: URL does not look like a valid http(s) URL`);
+            urlSkipped = true;
           }
           if (secretNeedsEncrypt && secret && !secret.startsWith("whsec_")) {
-            console.warn(`[ensureTables] Skipping notification channel ${row.id}: secret does not start with whsec_ prefix`);
-            continue;
+            console.warn(`[ensureTables] Skipping secret encryption for notification channel ${row.id}: secret does not start with whsec_ prefix`);
+            secretSkipped = true;
           }
 
+          const willEncryptUrl = urlNeedsEncrypt && !urlSkipped;
+          const willEncryptSecret = secretNeedsEncrypt && !secretSkipped;
+          if (!willEncryptUrl && !willEncryptSecret) continue;
+
           const newConfig = { ...cfg };
-          if (urlNeedsEncrypt) newConfig.url = encryptUrl(url);
-          if (secretNeedsEncrypt) newConfig.secret = encryptUrl(secret);
+          if (willEncryptUrl) newConfig.url = encryptUrl(url!);
+          if (willEncryptSecret) newConfig.secret = encryptUrl(secret!);
           await tx.execute(sql`UPDATE notification_channels SET config = ${JSON.stringify(newConfig)}::jsonb WHERE id = ${row.id}`);
           batchUpdated++;
         }

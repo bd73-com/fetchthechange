@@ -5,12 +5,14 @@ const mockGetActiveAutomationSubscriptions = vi.fn();
 const mockTouchAndResetAutomationSubscription = vi.fn().mockResolvedValue(undefined);
 const mockIncrementAutomationSubscriptionFailures = vi.fn().mockResolvedValue(1);
 const mockDeactivateAutomationSubscription = vi.fn().mockResolvedValue(true);
+const mockAddDeliveryLog = vi.fn().mockResolvedValue({ id: 1 });
 vi.mock("../storage", () => ({
   storage: {
     getActiveAutomationSubscriptions: (...args: any[]) => mockGetActiveAutomationSubscriptions(...args),
     touchAndResetAutomationSubscription: (...args: any[]) => mockTouchAndResetAutomationSubscription(...args),
     incrementAutomationSubscriptionFailures: (...args: any[]) => mockIncrementAutomationSubscriptionFailures(...args),
     deactivateAutomationSubscription: (...args: any[]) => mockDeactivateAutomationSubscription(...args),
+    addDeliveryLog: (...args: any[]) => mockAddDeliveryLog(...args),
   },
 }));
 
@@ -140,30 +142,47 @@ describe("deliverToAutomationSubscriptions", () => {
     );
   });
 
-  it("increments consecutive failures on non-2xx response", async () => {
+  it("queues durable retry on transient 5xx response (does NOT bump failure counter)", async () => {
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub({ id: 3 })]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: false, status: 500 });
 
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
-    expect(mockIncrementAutomationSubscriptionFailures).toHaveBeenCalledWith(3);
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Automation delivery failed"),
-      expect.objectContaining({ error: "HTTP 500", consecutiveFailures: 1 }),
-    );
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(expect.objectContaining({
+      channel: "automation",
+      status: "pending",
+      attempt: 1,
+      response: expect.objectContaining({ subscriptionId: 3, platform: "zapier", error: "HTTP 500", transient: true }),
+    }));
+    expect(mockIncrementAutomationSubscriptionFailures).not.toHaveBeenCalled();
     expect(mockTouchAndResetAutomationSubscription).not.toHaveBeenCalled();
   });
 
-  it("increments consecutive failures on network error", async () => {
+  it("queues durable retry on network error (does NOT bump failure counter)", async () => {
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub({ id: 3 })]);
     mockSsrfSafeFetch.mockRejectedValue(new Error("ECONNREFUSED"));
 
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(expect.objectContaining({
+      channel: "automation",
+      status: "pending",
+      response: expect.objectContaining({ error: "ECONNREFUSED", transient: true }),
+    }));
+    expect(mockIncrementAutomationSubscriptionFailures).not.toHaveBeenCalled();
+  });
+
+  it("increments consecutive failures on persistent 4xx response", async () => {
+    mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub({ id: 3 })]);
+    mockSsrfSafeFetch.mockResolvedValue({ ok: false, status: 404 });
+
+    await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
+
     expect(mockIncrementAutomationSubscriptionFailures).toHaveBeenCalledWith(3);
+    expect(mockAddDeliveryLog).not.toHaveBeenCalled();
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining("Automation delivery failed"),
-      expect.objectContaining({ error: "ECONNREFUSED", consecutiveFailures: 1 }),
+      expect.objectContaining({ error: "HTTP 404", consecutiveFailures: 1 }),
     );
   });
 
@@ -173,12 +192,13 @@ describe("deliverToAutomationSubscriptions", () => {
 
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
-    const loggedError = (consoleWarnSpy.mock.calls[0][1] as any).error;
-    expect(loggedError).not.toContain("hooks.zapier.com");
-    expect(loggedError).toContain("[redacted-url]");
+    // Sanitization now happens in the transient-retry log entry
+    const logged = mockAddDeliveryLog.mock.calls[0][0];
+    expect(logged.response.error).not.toContain("hooks.zapier.com");
+    expect(logged.response.error).toContain("[redacted-url]");
   });
 
-  it("deactivates subscription after reaching failure threshold", async () => {
+  it("deactivates subscription after reaching failure threshold (persistent 4xx)", async () => {
     mockIncrementAutomationSubscriptionFailures.mockResolvedValue(15); // equals threshold
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub({ id: 9 })]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: false, status: 410 });
@@ -192,7 +212,7 @@ describe("deliverToAutomationSubscriptions", () => {
     );
   });
 
-  it("does not deactivate subscription below failure threshold", async () => {
+  it("does not deactivate subscription on transient 5xx (retry queued instead)", async () => {
     mockIncrementAutomationSubscriptionFailures.mockResolvedValue(14); // below threshold of 15
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub({ id: 9 })]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: false, status: 500 });
@@ -200,6 +220,7 @@ describe("deliverToAutomationSubscriptions", () => {
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
     expect(mockDeactivateAutomationSubscription).not.toHaveBeenCalled();
+    expect(mockAddDeliveryLog).toHaveBeenCalled();
   });
 
   it("delivers to multiple subscriptions in parallel", async () => {
