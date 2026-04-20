@@ -3,7 +3,6 @@ import { getResendClient } from "./resendClient";
 import { type Monitor, type MonitorChange } from "@shared/schema";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { type UserTier } from "@shared/models/auth";
-import { ErrorLogger } from "./logger";
 import { ResendUsageTracker } from "./resendTracker";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
@@ -181,7 +180,7 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     console.log(`[Email] Sent to ${recipientEmail} for monitor ${monitor.id}, id: ${response.data?.id}`);
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    await ErrorLogger.error("email", `"${monitor.name}" — notification email failed to send. Check that your email address is valid. If this keeps happening, contact support.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url });
+    console.error(`[email] "${monitor.name}" — notification email failed to send. Check that your email address is valid. If this keeps happening, contact support.`, error instanceof Error ? error.message : "", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url });
     return { success: false, error: error.message };
   }
 }
@@ -234,7 +233,7 @@ FetchTheChange Team`,
     console.log(`[Email] Sent auto-pause notification to ${recipientEmail} for monitor ${monitor.id}`);
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    await ErrorLogger.error("email", `"${monitor.name}" — auto-pause email failed to send.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name });
+    console.error(`[email] "${monitor.name}" — auto-pause email failed to send.`, error instanceof Error ? error.message : "", { monitorId: monitor.id, monitorName: monitor.name });
     return { success: false, error: error.message };
   }
 }
@@ -316,15 +315,15 @@ FetchTheChange Team`,
 
     if (response.error) {
       await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, undefined, false).catch(() => {});
-      await ErrorLogger.warning("email", `Health warning email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: response.error.message });
+      console.warn(`[email] Health warning email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: response.error.message });
       return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
     }
 
     await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, response.data?.id, true).catch(() => {});
-    await ErrorLogger.info("email", `Health warning email sent`, { monitorId: monitor.id, monitorName: monitor.name, consecutiveFailures, tier });
+    console.log(`[email] Health warning email sent`, { monitorId: monitor.id, monitorName: monitor.name, consecutiveFailures, tier });
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    await ErrorLogger.warning("email", `Health warning email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
+    console.warn(`[email] Health warning email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
     return { success: false, error: error.message };
   }
 }
@@ -405,15 +404,15 @@ FetchTheChange Team`,
 
     if (response.error) {
       await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, undefined, false).catch(() => {});
-      await ErrorLogger.warning("email", `Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: response.error.message });
+      console.warn(`[email] Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: response.error.message });
       return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
     }
 
     await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, response.data?.id, true).catch(() => {});
-    await ErrorLogger.info("email", `Recovery email sent`, { monitorId: monitor.id, monitorName: monitor.name, recoveredValue: displayValue, degradedForMs });
+    console.log(`[email] Recovery email sent`, { monitorId: monitor.id, monitorName: monitor.name, recoveredValue: displayValue, degradedForMs });
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    await ErrorLogger.warning("email", `Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
+    console.warn(`[email] Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
     return { success: false, error: error.message };
   }
 }
@@ -479,7 +478,7 @@ FetchTheChange Team`,
     console.log(`[Email] Sent tier downgrade notification to ${recipientEmail} for user ${userId}`);
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    await ErrorLogger.error("email", `Tier downgrade email failed for user ${userId}`, error instanceof Error ? error : null, { userId });
+    console.error(`[email] Tier downgrade email failed for user ${userId}`, error instanceof Error ? error.message : "", { userId });
     return { success: false, error: String(error?.message ?? error) };
   }
 }
@@ -568,7 +567,7 @@ FetchTheChange Team`,
     console.log(`[Email] Sent digest to ${recipientEmail} for monitor ${monitor.id} (${changes.length} changes), id: ${response.data?.id}`);
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    await ErrorLogger.error("email", `"${monitor.name}" — digest email failed to send.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name });
+    console.error(`[email] "${monitor.name}" — digest email failed to send.`, error instanceof Error ? error.message : "", { monitorId: monitor.id, monitorName: monitor.name });
     return { success: false, error: error.message };
   }
 }

@@ -1,9 +1,15 @@
 import { format } from "date-fns";
 import { db } from "../db";
 import { getResendClient } from "./resendClient";
-import { browserlessUsage, errorLogs } from "@shared/schema";
+import { browserlessUsage } from "@shared/schema";
 import { BROWSERLESS_CAPS, users, type UserTier } from "@shared/models/auth";
 import { sql, eq, and, gte, count, desc } from "drizzle-orm";
+
+// In-memory cooldown tracking for threshold alert emails. The 6h cooldown
+// was previously enforced via error_logs rows; since that table is gone,
+// keep a lightweight map keyed by threshold. Lost on restart — acceptable
+// given rare restarts and the coarse 6h cadence.
+const recentThresholdAlerts = new Map<string, number>();
 
 function getMonthStart(): Date {
   const now = new Date();
@@ -93,27 +99,11 @@ export class BrowserlessUsageTracker {
       if (pct >= t.pct) {
         const alertKey = `browserless_alert_${t.key}`;
         const cooldownMs = 6 * 60 * 60 * 1000;
-        const cooldownStart = new Date(Date.now() - cooldownMs);
+        const lastAlertAt = recentThresholdAlerts.get(alertKey) ?? 0;
 
-        const recentAlert = await db
-          .select({ id: errorLogs.id })
-          .from(errorLogs)
-          .where(
-            and(
-              eq(errorLogs.source, "browserless"),
-              eq(errorLogs.message, alertKey),
-              gte(errorLogs.timestamp, cooldownStart)
-            )
-          )
-          .limit(1);
-
-        if (recentAlert.length === 0) {
-          await db.insert(errorLogs).values({
-            level: "info",
-            source: "browserless",
-            message: alertKey,
-            context: { threshold: t.label, usage: systemUsage, cap: systemCap },
-          });
+        if (Date.now() - lastAlertAt >= cooldownMs) {
+          recentThresholdAlerts.set(alertKey, Date.now());
+          console.log(`[browserless] threshold ${t.label} reached`, { threshold: t.label, usage: systemUsage, cap: systemCap });
           await this.sendThresholdEmail(t.label, systemUsage, systemCap);
         }
         break;

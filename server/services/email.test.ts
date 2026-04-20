@@ -21,14 +21,6 @@ vi.mock("../replit_integrations/auth/storage", () => ({
   },
 }));
 
-vi.mock("./logger", () => ({
-  ErrorLogger: {
-    error: vi.fn().mockResolvedValue(undefined),
-    warning: vi.fn().mockResolvedValue(undefined),
-    info: vi.fn().mockResolvedValue(undefined),
-  },
-}));
-
 vi.mock("./resendTracker", () => ({
   ResendUsageTracker: {
     canSendEmail: vi.fn().mockResolvedValue({ allowed: true }),
@@ -49,7 +41,6 @@ vi.mock("drizzle-orm", () => ({
 import { sendNotificationEmail, sendAutoPauseEmail, sendDigestEmail, sendHealthWarningEmail, sendRecoveryEmail, sendTierDowngradeEmail } from "./email";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { ResendUsageTracker } from "./resendTracker";
-import { ErrorLogger } from "./logger";
 import { db } from "../db";
 import type { Monitor, MonitorChange } from "@shared/schema";
 
@@ -233,12 +224,6 @@ describe("sendAutoPauseEmail", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Network error");
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
-      "email",
-      expect.stringContaining("auto-pause email failed"),
-      expect.any(Error),
-      expect.objectContaining({ monitorId: 1 })
-    );
   });
 
   it("sanitizes monitor name in subject to prevent header injection", async () => {
@@ -510,12 +495,6 @@ describe("sendNotificationEmail", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Connection failed");
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
-      "email",
-      expect.stringContaining("notification email failed"),
-      expect.any(Error),
-      expect.objectContaining({ monitorId: 1 })
-    );
   });
 
   it("uses notificationEmail when available", async () => {
@@ -1002,11 +981,6 @@ describe("sendHealthWarningEmail", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Network error");
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "email",
-      expect.stringContaining("Health warning email failed"),
-      expect.objectContaining({ monitorId: 1 })
-    );
   });
 });
 
@@ -1215,11 +1189,6 @@ describe("sendRecoveryEmail", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Connection reset");
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "email",
-      expect.stringContaining("Recovery email failed"),
-      expect.objectContaining({ monitorId: 1 })
-    );
   });
 });
 
@@ -1357,11 +1326,5 @@ describe("sendTierDowngradeEmail", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Connection reset");
-    expect(ErrorLogger.error).toHaveBeenCalledWith(
-      "email",
-      expect.stringContaining("Tier downgrade email failed"),
-      expect.any(Error),
-      expect.objectContaining({ userId: "user1" })
-    );
   });
 });

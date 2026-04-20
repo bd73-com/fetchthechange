@@ -3,7 +3,6 @@ import { storage, PENDING_WEBHOOK_RETRY_QUERY_LIMIT } from "../storage";
 import { checkMonitor, monitorsNeedingRetry } from "./scraper";
 import { processQueuedNotifications, processDigestCron } from "./notification";
 import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery";
-import { ErrorLogger } from "./logger";
 import { notificationTablesExist } from "./notificationReady";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { ensureMonitorConditionsTable } from "./ensureTables";
@@ -42,26 +41,16 @@ async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** Log a caught error as warning (transient) or error (non-transient) based on isTransientDbError. */
-async function logSchedulerError(
+function logSchedulerError(
   message: string,
   error: unknown,
   context?: Record<string, any>,
-): Promise<void> {
-  try {
-    if (isTransientDbError(error)) {
-      await ErrorLogger.warning("scheduler", message, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        ...context,
-      });
-    } else {
-      await ErrorLogger.error("scheduler", message, error instanceof Error ? error : null, {
-        errorMessage: error instanceof Error ? error.message : String(error),
-        ...context,
-      });
-    }
-  } catch {
-    // If logging itself fails (e.g., logging DB also down), don't mask the original error
-    console.error(`[Scheduler] Failed to log error: ${message}`, error instanceof Error ? error.message : error);
+): void {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  if (isTransientDbError(error)) {
+    console.warn(`[scheduler] ${message}`, { errorMessage, ...context });
+  } else {
+    console.error(`[scheduler] ${message}`, errorMessage, context ?? {});
   }
 }
 
@@ -125,7 +114,7 @@ async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]): P
     }
     return true;
   } catch (error) {
-    await ErrorLogger.error("scheduler", `"${monitor.name}" — scheduled check failed. This is usually a temporary issue. If it persists, verify the URL is still valid and the selector matches the page.`, error instanceof Error ? error : null, {
+    console.error(`[scheduler] "${monitor.name}" — scheduled check failed. This is usually a temporary issue. If it persists, verify the URL is still valid and the selector matches the page.`, error instanceof Error ? error.message : "", {
       monitorId: monitor.id,
       monitorName: monitor.name,
       url: monitor.url,
@@ -176,7 +165,7 @@ export async function startScheduler() {
   try {
     await storage.cleanupPollutedValues();
   } catch (error) {
-    await ErrorLogger.warning("scheduler", "cleanupPollutedValues failed (non-fatal)", { errorMessage: error instanceof Error ? error.message : String(error) });
+    console.warn("[scheduler] cleanupPollutedValues failed (non-fatal)", { errorMessage: error instanceof Error ? error.message : String(error) });
   }
 
   // Wire circuit breaker recovery: immediately retry pending monitors when Browserless comes back

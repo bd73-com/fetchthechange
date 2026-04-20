@@ -18,7 +18,6 @@ const {
   mockDbDeleteWhere,
   mockTriggerCampaignSend,
   mockResolveRecipients,
-  mockErrorLoggerError,
 } = vi.hoisted(() => ({
   mockDbExecute: vi.fn(),
   mockDbSelect: vi.fn(),
@@ -34,7 +33,6 @@ const {
   mockDbDeleteWhere: vi.fn().mockResolvedValue(undefined),
   mockTriggerCampaignSend: vi.fn(),
   mockResolveRecipients: vi.fn(),
-  mockErrorLoggerError: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../db", () => ({
@@ -79,12 +77,6 @@ vi.mock("drizzle-orm", () => ({
 vi.mock("./campaignEmail", () => ({
   triggerCampaignSend: (...args: any[]) => mockTriggerCampaignSend(...args),
   resolveRecipients: (...args: any[]) => mockResolveRecipients(...args),
-}));
-
-vi.mock("./logger", () => ({
-  ErrorLogger: {
-    error: (...args: any[]) => mockErrorLoggerError(...args),
-  },
 }));
 
 import { computeNextRunAt, ensureWelcomeConfig, bootstrapWelcomeCampaign, patchWelcomeCampaignUrls, processAutomatedCampaigns, runWelcomeCampaign, WELCOME_CAMPAIGN_DEFAULTS } from "./automatedCampaigns";
@@ -778,36 +770,6 @@ describe("processAutomatedCampaigns", () => {
     expect(mockTriggerCampaignSend).toHaveBeenCalled();
   });
 
-  it("logs error and continues if one config fails", async () => {
-    const pastDate = new Date(Date.now() - 3600000);
-    const config = {
-      id: 1,
-      key: "welcome",
-      enabled: true,
-      lastRunAt: new Date("2025-03-20"),
-      nextRunAt: pastDate,
-      subject: "test",
-      htmlBody: "<html></html>",
-      textBody: null,
-      name: "Welcome",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    mockDbWhere.mockResolvedValue([config]);
-    // Make the inner select fail
-    mockDbLimit.mockRejectedValue(new Error("DB connection failed"));
-
-    // Should not throw
-    await processAutomatedCampaigns();
-
-    expect(mockErrorLoggerError).toHaveBeenCalledWith(
-      "scheduler",
-      expect.stringContaining("'welcome' failed"),
-      expect.any(Error),
-      expect.objectContaining({ configKey: "welcome" }),
-    );
-  });
-
   it("rolls back lastRunAt and nextRunAt when send fails after the run is claimed", async () => {
     const previousLastRunAt = new Date("2025-03-20T00:00:00Z");
     const previousNextRunAt = new Date(Date.now() - 3600000); // 1 hour ago — eligible
@@ -865,13 +827,6 @@ describe("processAutomatedCampaigns", () => {
     expect(rollbackSetArg.lastRunAt).toBe(previousLastRunAt);
     expect(rollbackSetArg.nextRunAt).toBe(previousNextRunAt);
     expect(rollbackSetArg.updatedAt).toBeInstanceOf(Date);
-
-    expect(mockErrorLoggerError).toHaveBeenCalledWith(
-      "scheduler",
-      expect.stringContaining("'welcome' failed"),
-      expect.any(Error),
-      expect.objectContaining({ configKey: "welcome" }),
-    );
   });
 
   it("does not roll back when the claim itself loses to a concurrent run", async () => {
@@ -910,43 +865,5 @@ describe("processAutomatedCampaigns", () => {
     expect(mockDbSet).toHaveBeenCalledTimes(1);
     expect(mockResolveRecipients).not.toHaveBeenCalled();
     expect(mockTriggerCampaignSend).not.toHaveBeenCalled();
-    expect(mockErrorLoggerError).not.toHaveBeenCalled();
-  });
-
-  it("does not crash the loop when ErrorLogger itself throws", async () => {
-    const pastDate = new Date(Date.now() - 3600000);
-    const config = {
-      id: 1,
-      key: "welcome",
-      enabled: true,
-      lastRunAt: new Date("2025-03-20"),
-      nextRunAt: pastDate,
-      subject: "test",
-      htmlBody: "<html></html>",
-      textBody: null,
-      name: "Welcome",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    let whereCallCount = 0;
-    mockDbWhere.mockImplementation(() => {
-      whereCallCount++;
-      if (whereCallCount === 1) {
-        // initial config fetch in processAutomatedCampaigns
-        return Promise.resolve([config]);
-      }
-      // claim + inner config load chain — limit rejects to simulate DB failure
-      return {
-        returning: vi.fn().mockResolvedValue([config]),
-        limit: vi.fn().mockRejectedValue(new Error("DB connection failed")),
-      };
-    });
-    // Make ErrorLogger.error itself throw — the new try/catch should absorb it
-    mockErrorLoggerError.mockRejectedValue(new Error("Logger DB also down"));
-
-    // processAutomatedCampaigns must not throw — the loop continues
-    await processAutomatedCampaigns();
-
-    expect(mockErrorLoggerError).toHaveBeenCalled();
   });
 });

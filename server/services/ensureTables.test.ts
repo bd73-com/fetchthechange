@@ -24,7 +24,7 @@ vi.mock("../utils/encryption", () => ({
   isEncryptionAvailable: () => true,
 }));
 
-import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes } from "./ensureTables";
+import { ensureMonitorHealthColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes } from "./ensureTables";
 
 describe("ensureMonitorHealthColumns", () => {
   beforeEach(() => {
@@ -65,125 +65,6 @@ describe("ensureMonitorHealthColumns", () => {
       expect.any(Error),
     );
     errorSpy.mockRestore();
-  });
-});
-
-describe("ensureErrorLogColumns", () => {
-  beforeEach(() => {
-    mockExecute.mockReset();
-  });
-
-  it("executes ALTERs, pg_indexes check, dedup tx, and CONCURRENTLY index creation without throwing", async () => {
-    // Default empty rows → no existing valid index, proceed to dedup + create.
-    mockExecute.mockResolvedValue({ rows: [] });
-    await ensureErrorLogColumns();
-    // 3 ALTER TABLE + 1 pg_indexes check + 4 in-tx (SET LOCAL, advisory
-    // lock, UPDATE, DELETE) + 1 CREATE UNIQUE INDEX CONCURRENTLY = 9
-    expect(mockExecute).toHaveBeenCalledTimes(9);
-    const stmts = mockExecute.mock.calls.map(([arg]: any) => {
-      try { return JSON.stringify(arg); } catch { return String(arg); }
-    });
-    expect(stmts.some((s: string) => s.includes("first_occurrence"))).toBe(true);
-    expect(stmts.some((s: string) => s.includes("occurrence_count"))).toBe(true);
-    expect(stmts.some((s: string) => s.includes("pg_indexes"))).toBe(true);
-    expect(stmts.some((s: string) => s.includes("pg_advisory_xact_lock"))).toBe(true);
-    expect(stmts.some((s: string) => s.includes("CREATE UNIQUE INDEX") && s.includes("CONCURRENTLY") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(true);
-  });
-
-  it("skips DDL entirely when a valid, unique, correctly-shaped index already exists", async () => {
-    // pg_indexes check returns a row that passes all three validity gates
-    // (indisvalid, indisunique, indexdef includes both the expected column
-    // tuple and the partial predicate) → fast-path return.
-    mockExecute
-      .mockResolvedValueOnce({ rows: [] }) // ALTER first_occurrence
-      .mockResolvedValueOnce({ rows: [] }) // ALTER occurrence_count
-      .mockResolvedValueOnce({ rows: [] }) // ALTER deleted_at
-      .mockResolvedValueOnce({ rows: [{
-        indisvalid: true,
-        indisunique: true,
-        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message) WHERE (resolved = false)",
-      }] });
-    await ensureErrorLogColumns();
-    expect(mockExecute).toHaveBeenCalledTimes(4); // ALTERs + pg_indexes only
-  });
-
-  it("drops and rebuilds when existing index is INVALID", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mockExecute
-      .mockResolvedValueOnce({ rows: [] }) // ALTER first_occurrence
-      .mockResolvedValueOnce({ rows: [] }) // ALTER occurrence_count
-      .mockResolvedValueOnce({ rows: [] }) // ALTER deleted_at
-      .mockResolvedValueOnce({ rows: [{
-        indisvalid: false,
-        indisunique: true,
-        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message) WHERE (resolved = false)",
-      }] })
-      .mockResolvedValue({ rows: [] }); // DROP + tx statements + CREATE
-    await ensureErrorLogColumns();
-    const stmts = mockExecute.mock.calls.map(([arg]: any) => {
-      try { return JSON.stringify(arg); } catch { return String(arg); }
-    });
-    expect(stmts.some((s: string) => s.includes("DROP INDEX") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(true);
-    warnSpy.mockRestore();
-  });
-
-  it("drops and rebuilds when existing index is non-unique (wrong definition)", async () => {
-    // A stale index with the same name but non-unique type would otherwise
-    // pass the old bare `indisvalid` check and silently break ON CONFLICT.
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mockExecute
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{
-        indisvalid: true,
-        indisunique: false, // ← the drift we're guarding against
-        indexdef: "CREATE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message) WHERE (resolved = false)",
-      }] })
-      .mockResolvedValue({ rows: [] });
-    await ensureErrorLogColumns();
-    const stmts = mockExecute.mock.calls.map(([arg]: any) => {
-      try { return JSON.stringify(arg); } catch { return String(arg); }
-    });
-    expect(stmts.some((s: string) => s.includes("DROP INDEX") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(true);
-    warnSpy.mockRestore();
-  });
-
-  it("drops and rebuilds when existing index has wrong columns or missing predicate", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mockExecute
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{
-        indisvalid: true,
-        indisunique: true,
-        // Wrong column tuple — missing message, no WHERE predicate.
-        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source)",
-      }] })
-      .mockResolvedValue({ rows: [] });
-    await ensureErrorLogColumns();
-    const stmts = mockExecute.mock.calls.map(([arg]: any) => {
-      try { return JSON.stringify(arg); } catch { return String(arg); }
-    });
-    expect(stmts.some((s: string) => s.includes("DROP INDEX") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(true);
-    warnSpy.mockRestore();
-  });
-
-  it("catches errors and does not throw", async () => {
-    mockExecute.mockRejectedValue(new Error("permission denied"));
-    await expect(ensureErrorLogColumns()).resolves.toBeUndefined();
-  });
-
-  it("logs a warning when an error occurs", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mockExecute.mockRejectedValue(new Error("permission denied"));
-    await ensureErrorLogColumns();
-    expect(warnSpy).toHaveBeenCalledWith(
-      "Could not ensure error_logs columns/index:",
-      expect.any(Error),
-    );
-    warnSpy.mockRestore();
   });
 });
 

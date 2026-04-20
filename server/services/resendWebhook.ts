@@ -1,7 +1,6 @@
 import { db } from "../db";
 import { campaignRecipients, campaigns } from "@shared/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { ErrorLogger } from "./logger";
 
 interface ResendWebhookEvent {
   type: string;

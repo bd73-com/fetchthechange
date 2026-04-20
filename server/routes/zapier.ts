@@ -3,7 +3,6 @@ import { z } from "zod";
 import rateLimit from "express-rate-limit";
 import { storage } from "../storage";
 import { isPrivateUrl } from "../utils/ssrf";
-import { ErrorLogger } from "../services/logger";
 import {
   zapierSubscribeSchema,
   zapierUnsubscribeSchema,
@@ -73,7 +72,7 @@ router.post("/subscribe", subscribeRateLimit, async (req: any, res) => {
     const ssrfError = await isPrivateUrl(body.hookUrl);
     if (ssrfError) {
       const hostname = new URL(body.hookUrl).hostname;
-      await ErrorLogger.warning("api", "SSRF blocked on Zapier subscribe", {
+      console.warn("[api] SSRF blocked on Zapier subscribe", {
         userId: req.apiUser.id,
         hookUrlHostname: hostname,
       });
@@ -115,7 +114,7 @@ router.post("/subscribe", subscribeRateLimit, async (req: any, res) => {
       });
     }
 
-    await ErrorLogger.info("api", "Automation subscription created", {
+    console.log("[api] Automation subscription created", {
       userId: req.apiUser.id,
       platform: "zapier",
       monitorId: body.monitorId ?? "all",
@@ -144,7 +143,7 @@ router.delete("/unsubscribe", async (req: any, res) => {
     const deactivated = await storage.deactivateAutomationSubscription(body.id, req.apiUser.id);
 
     if (deactivated) {
-      await ErrorLogger.info("api", "Automation subscription deactivated", {
+      console.log("[api] Automation subscription deactivated", {
         id: body.id,
         userId: req.apiUser.id,
         platform: "zapier",

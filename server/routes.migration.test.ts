@@ -78,14 +78,6 @@ vi.mock("./db", () => ({
   },
 }));
 
-vi.mock("./services/logger", () => ({
-  ErrorLogger: {
-    error: vi.fn().mockResolvedValue(undefined),
-    warning: vi.fn().mockResolvedValue(undefined),
-    info: vi.fn().mockResolvedValue(undefined),
-  },
-}));
-
 vi.mock("./services/scraper", () => ({
   checkMonitor: vi.fn(),
   extractWithBrowserless: vi.fn(),
@@ -154,7 +146,7 @@ function makeMockApp() {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-describe("error_logs dedup column migration at startup", () => {
+describe("registerRoutes DDL migrations at startup", () => {
   beforeEach(() => {
     // Clear registered routes for fresh registration
     for (const method of Object.keys(registeredRoutes)) {
@@ -204,64 +196,6 @@ describe("error_logs dedup column migration at startup", () => {
     expect(callStrings.some((s: string) => s.includes("notification_queue") && s.includes("permanently_failed"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("automated_campaign_configs"))).toBe(true);
     expect(callStrings.some((s: string) => s.includes("pending_retry_at"))).toBe(true);
-  });
-
-  it("still registers all route groups when migration succeeds", async () => {
-    vi.clearAllMocks();
-    mockDbExecute.mockResolvedValue({ rows: [] });
-    process.env.APP_OWNER_ID = "owner-123";
-
-    const { registerRoutes } = await import("./routes");
-    const app = makeMockApp();
-    await registerRoutes(app as any, app as any);
-
-    const getRoutes = Object.keys(registeredRoutes["get"] ?? {});
-    expect(getRoutes).toContain("/api/admin/error-logs");
-    expect(getRoutes).toContain("/api/admin/error-logs/count");
-  });
-
-  it("still registers routes when migration fails", async () => {
-    vi.clearAllMocks();
-    mockDbExecute.mockRejectedValue(new Error("relation \"error_logs\" does not exist"));
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    process.env.APP_OWNER_ID = "owner-123";
-
-    const { registerRoutes } = await import("./routes");
-    const app = makeMockApp();
-
-    // Should not throw even though migration failed
-    await registerRoutes(app as any, app as any);
-
-    // Routes should still be registered despite migration failure
-    const getRoutes = Object.keys(registeredRoutes["get"] ?? {});
-    expect(getRoutes).toContain("/api/admin/error-logs");
-    expect(getRoutes).toContain("/api/admin/error-logs/count");
-    const deleteRoutes = Object.keys(registeredRoutes["delete"] ?? {});
-    expect(deleteRoutes).toContain("/api/admin/error-logs/:id");
-
-    warnSpy.mockRestore();
-    errorSpy.mockRestore();
-  });
-
-  it("logs a warning when migration fails", async () => {
-    vi.clearAllMocks();
-    const migrationError = new Error("connection refused");
-    mockDbExecute.mockRejectedValue(migrationError);
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    process.env.APP_OWNER_ID = "owner-123";
-
-    const { registerRoutes } = await import("./routes");
-    const app = makeMockApp();
-    await registerRoutes(app as any, app as any);
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      "Could not ensure error_logs columns/index:",
-      migrationError,
-    );
-    warnSpy.mockRestore();
-    errorSpy.mockRestore();
   });
 
   it("does not throw when first execute succeeds but second fails", async () => {
@@ -414,22 +348,12 @@ describe("error_logs dedup column migration at startup", () => {
   it("logs error and continues when notification channel table creation fails", async () => {
     vi.clearAllMocks();
     const channelError = new Error("permission denied for schema public");
-    // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs
-    // migration succeeds (3 ALTERs + 1 pg_indexes check + 4 in-tx + 1 CREATE
-    // INDEX CONCURRENTLY = 9), api_keys succeed (2), then channel tables fail
+    // monitor health ALTERs succeed (2), pending_retry_at (1), api_keys
+    // succeed (2), then channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors pending_retry_at
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs first_occurrence
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs occurrence_count
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs deleted_at
-      .mockResolvedValueOnce({ rows: [] }) // pg_indexes check (no existing idx)
-      .mockResolvedValueOnce({ rows: [] }) // SET LOCAL lock_timeout
-      .mockResolvedValueOnce({ rows: [] }) // pg_advisory_xact_lock
-      .mockResolvedValueOnce({ rows: [] }) // UPDATE dedup
-      .mockResolvedValueOnce({ rows: [] }) // DELETE dedup
-      .mockResolvedValueOnce({ rows: [] }) // CREATE UNIQUE INDEX CONCURRENTLY
       .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
       .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
       .mockRejectedValueOnce(channelError); // notification_channels fails
@@ -453,7 +377,6 @@ describe("error_logs dedup column migration at startup", () => {
     // Routes should still be registered
     const getRoutes = Object.keys(registeredRoutes["get"] ?? {});
     expect(getRoutes.length).toBeGreaterThan(0);
-    expect(getRoutes).toContain("/api/admin/error-logs");
 
     errorSpy.mockRestore();
     warnSpy.mockRestore();
@@ -462,22 +385,12 @@ describe("error_logs dedup column migration at startup", () => {
   it("registers channel routes even when notification channel tables fail to create", async () => {
     vi.clearAllMocks();
     const channelError = new Error("connection timeout");
-    // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs
-    // migration succeeds (3 ALTERs + 1 pg_indexes check + 4 in-tx + 1 CREATE
-    // INDEX CONCURRENTLY = 9), api_keys succeed (2), channel tables fail
+    // monitor health ALTERs succeed (2), pending_retry_at (1), api_keys
+    // succeed (2), channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors pending_retry_at
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs first_occurrence
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs occurrence_count
-      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs deleted_at
-      .mockResolvedValueOnce({ rows: [] }) // pg_indexes check (no existing idx)
-      .mockResolvedValueOnce({ rows: [] }) // SET LOCAL lock_timeout
-      .mockResolvedValueOnce({ rows: [] }) // pg_advisory_xact_lock
-      .mockResolvedValueOnce({ rows: [] }) // UPDATE dedup
-      .mockResolvedValueOnce({ rows: [] }) // DELETE dedup
-      .mockResolvedValueOnce({ rows: [] }) // CREATE UNIQUE INDEX CONCURRENTLY
       .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
       .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
       .mockRejectedValueOnce(channelError); // notification_channels fails
