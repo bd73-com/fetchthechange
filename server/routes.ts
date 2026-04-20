@@ -12,7 +12,7 @@ import { TIER_LIMITS, TAG_LIMITS, TAG_ASSIGNMENT_LIMITS, BROWSERLESS_CAPS, RESEN
 // startScheduler is called from index.ts after registerRoutes completes
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
-import { sql, asc, desc, eq, and, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
+import { sql, desc, eq, and, isNull } from "drizzle-orm";
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { notificationTablesExist, channelTablesExist } from "./services/notificationReady";

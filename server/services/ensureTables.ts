@@ -4,10 +4,9 @@ import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken, isEncryptionA
 
 /**
  * Drops the legacy `error_logs` table if it still exists. The admin error
- * logging feature was removed; this hook cleans up the table in-place during
- * the next deploy since the project uses `drizzle-kit push` rather than a
- * versioned migrator (so `migrations/0001_drop_error_logs.sql` would not be
- * applied automatically).
+ * logging feature was removed; since the project uses `drizzle-kit push`
+ * rather than a versioned migrator, the drop must run from an ensure hook
+ * rather than a SQL migration file. Idempotent — safe to run every deploy.
  */
 export async function ensureErrorLogsDropped(): Promise<void> {
   try {

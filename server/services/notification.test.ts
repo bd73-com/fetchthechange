@@ -732,10 +732,24 @@ describe("processQueuedNotifications edge cases", () => {
     ];
     mockGetStaleQueueEntries.mockResolvedValueOnce(staleEntries);
 
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     await processQueuedNotifications();
     expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledTimes(2);
     expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(7);
     expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(8);
+    // Only one summary warning, not one per entry — protects the intent
+    // that the stale-queue path emits a single aggregated log line.
+    const summaryCalls = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("stale notification queue entries"),
+    );
+    expect(summaryCalls.length).toBe(1);
+    expect(String(summaryCalls[0][0])).toContain("2 stale notification queue entries");
+    expect(summaryCalls[0][1]).toEqual(
+      expect.objectContaining({ count: 2, monitorIds: expect.arrayContaining([3, 4]) }),
+    );
+
+    warnSpy.mockRestore();
   });
 
   it("groups multiple entries by monitor and processes each", async () => {

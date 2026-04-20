@@ -1972,6 +1972,49 @@ describe("failure tracking and auto-pause", () => {
       "Page took too long to respond"
     );
   });
+
+  it("Browserless infrastructure failures emit a monitor-agnostic warning so affected monitors aggregate under one log pattern", async () => {
+    const emptyHtml = `<html><body><p>Loading...</p></body></html>`;
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }))
+      .mockResolvedValueOnce(new Response(emptyHtml, { status: 200 }));
+
+    process.env.BROWSERLESS_TOKEN = "test-token";
+    const { BrowserlessUsageTracker } = await import("./browserlessTracker");
+    (BrowserlessUsageTracker.canUseBrowserless as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ allowed: true });
+    mockConnectOverCDP.mockRejectedValue(new Error("connectOverCDP failed: ECONNREFUSED"));
+
+    mockDbUpdate(1, true);
+    mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
+    await runWithTimers(monitor);
+
+    // Protect the dedup-aggregation intent: the canonical infra-outage
+    // message must stay monitor-agnostic so grep-based triage clusters
+    // across affected monitors. Per-monitor drill-down stays in the
+    // context object (see scraper.ts:1263 rationale comment).
+    const infraCalls = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("Browserless service unavailable"),
+    );
+    expect(infraCalls.length).toBeGreaterThanOrEqual(1);
+    for (const c of infraCalls) {
+      expect(String(c[0])).not.toContain("My Watch");
+      expect(c[1]).toEqual(
+        expect.objectContaining({
+          monitorId: 1,
+          monitorName: "My Watch",
+          classifiedReason: expect.stringContaining("connection refused"),
+        }),
+      );
+    }
+
+    warnSpy.mockRestore();
+    delete process.env.BROWSERLESS_TOKEN;
+  });
 });
 
 // ---------------------------------------------------------------------------
