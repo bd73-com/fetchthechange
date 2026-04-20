@@ -148,14 +148,14 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
         await WebhookHandlers.processWebhook(req.body as Buffer, sig);
         res.status(200).json({ received: true });
-      } catch (error: any) {
-        const msg = error.message || '';
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error ?? '');
         if (msg.includes('signature') || msg.includes('No signatures found') || msg.includes('timestamp')) {
-          console.error('[stripe] Webhook signature validation failed', error instanceof Error ? error.message : String(error), { ip: req.ip });
+          console.error('[stripe] Webhook signature validation failed', msg, { ip: req.ip });
           return res.status(401).json({ error: 'Invalid signature' });
         }
 
-        console.error('[stripe] Webhook processing failed', error instanceof Error ? error.message : String(error));
+        console.error('[stripe] Webhook processing failed', msg);
         return res.status(500).json({ error: 'Processing failed' });
       }
     }
@@ -176,14 +176,14 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         const event = await verifyResendWebhook(req.body, req.headers as Record<string, string | string[] | undefined>);
         await handleResendWebhookEvent(event);
         res.status(200).json({ received: true });
-      } catch (error: any) {
-        const msg = error.message || '';
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error ?? '');
         if (msg.includes('signature') || msg.includes('timestamp') || msg.includes('No signatures found')) {
-          console.error('[email] Resend webhook signature validation failed', error instanceof Error ? error.message : String(error), { ip: req.ip });
+          console.error('[email] Resend webhook signature validation failed', msg, { ip: req.ip });
           return res.status(401).json({ error: 'Invalid signature' });
         }
 
-        console.error('[email] Resend webhook processing failed', error instanceof Error ? error.message : String(error));
+        console.error('[email] Resend webhook processing failed', msg);
         return res.status(500).json({ error: 'Processing failed' });
       }
     }
@@ -339,10 +339,17 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   startStripeInitWithRetry();
 
-  // Error Handler
+  // Error Handler — log safe fields only; never emit err.stack so DSNs,
+  // bearer tokens, and provider keys embedded in library stack traces
+  // don't land in stdout.
   app.use((err: any, _req: any, res: any, next: any) => {
-    const status = err.status || err.statusCode || 500;
-    console.error("Internal Server Error:", err);
+    const isErrObj = err !== null && err !== undefined && typeof err === "object";
+    const status = isErrObj ? (err.status || err.statusCode || 500) : 500;
+    console.error("Internal Server Error:", {
+      name: isErrObj && typeof err.name === "string" ? err.name : "NonErrorThrow",
+      code: isErrObj && err.code ? String(err.code) : undefined,
+      message: err instanceof Error ? err.message : String(err ?? "Unhandled error"),
+    });
     if (res.headersSent) return next(err);
     return res.status(status).json({ message: "Internal Server Error" });
   });

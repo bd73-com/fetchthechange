@@ -2692,8 +2692,12 @@ export async function registerRoutes(
 
   // Catch-all error handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    const isErrObj = err !== null && err !== undefined && typeof err === "object";
+    const message = isErrObj && typeof err.message === "string" && err.message
+      ? err.message
+      : String(err ?? "Unhandled API error");
     // CORS rejections from the cors() middleware arrive as Error('Not allowed by CORS')
-    if (err.message === "Not allowed by CORS") {
+    if (message === "Not allowed by CORS") {
       return res.status(403).json({ message: "Not allowed by CORS", code: "CORS_FORBIDDEN" });
     }
     // Log err.name + err.code + err.message + status; skip err.stack so DSNs,
@@ -2702,11 +2706,12 @@ export async function registerRoutes(
     // sanitized the stack via regex; the console sink has no sanitizer. name
     // and code give most of the diagnostic signal without the secret-leak
     // surface (they come from our code, not library internals).
-    const name = (err && typeof err === "object" && typeof err.name === "string") ? err.name : "Error";
-    const code = (err && typeof err === "object" && (err as any).code) ? String((err as any).code) : undefined;
-    const message = (err && typeof err === "object" && typeof err.message === "string" && err.message) || "Unhandled API error";
-    console.error(`[api] ${name}: ${message}`, { status: err.status || 500, ...(code ? { code } : {}) });
-    res.status(err.status || 500).json({ message: "Internal server error" });
+    const name = isErrObj && typeof err.name === "string" ? err.name : "NonErrorThrow";
+    const code = isErrObj && err.code ? String(err.code) : undefined;
+    const rawStatus = isErrObj ? Number(err.status ?? err.statusCode) : NaN;
+    const status = Number.isInteger(rawStatus) && rawStatus >= 400 && rawStatus <= 599 ? rawStatus : 500;
+    console.error(`[api] ${name}: ${message}`, { status, ...(code ? { code } : {}) });
+    res.status(status).json({ message: "Internal server error", code: "INTERNAL_SERVER_ERROR" });
   });
 
   return { httpServer, campaignConfigsReady };

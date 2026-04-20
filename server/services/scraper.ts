@@ -1257,13 +1257,13 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             console.error(
               `[scraper] "${monitor.name}" — rendered page extraction blocked by SSRF protection`,
               lastBrowserlessErr instanceof Error ? lastBrowserlessErr.message : "",
-              { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector },
+              { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector },
             );
           } else if (browserlessInfraFailure) {
             // Monitor-agnostic message so grep-based triage aggregates infra
             // outages across affected monitors into a single log pattern.
             // Per-monitor drill-down details stay in the context object.
-            console.warn("[scraper] Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
+            console.warn("[scraper] Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
           } else {
             const classifiedReason = classifyBrowserlessError(rawBrowserlessMsg);
             console.warn(
@@ -1271,7 +1271,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
               {
                 monitorId: monitor.id,
                 monitorName: monitor.name,
-                url: monitor.url,
+                hostname: safeHostname(monitor.url),
                 selector: monitor.selector,
                 circuitState: browserlessCircuitBreaker.getState(),
                 classifiedReason,
@@ -1299,7 +1299,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     if (skippedDueToOpenCircuit && newValue == null) {
       console.warn(
         "[scraper] Browserless circuit breaker open — preserving last known values",
-        { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
+        { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
       );
     }
 
@@ -1562,12 +1562,12 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     const isTransient = (logContext === "network error" && !isPermanentNetworkError) || logContext === "database connection error";
     const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
     if (isTransient) {
-      console.warn(`[scraper] ${logMessage}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+      console.warn(`[scraper] ${logMessage}`, { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector });
     } else {
       console.error(
         `[scraper] ${logMessage}`,
         error instanceof Error ? error.message : String(error),
-        { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }
+        { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector }
       );
     }
 

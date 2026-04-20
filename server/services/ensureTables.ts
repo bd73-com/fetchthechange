@@ -17,15 +17,14 @@ import { encryptUrl, decryptToken, hashUrl, isValidEncryptedToken, isEncryptionA
  * it a few hours past cutover is harmless.
  */
 export async function dropLegacyErrorLogsTable(): Promise<void> {
-  try {
-    await db.execute(sql`DROP TABLE IF EXISTS error_logs`);
-    const check = await db.execute(sql`SELECT to_regclass('error_logs') AS exists`);
-    const stillExists = (check as any).rows?.[0]?.exists;
-    if (stillExists) {
-      console.error("[ensureTables] DROP TABLE error_logs completed but to_regclass still resolves — table survived", { stillExists });
-    }
-  } catch (e) {
-    console.error("Could not drop legacy error_logs table:", e);
+  // Propagate errors so the one-shot operator script sees the failure
+  // instead of a silent `console.error`. This is a manual utility, not
+  // a boot hook, so throwing is the right posture.
+  await db.execute(sql`DROP TABLE IF EXISTS error_logs`);
+  const check = await db.execute(sql`SELECT to_regclass('error_logs') AS exists`);
+  const stillExists = (check as any).rows?.[0]?.exists;
+  if (stillExists) {
+    throw new Error(`DROP TABLE error_logs completed but to_regclass still resolves — table survived (value=${String(stillExists)})`);
   }
 }
 

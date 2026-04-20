@@ -8,6 +8,7 @@ import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { ensureMonitorConditionsTable } from "./ensureTables";
 import { processAutomatedCampaigns } from "./automatedCampaigns";
 import { isTransientDbError } from "../utils/dbErrors";
+import { safeHostname } from "./monitorValidation";
 import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
 import { db } from "../db";
 import { eq, sql } from "drizzle-orm";
@@ -117,8 +118,7 @@ async function runCheckWithLimit(monitor: Parameters<typeof checkMonitor>[0]): P
     console.error(`[scheduler] "${monitor.name}" — scheduled check failed. This is usually a temporary issue. If it persists, verify the URL is still valid and the selector matches the page.`, error instanceof Error ? error.message : String(error), {
       monitorId: monitor.id,
       monitorName: monitor.name,
-      url: monitor.url,
-      selector: monitor.selector,
+      hostname: safeHostname(monitor.url),
     });
     return true;
   } finally {

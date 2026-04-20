@@ -320,7 +320,7 @@ async function deliverToChannels(
       } else if (ch.channel === "slack" && !result.slack) {
         result.slack = { success: false, error: msg };
       }
-      console.error(`[email] Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err.message : String(err), { monitorId: monitor.id, channel: ch.channel });
+      console.error(`[notification] Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err.message : String(err), { monitorId: monitor.id, channel: ch.channel });
     }
   });
 
@@ -480,7 +480,7 @@ async function deliverDigestToChannels(
       } else if (ch.channel === "slack" && !result.slack) {
         result.slack = { success: false, error: msg };
       }
-      console.error(`[email] Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err.message : String(err), { monitorId: monitor.id, channel: ch.channel });
+      console.error(`[notification] Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err.message : String(err), { monitorId: monitor.id, channel: ch.channel });
     }
   });
 

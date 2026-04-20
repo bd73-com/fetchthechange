@@ -1990,30 +1990,32 @@ describe("failure tracking and auto-pause", () => {
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
-    await runWithTimers(monitor);
+    try {
+      const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
+      await runWithTimers(monitor);
 
-    // Protect the dedup-aggregation intent: the canonical infra-outage
-    // message must stay monitor-agnostic so grep-based triage clusters
-    // across affected monitors. Per-monitor drill-down stays in the
-    // context object (see scraper.ts:1263 rationale comment).
-    const infraCalls = warnSpy.mock.calls.filter((c) =>
-      String(c[0]).includes("Browserless service unavailable"),
-    );
-    expect(infraCalls.length).toBeGreaterThanOrEqual(1);
-    for (const c of infraCalls) {
-      expect(String(c[0])).not.toContain("My Watch");
-      expect(c[1]).toEqual(
-        expect.objectContaining({
-          monitorId: 1,
-          monitorName: "My Watch",
-          classifiedReason: expect.stringContaining("connection refused"),
-        }),
+      // Protect the dedup-aggregation intent: the canonical infra-outage
+      // message must stay monitor-agnostic so grep-based triage clusters
+      // across affected monitors. Per-monitor drill-down stays in the
+      // context object (see scraper.ts:1263 rationale comment).
+      const infraCalls = warnSpy.mock.calls.filter((c) =>
+        String(c[0]).includes("Browserless service unavailable"),
       );
+      expect(infraCalls.length).toBeGreaterThanOrEqual(1);
+      for (const c of infraCalls) {
+        expect(String(c[0])).not.toContain("My Watch");
+        expect(c[1]).toEqual(
+          expect.objectContaining({
+            monitorId: 1,
+            monitorName: "My Watch",
+            classifiedReason: expect.stringContaining("connection refused"),
+          }),
+        );
+      }
+    } finally {
+      warnSpy.mockRestore();
+      delete process.env.BROWSERLESS_TOKEN;
     }
-
-    warnSpy.mockRestore();
-    delete process.env.BROWSERLESS_TOKEN;
   });
 });
 

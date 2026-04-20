@@ -38,7 +38,7 @@ export default function DashboardNav() {
             <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
               <Link href="/admin/campaigns">
                 <Send className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">Campaigns</span>
+                <span className="sr-only sm:not-sr-only">Campaigns</span>
               </Link>
             </Button>
           )}
