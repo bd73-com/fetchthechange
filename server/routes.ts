@@ -77,7 +77,10 @@ export async function registerRoutes(
     criticalSchemaFailures.push("monitors.pending_retry_at column");
   }
   const apiKeysReady = await ensureApiKeysTable();
-  await ensureChannelTables();
+  const channelTablesReady = await ensureChannelTables();
+  if (!channelTablesReady) {
+    criticalSchemaFailures.push("notification channel / delivery_log columns");
+  }
   await ensureMonitorChangesIndexes();
   await ensureCampaignPartialIndexes();
   const notificationQueueReady = await ensureNotificationQueueColumns();

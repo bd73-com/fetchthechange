@@ -329,6 +329,8 @@ export const deliveryLog = pgTable("delivery_log", {
 }, (table) => ({
   monitorCreatedIdx: index("delivery_log_monitor_created_idx").on(table.monitorId, table.createdAt),
   channelStatusAttemptIdx: index("delivery_log_channel_status_attempt_idx").on(table.channel, table.status, table.createdAt, table.attempt),
+  // Supports the per-tick stalled-delivery recovery UPDATE: WHERE channel=? AND status='processing' AND claimed_at < ?
+  channelStatusClaimedIdx: index("delivery_log_channel_status_claimed_idx").on(table.channel, table.status, table.claimedAt),
 }));
 
 export const deliveryLogRelations = relations(deliveryLog, ({ one }) => ({

@@ -25,6 +25,9 @@ let activeChecks = 0;
 let schedulerStarted = false;
 const cronTasks: ReturnType<typeof cron.schedule>[] = [];
 const pendingTimeouts = new Set<ReturnType<typeof setTimeout>>();
+// Resolvers for any outstanding waitForActiveChecks() promises. stopScheduler
+// must call each one so shutdown cannot hang after the poll timer is cleared.
+const activeCheckWaiters = new Set<() => void>();
 
 
 /** Retry a DB operation once after a 1 s delay on transient connection errors. */
@@ -72,10 +75,19 @@ function trackTimeout(callback: () => void, delayMs: number): ReturnType<typeof 
  */
 export function waitForActiveChecks(timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      activeCheckWaiters.delete(finish);
+      resolve();
+    };
+    activeCheckWaiters.add(finish);
     const start = Date.now();
     const check = () => {
+      if (settled) return;
       if (activeChecks === 0 || Date.now() - start > timeoutMs) {
-        resolve();
+        finish();
       } else {
         trackTimeout(check, 100);
       }
@@ -583,6 +595,10 @@ export function stopScheduler(): void {
   cronTasks.length = 0;
   pendingTimeouts.forEach((handle) => { clearTimeout(handle); });
   pendingTimeouts.clear();
+  // Unblock any waitForActiveChecks waiters — their poll timer has just been
+  // cancelled above, so without explicit resolution the promise would hang.
+  activeCheckWaiters.forEach((finish) => finish());
+  activeCheckWaiters.clear();
   retryBackoff.clear();
   schedulerStarted = false;
 }

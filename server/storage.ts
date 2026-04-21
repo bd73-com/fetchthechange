@@ -73,6 +73,30 @@ export interface IStorage {
   resetAutomationSubscriptionFailures(id: number): Promise<void>;
   cleanupStaleAutomationSubscriptions(olderThan: Date): Promise<number>;
   getRecentChangesForMonitors(monitorIds: number[], limit: number): Promise<MonitorChange[]>;
+
+  // Delivery log retry primitives
+  addDeliveryLog(entry: {
+    monitorId: number;
+    changeId: number;
+    channel: string;
+    status: string;
+    attempt?: number;
+    response?: Record<string, unknown> | null;
+    deliveredAt?: Date | null;
+  }): Promise<DeliveryLogEntry>;
+  updateDeliveryLog(
+    id: number,
+    updates: Partial<Pick<DeliveryLogEntry, "status" | "attempt" | "response" | "deliveredAt" | "claimedAt">>,
+  ): Promise<void>;
+  getPendingWebhookRetries(): Promise<DeliveryLogEntry[]>;
+  claimDeliveryForRetry(id: number, expectedAttempt: number, channel: string): Promise<DeliveryLogEntry | null>;
+  /** @deprecated use claimDeliveryForRetry(id, attempt, "webhook") */
+  claimWebhookDeliveryForRetry(id: number, expectedAttempt: number): Promise<DeliveryLogEntry | null>;
+  recoverStalledDeliveries(channel: string, olderThan: Date): Promise<number>;
+  /** @deprecated use recoverStalledDeliveries("webhook", olderThan) */
+  recoverStalledWebhookDeliveries(olderThan: Date): Promise<number>;
+  getPendingAutomationRetries(): Promise<DeliveryLogEntry[]>;
+  getAutomationSubscriptionById(id: number): Promise<AutomationSubscription | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {

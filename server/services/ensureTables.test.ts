@@ -101,8 +101,10 @@ describe("ensureChannelTables", () => {
   it("executes all CREATE TABLE and CREATE INDEX statements without throwing", async () => {
     mockExecute.mockResolvedValue([]);
     await ensureChannelTables();
-    // 3 CREATE TABLE + 1 CREATE INDEX + 1 CREATE UNIQUE INDEX + 2 CREATE INDEX + 1 ALTER delivery_log ADD claimed_at + 1 backfill SELECT = 9
-    expect(mockExecute).toHaveBeenCalledTimes(9);
+    // 3 CREATE TABLE + 1 CREATE INDEX + 1 CREATE UNIQUE INDEX + 2 CREATE INDEX
+    //   + 1 ALTER delivery_log ADD claimed_at + 1 CREATE INDEX (claimed_at)
+    //   + 1 backfill SELECT = 10
+    expect(mockExecute).toHaveBeenCalledTimes(10);
   });
 
   it("emits CREATE INDEX for delivery_log_channel_status_attempt_idx", async () => {
@@ -114,9 +116,14 @@ describe("ensureChannelTables", () => {
     expect(statements.some((s: string) => s.includes("delivery_log_channel_status_attempt_idx"))).toBe(true);
   });
 
-  it("catches errors and does not throw", async () => {
+  it("catches errors and returns false without throwing", async () => {
     mockExecute.mockRejectedValue(new Error("connection refused"));
-    await expect(ensureChannelTables()).resolves.toBeUndefined();
+    await expect(ensureChannelTables()).resolves.toBe(false);
+  });
+
+  it("returns true on successful schema provisioning", async () => {
+    mockExecute.mockResolvedValue([]);
+    await expect(ensureChannelTables()).resolves.toBe(true);
   });
 
   it("logs error when table creation fails", async () => {

@@ -58,10 +58,12 @@ export async function ensureApiKeysTable(): Promise<boolean> {
 
 /**
  * Ensures notification channel tables exist (notification_channels, delivery_log, slack_connections).
- * Without this, channel management routes return 503 "not available"
- * if schema:push has not been run after these tables were added to the schema.
+ * Returns true when schema is ready, false when provisioning failed — callers
+ * should gate traffic off the result because delivery_log.claimed_at is
+ * referenced by retry/recovery queries that would otherwise throw
+ * `column "claimed_at" does not exist` for the life of the process.
  */
-export async function ensureChannelTables(): Promise<void> {
+export async function ensureChannelTables(): Promise<boolean> {
   try {
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS notification_channels (
@@ -94,6 +96,9 @@ export async function ensureChannelTables(): Promise<void> {
     await db.execute(sql`CREATE INDEX IF NOT EXISTS delivery_log_channel_status_attempt_idx ON delivery_log(channel, status, created_at, attempt)`);
     // claimed_at column for multi-replica atomic claim coordination (see scheduler webhook retry cron).
     await db.execute(sql`ALTER TABLE delivery_log ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP`);
+    // Recovery scans filter by (channel, status, claimed_at) to find rows stuck
+    // in 'processing' after a replica crash — index matches the query shape.
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS delivery_log_channel_status_claimed_idx ON delivery_log(channel, status, claimed_at)`);
 
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS slack_connections (
@@ -109,8 +114,10 @@ export async function ensureChannelTables(): Promise<void> {
     `);
     // Backfill: encrypt existing plaintext webhook URLs
     await backfillNotificationChannelWebhookUrls();
+    return true;
   } catch (e) {
     console.error("Could not ensure notification channel tables:", e);
+    return false;
   }
 }
 

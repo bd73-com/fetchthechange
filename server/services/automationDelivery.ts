@@ -113,7 +113,23 @@ export async function deliverToAutomationSubscriptions(
     await handleDeliveryFailure(sub.id, monitor, sub.platform, outcome.error);
   });
 
-  await Promise.allSettled(deliveries);
+  const results = await Promise.allSettled(deliveries);
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === "rejected") {
+      // A rejection here means the fallback path (addDeliveryLog) itself
+      // threw and handleDeliveryFailure also threw, OR handleDeliveryFailure
+      // threw on the persistent path. Silently ignoring loses the signal.
+      const sub = subscriptions[i];
+      const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      console.error("[Automation] Delivery handling failed — retry and failure-counter updates may be inconsistent", {
+        subscriptionId: sub?.id,
+        monitorId: monitor.id,
+        platform: sub?.platform,
+        errorMessage,
+      });
+    }
+  }
 }
 
 async function handleDeliveryFailure(

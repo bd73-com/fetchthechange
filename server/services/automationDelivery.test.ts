@@ -158,6 +158,27 @@ describe("deliverToAutomationSubscriptions", () => {
     expect(mockTouchAndResetAutomationSubscription).not.toHaveBeenCalled();
   });
 
+  it.each([408, 429])("queues durable retry on transient HTTP %s response", async (status) => {
+    mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub({ id: 3 })]);
+    mockSsrfSafeFetch.mockResolvedValue({ ok: false, status });
+
+    await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
+
+    expect(mockAddDeliveryLog).toHaveBeenCalledWith(expect.objectContaining({
+      channel: "automation",
+      status: "pending",
+      attempt: 1,
+      response: expect.objectContaining({
+        subscriptionId: 3,
+        platform: "zapier",
+        error: `HTTP ${status}`,
+        transient: true,
+      }),
+    }));
+    expect(mockIncrementAutomationSubscriptionFailures).not.toHaveBeenCalled();
+    expect(mockTouchAndResetAutomationSubscription).not.toHaveBeenCalled();
+  });
+
   it("queues durable retry on network error (does NOT bump failure counter)", async () => {
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub({ id: 3 })]);
     mockSsrfSafeFetch.mockRejectedValue(new Error("ECONNREFUSED"));
