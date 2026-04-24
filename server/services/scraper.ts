@@ -6,6 +6,7 @@ import { ErrorLogger } from "./logger";
 import { BrowserlessUsageTracker } from "./browserlessTracker";
 import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { isTransientDbError } from "../utils/dbErrors";
+import { safeHostname } from "../utils/urlUtils";
 import { browserPool } from "./browserPool";
 import { validateUrlBeforeFetch, ssrfSafeFetch } from "../utils/ssrf";
 import { type Monitor, monitorMetrics, monitors } from "@shared/schema";
@@ -18,11 +19,6 @@ import { eq, sql } from "drizzle-orm";
  * Browserless infrastructure failures. Cleared on success or server restart.
  */
 export const monitorsNeedingRetry = new Set<number>();
-
-/** Extract hostname from a URL for safe logging (no query params or paths). */
-function safeHostname(urlString: string): string {
-  try { return new URL(urlString).hostname; } catch { return "unknown"; }
-}
 
 /** Pool of modern User-Agent profiles to rotate per request, reducing fingerprint-based blocking. */
 const UA_PROFILES: Array<{ userAgent: string; secChUa?: string; secChUaPlatform?: string }> = [

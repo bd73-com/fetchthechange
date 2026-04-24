@@ -3,6 +3,7 @@ import { db } from "../db";
 import { resendUsage, errorLogs } from "@shared/schema";
 import { RESEND_CAPS } from "@shared/models/auth";
 import { sql, eq, and, gte, count, desc } from "drizzle-orm";
+import { ErrorLogger } from "./logger";
 
 function getMonthStart(): Date {
   const now = new Date();
@@ -106,12 +107,7 @@ export class ResendUsageTracker {
           .limit(1);
 
         if (recentAlert.length === 0) {
-          await db.insert(errorLogs).values({
-            level: "warning",
-            source: "resend",
-            message: alertKey,
-            context: { threshold: t.label, usage: monthlyUsage, cap: monthlyCap },
-          });
+          await ErrorLogger.info("resend", alertKey, { threshold: t.label, usage: monthlyUsage, cap: monthlyCap });
           console.log(`[ResendTracker] Monthly usage at ${t.label}: ${monthlyUsage}/${monthlyCap}`);
         }
         break;
@@ -139,12 +135,7 @@ export class ResendUsageTracker {
         .limit(1);
 
       if (recentAlert.length === 0) {
-        await db.insert(errorLogs).values({
-          level: "warning",
-          source: "resend",
-          message: alertKey,
-          context: { threshold: "90% daily", usage: dailyUsage, cap: dailyCap },
-        });
+        await ErrorLogger.info("resend", alertKey, { threshold: "90% daily", usage: dailyUsage, cap: dailyCap });
         console.log(`[ResendTracker] Daily usage at 90%: ${dailyUsage}/${dailyCap}`);
       }
     }

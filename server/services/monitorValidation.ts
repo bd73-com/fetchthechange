@@ -91,13 +91,4 @@ export async function validateMonitorInput(
   return null;
 }
 
-/**
- * Safely extract hostname from a URL string for logging.
- */
-export function safeHostname(urlString: string): string {
-  try {
-    return new URL(urlString).hostname;
-  } catch {
-    return "unknown";
-  }
-}
+export { safeHostname } from "../utils/urlUtils";

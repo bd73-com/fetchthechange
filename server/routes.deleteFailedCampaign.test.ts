@@ -95,7 +95,6 @@ vi.mock("./storage", () => ({
 vi.mock("./services/logger", () => ({
   ErrorLogger: {
     error: vi.fn().mockResolvedValue(undefined),
-    warning: vi.fn().mockResolvedValue(undefined),
     info: vi.fn().mockResolvedValue(undefined),
   },
 }));

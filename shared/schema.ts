@@ -90,7 +90,7 @@ export type MonitorMetric = typeof monitorMetrics.$inferSelect;
 export const errorLogs = pgTable("error_logs", {
   id: serial("id").primaryKey(),
   timestamp: timestamp("timestamp").defaultNow().notNull(), // last occurrence
-  level: text("level").notNull(), // 'error' | 'warning' | 'info'
+  level: text("level").notNull(), // 'error' | 'info' (new writes); 'warning' may appear in historical rows from pre-deprecation writes
   source: text("source").notNull(), // see ERROR_LOG_SOURCES in shared/routes.ts
   errorType: text("error_type"),
   message: text("message").notNull(),

@@ -8,14 +8,7 @@ import { ResendUsageTracker } from "./resendTracker";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { getAppUrl } from "../utils/appUrl";
-
-function safeHostname(urlString: string): string {
-  try {
-    return new URL(urlString).hostname;
-  } catch {
-    return "unknown";
-  }
-}
+import { safeHostname } from "../utils/urlUtils";
 
 export interface EmailResult {
   success: boolean;

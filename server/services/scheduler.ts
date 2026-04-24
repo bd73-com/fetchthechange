@@ -10,7 +10,7 @@ import { browserlessCircuitBreaker } from "./browserlessCircuitBreaker";
 import { ensureMonitorConditionsTable } from "./ensureTables";
 import { processAutomatedCampaigns } from "./automatedCampaigns";
 import { isTransientDbError } from "../utils/dbErrors";
-import { safeHostname } from "./monitorValidation";
+import { safeHostname } from "../utils/urlUtils";
 import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
 import { db } from "../db";
 import { eq, sql } from "drizzle-orm";
