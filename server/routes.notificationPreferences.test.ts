@@ -97,6 +97,7 @@ vi.mock("./middleware/rateLimiter", () => ({
   emailUpdateRateLimiter: (_req: any, _res: any, next: any) => next(),
   contactFormRateLimiter: (_req: any, _res: any, next: any) => next(),
   unauthenticatedRateLimiter: (_req: any, _res: any, next: any) => next(),
+  adminErrorLogsRateLimiter: (_req: any, _res: any, next: any) => next(),
 }));
 
 vi.mock("./services/scheduler", () => ({

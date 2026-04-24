@@ -119,6 +119,18 @@ export const emailUpdateRateLimiter = createTieredRateLimiter("emailUpdate", {
   message: "Too many email update attempts. Please try again later."
 });
 
+// Caps per-user request volume on the admin error-log endpoints. Each call
+// runs a 500-row SELECT + JS ownership filter (see #465); without a bucket a
+// single Power-tier account with N browser tabs amplifies the badge poller
+// into N concurrent scans every 30s. 60/min easily covers legitimate manual
+// use (multiple tabs + mutation invalidations) while keeping DB load bounded.
+export const adminErrorLogsRateLimiter = createTieredRateLimiter("adminErrorLogs", {
+  free: { max: 60, windowMs: 60 * 1000 },
+  pro: { max: 60, windowMs: 60 * 1000 },
+  power: { max: 60, windowMs: 60 * 1000 },
+  message: "Too many admin error-log requests. Please slow down."
+});
+
 export const contactFormRateLimiter = createTieredRateLimiter("contactForm", {
   free: { max: 3, windowMs: 60 * 60 * 1000 },
   pro: { max: 5, windowMs: 60 * 60 * 1000 },

@@ -33,6 +33,33 @@ export async function ensureErrorLogColumns(): Promise<void> {
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS occurrence_count INTEGER NOT NULL DEFAULT 1`);
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP`);
 
+    // Enforce the level enum at the DB layer so a direct SQL INSERT or a
+    // caller that bypasses the TypeScript union (e.g. `db.execute(sql\`INSERT
+    // INTO error_logs (level, …) VALUES ('Error', …)\`)`) cannot land a
+    // misspelled/miscased level in the table. The admin UI's levelConfig
+    // (`client/src/pages/AdminErrors.tsx`) only indexes `error|warning|info`,
+    // so an unknown level silently falls back to the info badge. Keep
+    // `'warning'` allowed until the historical warning rows are purged — new
+    // writes only use `error|info`. See #466.
+    await db.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'error_logs_level_chk'
+            AND conrelid = 'error_logs'::regclass
+        ) THEN
+          BEGIN
+            ALTER TABLE error_logs
+              ADD CONSTRAINT error_logs_level_chk
+              CHECK (level IN ('error', 'info', 'warning'));
+          EXCEPTION WHEN check_violation THEN
+            RAISE WARNING 'error_logs_level_chk not added: existing rows have levels outside (error, info, warning)';
+          END;
+        END IF;
+      END$$;
+    `);
+
     // Check if a VALID, UNIQUE, correctly-shaped index already exists — skip
     // DDL entirely if so. Validates four invariants simultaneously:
     //   1. `indisvalid` — not a leftover INVALID build

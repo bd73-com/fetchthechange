@@ -28,7 +28,8 @@ import {
   suggestSelectorsRateLimiter,
   emailUpdateRateLimiter,
   contactFormRateLimiter,
-  unauthenticatedRateLimiter
+  unauthenticatedRateLimiter,
+  adminErrorLogsRateLimiter
 } from "./middleware/rateLimiter";
 import { generateWebhookSecret, redactSecret } from "./services/webhookDelivery";
 import { listChannels as listSlackChannels } from "./services/slackDelivery";
@@ -1482,7 +1483,7 @@ export async function registerRoutes(
   // Lightweight count endpoint for notification badge.
   // Returns { count: 0 } instead of { message, code } on auth errors so the
   // client badge can consume every response shape uniformly without error handling.
-  app.get("/api/admin/error-logs/count", isAuthenticated, async (req: any, res) => {
+  app.get("/api/admin/error-logs/count", isAuthenticated, adminErrorLogsRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) {
@@ -1525,7 +1526,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/admin/error-logs", isAuthenticated, async (req: any, res) => {
+  app.get("/api/admin/error-logs", isAuthenticated, adminErrorLogsRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) {
@@ -1614,7 +1615,7 @@ export async function registerRoutes(
   });
 
   // Batch soft-delete error log entries
-  app.post("/api/admin/error-logs/batch-delete", isAuthenticated, async (req: any, res) => {
+  app.post("/api/admin/error-logs/batch-delete", isAuthenticated, adminErrorLogsRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) {
@@ -1708,7 +1709,7 @@ export async function registerRoutes(
   });
 
   // Restore soft-deleted error log entries (undo)
-  app.post("/api/admin/error-logs/restore", isAuthenticated, async (req: any, res) => {
+  app.post("/api/admin/error-logs/restore", isAuthenticated, adminErrorLogsRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) {
@@ -1724,7 +1725,13 @@ export async function registerRoutes(
         (await storage.getMonitors(userId)).map((m: any) => m.id)
       );
 
-      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).orderBy(asc(errorLogs.id)).limit(500);
+      // Order by most-recently-soft-deleted so the user's just-deleted rows
+      // (which they're trying to undo) fall inside the 500-row window even
+      // when the table has accumulated older soft-deletes from another admin
+      // between the 60s safety-net cleanup cycles. The old `asc(id)` scan
+      // picked oldest rows first and silently returned count=0 to the user
+      // when their own rows lived past the window. See #468.
+      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).orderBy(desc(errorLogs.deletedAt), desc(errorLogs.id)).limit(500);
 
       const authorized = softDeleted.filter((log: any) => {
         const ctx = log.context as Record<string, unknown> | null;
@@ -1746,7 +1753,7 @@ export async function registerRoutes(
   });
 
   // Finalize soft-deleted error log entries (hard-delete)
-  app.post("/api/admin/error-logs/finalize", isAuthenticated, async (req: any, res) => {
+  app.post("/api/admin/error-logs/finalize", isAuthenticated, adminErrorLogsRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) {
@@ -1762,7 +1769,11 @@ export async function registerRoutes(
         (await storage.getMonitors(userId)).map((m: any) => m.id)
       );
 
-      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).orderBy(asc(errorLogs.id)).limit(500);
+      // Most-recently-soft-deleted first — symmetric with the restore endpoint
+      // above so the user's count reflects their just-deleted rows instead of
+      // returning 0 because older soft-deletes from another admin dominate
+      // the 500-row window. See #468.
+      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).orderBy(desc(errorLogs.deletedAt), desc(errorLogs.id)).limit(500);
 
       const authorized = softDeleted.filter((log: any) => {
         const ctx = log.context as Record<string, unknown> | null;

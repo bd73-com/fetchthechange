@@ -121,6 +121,7 @@ vi.mock("./middleware/rateLimiter", () => ({
   emailUpdateRateLimiter: (_req: any, _res: any, next: any) => next(),
   contactFormRateLimiter: (_req: any, _res: any, next: any) => next(),
   unauthenticatedRateLimiter: (_req: any, _res: any, next: any) => next(),
+  adminErrorLogsRateLimiter: (_req: any, _res: any, next: any) => next(),
 }));
 
 vi.mock("./services/scheduler", () => ({
@@ -414,8 +415,9 @@ describe("error_logs dedup column migration at startup", () => {
     vi.clearAllMocks();
     const channelError = new Error("permission denied for schema public");
     // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs
-    // migration succeeds (3 ALTERs + 1 pg_indexes check + 4 in-tx + 1 CREATE
-    // INDEX CONCURRENTLY = 9), api_keys succeed (2), then channel tables fail
+    // migration succeeds (3 ALTERs + 1 DO block level CHECK + 1 pg_indexes
+    // check + 4 in-tx + 1 CREATE INDEX CONCURRENTLY = 10), api_keys succeed
+    // (2), then channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
@@ -423,6 +425,7 @@ describe("error_logs dedup column migration at startup", () => {
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs first_occurrence
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs occurrence_count
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs deleted_at
+      .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
       .mockResolvedValueOnce({ rows: [] }) // pg_indexes check (no existing idx)
       .mockResolvedValueOnce({ rows: [] }) // SET LOCAL lock_timeout
       .mockResolvedValueOnce({ rows: [] }) // pg_advisory_xact_lock
@@ -462,8 +465,9 @@ describe("error_logs dedup column migration at startup", () => {
     vi.clearAllMocks();
     const channelError = new Error("connection timeout");
     // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs
-    // migration succeeds (3 ALTERs + 1 pg_indexes check + 4 in-tx + 1 CREATE
-    // INDEX CONCURRENTLY = 9), api_keys succeed (2), channel tables fail
+    // migration succeeds (3 ALTERs + 1 DO block level CHECK + 1 pg_indexes
+    // check + 4 in-tx + 1 CREATE INDEX CONCURRENTLY = 10), api_keys succeed
+    // (2), channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
@@ -471,6 +475,7 @@ describe("error_logs dedup column migration at startup", () => {
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs first_occurrence
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs occurrence_count
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs deleted_at
+      .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
       .mockResolvedValueOnce({ rows: [] }) // pg_indexes check (no existing idx)
       .mockResolvedValueOnce({ rows: [] }) // SET LOCAL lock_timeout
       .mockResolvedValueOnce({ rows: [] }) // pg_advisory_xact_lock

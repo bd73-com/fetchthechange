@@ -360,10 +360,21 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   startStripeInitWithRetry();
 
-  // Error Handler
-  app.use((err: any, _req: any, res: any, next: any) => {
+  // Error Handler — route the unhandled error through ErrorLogger so its
+  // regex redaction (postgres DSNs, Bearer tokens, Resend/Stripe/GitHub keys)
+  // applies to the message + stack before they hit the Replit log stream.
+  // A raw `console.error(err)` here leaks any secret embedded in the stack
+  // or SDK-attached fields (e.g. a Resend HTTP response body echoed in
+  // `err.message`). See #463.
+  const { ErrorLogger: TopLevelErrorLogger } = await import("./services/logger");
+  app.use((err: any, req: any, res: any, next: any) => {
     const status = err.status || err.statusCode || 500;
-    console.error("Internal Server Error:", err);
+    TopLevelErrorLogger.error(
+      "api",
+      "Unhandled error in request handler",
+      err instanceof Error ? err : new Error(String(err?.message ?? err)),
+      { path: req?.path, method: req?.method, status },
+    ).catch(() => { /* ErrorLogger already logs its own DB failures */ });
     if (res.headersSent) return next(err);
     return res.status(status).json({ message: "Internal Server Error" });
   });

@@ -77,14 +77,16 @@ describe("ensureErrorLogColumns", () => {
     // Default empty rows → no existing valid index, proceed to dedup + create.
     mockExecute.mockResolvedValue({ rows: [] });
     await ensureErrorLogColumns();
-    // 3 ALTER TABLE + 1 pg_indexes check + 4 in-tx (SET LOCAL, advisory
-    // lock, UPDATE, DELETE) + 1 CREATE UNIQUE INDEX CONCURRENTLY = 9
-    expect(mockExecute).toHaveBeenCalledTimes(9);
+    // 3 ALTER TABLE + 1 DO block (level CHECK) + 1 pg_indexes check + 4 in-tx
+    // (SET LOCAL, advisory lock, UPDATE, DELETE) + 1 CREATE UNIQUE INDEX
+    // CONCURRENTLY = 10
+    expect(mockExecute).toHaveBeenCalledTimes(10);
     const stmts = mockExecute.mock.calls.map(([arg]: any) => {
       try { return JSON.stringify(arg); } catch { return String(arg); }
     });
     expect(stmts.some((s: string) => s.includes("first_occurrence"))).toBe(true);
     expect(stmts.some((s: string) => s.includes("occurrence_count"))).toBe(true);
+    expect(stmts.some((s: string) => s.includes("error_logs_level_chk"))).toBe(true);
     expect(stmts.some((s: string) => s.includes("pg_indexes"))).toBe(true);
     expect(stmts.some((s: string) => s.includes("pg_advisory_xact_lock"))).toBe(true);
     expect(stmts.some((s: string) => s.includes("CREATE UNIQUE INDEX") && s.includes("CONCURRENTLY") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(true);
@@ -98,13 +100,14 @@ describe("ensureErrorLogColumns", () => {
       .mockResolvedValueOnce({ rows: [] }) // ALTER first_occurrence
       .mockResolvedValueOnce({ rows: [] }) // ALTER occurrence_count
       .mockResolvedValueOnce({ rows: [] }) // ALTER deleted_at
+      .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
       .mockResolvedValueOnce({ rows: [{
         indisvalid: true,
         indisunique: true,
         indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message) WHERE (resolved = false)",
       }] });
     await ensureErrorLogColumns();
-    expect(mockExecute).toHaveBeenCalledTimes(4); // ALTERs + pg_indexes only
+    expect(mockExecute).toHaveBeenCalledTimes(5); // ALTERs + CHECK DO block + pg_indexes only
   });
 
   it("drops and rebuilds when existing index is INVALID", async () => {
@@ -113,6 +116,7 @@ describe("ensureErrorLogColumns", () => {
       .mockResolvedValueOnce({ rows: [] }) // ALTER first_occurrence
       .mockResolvedValueOnce({ rows: [] }) // ALTER occurrence_count
       .mockResolvedValueOnce({ rows: [] }) // ALTER deleted_at
+      .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
       .mockResolvedValueOnce({ rows: [{
         indisvalid: false,
         indisunique: true,
@@ -135,6 +139,7 @@ describe("ensureErrorLogColumns", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
       .mockResolvedValueOnce({ rows: [{
         indisvalid: true,
         indisunique: false, // ← the drift we're guarding against
@@ -155,6 +160,7 @@ describe("ensureErrorLogColumns", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
       .mockResolvedValueOnce({ rows: [{
         indisvalid: true,
         indisunique: true,

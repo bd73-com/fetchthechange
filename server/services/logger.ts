@@ -26,8 +26,17 @@ const SENSITIVE_VALUE_PATTERNS = [
   /\b[A-Za-z0-9+/]{40,}={0,2}\b/g,
 ];
 
+// Strip C0 controls (except \t which we normalize to a space) and C1 controls
+// so an attacker who embeds `\n[ERROR][scheduler]` in a user-controlled field
+// like `monitor.name` cannot forge fake log rows or poison the
+// (level, source, message) dedup bucket by splitting the line. See #464.
+function stripControlChars(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/[\x00-\x08\x0A-\x1F\x7F-\x9F]/g, " ").replace(/\t/g, " ");
+}
+
 function sanitizeString(str: string): string {
-  let result = str;
+  let result = stripControlChars(str);
   for (const pattern of SENSITIVE_VALUE_PATTERNS) {
     pattern.lastIndex = 0;
     result = result.replace(pattern, "[REDACTED]");
@@ -61,18 +70,22 @@ export class ErrorLogger {
     context?: Record<string, any> | null
   ): Promise<void> {
     const prefix = `[${level.toUpperCase()}][${source}]`;
-    const logMsg = `${prefix} ${message}`;
 
-    if (level === "error") {
-      console.error(logMsg, error?.message || "");
-    } else {
-      console.log(logMsg);
-    }
-
+    // Sanitize before any console output so secrets embedded in the message
+    // or the raw SDK error.message (e.g. `Authorization: Bearer re_…` echoed
+    // in a Resend/Stripe HTTP response body) do not leak to the Replit log
+    // stream. Matches the DB-write sanitization below. See #467.
     const sanitizedMessage = sanitizeString(message);
     const sanitizedStack = error?.stack ? sanitizeString(error.stack) : null;
     const sanitizedContext = context ? sanitizeContext(context) : null;
     const errorType = error?.constructor?.name || null;
+    const logMsg = `${prefix} ${sanitizedMessage}`;
+
+    if (level === "error") {
+      console.error(logMsg, sanitizeString(error?.message || ""));
+    } else {
+      console.log(logMsg);
+    }
 
     try {
       // Atomic upsert against the partial unique index
