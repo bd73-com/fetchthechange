@@ -1495,10 +1495,14 @@ export async function registerRoutes(
 
       const isAppOwner = userId === APP_OWNER_ID;
 
+      // Filter to the same level set the UI dropdown offers so the badge
+      // count matches what the admin sees after clicking through. Legacy
+      // "warning" rows (from pre-deprecation writes) are still viewable via
+      // source-filtered queries but do not inflate the badge.
       const allResults = await db
         .select({ id: errorLogs.id, context: errorLogs.context })
         .from(errorLogs)
-        .where(and(eq(errorLogs.resolved, false), isNull(errorLogs.deletedAt)))
+        .where(and(eq(errorLogs.resolved, false), isNull(errorLogs.deletedAt), inArray(errorLogs.level, ["error", "info"])))
         .limit(500);
 
       const userMonitorIds = new Set(

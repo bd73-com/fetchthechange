@@ -20,6 +20,29 @@ import { eq, sql } from "drizzle-orm";
  */
 export const monitorsNeedingRetry = new Set<number>();
 
+/**
+ * Per-process throttle for high-frequency infrastructure warnings. During a
+ * Browserless outage the scraper fires the same monitor-agnostic warning on
+ * every monitor check across every replica; without throttling that produces
+ * thousands of identical stdout lines per minute. Returns true if the caller
+ * should emit, false if suppressed.
+ *
+ * State is per-replica: under autoscale each replica throttles independently
+ * (acceptable tradeoff — infra-outage operational signal is coarse).
+ */
+const infraWarnLastEmit = new Map<string, number>();
+const INFRA_WARN_COOLDOWN_MS = 60_000;
+function shouldEmitInfraWarn(key: string): boolean {
+  const now = Date.now();
+  const last = infraWarnLastEmit.get(key) ?? 0;
+  if (now - last < INFRA_WARN_COOLDOWN_MS) return false;
+  infraWarnLastEmit.set(key, now);
+  return true;
+}
+export function _resetInfraWarnThrottleForTests(): void {
+  infraWarnLastEmit.clear();
+}
+
 /** Pool of modern User-Agent profiles to rotate per request, reducing fingerprint-based blocking. */
 const UA_PROFILES: Array<{ userAgent: string; secChUa?: string; secChUaPlatform?: string }> = [
   // Chrome 133 – Windows 10
@@ -1268,7 +1291,9 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             // most recent writer that supplied a non-null context, not an
             // aggregate across affected monitors. occurrenceCount is the only
             // signal of outage scope.
-            console.warn("[scraper] Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
+            if (shouldEmitInfraWarn("browserless-unavailable")) {
+              console.warn("[scraper] Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
+            }
           } else {
             // Site-specific failure: keep the monitor name because the site itself is the problem.
             // Emit via console.warn only (not ErrorLogger) so the Browserless infra-noise flood
@@ -1315,7 +1340,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     // when static extraction succeeded. The message is monitor-agnostic so
     // affected monitors dedup into a single row via the unresolved-dedup
     // index (#448). See GitHub issue #449.
-    if (skippedDueToOpenCircuit && newValue == null) {
+    if (skippedDueToOpenCircuit && newValue == null && shouldEmitInfraWarn("browserless-circuit-open")) {
       console.warn(
         "[scraper] Browserless circuit breaker open — preserving last known values",
         { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
@@ -1454,30 +1479,35 @@ export async function checkMonitor(monitor: Monitor): Promise<{
           const dbErrMsg = dbError instanceof Error ? dbError.message : String(dbError);
           const retryErrMsg = retryError instanceof Error ? retryError.message : String(retryError);
           const isTransientSave = isTransientDbError(retryError);
-          const saveContext = {
-            monitorId: monitor.id,
-            monitorName: monitor.name,
-            extractedValue: newValue?.substring(0, 200) ?? null,
-            previousValue: oldValue?.substring(0, 200) ?? null,
-            changed,
-            dbError: dbErrMsg,
-            retryError: retryErrMsg,
-          };
           if (isTransientSave) {
+            // Transient path goes to stdout only (console.warn bypasses ErrorLogger
+            // sanitization), so drop extractedValue/previousValue — they contain
+            // user-scraped page content that may include API tokens or PII.
             try {
               console.warn(
                 `[scraper] "${monitor.name}" check succeeded but failed to save result (will retry)`,
-                saveContext,
+                { monitorId: monitor.id, monitorName: monitor.name, changed, dbError: dbErrMsg, retryError: retryErrMsg },
               );
             } catch {
               // ignore
             }
           } else {
+            // Non-transient path goes through ErrorLogger.error which sanitizes
+            // context via SENSITIVE_VALUE_PATTERNS regex — safe to include
+            // truncated values for triage.
             await ErrorLogger.error(
               "scraper",
               `"${monitor.name}" check succeeded but failed to save result`,
               retryError instanceof Error ? retryError : null,
-              saveContext,
+              {
+                monitorId: monitor.id,
+                monitorName: monitor.name,
+                extractedValue: newValue?.substring(0, 200) ?? null,
+                previousValue: oldValue?.substring(0, 200) ?? null,
+                changed,
+                dbError: dbErrMsg,
+                retryError: retryErrMsg,
+              },
             ).catch(() => {});
           }
 
@@ -1585,14 +1615,22 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     const errMsg = error instanceof Error ? error.message : "";
     const isPermanentNetworkError = /ENOTFOUND|certificate|ssl|tls/i.test(errMsg);
     const isTransient = (logContext === "network error" && !isPermanentNetworkError) || logContext === "database connection error";
-    const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
     if (isTransient) {
+      // Transient path goes to stdout only (console.warn bypasses ErrorLogger
+      // sanitization). Avoid interpolating error.message because undici/fetch
+      // errors echo the full requested URL with any userinfo or query-string
+      // credentials (e.g. "request to https://user:pw@host failed"). The
+      // classified logContext is enough for triage.
       try {
-        console.warn(`[scraper] ${logMessage}`, { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector });
+        console.warn(`[scraper] "${monitor.name}" check failed (${logContext})`, { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector });
       } catch {
         // ignore
       }
     } else {
+      // Non-transient path: ErrorLogger.error sanitizes message + stack via
+      // SENSITIVE_VALUE_PATTERNS (DSN/Bearer/provider-key regex) before
+      // persisting, so the full error message can be logged.
+      const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
       await ErrorLogger.error(
         "scraper",
         logMessage,

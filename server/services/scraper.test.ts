@@ -125,6 +125,7 @@ import {
   BASE_RETRY_MS,
   JITTER_CAP_MS,
   extractWithBrowserless,
+  _resetInfraWarnThrottleForTests,
 } from "./scraper";
 import { storage } from "../storage";
 import { sendNotificationEmail, sendAutoPauseEmail, sendHealthWarningEmail, sendRecoveryEmail } from "./email";
@@ -137,6 +138,12 @@ import type { Monitor } from "@shared/schema";
 // Drain browser pool after every test to prevent cross-test pollution
 afterEach(async () => {
   await browserPool.drain();
+});
+
+// Reset the infra-warning throttle before each test so the module-level
+// cooldown map doesn't suppress a warning the test expects to observe.
+beforeEach(() => {
+  _resetInfraWarnThrottleForTests();
 });
 
 // ---------------------------------------------------------------------------
@@ -4378,7 +4385,7 @@ describe("checkMonitor outer catch resilience", () => {
     expect(vi.mocked(processChangeNotification)).toHaveBeenCalledTimes(1);
   });
 
-  it("logs extractedValue and previousValue when both save attempts fail", async () => {
+  it("does not leak extractedValue/previousValue on transient save failure (console.warn path)", async () => {
     const html = `<html><body><span class="price">$49.99</span></body></html>`;
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(html, { status: 200 }));
 
@@ -4397,18 +4404,26 @@ describe("checkMonitor outer catch resilience", () => {
       expect(result.currentValue).toBe("$49.99");
       expect(result.changed).toBe(true);
       expect(result.error).toContain("server error prevented saving");
-      // Transient DB errors are downgraded to console.warn (will retry via accelerated retry)
+      // Transient DB errors are downgraded to console.warn (will retry via accelerated retry).
+      // console.warn bypasses ErrorLogger's sanitization, so extractedValue/previousValue
+      // (user-scraped page content — can carry API tokens, PII, internal URLs) MUST be
+      // omitted from the payload. The non-transient path keeps them because ErrorLogger.error
+      // runs sanitizeContext.
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         expect.stringContaining("check succeeded but failed to save result"),
         expect.objectContaining({
           monitorId: 1,
-          extractedValue: "$49.99",
-          previousValue: "$39.99",
+          monitorName: "Test Monitor",
           changed: true,
           dbError: "connection terminated",
           retryError: "connection terminated",
         }),
       );
+      const transientCall = consoleWarnSpy.mock.calls.find(
+        (c) => typeof c[0] === "string" && c[0].includes("check succeeded but failed to save result"),
+      );
+      expect(transientCall?.[1]).not.toHaveProperty("extractedValue");
+      expect(transientCall?.[1]).not.toHaveProperty("previousValue");
       expect(ErrorLogger.error).not.toHaveBeenCalled();
     } finally {
       consoleWarnSpy.mockRestore();

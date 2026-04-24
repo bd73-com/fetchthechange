@@ -4,6 +4,7 @@ import { getResendClient } from "./resendClient";
 import { browserlessUsage, errorLogs } from "@shared/schema";
 import { BROWSERLESS_CAPS, users, type UserTier } from "@shared/models/auth";
 import { sql, eq, and, gte, count, desc } from "drizzle-orm";
+import { ErrorLogger } from "./logger";
 
 function getMonthStart(): Date {
   const now = new Date();
@@ -108,12 +109,12 @@ export class BrowserlessUsageTracker {
           .limit(1);
 
         if (recentAlert.length === 0) {
-          await db.insert(errorLogs).values({
-            level: "info",
-            source: "browserless",
-            message: alertKey,
-            context: { threshold: t.label, usage: systemUsage, cap: systemCap },
-          });
+          // Use ErrorLogger.info so the dedup upsert (ON CONFLICT) handles the
+          // case where an unresolved alert row for the same bucket already
+          // exists beyond the 6h cooldown window — raw `db.insert` would throw
+          // on the partial unique index and the alert email would silently
+          // fail to fire.
+          await ErrorLogger.info("browserless", alertKey, { threshold: t.label, usage: systemUsage, cap: systemCap });
           await this.sendThresholdEmail(t.label, systemUsage, systemCap);
         }
         break;
