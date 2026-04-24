@@ -360,25 +360,6 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   startStripeInitWithRetry();
 
-  // Error Handler — route the unhandled error through ErrorLogger so its
-  // regex redaction (postgres DSNs, Bearer tokens, Resend/Stripe/GitHub keys)
-  // applies to the message + stack before they hit the Replit log stream.
-  // A raw `console.error(err)` here leaks any secret embedded in the stack
-  // or SDK-attached fields (e.g. a Resend HTTP response body echoed in
-  // `err.message`). See #463.
-  const { ErrorLogger: TopLevelErrorLogger } = await import("./services/logger");
-  app.use((err: any, req: any, res: any, next: any) => {
-    const status = err.status || err.statusCode || 500;
-    TopLevelErrorLogger.error(
-      "api",
-      "Unhandled error in request handler",
-      err instanceof Error ? err : new Error(String(err?.message ?? err)),
-      { path: req?.path, method: req?.method, status },
-    ).catch(() => { /* ErrorLogger already logs its own DB failures */ });
-    if (res.headersSent) return next(err);
-    return res.status(status).json({ message: "Internal Server Error" });
-  });
-
   // Setup Vite or Static Files
   if (process.env.NODE_ENV === "development") {
     const { setupVite } = await import("./vite");
@@ -386,6 +367,26 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   } else {
     serveStatic(app);
   }
+
+  // Error Handler — must be registered AFTER all other middleware/routes so
+  // errors propagated via next(err) from route handlers, Vite's SSR
+  // middleware, and serveStatic all flow through ErrorLogger's redaction
+  // (postgres DSNs, Bearer tokens, Resend/Stripe/GitHub keys). A raw
+  // `console.error(err)` here leaks any secret embedded in the stack or
+  // SDK-attached fields (e.g. a Resend HTTP response body echoed in
+  // `err.message`). See #463. Reuses the ErrorLogger binding imported at
+  // line 313 rather than re-importing.
+  app.use((err: any, req: any, res: any, next: any) => {
+    const status = err.status || err.statusCode || 500;
+    ErrorLogger.error(
+      "api",
+      "Unhandled error in request handler",
+      err instanceof Error ? err : new Error(String(err?.message ?? err)),
+      { path: req?.path, method: req?.method, status },
+    ).catch(() => { /* ErrorLogger already logs its own DB failures */ });
+    if (res.headersSent) return next(err);
+    return res.status(status).json({ message: "Internal Server Error", code: "INTERNAL_ERROR" });
+  });
 
   // Start Server — kill any stale process on the port first (Replit restarts
   // can leave zombies when the previous process didn't exit cleanly).

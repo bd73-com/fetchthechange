@@ -1686,7 +1686,11 @@ export async function registerRoutes(
           conditions.push(notInArray(errorLogs.id, excludeList));
         }
 
-        const entries = await db.select().from(errorLogs).where(and(...conditions)).orderBy(asc(errorLogs.id)).limit(500);
+        // Newest-first matches the list view (`GET /api/admin/error-logs`
+        // orderBy `desc(timestamp)`) and the restore/finalize endpoints so
+        // "delete filtered" drains the rows the admin is actually looking at
+        // instead of starving on the oldest 500 matching rows.
+        const entries = await db.select().from(errorLogs).where(and(...conditions)).orderBy(desc(errorLogs.timestamp), desc(errorLogs.id)).limit(500);
 
         const authorized = entries.filter((log: any) => {
           const ctx = log.context as Record<string, unknown> | null;

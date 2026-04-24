@@ -41,6 +41,11 @@ export async function ensureErrorLogColumns(): Promise<void> {
     // so an unknown level silently falls back to the info badge. Keep
     // `'warning'` allowed until the historical warning rows are purged — new
     // writes only use `error|info`. See #466.
+    //
+    // Catches `duplicate_object` too so concurrent boots in a rolling deploy
+    // don't race past the `IF NOT EXISTS` probe and abort the function with
+    // SQLSTATE 42710 — if another instance wins the ALTER we treat it as a
+    // no-op and fall through to the index-build steps below.
     await db.execute(sql`
       DO $$
       BEGIN
@@ -53,8 +58,11 @@ export async function ensureErrorLogColumns(): Promise<void> {
             ALTER TABLE error_logs
               ADD CONSTRAINT error_logs_level_chk
               CHECK (level IN ('error', 'info', 'warning'));
-          EXCEPTION WHEN check_violation THEN
-            RAISE WARNING 'error_logs_level_chk not added: existing rows have levels outside (error, info, warning)';
+          EXCEPTION
+            WHEN check_violation THEN
+              RAISE WARNING 'error_logs_level_chk not added: existing rows have levels outside (error, info, warning)';
+            WHEN duplicate_object THEN
+              NULL;
           END;
         END IF;
       END$$;

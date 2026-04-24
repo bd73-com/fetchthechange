@@ -86,7 +86,14 @@ describe("ensureErrorLogColumns", () => {
     });
     expect(stmts.some((s: string) => s.includes("first_occurrence"))).toBe(true);
     expect(stmts.some((s: string) => s.includes("occurrence_count"))).toBe(true);
-    expect(stmts.some((s: string) => s.includes("error_logs_level_chk"))).toBe(true);
+    // Lock in the exact allowed-values tuple so an accidental widening or
+    // narrowing of the level set is caught at CI rather than at runtime.
+    expect(stmts.some((s: string) =>
+      s.includes("error_logs_level_chk") &&
+      s.includes("'error'") &&
+      s.includes("'info'") &&
+      s.includes("'warning'")
+    )).toBe(true);
     expect(stmts.some((s: string) => s.includes("pg_indexes"))).toBe(true);
     expect(stmts.some((s: string) => s.includes("pg_advisory_xact_lock"))).toBe(true);
     expect(stmts.some((s: string) => s.includes("CREATE UNIQUE INDEX") && s.includes("CONCURRENTLY") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(true);

@@ -26,13 +26,21 @@ const SENSITIVE_VALUE_PATTERNS = [
   /\b[A-Za-z0-9+/]{40,}={0,2}\b/g,
 ];
 
-// Strip C0 controls (except \t which we normalize to a space) and C1 controls
-// so an attacker who embeds `\n[ERROR][scheduler]` in a user-controlled field
-// like `monitor.name` cannot forge fake log rows or poison the
-// (level, source, message) dedup bucket by splitting the line. See #464.
+// Strip C0/C1 controls, Unicode line/paragraph separators (U+2028/U+2029),
+// and BiDi overrides (U+202A-U+202E, U+2066-U+2069). The line-separator and
+// BiDi points are not line terminators to Node's `console` but DO split lines
+// in most terminal emulators (including Replit's) and downstream log
+// aggregators, so an attacker who embeds `\n[ERROR][scheduler]` or U+2028 in
+// a user-controlled field like `monitor.name` cannot forge fake log rows or
+// poison the (level, source, message) dedup bucket. Tabs are normalized to a
+// space separately. See #464.
 function stripControlChars(str: string): string {
   // eslint-disable-next-line no-control-regex
-  return str.replace(/[\x00-\x08\x0A-\x1F\x7F-\x9F]/g, " ").replace(/\t/g, " ");
+  return str
+    .replace(/[\x00-\x08\x0A-\x1F\x7F-\x9F]/g, " ")
+    .replace(/[\u2028\u2029]/g, " ")
+    .replace(/[\u202A-\u202E\u2066-\u2069]/g, "")
+    .replace(/\t/g, " ");
 }
 
 function sanitizeString(str: string): string {
@@ -74,7 +82,9 @@ export class ErrorLogger {
     // Sanitize before any console output so secrets embedded in the message
     // or the raw SDK error.message (e.g. `Authorization: Bearer re_…` echoed
     // in a Resend/Stripe HTTP response body) do not leak to the Replit log
-    // stream. Matches the DB-write sanitization below. See #467.
+    // stream. Matches the DB-write sanitization below. `sanitizedStack` is
+    // intentionally NOT emitted to the console — stacks pollute Replit logs
+    // and the DB copy is enough for admin triage. See #467.
     const sanitizedMessage = sanitizeString(message);
     const sanitizedStack = error?.stack ? sanitizeString(error.stack) : null;
     const sanitizedContext = context ? sanitizeContext(context) : null;
@@ -82,7 +92,11 @@ export class ErrorLogger {
     const logMsg = `${prefix} ${sanitizedMessage}`;
 
     if (level === "error") {
-      console.error(logMsg, sanitizeString(error?.message || ""));
+      if (error?.message) {
+        console.error(logMsg, sanitizeString(error.message));
+      } else {
+        console.error(logMsg);
+      }
     } else {
       console.log(logMsg);
     }
