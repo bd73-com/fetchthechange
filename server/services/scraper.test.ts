@@ -30,7 +30,6 @@ vi.mock("./notification", () => ({
 vi.mock("./logger", () => ({
   ErrorLogger: {
     error: vi.fn().mockResolvedValue(undefined),
-    warning: vi.fn().mockResolvedValue(undefined),
     info: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -1957,24 +1956,28 @@ describe("failure tracking and auto-pause", () => {
     mockDbUpdate(1, true);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
-    const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
-    await runWithTimers(monitor);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
+      await runWithTimers(monitor);
 
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scraper",
-      "Browserless service unavailable — preserving last known values",
-      expect.objectContaining({
-        monitorId: 1,
-        monitorName: "My Watch",
-        classifiedReason: expect.stringContaining("connection refused"),
-      }),
-    );
-    // Every infra-warning call must omit the monitor name so dedup aggregates across monitors.
-    const infraCalls = (ErrorLogger.warning as ReturnType<typeof vi.fn>).mock.calls
-      .filter((c) => c[0] === "scraper" && String(c[1]).includes("Browserless service unavailable"));
-    expect(infraCalls.length).toBeGreaterThanOrEqual(1);
-    for (const c of infraCalls) {
-      expect(c[1]).not.toContain("My Watch");
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[scraper] Browserless service unavailable — preserving last known values",
+        expect.objectContaining({
+          monitorId: 1,
+          monitorName: "My Watch",
+          classifiedReason: expect.stringContaining("connection refused"),
+        }),
+      );
+      // Every infra-warning call must omit the monitor name so dedup-style aggregation works.
+      const infraCalls = consoleWarnSpy.mock.calls
+        .filter((c) => typeof c[0] === "string" && c[0].includes("Browserless service unavailable"));
+      expect(infraCalls.length).toBeGreaterThanOrEqual(1);
+      for (const c of infraCalls) {
+        expect(c[0]).not.toContain("My Watch");
+      }
+    } finally {
+      consoleWarnSpy.mockRestore();
     }
 
     delete process.env.BROWSERLESS_TOKEN;
@@ -1997,24 +2000,28 @@ describe("failure tracking and auto-pause", () => {
     mockDbUpdate(1, true);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
-    const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
-    // Non-infra failures retry once with BASE_RETRY_MS + jitter (up to ~3.5s).
-    // Bound to 10s so future refactors adding recursive setTimeout in this path
-    // produce a test timeout rather than an infinite loop.
-    const promise = checkMonitor(monitor);
-    await vi.advanceTimersByTimeAsync(10000);
-    await promise;
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
+      // Non-infra failures retry once with BASE_RETRY_MS + jitter (up to ~3.5s).
+      // Bound to 10s so future refactors adding recursive setTimeout in this path
+      // produce a test timeout rather than an infinite loop.
+      const promise = checkMonitor(monitor);
+      await vi.advanceTimersByTimeAsync(10000);
+      await promise;
 
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scraper",
-      `"My Watch" — page timeout`,
-      expect.objectContaining({
-        monitorId: 1,
-        monitorName: "My Watch",
-        classifiedReason: "page timeout",
-        rawBrowserlessMsg: expect.stringContaining("Navigation timeout"),
-      }),
-    );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        `[scraper] "My Watch" — page timeout`,
+        expect.objectContaining({
+          monitorId: 1,
+          monitorName: "My Watch",
+          classifiedReason: "page timeout",
+          rawBrowserlessMsg: expect.stringContaining("Navigation timeout"),
+        }),
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
 
     delete process.env.BROWSERLESS_TOKEN;
   });
@@ -2031,18 +2038,22 @@ describe("failure tracking and auto-pause", () => {
     mockDbUpdate(1, true);
     mockStorage.getUser.mockResolvedValue({ id: "user1", tier: "free" });
 
-    const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
-    await runWithTimers(monitor);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const monitor = makeMonitor({ currentValue: "$99.99", name: "My Watch" });
+      await runWithTimers(monitor);
 
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scraper",
-      "Browserless circuit breaker open — preserving last known values",
-      expect.objectContaining({ monitorId: 1, monitorName: "My Watch" }),
-    );
-    const circuitCalls = (ErrorLogger.warning as ReturnType<typeof vi.fn>).mock.calls
-      .filter((c) => c[0] === "scraper" && String(c[1]).includes("circuit breaker open"));
-    for (const c of circuitCalls) {
-      expect(c[1]).not.toContain("My Watch");
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[scraper] Browserless circuit breaker open — preserving last known values",
+        expect.objectContaining({ monitorId: 1, monitorName: "My Watch" }),
+      );
+      const circuitCalls = consoleWarnSpy.mock.calls
+        .filter((c) => typeof c[0] === "string" && c[0].includes("circuit breaker open"));
+      for (const c of circuitCalls) {
+        expect(c[0]).not.toContain("My Watch");
+      }
+    } finally {
+      consoleWarnSpy.mockRestore();
     }
 
     delete process.env.BROWSERLESS_TOKEN;
@@ -3917,18 +3928,22 @@ describe("self-healing recovery", () => {
     const cbMock = browserlessCircuitBreaker as unknown as { isAvailable: ReturnType<typeof vi.fn>; recordSuccess: ReturnType<typeof vi.fn>; recordInfraFailure: ReturnType<typeof vi.fn>; getState: ReturnType<typeof vi.fn> };
     cbMock.isAvailable.mockReturnValue(false);
 
-    const monitor = makeMonitor({ selector: ".missing", currentValue: null });
-    await runWithTimers(monitor);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const monitor = makeMonitor({ selector: ".missing", currentValue: null });
+      await runWithTimers(monitor);
 
-    // Admin UI must see a circuit-open entry regardless of whether the monitor
-    // has a cached value (graceful degradation) or is first-check. The message
-    // is monitor-agnostic so affected monitors dedup into a single row via the
-    // partial unique index (#448).
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scraper",
-      "Browserless circuit breaker open — preserving last known values",
-      expect.objectContaining({ monitorId: 1 }),
-    );
+      // Operator console must see a circuit-open entry regardless of whether the
+      // monitor has a cached value (graceful degradation) or is first-check. The
+      // message is monitor-agnostic so affected monitors aggregate into a single
+      // line in the logs.
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[scraper] Browserless circuit breaker open — preserving last known values",
+        expect.objectContaining({ monitorId: 1 }),
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   it("falls through to blocked when no currentValue, infra failure, and page is blocked", async () => {
@@ -4368,27 +4383,31 @@ describe("checkMonitor outer catch resilience", () => {
 
     const { ErrorLogger } = await import("./logger");
 
-    const monitor = makeMonitor({ currentValue: "$39.99" });
-    const result = await runWithTimers(monitor);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const monitor = makeMonitor({ currentValue: "$39.99" });
+      const result = await runWithTimers(monitor);
 
-    expect(result.status).toBe("ok");
-    expect(result.currentValue).toBe("$49.99");
-    expect(result.changed).toBe(true);
-    expect(result.error).toContain("server error prevented saving");
-    // Transient DB errors are downgraded to warnings (will retry via accelerated retry)
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scraper",
-      expect.stringContaining("check succeeded but failed to save result"),
-      expect.objectContaining({
-        monitorId: 1,
-        extractedValue: "$49.99",
-        previousValue: "$39.99",
-        changed: true,
-        dbError: "connection terminated",
-        retryError: "connection terminated",
-      }),
-    );
-    expect(ErrorLogger.error).not.toHaveBeenCalled();
+      expect(result.status).toBe("ok");
+      expect(result.currentValue).toBe("$49.99");
+      expect(result.changed).toBe(true);
+      expect(result.error).toContain("server error prevented saving");
+      // Transient DB errors are downgraded to console.warn (will retry via accelerated retry)
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("check succeeded but failed to save result"),
+        expect.objectContaining({
+          monitorId: 1,
+          extractedValue: "$49.99",
+          previousValue: "$39.99",
+          changed: true,
+          dbError: "connection terminated",
+          retryError: "connection terminated",
+        }),
+      );
+      expect(ErrorLogger.error).not.toHaveBeenCalled();
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   it("returns result even when ErrorLogger.error rejects in outer catch", async () => {
@@ -6005,13 +6024,17 @@ describe("token redaction in Browserless connection errors", () => {
 // extractWithBrowserless error logging uses classifyBrowserlessError
 // ---------------------------------------------------------------------------
 describe("extractWithBrowserless error classification in logs", () => {
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.BROWSERLESS_TOKEN = "test-token";
+    consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
     delete process.env.BROWSERLESS_TOKEN;
+    consoleWarnSpy.mockRestore();
   });
 
   it("does not log to ErrorLogger (caller handles logging)", async () => {
@@ -6024,7 +6047,7 @@ describe("extractWithBrowserless error classification in logs", () => {
     // extractWithBrowserless no longer logs — the caller (checkMonitor) logs
     // with fuller context to avoid duplicate error entries.
     expect(ErrorLogger.error).not.toHaveBeenCalled();
-    expect(ErrorLogger.warning).not.toHaveBeenCalled();
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
   });
 
   it("re-throws ECONNREFUSED without logging", async () => {
@@ -6035,7 +6058,7 @@ describe("extractWithBrowserless error classification in logs", () => {
     ).rejects.toThrow();
 
     expect(ErrorLogger.error).not.toHaveBeenCalled();
-    expect(ErrorLogger.warning).not.toHaveBeenCalled();
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
   });
 
   it("re-throws errors without logging even when monitor name provided", async () => {
@@ -6046,7 +6069,7 @@ describe("extractWithBrowserless error classification in logs", () => {
     ).rejects.toThrow();
 
     expect(ErrorLogger.error).not.toHaveBeenCalled();
-    expect(ErrorLogger.warning).not.toHaveBeenCalled();
+    expect(consoleWarnSpy).not.toHaveBeenCalled();
   });
 });
 

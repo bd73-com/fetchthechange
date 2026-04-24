@@ -316,7 +316,7 @@ FetchTheChange Team`,
 
     if (response.error) {
       await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, undefined, false).catch(() => {});
-      await ErrorLogger.warning("email", `Health warning email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: response.error.message });
+      console.warn(`[email] Health warning email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: response.error.message });
       return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
     }
 
@@ -324,7 +324,7 @@ FetchTheChange Team`,
     await ErrorLogger.info("email", `Health warning email sent`, { monitorId: monitor.id, monitorName: monitor.name, consecutiveFailures, tier });
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    await ErrorLogger.warning("email", `Health warning email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
+    console.warn(`[email] Health warning email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
     return { success: false, error: error.message };
   }
 }
@@ -405,7 +405,7 @@ FetchTheChange Team`,
 
     if (response.error) {
       await ResendUsageTracker.recordUsage(monitor.userId, monitor.id, recipientEmail, undefined, false).catch(() => {});
-      await ErrorLogger.warning("email", `Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: response.error.message });
+      console.warn(`[email] Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: response.error.message });
       return { success: false, error: response.error.message, to: recipientEmail, from: fromAddress };
     }
 
@@ -413,7 +413,7 @@ FetchTheChange Team`,
     await ErrorLogger.info("email", `Recovery email sent`, { monitorId: monitor.id, monitorName: monitor.name, recoveredValue: displayValue, degradedForMs });
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    await ErrorLogger.warning("email", `Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
+    console.warn(`[email] Recovery email failed to send for monitor ${monitor.id}`, { monitorId: monitor.id, error: error.message });
     return { success: false, error: error.message };
   }
 }

@@ -24,7 +24,6 @@ vi.mock("../replit_integrations/auth/storage", () => ({
 vi.mock("./logger", () => ({
   ErrorLogger: {
     error: vi.fn().mockResolvedValue(undefined),
-    warning: vi.fn().mockResolvedValue(undefined),
     info: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -997,16 +996,19 @@ describe("sendHealthWarningEmail", () => {
   it("handles thrown exceptions gracefully", async () => {
     vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
     mockSend.mockRejectedValueOnce(new Error("Network error"));
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "error");
 
-    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "error");
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("Network error");
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "email",
-      expect.stringContaining("Health warning email failed"),
-      expect.objectContaining({ monitorId: 1 })
-    );
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Network error");
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[email] Health warning email failed"),
+        expect.objectContaining({ monitorId: 1 })
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 });
 
@@ -1210,16 +1212,19 @@ describe("sendRecoveryEmail", () => {
   it("handles thrown exceptions gracefully", async () => {
     vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
     mockSend.mockRejectedValueOnce(new Error("Connection reset"));
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await sendRecoveryEmail(makeMonitor(), "value");
 
-    const result = await sendRecoveryEmail(makeMonitor(), "value");
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("Connection reset");
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "email",
-      expect.stringContaining("Recovery email failed"),
-      expect.objectContaining({ monitorId: 1 })
-    );
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Connection reset");
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[email] Recovery email failed"),
+        expect.objectContaining({ monitorId: 1 })
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 });
 

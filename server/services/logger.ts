@@ -3,7 +3,7 @@ import { errorLogs } from "@shared/schema";
 import { sql } from "drizzle-orm";
 import type { ERROR_LOG_SOURCES } from "@shared/routes";
 
-type LogLevel = "error" | "warning" | "info";
+type LogLevel = "error" | "info";
 type LogSource = (typeof ERROR_LOG_SOURCES)[number];
 
 const SENSITIVE_KEYS = [
@@ -65,8 +65,6 @@ export class ErrorLogger {
 
     if (level === "error") {
       console.error(logMsg, error?.message || "");
-    } else if (level === "warning") {
-      console.warn(logMsg);
     } else {
       console.log(logMsg);
     }
@@ -133,10 +131,6 @@ export class ErrorLogger {
 
   static async error(source: LogSource, message: string, error?: Error | null, context?: Record<string, any> | null) {
     return ErrorLogger.log("error", source, message, error, context);
-  }
-
-  static async warning(source: LogSource, message: string, context?: Record<string, any> | null) {
-    return ErrorLogger.log("warning", source, message, null, context);
   }
 
   static async info(source: LogSource, message: string, context?: Record<string, any> | null) {

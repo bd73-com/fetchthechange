@@ -73,7 +73,6 @@ vi.mock("./automationDelivery", () => ({
 vi.mock("./logger", () => ({
   ErrorLogger: {
     error: vi.fn().mockResolvedValue(undefined),
-    warning: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -243,18 +242,21 @@ describe("startScheduler", () => {
 
   it("continues startup and registers cron jobs when cleanupPollutedValues throws", async () => {
     mockCleanupPollutedValues.mockRejectedValueOnce(new Error("DB connection lost"));
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await startScheduler();
 
-    await startScheduler();
-
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scheduler",
-      "cleanupPollutedValues failed (non-fatal)",
-      expect.objectContaining({ errorMessage: "DB connection lost" })
-    );
-    // Cron jobs should still be registered despite the failure
-    expect(hasCron("* * * * *")).toBe(true);
-    expect(hasCron("*/1 * * * *")).toBe(true);
-    expect(hasCron("0 3 * * *")).toBe(true);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[scheduler] cleanupPollutedValues failed (non-fatal)",
+        expect.objectContaining({ errorMessage: "DB connection lost" })
+      );
+      // Cron jobs should still be registered despite the failure
+      expect(hasCron("* * * * *")).toBe(true);
+      expect(hasCron("*/1 * * * *")).toBe(true);
+      expect(hasCron("0 3 * * *")).toBe(true);
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   it("registers all cron schedules (every-minute, notification queue, and daily cleanup)", async () => {
@@ -793,26 +795,30 @@ describe("daily metrics cleanup", () => {
     mockDbExecute
       .mockRejectedValueOnce(new Error("Connection terminated"))
       .mockRejectedValueOnce(new Error("Connection terminated"));
-    const cronPromise = runCron("0 3 * * *");
-    await vi.advanceTimersByTimeAsync(2000);
-    await cronPromise;
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const cronPromise = runCron("0 3 * * *");
+      await vi.advanceTimersByTimeAsync(2000);
+      await cronPromise;
 
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scheduler",
-      "monitor_metrics cleanup failed",
-      expect.objectContaining({
-        errorMessage: "Connection terminated",
-        retentionDays: 90,
-        table: "monitor_metrics",
-      })
-    );
-    // Verify the monitor_metrics cleanup itself didn't log an error (other cleanup tasks may)
-    expect(ErrorLogger.error).not.toHaveBeenCalledWith(
-      "scheduler",
-      "monitor_metrics cleanup failed",
-      expect.anything(),
-      expect.anything()
-    );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[scheduler] monitor_metrics cleanup failed",
+        expect.objectContaining({
+          errorMessage: "Connection terminated",
+          retentionDays: 90,
+          table: "monitor_metrics",
+        })
+      );
+      // Verify the monitor_metrics cleanup itself didn't log an error (other cleanup tasks may)
+      expect(ErrorLogger.error).not.toHaveBeenCalledWith(
+        "scheduler",
+        "monitor_metrics cleanup failed",
+        expect.anything(),
+        expect.anything()
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   it("handles non-Error thrown in cleanup (uses String coercion)", async () => {
@@ -961,35 +967,41 @@ describe("notification queue and digest cron (*/1 * * * *)", () => {
     // logSchedulerError still classifies transient errors as warnings.
     mockProcessQueuedNotifications
       .mockRejectedValueOnce(new Error("Connection terminated"));
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await startScheduler();
+      await runCron("*/1 * * * *");
 
-    await startScheduler();
-    await runCron("*/1 * * * *");
-
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scheduler",
-      "Queued notification processing failed",
-      expect.objectContaining({
-        errorMessage: "Connection terminated",
-      })
-    );
-    expect(ErrorLogger.error).not.toHaveBeenCalled();
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[scheduler] Queued notification processing failed",
+        expect.objectContaining({
+          errorMessage: "Connection terminated",
+        })
+      );
+      expect(ErrorLogger.error).not.toHaveBeenCalled();
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   it("logs warning (not error) when processDigestCron fails with transient DB error", async () => {
     mockProcessDigestCron
       .mockRejectedValueOnce(new Error("Connection terminated"));
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await startScheduler();
+      await runCron("*/1 * * * *");
 
-    await startScheduler();
-    await runCron("*/1 * * * *");
-
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scheduler",
-      "Digest processing failed",
-      expect.objectContaining({
-        errorMessage: "Connection terminated",
-      })
-    );
-    expect(ErrorLogger.error).not.toHaveBeenCalled();
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[scheduler] Digest processing failed",
+        expect.objectContaining({
+          errorMessage: "Connection terminated",
+        })
+      );
+      expect(ErrorLogger.error).not.toHaveBeenCalled();
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 });
 
@@ -1106,19 +1118,22 @@ describe("withDbRetry and re-entrancy guards", () => {
     mockGetAllActiveMonitors
       .mockRejectedValueOnce(new Error("Connection terminated"))
       .mockRejectedValueOnce(new Error("Connection terminated again"));
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await startScheduler();
+      const cronPromise = runCron("* * * * *");
+      await vi.advanceTimersByTimeAsync(2000);
+      await cronPromise;
 
-    await startScheduler();
-    const cronPromise = runCron("* * * * *");
-    await vi.advanceTimersByTimeAsync(2000);
-    await cronPromise;
-
-    expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
-    // Transient DB errors are downgraded to warnings via logSchedulerError helper
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scheduler",
-      "Scheduler iteration failed",
-      expect.objectContaining({ activeChecks: 0 })
-    );
+      expect(mockGetAllActiveMonitors).toHaveBeenCalledTimes(2);
+      // Transient DB errors are downgraded to console.warn via logSchedulerError helper
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[scheduler] Scheduler iteration failed",
+        expect.objectContaining({ activeChecks: 0 })
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   it("skips main cron iteration when previous iteration is still running", async () => {
@@ -1227,27 +1242,30 @@ describe("withDbRetry and re-entrancy guards", () => {
     mockStorage.getPendingWebhookRetries
       .mockRejectedValueOnce(new Error("Connection terminated"))
       .mockRejectedValueOnce(new Error("Connection terminated"));
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await startScheduler();
+      const callbacks = cronCallbacks["*/1 * * * *"];
+      await callbacks[0](); // notification cron
+      const webhookPromise = callbacks[1]();
+      await vi.advanceTimersByTimeAsync(2000);
+      await webhookPromise;
 
-    await startScheduler();
-    const callbacks = cronCallbacks["*/1 * * * *"];
-    await callbacks[0](); // notification cron
-    const webhookPromise = callbacks[1]();
-    await vi.advanceTimersByTimeAsync(2000);
-    await webhookPromise;
-
-    expect(ErrorLogger.warning).toHaveBeenCalledWith(
-      "scheduler",
-      "Webhook retry processing failed",
-      expect.objectContaining({
-        errorMessage: "Connection terminated",
-      })
-    );
-    expect(ErrorLogger.error).not.toHaveBeenCalledWith(
-      "scheduler",
-      expect.stringContaining("Webhook"),
-      expect.anything(),
-      expect.anything()
-    );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[scheduler] Webhook retry processing failed",
+        expect.objectContaining({
+          errorMessage: "Connection terminated",
+        })
+      );
+      expect(ErrorLogger.error).not.toHaveBeenCalledWith(
+        "scheduler",
+        expect.stringContaining("Webhook"),
+        expect.anything(),
+        expect.anything()
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 });
 

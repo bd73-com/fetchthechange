@@ -73,7 +73,7 @@ router.post("/subscribe", subscribeRateLimit, async (req: any, res) => {
     const ssrfError = await isPrivateUrl(body.hookUrl);
     if (ssrfError) {
       const hostname = new URL(body.hookUrl).hostname;
-      await ErrorLogger.warning("api", "SSRF blocked on Zapier subscribe", {
+      console.warn("[api] SSRF blocked on Zapier subscribe", {
         userId: req.apiUser.id,
         hookUrlHostname: hostname,
       });

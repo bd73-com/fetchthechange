@@ -24,11 +24,9 @@ vi.mock("../utils/encryption", () => ({
 
 // Mock logger
 const mockLoggerInfo = vi.fn().mockResolvedValue(undefined);
-const mockLoggerWarning = vi.fn().mockResolvedValue(undefined);
 vi.mock("../services/logger", () => ({
   ErrorLogger: {
     info: (...args: any[]) => mockLoggerInfo(...args),
-    warning: (...args: any[]) => mockLoggerWarning(...args),
   },
 }));
 

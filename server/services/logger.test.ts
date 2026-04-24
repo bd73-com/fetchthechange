@@ -81,7 +81,7 @@ describe("ErrorLogger atomic upsert", () => {
   });
 
   it("configures onConflictDoUpdate against the partial unique index", async () => {
-    await ErrorLogger.warning("scraper", "Browserless service unavailable — preserving last known values", { monitorId: 1 });
+    await ErrorLogger.error("scraper", "Browserless service unavailable — preserving last known values", null, { monitorId: 1 });
 
     const conflictConfig = mockOnConflictDoUpdateFn.mock.calls[0][0];
     // target must be the three-column tuple matching the unique index
@@ -160,13 +160,6 @@ describe("ErrorLogger atomic upsert", () => {
   it("convenience methods call log with correct level", async () => {
     await ErrorLogger.error("stripe", "error msg");
     expect(mockInsertValuesFn.mock.calls[0][0].level).toBe("error");
-
-    vi.clearAllMocks();
-    mockInsertValuesFn.mockReturnValue({ onConflictDoUpdate: mockOnConflictDoUpdateFn });
-    mockDbInsert.mockReturnValue({ values: mockInsertValuesFn });
-
-    await ErrorLogger.warning("email", "warning msg");
-    expect(mockInsertValuesFn.mock.calls[0][0].level).toBe("warning");
 
     vi.clearAllMocks();
     mockInsertValuesFn.mockReturnValue({ onConflictDoUpdate: mockOnConflictDoUpdateFn });

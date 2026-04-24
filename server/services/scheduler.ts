@@ -45,7 +45,7 @@ async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Log a caught error as warning (transient) or error (non-transient) based on isTransientDbError. */
+/** Log a caught error: console.warn if transient, ErrorLogger.error otherwise. Warning-level no longer persists to the admin Event Log. */
 async function logSchedulerError(
   message: string,
   error: unknown,
@@ -53,7 +53,7 @@ async function logSchedulerError(
 ): Promise<void> {
   try {
     if (isTransientDbError(error)) {
-      await ErrorLogger.warning("scheduler", message, {
+      console.warn(`[scheduler] ${message}`, {
         errorMessage: error instanceof Error ? error.message : String(error),
         ...context,
       });
@@ -189,7 +189,7 @@ export async function startScheduler() {
   try {
     await storage.cleanupPollutedValues();
   } catch (error) {
-    await ErrorLogger.warning("scheduler", "cleanupPollutedValues failed (non-fatal)", { errorMessage: error instanceof Error ? error.message : String(error) });
+    console.warn("[scheduler] cleanupPollutedValues failed (non-fatal)", { errorMessage: error instanceof Error ? error.message : String(error) });
   }
 
   // Wire circuit breaker recovery: immediately retry pending monitors when Browserless comes back

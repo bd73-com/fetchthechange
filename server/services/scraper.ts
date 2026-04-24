@@ -1272,7 +1272,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             // most recent writer that supplied a non-null context, not an
             // aggregate across affected monitors. occurrenceCount is the only
             // signal of outage scope.
-            await ErrorLogger.warning("scraper", "Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
+            console.warn("[scraper] Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
           } else {
             // Site-specific failure: keep the monitor name because the site itself is the problem.
             // Mirror the infra branch's drill-down fields (classifiedReason + truncated raw
@@ -1280,9 +1280,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             // string fires. Logger sanitization (server/services/logger.ts:29-53) strips
             // secrets from the raw error before persistence.
             const classifiedReason = classifyBrowserlessError(rawBrowserlessMsg);
-            await ErrorLogger.warning(
-              "scraper",
-              `"${monitor.name}" — ${classifiedReason}`,
+            console.warn(
+              `[scraper] "${monitor.name}" — ${classifiedReason}`,
               {
                 monitorId: monitor.id,
                 monitorName: monitor.name,
@@ -1323,9 +1322,8 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     // affected monitors dedup into a single row via the unresolved-dedup
     // index (#448). See GitHub issue #449.
     if (skippedDueToOpenCircuit && newValue == null) {
-      await ErrorLogger.warning(
-        "scraper",
-        "Browserless circuit breaker open — preserving last known values",
+      console.warn(
+        "[scraper] Browserless circuit breaker open — preserving last known values",
         { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
       );
     }
@@ -1472,11 +1470,14 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             retryError: retryErrMsg,
           };
           if (isTransientSave) {
-            await ErrorLogger.warning(
-              "scraper",
-              `"${monitor.name}" check succeeded but failed to save result (will retry)`,
-              saveContext,
-            ).catch(() => {});
+            try {
+              console.warn(
+                `[scraper] "${monitor.name}" check succeeded but failed to save result (will retry)`,
+                saveContext,
+              );
+            } catch {
+              // ignore
+            }
           } else {
             await ErrorLogger.error(
               "scraper",
@@ -1592,7 +1593,11 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     const isTransient = (logContext === "network error" && !isPermanentNetworkError) || logContext === "database connection error";
     const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
     if (isTransient) {
-      await ErrorLogger.warning("scraper", logMessage, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }).catch(() => {});
+      try {
+        console.warn(`[scraper] ${logMessage}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+      } catch {
+        // ignore
+      }
     } else {
       await ErrorLogger.error(
         "scraper",
