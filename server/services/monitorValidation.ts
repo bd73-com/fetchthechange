@@ -91,4 +91,3 @@ export async function validateMonitorInput(
   return null;
 }
 
-export { safeHostname } from "../utils/urlUtils";

@@ -7,8 +7,8 @@ import {
   checkMonitorLimit,
   checkFrequencyTier,
   validateMonitorInput,
-  safeHostname,
 } from "../services/monitorValidation";
+import { safeHostname } from "../utils/urlUtils";
 import {
   apiV1PaginationSchema,
   apiV1ChangesPaginationSchema,

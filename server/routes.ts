@@ -44,7 +44,8 @@ import { renderRobotsTxt, renderSitemapXml } from "./services/seoFiles";
 // URL VALIDATION - SSRF PROTECTION (shared module)
 // ------------------------------------------------------------------
 import { isPrivateUrl, ssrfSafeFetch } from './utils/ssrf';
-import { checkFrequencyTier, safeHostname } from './services/monitorValidation';
+import { checkFrequencyTier } from './services/monitorValidation';
+import { safeHostname } from './utils/urlUtils';
 
 // ------------------------------------------------------------------
 // 1. CHECK MONITOR FUNCTION

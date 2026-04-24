@@ -50,10 +50,10 @@ describe("buildBatchDeletePayload", () => {
     const result = buildBatchDeletePayload({
       ...defaults,
       selectAll: true,
-      levelFilter: "warning",
+      levelFilter: "info",
       sourceFilter: "api",
     });
-    expect(result).toEqual({ filters: { level: "warning", source: "api" } });
+    expect(result).toEqual({ filters: { level: "info", source: "api" } });
   });
 
   it("includes excludeIds when filters are active and entries are excluded", () => {
