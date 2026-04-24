@@ -1260,7 +1260,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
               "scraper",
               `"${monitor.name}" — rendered page extraction blocked by SSRF protection`,
               lastBrowserlessErr instanceof Error ? lastBrowserlessErr : null,
-              { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector },
+              { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector },
             ).catch(() => {});
           } else if (browserlessInfraFailure) {
             // Infra-wide outage: monitor-agnostic message so every affected monitor
@@ -1272,24 +1272,22 @@ export async function checkMonitor(monitor: Monitor): Promise<{
             // most recent writer that supplied a non-null context, not an
             // aggregate across affected monitors. occurrenceCount is the only
             // signal of outage scope.
-            console.warn("[scraper] Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
+            console.warn("[scraper] Browserless service unavailable — preserving last known values", { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState(), classifiedReason: classifyBrowserlessError(rawBrowserlessMsg) });
           } else {
             // Site-specific failure: keep the monitor name because the site itself is the problem.
-            // Mirror the infra branch's drill-down fields (classifiedReason + truncated raw
-            // error) so the admin UI has enough detail when the catchall "extraction failed"
-            // string fires. Logger sanitization (server/services/logger.ts:29-53) strips
-            // secrets from the raw error before persistence.
+            // Emit via console.warn only (not ErrorLogger) so the Browserless infra-noise flood
+            // stays out of the admin Event Log. classifiedReason gives enough triage detail
+            // without echoing the raw upstream error (which can contain the requested URL).
             const classifiedReason = classifyBrowserlessError(rawBrowserlessMsg);
             console.warn(
               `[scraper] "${monitor.name}" — ${classifiedReason}`,
               {
                 monitorId: monitor.id,
                 monitorName: monitor.name,
-                url: monitor.url,
+                hostname: safeHostname(monitor.url),
                 selector: monitor.selector,
                 circuitState: browserlessCircuitBreaker.getState(),
                 classifiedReason,
-                rawBrowserlessMsg: rawBrowserlessMsg.slice(0, 500),
               },
             );
           }
@@ -1324,7 +1322,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     if (skippedDueToOpenCircuit && newValue == null) {
       console.warn(
         "[scraper] Browserless circuit breaker open — preserving last known values",
-        { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
+        { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector, circuitState: browserlessCircuitBreaker.getState() }
       );
     }
 
@@ -1594,7 +1592,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
     const logMessage = `"${monitor.name}" check failed (${logContext}): ${error instanceof Error ? error.message : "Unknown error"}`;
     if (isTransient) {
       try {
-        console.warn(`[scraper] ${logMessage}`, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector });
+        console.warn(`[scraper] ${logMessage}`, { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector });
       } catch {
         // ignore
       }
@@ -1603,7 +1601,7 @@ export async function checkMonitor(monitor: Monitor): Promise<{
         "scraper",
         logMessage,
         error instanceof Error ? error : null,
-        { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url, selector: monitor.selector }
+        { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url), selector: monitor.selector }
       ).catch(() => {});
     }
 

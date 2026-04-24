@@ -1536,7 +1536,7 @@ export async function registerRoutes(
       const limitNum = Math.max(1, Math.min(Number(req.query.limit) || 100, 500));
 
       const conditions = [eq(errorLogs.resolved, false), isNull(errorLogs.deletedAt)];
-      if (level && ["error", "warning", "info"].includes(level)) {
+      if (level && ["error", "info"].includes(level)) {
         conditions.push(eq(errorLogs.level, level));
       }
       if (source && (ERROR_LOG_SOURCES as readonly string[]).includes(source)) {
@@ -1623,7 +1623,7 @@ export async function registerRoutes(
       const batchDeleteSchema = z.object({
         ids: z.array(z.number().int().positive()).min(1).max(500).optional(),
         filters: z.object({
-          level: z.enum(["error", "warning", "info"]).optional(),
+          level: z.enum(["error", "info"]).optional(),
           source: errorLogSourceSchema.optional(),
         }).strict().refine(
           (data) => data.level !== undefined || data.source !== undefined,

@@ -9,6 +9,14 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { getAppUrl } from "../utils/appUrl";
 
+function safeHostname(urlString: string): string {
+  try {
+    return new URL(urlString).hostname;
+  } catch {
+    return "unknown";
+  }
+}
+
 export interface EmailResult {
   success: boolean;
   id?: string;
@@ -181,7 +189,7 @@ export async function sendNotificationEmail(monitor: Monitor, oldValue: string |
     console.log(`[Email] Sent to ${recipientEmail} for monitor ${monitor.id}, id: ${response.data?.id}`);
     return { success: true, id: response.data?.id, to: recipientEmail, from: fromAddress };
   } catch (error: any) {
-    await ErrorLogger.error("email", `"${monitor.name}" — notification email failed to send. Check that your email address is valid. If this keeps happening, contact support.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name, url: monitor.url });
+    await ErrorLogger.error("email", `"${monitor.name}" — notification email failed to send. Check that your email address is valid. If this keeps happening, contact support.`, error instanceof Error ? error : null, { monitorId: monitor.id, monitorName: monitor.name, hostname: safeHostname(monitor.url) });
     return { success: false, error: error.message };
   }
 }

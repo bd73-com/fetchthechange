@@ -390,7 +390,6 @@ export default function AdminErrors() {
               <SelectContent>
                 <SelectItem value="all">All levels</SelectItem>
                 <SelectItem value="error">Errors</SelectItem>
-                <SelectItem value="warning">Warnings</SelectItem>
                 <SelectItem value="info">Info</SelectItem>
               </SelectContent>
             </Select>

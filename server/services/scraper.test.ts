@@ -2016,9 +2016,14 @@ describe("failure tracking and auto-pause", () => {
           monitorId: 1,
           monitorName: "My Watch",
           classifiedReason: "page timeout",
-          rawBrowserlessMsg: expect.stringContaining("Navigation timeout"),
         }),
       );
+      // rawBrowserlessMsg must not leak — upstream errors can echo back the
+      // requested URL with credentials in the query string.
+      const siteSpecificCall = consoleWarnSpy.mock.calls.find(
+        (c) => typeof c[0] === "string" && c[0].includes("page timeout"),
+      );
+      expect(siteSpecificCall?.[1]).not.toHaveProperty("rawBrowserlessMsg");
     } finally {
       consoleWarnSpy.mockRestore();
     }
