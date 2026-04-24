@@ -168,4 +168,23 @@ describe("ErrorLogger atomic upsert", () => {
     await ErrorLogger.info("scheduler", "info msg");
     expect(mockInsertValuesFn.mock.calls[0][0].level).toBe("info");
   });
+
+  // Regression guard: warning-level was removed to silence the Browserless
+  // infra-noise flood from bubbling into the admin Event Log. All former
+  // warning call sites now use console.warn and stay out of the DB.
+  it("does not expose a warning() method — warning-level is console-only", () => {
+    expect((ErrorLogger as any).warning).toBeUndefined();
+  });
+
+  it("info path writes to console.log (not console.warn/console.error)", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await ErrorLogger.info("scheduler", "hello");
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[INFO][scheduler] hello"));
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
