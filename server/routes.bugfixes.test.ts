@@ -97,6 +97,13 @@ vi.mock("./db", () => ({
   },
 }));
 
+vi.mock("./services/logger", () => ({
+  ErrorLogger: {
+    error: vi.fn().mockResolvedValue(undefined),
+    info: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 vi.mock("./services/scraper", () => ({
   checkMonitor: vi.fn(),
   extractWithBrowserless: vi.fn(),
@@ -317,6 +324,78 @@ describe("#293: PATCH /api/admin/campaigns/:id rejects empty body", () => {
     const res = await callHandler("patch", ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(res._json.name).toBe("Updated");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #292 — Error log list filters by resolved=false
+// ---------------------------------------------------------------------------
+describe("#292: GET /api/admin/error-logs filters by resolved=false", () => {
+  const ENDPOINT = "/api/admin/error-logs";
+
+  beforeEach(async () => {
+    await ensureRoutes();
+    vi.clearAllMocks();
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+  });
+
+  it("returns only unresolved entries (resolved entries excluded from list)", async () => {
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: null, resolved: false },
+    ]);
+
+    const req = ownerReq({ query: {} });
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // The WHERE clause now includes eq(errorLogs.resolved, false),
+    // so the DB mock only returns unresolved entries. Verify the query was built.
+    expect(mockSelectWhereFn).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #288 — Single-delete filters already-deleted entries
+// ---------------------------------------------------------------------------
+describe("#288: DELETE /api/admin/error-logs/:id rejects already-deleted entries", () => {
+  const ENDPOINT = "/api/admin/error-logs/:id";
+
+  beforeEach(async () => {
+    await ensureRoutes();
+    vi.clearAllMocks();
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
+    mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
+    mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
+    mockUpdateWhereFn.mockResolvedValue(undefined);
+    mockUpdateSetFn.mockReturnValue({ where: mockUpdateWhereFn });
+    mockDbUpdate.mockReturnValue({ set: mockUpdateSetFn });
+  });
+
+  it("returns 404 when entry is already soft-deleted (not found by query)", async () => {
+    // The query now includes isNull(errorLogs.deletedAt), so a soft-deleted
+    // entry won't be returned — mockLimitFn returns empty array
+    mockLimitFn.mockResolvedValue([]);
+
+    const req = ownerReq({ params: { id: "5" } });
+    const res = await callHandler("delete", ENDPOINT, req);
+    expect(res._status).toBe(404);
+    expect(res._json).toEqual({ message: "Log entry not found" });
+  });
+
+  it("successfully soft-deletes a non-deleted entry", async () => {
+    mockLimitFn.mockResolvedValue([{ id: 5, context: null, deletedAt: null }]);
+
+    const req = ownerReq({ params: { id: "5" } });
+    const res = await callHandler("delete", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "Deleted" });
   });
 });
 
@@ -549,6 +628,7 @@ describe("app.param id validation (#346)", () => {
 // ---------------------------------------------------------------------------
 describe("#373: Negative limit query parameter is clamped to 1", () => {
   const DELIVERIES_ENDPOINT = "/api/monitors/:id/deliveries";
+  const ERROR_LOGS_ENDPOINT = "/api/admin/error-logs";
 
   beforeEach(async () => {
     await ensureRoutes();
@@ -593,6 +673,36 @@ describe("#373: Negative limit query parameter is clamped to 1", () => {
     expect(res._status).toBe(200);
     // Number("0") is falsy, so || 50 kicks in, then Math.max(1, 50) = 50
     expect(mockGetDeliveryLog).toHaveBeenCalledWith(1, 50, undefined);
+  });
+
+  it("error-logs endpoint clamps limit=-1 to 1", async () => {
+    const req = ownerReq({ query: { limit: "-1" } });
+    const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // The DB select chain should have .limit(1) called, not .limit(-1)
+    expect(mockLimitFn).toHaveBeenCalledWith(1);
+  });
+
+  it("error-logs endpoint defaults limit to 100 for non-numeric input", async () => {
+    const req = ownerReq({ query: { limit: "abc" } });
+    const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockLimitFn).toHaveBeenCalledWith(100);
+  });
+
+  it("error-logs endpoint caps limit at 500", async () => {
+    const req = ownerReq({ query: { limit: "9999" } });
+    const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(mockLimitFn).toHaveBeenCalledWith(500);
+  });
+
+  it("error-logs endpoint treats limit=0 as default (100)", async () => {
+    const req = ownerReq({ query: { limit: "0" } });
+    const res = await callHandler("get", ERROR_LOGS_ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // Number("0") is falsy, so || 100 kicks in, then Math.max(1, 100) = 100
+    expect(mockLimitFn).toHaveBeenCalledWith(100);
   });
 
   it("campaign analytics endpoint clamps limit=-1 to 1", async () => {

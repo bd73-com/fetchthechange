@@ -1,0 +1,812 @@
+import { useState, useRef, useCallback, useEffect } from "react";
+import { formatDate, formatDateTime } from "@/lib/date-format";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { buildBatchDeletePayload } from "./adminErrorsUtils";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { XCircle, AlertTriangle, Info, ArrowLeft, RefreshCw, Globe, Mail, Users, Trash2, Loader2, X } from "lucide-react";
+import { Link } from "wouter";
+import { ERROR_LOG_SOURCES } from "@shared/routes";
+import type { ErrorLog } from "@shared/schema";
+import { queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { usePageTitle } from "@/hooks/use-page-title";
+import { ToastAction } from "@/components/ui/toast";
+
+/** JSON-serialized ErrorLog — Date fields become strings over the wire. */
+type ErrorLogEntry = {
+  [K in keyof ErrorLog]: ErrorLog[K] extends Date ? string : ErrorLog[K] extends Date | null ? string | null : ErrorLog[K];
+};
+
+interface BrowserlessUsageData {
+  systemUsage: number;
+  systemCap: number;
+  tierCaps: { free: number; pro: number; power: number };
+  topConsumers: Array<{ userId: string; callCount: number }>;
+  tierBreakdown: Record<string, { users: number; totalCalls: number }>;
+  resetDate: string;
+}
+
+interface ResendUsageData {
+  dailyUsage: number;
+  dailyCap: number;
+  monthlyUsage: number;
+  monthlyCap: number;
+  failedThisMonth: number;
+  recentHistory: Array<{ date: string; count: number }>;
+  resetDate: string;
+}
+
+interface UserOverviewEntry {
+  id: string;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  tier: string;
+  created_at: string | null;
+  updated_at: string | null;
+  monitor_count: number;
+  active_monitor_count: number;
+  last_activity: string | null;
+  browserless_usage_this_month: number;
+  emails_sent_this_month: number;
+}
+
+const levelConfig: Record<string, { icon: typeof XCircle; variant: "destructive" | "secondary" | "outline"; label: string }> = {
+  error: { icon: XCircle, variant: "destructive", label: "Error" },
+  warning: { icon: AlertTriangle, variant: "secondary", label: "Warning" },
+  info: { icon: Info, variant: "outline", label: "Info" },
+};
+
+const UNDO_TIMEOUT_MS = 5000;
+
+export default function AdminErrors() {
+  usePageTitle("Admin: Errors — FetchTheChange");
+  const [levelFilter, setLevelFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectAll, setSelectAll] = useState(false);
+  const [excludedIds, setExcludedIds] = useState<Set<number>>(new Set());
+  const { toast, dismiss } = useToast();
+
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeToastRef = useRef<string | null>(null);
+  const pendingFinalizeRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    };
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setSelectAll(false);
+    setExcludedIds(new Set());
+  }, []);
+
+  const { data: browserlessData } = useQuery<BrowserlessUsageData>({
+    queryKey: ["/api/admin/browserless-usage"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/browserless-usage", { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
+    },
+    refetchInterval: 60000,
+  });
+
+  const { data: resendData } = useQuery<ResendUsageData>({
+    queryKey: ["/api/admin/resend-usage"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/resend-usage", { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
+    },
+    refetchInterval: 60000,
+  });
+
+  const { data: usersOverview } = useQuery<UserOverviewEntry[]>({
+    queryKey: ["/api/admin/users-overview"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/users-overview", { credentials: "include" });
+      if (res.status === 403) {
+        const err = new Error("forbidden");
+        (err as any).status = 403;
+        throw err;
+      }
+      if (!res.ok) return null;
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
+    },
+    retry: (_count, error) => (error as any)?.status !== 403,
+    refetchInterval: (query) =>
+      (query.state.error as any)?.status === 403 ? false : 60000,
+  });
+
+  const queryKey = ["/api/admin/error-logs", levelFilter, sourceFilter];
+  const { data: logs = [], isLoading, isFetching, isError } = useQuery<ErrorLogEntry[]>({
+    queryKey,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (levelFilter !== "all") params.set("level", levelFilter);
+      if (sourceFilter !== "all") params.set("source", sourceFilter);
+      params.set("limit", "100");
+      const res = await fetch(`/api/admin/error-logs?${params}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to fetch logs");
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
+    },
+    refetchInterval: 30000,
+  });
+
+  const invalidateAll = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/error-logs"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/error-logs/count"] });
+  }, []);
+
+  const finalizeMutation = useMutation({
+    mutationFn: async (): Promise<{ count: number; hasMore?: boolean }> => {
+      const res = await fetch("/api/admin/error-logs/finalize", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to finalize deletion");
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
+    },
+    onSuccess: (data) => {
+      invalidateAll();
+      clearSelection();
+      if (data.hasMore) {
+        toast({ title: "More entries remain", description: "Some soft-deleted entries were not finalized. Repeat to finalize more." });
+      }
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to permanently delete entries", variant: "destructive" });
+    },
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: async (): Promise<{ count: number; hasMore?: boolean }> => {
+      const res = await fetch("/api/admin/error-logs/restore", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to restore entries");
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      });
+    },
+    onSuccess: (data) => {
+      invalidateAll();
+      if (data.hasMore) {
+        toast({ title: "More entries remain", description: "Some soft-deleted entries were not restored. Repeat to restore more." });
+      }
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to restore entries", variant: "destructive" });
+    },
+  });
+
+  const finalizePrevious = useCallback(() => {
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    if (activeToastRef.current) {
+      dismiss(activeToastRef.current);
+      activeToastRef.current = null;
+    }
+    if (pendingFinalizeRef.current) {
+      pendingFinalizeRef.current = false;
+      finalizeMutation.mutate();
+    }
+  }, [dismiss, finalizeMutation]);
+
+  const showUndoToast = useCallback((count: number) => {
+    pendingFinalizeRef.current = true;
+
+    const { id } = toast({
+      title: `${count} ${count === 1 ? "entry" : "entries"} deleted`,
+      action: (
+        <ToastAction altText="Undo" onClick={() => {
+          if (undoTimerRef.current) {
+            clearTimeout(undoTimerRef.current);
+            undoTimerRef.current = null;
+          }
+          pendingFinalizeRef.current = false;
+          activeToastRef.current = null;
+          restoreMutation.mutate();
+        }}>
+          Undo
+        </ToastAction>
+      ),
+      duration: UNDO_TIMEOUT_MS,
+    });
+
+    activeToastRef.current = id;
+
+    undoTimerRef.current = setTimeout(() => {
+      undoTimerRef.current = null;
+      activeToastRef.current = null;
+      pendingFinalizeRef.current = false;
+      finalizeMutation.mutate();
+    }, UNDO_TIMEOUT_MS);
+  }, [toast, restoreMutation, finalizeMutation]);
+
+  const batchDeleteMutation = useMutation({
+    mutationFn: async (body: { ids?: number[]; filters?: { level?: string; source?: string }; excludeIds?: number[] }) => {
+      const res = await fetch("/api/admin/error-logs/batch-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.message || "Failed to delete entries");
+      }
+      return res.json().catch(() => {
+        throw new Error("Unexpected response format from server");
+      }) as Promise<{ count: number; hasMore?: boolean }>;
+    },
+    onSuccess: (data) => {
+      invalidateAll();
+      clearSelection();
+      showUndoToast(data.count);
+      if (data.hasMore) {
+        toast({ title: "More entries remain", description: "Some matching entries were not deleted. Repeat to delete more." });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleSingleDelete = useCallback((id: number) => {
+    finalizePrevious();
+    batchDeleteMutation.mutate({ ids: [id] });
+  }, [finalizePrevious, batchDeleteMutation]);
+
+  const handleBatchDelete = useCallback(() => {
+    const payload = buildBatchDeletePayload({
+      selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, logs,
+    });
+    if (!payload) return;
+    finalizePrevious();
+    batchDeleteMutation.mutate(payload);
+  }, [finalizePrevious, batchDeleteMutation, selectAll, selectedIds, excludedIds, levelFilter, sourceFilter, logs]);
+
+  const selectionCount = selectAll ? logs.length - excludedIds.size : selectedIds.size;
+  const hasSelection = selectionCount > 0;
+
+  const isEntrySelected = useCallback((id: number) => {
+    if (selectAll) return !excludedIds.has(id);
+    return selectedIds.has(id);
+  }, [selectAll, excludedIds, selectedIds]);
+
+  const toggleEntry = useCallback((id: number) => {
+    if (selectAll) {
+      setExcludedIds(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      });
+    }
+  }, [selectAll]);
+
+  const toggleSelectAll = useCallback((checked: boolean) => {
+    if (checked) {
+      setSelectAll(true);
+      setExcludedIds(new Set());
+      setSelectedIds(new Set());
+    } else {
+      clearSelection();
+    }
+  }, [clearSelection]);
+
+  const allVisibleSelected = selectAll
+    ? excludedIds.size === 0
+    : logs.length > 0 && logs.every(l => selectedIds.has(l.id));
+
+  const someVisibleSelected = selectAll
+    ? excludedIds.size > 0 && excludedIds.size < logs.length
+    : selectedIds.size > 0 && !allVisibleSelected;
+
+  const formatTimestamp = (ts: string) => {
+    return formatDateTime(ts);
+  };
+
+  const getTierBadgeClass = (tier: string) => {
+    switch (tier) {
+      case "power": return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
+      case "pro": return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300";
+      default: return "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300";
+    }
+  };
+
+  const formatRelativeTime = (dateStr: string | null) => {
+    if (!dateStr) return "Never";
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `${diffDays}d ago`;
+    return formatDate(date);
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" asChild data-testid="button-back-dashboard">
+              <Link href="/dashboard">
+                <ArrowLeft className="h-4 w-4" />
+              </Link>
+            </Button>
+            <h1 className="text-2xl font-bold" data-testid="text-admin-title">Event Log</h1>
+            <Badge variant="secondary">{logs.length} entries</Badge>
+          </div>
+          <div className="flex items-center gap-3">
+            <Select value={levelFilter} onValueChange={setLevelFilter} data-testid="select-level-filter">
+              <SelectTrigger className="w-[140px]" data-testid="button-level-filter">
+                <SelectValue placeholder="Filter level" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All levels</SelectItem>
+                <SelectItem value="error">Errors</SelectItem>
+                <SelectItem value="info">Info</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sourceFilter} onValueChange={setSourceFilter} data-testid="select-source-filter">
+              <SelectTrigger className="w-[140px]" data-testid="button-source-filter">
+                <SelectValue placeholder="Filter category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                {ERROR_LOG_SOURCES.map((source) => (
+                  <SelectItem key={source} value={source}>
+                    {source.charAt(0).toUpperCase() + source.slice(1)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey });
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/browserless-usage"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/resend-usage"] });
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/users-overview"] });
+              }}
+              disabled={isFetching}
+              data-testid="button-refresh-logs"
+            >
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+        </div>
+
+        {usersOverview && usersOverview.length > 0 && (
+          <Card className="mb-6" data-testid="card-users-overview">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                User Overview
+              </CardTitle>
+              <span className="text-xs text-muted-foreground">
+                {usersOverview.length} user{usersOverview.length !== 1 ? "s" : ""}
+              </span>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[200px]">User</TableHead>
+                      <TableHead>Tier</TableHead>
+                      <TableHead className="text-right">Monitors</TableHead>
+                      <TableHead className="text-right">Browserless</TableHead>
+                      <TableHead className="text-right">Emails</TableHead>
+                      <TableHead className="text-right">Last Active</TableHead>
+                      <TableHead className="text-right">Joined</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {usersOverview.map((u) => (
+                      <TableRow key={u.id} data-testid={`row-user-${u.id}`}>
+                        <TableCell className="font-medium">
+                          <div className="flex flex-col">
+                            <span className="truncate max-w-[180px]">
+                              {u.first_name || u.last_name
+                                ? `${u.first_name || ""} ${u.last_name || ""}`.trim()
+                                : u.email || u.id.slice(0, 8) + "..."}
+                            </span>
+                            {(u.first_name || u.last_name) && u.email && (
+                              <span className="text-xs text-muted-foreground truncate max-w-[180px]">
+                                {u.email}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={getTierBadgeClass(u.tier)}
+                            data-testid={`badge-tier-${u.id}`}
+                          >
+                            {u.tier}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          <span data-testid={`text-monitors-${u.id}`}>
+                            {u.active_monitor_count}/{u.monitor_count}
+                          </span>
+                          <span className="text-xs text-muted-foreground ml-1">active</span>
+                        </TableCell>
+                        <TableCell className="text-right font-mono" data-testid={`text-browserless-${u.id}`}>
+                          {u.browserless_usage_this_month}
+                        </TableCell>
+                        <TableCell className="text-right font-mono" data-testid={`text-emails-${u.id}`}>
+                          {u.emails_sent_this_month}
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {formatRelativeTime(u.last_activity)}
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {u.created_at
+                            ? formatDate(u.created_at)
+                            : "\u2014"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {browserlessData && (
+          <Card className="mb-6" data-testid="card-browserless-usage">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Globe className="h-4 w-4" />
+                Browserless Usage
+              </CardTitle>
+              <span className="text-xs text-muted-foreground">Resets {browserlessData.resetDate}</span>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span data-testid="text-system-usage-label">System Usage</span>
+                  <span className="font-mono" data-testid="text-system-usage-value">
+                    {browserlessData.systemUsage} / {browserlessData.systemCap}
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-secondary overflow-hidden" data-testid="progress-system-usage">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      browserlessData.systemUsage / browserlessData.systemCap > 0.95
+                        ? "bg-destructive"
+                        : browserlessData.systemUsage / browserlessData.systemCap > 0.8
+                        ? "bg-orange-500 dark:bg-orange-400"
+                        : "bg-primary"
+                    }`}
+                    style={{ width: `${Math.min(100, (browserlessData.systemUsage / browserlessData.systemCap) * 100)}%` }}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {(["pro", "power"] as const).map((tier) => {
+                  const data = browserlessData.tierBreakdown[tier];
+                  return (
+                    <div key={tier} className="text-center" data-testid={`text-tier-breakdown-${tier}`}>
+                      <p className="text-xs text-muted-foreground capitalize">{tier}</p>
+                      <p className="text-lg font-semibold">{data?.totalCalls ?? 0}</p>
+                      <p className="text-xs text-muted-foreground">{data?.users ?? 0} users</p>
+                    </div>
+                  );
+                })}
+                <div className="text-center" data-testid="text-tier-caps">
+                  <p className="text-xs text-muted-foreground">Per-User Caps</p>
+                  <p className="text-xs mt-1">Pro: {browserlessData.tierCaps.pro}</p>
+                  <p className="text-xs">Power: {browserlessData.tierCaps.power}</p>
+                </div>
+              </div>
+              {browserlessData.topConsumers.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Top Consumers</p>
+                  <div className="space-y-1">
+                    {browserlessData.topConsumers.slice(0, 5).map((c, i) => (
+                      <div key={c.userId} className="flex justify-between text-xs" data-testid={`text-consumer-${c.userId}`}>
+                        <span className="text-muted-foreground truncate max-w-[200px]">
+                          {i + 1}. {c.userId}
+                        </span>
+                        <span className="font-mono">{c.callCount} calls</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {resendData && (
+          <Card className="mb-6" data-testid="card-resend-usage">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Mail className="h-4 w-4" />
+                Resend Email Usage
+              </CardTitle>
+              <span className="text-xs text-muted-foreground">Resets {resendData.resetDate}</span>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span data-testid="text-resend-daily-label">Daily</span>
+                    <span className="font-mono" data-testid="text-resend-daily-value">
+                      {resendData.dailyUsage} / {resendData.dailyCap}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-secondary overflow-hidden" data-testid="progress-resend-daily">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        resendData.dailyUsage / resendData.dailyCap > 0.95
+                          ? "bg-destructive"
+                          : resendData.dailyUsage / resendData.dailyCap > 0.8
+                          ? "bg-orange-500 dark:bg-orange-400"
+                          : "bg-primary"
+                      }`}
+                      style={{ width: `${Math.min(100, (resendData.dailyUsage / resendData.dailyCap) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span data-testid="text-resend-monthly-label">Monthly</span>
+                    <span className="font-mono" data-testid="text-resend-monthly-value">
+                      {resendData.monthlyUsage} / {resendData.monthlyCap}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-secondary overflow-hidden" data-testid="progress-resend-monthly">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        resendData.monthlyUsage / resendData.monthlyCap > 0.95
+                          ? "bg-destructive"
+                          : resendData.monthlyUsage / resendData.monthlyCap > 0.8
+                          ? "bg-orange-500 dark:bg-orange-400"
+                          : "bg-primary"
+                      }`}
+                      style={{ width: `${Math.min(100, (resendData.monthlyUsage / resendData.monthlyCap) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              {resendData.failedThisMonth > 0 && (
+                <div className="text-xs text-muted-foreground" data-testid="text-resend-failed">
+                  {resendData.failedThisMonth} failed this month
+                </div>
+              )}
+              {resendData.recentHistory.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Last 7 Days</p>
+                  <div className="flex items-end gap-1 h-12">
+                    {resendData.recentHistory.slice().reverse().map((day) => {
+                      const maxCount = Math.max(...resendData.recentHistory.map(d => d.count), 1);
+                      const heightPct = Math.max(4, (day.count / maxCount) * 100);
+                      return (
+                        <div key={day.date} className="flex-1 flex flex-col items-center gap-1" data-testid={`bar-resend-${day.date}`}>
+                          <div
+                            className="w-full bg-primary/60 rounded-sm min-w-[4px]"
+                            style={{ height: `${heightPct}%` }}
+                            title={`${day.date}: ${day.count} emails`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-1 mt-1">
+                    {resendData.recentHistory.slice().reverse().map((day) => (
+                      <div key={day.date} className="flex-1 text-center">
+                        <span className="text-[10px] text-muted-foreground">{day.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {isLoading ? (
+          <div className="text-center py-12 text-muted-foreground">Loading logs...</div>
+        ) : isError ? (
+          <div className="text-center py-12 text-muted-foreground">Failed to load event log.</div>
+        ) : logs.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              No log entries found.
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 mb-3">
+              <Checkbox
+                checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
+                onCheckedChange={(checked) => toggleSelectAll(!!checked)}
+                data-testid="checkbox-select-all"
+                aria-label="Select all entries"
+              />
+              <span className="text-sm text-muted-foreground">
+                {selectAll ? `All ${logs.length} visible entries selected` : "Select all"}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {logs.map((log) => {
+                const config = levelConfig[log.level] || levelConfig.info;
+                const Icon = config.icon;
+                const isExpanded = expandedId === log.id;
+                const checked = isEntrySelected(log.id);
+
+                return (
+                  <Card
+                    key={log.id}
+                    className={`hover-elevate cursor-pointer ${checked ? "ring-1 ring-primary/50" : ""}`}
+                    onClick={() => setExpandedId(isExpanded ? null : log.id)}
+                    data-testid={`card-log-${log.id}`}
+                  >
+                    <CardContent className="py-3 px-4">
+                      <div className="flex flex-wrap items-start gap-3">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => toggleEntry(log.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-0.5 shrink-0"
+                          data-testid={`checkbox-log-${log.id}`}
+                          aria-label={`Select log entry ${log.id}`}
+                        />
+                        <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${log.level === "error" ? "text-destructive" : log.level === "warning" ? "text-yellow-500" : "text-muted-foreground"}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <Badge variant={config.variant} data-testid={`badge-level-${log.id}`}>
+                              {config.label}
+                            </Badge>
+                            <Badge variant="outline" data-testid={`badge-source-${log.id}`}>
+                              {log.source}
+                            </Badge>
+                            {log.errorType && (
+                              <span className="text-xs text-muted-foreground">{log.errorType}</span>
+                            )}
+                            {log.occurrenceCount > 1 && (
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0" data-testid={`badge-count-${log.id}`}>
+                                {log.occurrenceCount}x
+                              </Badge>
+                            )}
+                            <span className="text-xs text-muted-foreground ml-auto shrink-0">
+                              {log.occurrenceCount > 1 && log.firstOccurrence
+                                ? `${formatTimestamp(log.firstOccurrence)} \u2014 ${formatTimestamp(log.timestamp)}`
+                                : formatTimestamp(log.timestamp)}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                              aria-label={`Delete log entry ${log.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSingleDelete(log.id);
+                              }}
+                              disabled={batchDeleteMutation.isPending}
+                              data-testid={`button-delete-log-${log.id}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                          <p className="text-sm truncate" data-testid={`text-message-${log.id}`}>
+                            {log.message}
+                          </p>
+                          {isExpanded && (
+                            <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                              {log.stackTrace && (
+                                <div>
+                                  <p className="text-xs font-medium text-muted-foreground mb-1">Stack Trace</p>
+                                  <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-48 overflow-y-auto select-text">
+                                    {log.stackTrace}
+                                  </pre>
+                                </div>
+                              )}
+                              {log.context != null && (
+                                <div>
+                                  <p className="text-xs font-medium text-muted-foreground mb-1">Context</p>
+                                  <pre className="text-xs bg-secondary/50 p-3 rounded-md overflow-x-auto max-h-32 overflow-y-auto select-text">
+                                    {JSON.stringify(log.context, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {hasSelection && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50" data-testid="floating-action-bar">
+          <div className="flex items-center gap-3 bg-background border rounded-lg shadow-lg px-4 py-3">
+            <span className="text-sm font-medium" data-testid="text-selection-count">
+              {selectAll ? `${selectionCount} visible entries` : `${selectionCount} selected`}
+            </span>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleBatchDelete}
+              disabled={batchDeleteMutation.isPending}
+              data-testid="button-delete-selected"
+            >
+              {batchDeleteMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+              )}
+              Delete selected
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearSelection}
+              data-testid="button-clear-selection"
+            >
+              <X className="h-3.5 w-3.5 mr-1" />
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

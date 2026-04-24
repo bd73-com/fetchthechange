@@ -26,6 +26,7 @@ import DocsZapier from "@/pages/DocsZapier";
 import DocsMake from "@/pages/DocsMake";
 import Privacy from "@/pages/Privacy";
 import Changelog from "@/pages/Changelog";
+import AdminErrors from "@/pages/AdminErrors";
 import AdminCampaigns from "@/pages/AdminCampaigns";
 import AdminCampaignDetail from "@/pages/AdminCampaignDetail";
 import ExtensionAuth from "@/pages/ExtensionAuth";
@@ -100,6 +101,7 @@ function Router() {
       <Route path="/privacy" component={Privacy} />
       <Route path="/extension-auth" component={ExtensionAuth} />
       <Route path="/developer" component={() => <ProtectedRoute component={Developer} requiredTier="power" />} />
+      <Route path="/admin/errors" component={() => <ProtectedRoute component={AdminErrors} />} />
       <Route path="/admin/campaigns" component={() => <ProtectedRoute component={AdminCampaigns} />} />
       <Route path="/admin/campaigns/:id" component={() => <ProtectedRoute component={AdminCampaignDetail} />} />
       {/* Fallback to 404 */}

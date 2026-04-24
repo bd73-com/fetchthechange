@@ -19,11 +19,15 @@ vi.mock("../replit_integrations/auth/storage", () => ({
 const mockCheckMonitorLimit = vi.fn();
 const mockCheckFrequencyTier = vi.fn().mockReturnValue(null);
 const mockValidateMonitorInput = vi.fn();
-const mockSafeHostname = vi.fn().mockReturnValue("example.com");
 vi.mock("../services/monitorValidation", () => ({
   checkMonitorLimit: (...args: any[]) => mockCheckMonitorLimit(...args),
   checkFrequencyTier: (...args: any[]) => mockCheckFrequencyTier(...args),
   validateMonitorInput: (...args: any[]) => mockValidateMonitorInput(...args),
+}));
+
+// Mock urlUtils
+const mockSafeHostname = vi.fn().mockReturnValue("example.com");
+vi.mock("../utils/urlUtils", () => ({
   safeHostname: (...args: any[]) => mockSafeHostname(...args),
 }));
 

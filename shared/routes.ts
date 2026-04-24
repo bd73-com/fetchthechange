@@ -17,6 +17,18 @@ export const errorSchemas = {
   }),
 };
 
+export const ERROR_LOG_SOURCES = [
+  "scraper",
+  "email",
+  "scheduler",
+  "api",
+  "stripe",
+  "resend",
+  "browserless",
+] as const;
+
+export const errorLogSourceSchema = z.enum(ERROR_LOG_SOURCES);
+
 export const contactFormSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
   category: z.enum(["bug", "feature", "billing", "general"], {

@@ -21,6 +21,13 @@ vi.mock("../replit_integrations/auth/storage", () => ({
   },
 }));
 
+vi.mock("./logger", () => ({
+  ErrorLogger: {
+    error: vi.fn().mockResolvedValue(undefined),
+    info: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 vi.mock("./resendTracker", () => ({
   ResendUsageTracker: {
     canSendEmail: vi.fn().mockResolvedValue({ allowed: true }),
@@ -41,6 +48,7 @@ vi.mock("drizzle-orm", () => ({
 import { sendNotificationEmail, sendAutoPauseEmail, sendDigestEmail, sendHealthWarningEmail, sendRecoveryEmail, sendTierDowngradeEmail } from "./email";
 import { authStorage } from "../replit_integrations/auth/storage";
 import { ResendUsageTracker } from "./resendTracker";
+import { ErrorLogger } from "./logger";
 import { db } from "../db";
 import type { Monitor, MonitorChange } from "@shared/schema";
 
@@ -224,6 +232,12 @@ describe("sendAutoPauseEmail", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Network error");
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "email",
+      expect.stringContaining("auto-pause email failed"),
+      expect.any(Error),
+      expect.objectContaining({ monitorId: 1 })
+    );
   });
 
   it("sanitizes monitor name in subject to prevent header injection", async () => {
@@ -495,6 +509,12 @@ describe("sendNotificationEmail", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Connection failed");
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "email",
+      expect.stringContaining("notification email failed"),
+      expect.any(Error),
+      expect.objectContaining({ monitorId: 1 })
+    );
   });
 
   it("uses notificationEmail when available", async () => {
@@ -976,11 +996,19 @@ describe("sendHealthWarningEmail", () => {
   it("handles thrown exceptions gracefully", async () => {
     vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
     mockSend.mockRejectedValueOnce(new Error("Network error"));
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "error");
 
-    const result = await sendHealthWarningEmail(makeMonitor(), 5, 5, "error");
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("Network error");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Network error");
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[email] Health warning email failed"),
+        expect.objectContaining({ monitorId: 1 })
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 });
 
@@ -1184,11 +1212,19 @@ describe("sendRecoveryEmail", () => {
   it("handles thrown exceptions gracefully", async () => {
     vi.mocked(authStorage.getUser).mockResolvedValueOnce(powerUser() as any);
     mockSend.mockRejectedValueOnce(new Error("Connection reset"));
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await sendRecoveryEmail(makeMonitor(), "value");
 
-    const result = await sendRecoveryEmail(makeMonitor(), "value");
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("Connection reset");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Connection reset");
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[email] Recovery email failed"),
+        expect.objectContaining({ monitorId: 1 })
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 });
 
@@ -1326,5 +1362,11 @@ describe("sendTierDowngradeEmail", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Connection reset");
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "email",
+      expect.stringContaining("Tier downgrade email failed"),
+      expect.any(Error),
+      expect.objectContaining({ userId: "user1" })
+    );
   });
 });

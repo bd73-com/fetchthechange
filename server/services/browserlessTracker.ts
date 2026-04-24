@@ -1,24 +1,10 @@
 import { format } from "date-fns";
 import { db } from "../db";
 import { getResendClient } from "./resendClient";
-import { browserlessUsage } from "@shared/schema";
+import { browserlessUsage, errorLogs } from "@shared/schema";
 import { BROWSERLESS_CAPS, users, type UserTier } from "@shared/models/auth";
 import { sql, eq, and, gte, count, desc } from "drizzle-orm";
-
-// In-memory cooldown tracking for threshold alert emails. The 6h cooldown
-// was previously enforced via error_logs rows that persisted across deploys
-// and were shared across replicas; that table is gone. Tradeoffs now:
-//   - RESTART-RESET: two deploys within 6h while usage is already >80%
-//     can re-fire the same threshold email because the Map is per-process
-//     and starts empty on each boot.
-//   - AUTOSCALE FAN-OUT: Replit autoscale may run multiple replicas; each
-//     holds its own Map, so a threshold crossing during a traffic spike
-//     can send up to one alert email per replica instead of a single
-//     global alert.
-// Both are accepted: alert emails are coarse operational signals, burst
-// duplication is annoying but not harmful, and persisting cooldown to a
-// new alert_state table is scope creep for this removal branch.
-const recentThresholdAlerts = new Map<string, number>();
+import { ErrorLogger } from "./logger";
 
 function getMonthStart(): Date {
   const now = new Date();
@@ -108,11 +94,27 @@ export class BrowserlessUsageTracker {
       if (pct >= t.pct) {
         const alertKey = `browserless_alert_${t.key}`;
         const cooldownMs = 6 * 60 * 60 * 1000;
-        const lastAlertAt = recentThresholdAlerts.get(alertKey) ?? 0;
+        const cooldownStart = new Date(Date.now() - cooldownMs);
 
-        if (Date.now() - lastAlertAt >= cooldownMs) {
-          recentThresholdAlerts.set(alertKey, Date.now());
-          console.log(`[browserless] threshold ${t.label} reached`, { threshold: t.label, usage: systemUsage, cap: systemCap });
+        const recentAlert = await db
+          .select({ id: errorLogs.id })
+          .from(errorLogs)
+          .where(
+            and(
+              eq(errorLogs.source, "browserless"),
+              eq(errorLogs.message, alertKey),
+              gte(errorLogs.timestamp, cooldownStart)
+            )
+          )
+          .limit(1);
+
+        if (recentAlert.length === 0) {
+          // Use ErrorLogger.info so the dedup upsert (ON CONFLICT) handles the
+          // case where an unresolved alert row for the same bucket already
+          // exists beyond the 6h cooldown window — raw `db.insert` would throw
+          // on the partial unique index and the alert email would silently
+          // fail to fire.
+          await ErrorLogger.info("browserless", alertKey, { threshold: t.label, usage: systemUsage, cap: systemCap });
           await this.sendThresholdEmail(t.label, systemUsage, systemCap);
         }
         break;

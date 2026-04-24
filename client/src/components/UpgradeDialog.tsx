@@ -104,6 +104,7 @@ export function UpgradeDialog({ currentTier, children }: UpgradeDialogProps) {
         "JavaScript-rendered pages",
         "Fix Selector tool",
         "Full change history",
+        "Admin event log",
       ],
     };
     return features[tier] || [];

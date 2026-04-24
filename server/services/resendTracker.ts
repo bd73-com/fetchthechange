@@ -1,20 +1,9 @@
 import { format, parseISO } from "date-fns";
 import { db } from "../db";
-import { resendUsage } from "@shared/schema";
+import { resendUsage, errorLogs } from "@shared/schema";
 import { RESEND_CAPS } from "@shared/models/auth";
 import { sql, eq, and, gte, count, desc } from "drizzle-orm";
-
-// In-memory cooldown tracking for threshold alert logs. Previously persisted
-// via error_logs; now kept in-memory with a 6h cooldown per alert key.
-// Tradeoffs mirror browserlessTracker:
-//   - RESTART-RESET: two deploys within 6h during an already-elevated usage
-//     window can re-fire the same threshold warn, because the Map is
-//     per-process and starts empty on each boot.
-//   - AUTOSCALE FAN-OUT: Replit autoscale replicas each hold their own
-//     Map, so a threshold crossing during scale-out can emit up to one
-//     console.warn per replica instead of a single global alert.
-// Both are accepted as documented tradeoffs for the removal branch.
-const recentResendAlerts = new Map<string, number>();
+import { ErrorLogger } from "./logger";
 
 function getMonthStart(): Date {
   const now = new Date();
@@ -99,15 +88,27 @@ export class ResendUsageTracker {
       { key: "80", pct: 0.80, label: "80%" },
     ];
 
-    const cooldownMs = 6 * 60 * 60 * 1000;
-
     for (const t of thresholds) {
       if (pct >= t.pct) {
         const alertKey = `resend_alert_${t.key}`;
-        const lastAlertAt = recentResendAlerts.get(alertKey) ?? 0;
-        if (Date.now() - lastAlertAt >= cooldownMs) {
-          recentResendAlerts.set(alertKey, Date.now());
-          console.warn(`[resend] Monthly usage at ${t.label}: ${monthlyUsage}/${monthlyCap}`, { threshold: t.label, usage: monthlyUsage, cap: monthlyCap });
+        const cooldownMs = 6 * 60 * 60 * 1000;
+        const cooldownStart = new Date(Date.now() - cooldownMs);
+
+        const recentAlert = await db
+          .select({ id: errorLogs.id })
+          .from(errorLogs)
+          .where(
+            and(
+              eq(errorLogs.source, "resend"),
+              eq(errorLogs.message, alertKey),
+              gte(errorLogs.timestamp, cooldownStart)
+            )
+          )
+          .limit(1);
+
+        if (recentAlert.length === 0) {
+          await ErrorLogger.info("resend", alertKey, { threshold: t.label, usage: monthlyUsage, cap: monthlyCap });
+          console.log(`[ResendTracker] Monthly usage at ${t.label}: ${monthlyUsage}/${monthlyCap}`);
         }
         break;
       }
@@ -118,10 +119,24 @@ export class ResendUsageTracker {
     const dailyPct = dailyUsage / dailyCap;
     if (dailyPct >= 0.9) {
       const alertKey = `resend_daily_alert_90`;
-      const lastAlertAt = recentResendAlerts.get(alertKey) ?? 0;
-      if (Date.now() - lastAlertAt >= cooldownMs) {
-        recentResendAlerts.set(alertKey, Date.now());
-        console.warn(`[resend] Daily usage at 90%: ${dailyUsage}/${dailyCap}`, { threshold: "90% daily", usage: dailyUsage, cap: dailyCap });
+      const cooldownMs = 6 * 60 * 60 * 1000;
+      const cooldownStart = new Date(Date.now() - cooldownMs);
+
+      const recentAlert = await db
+        .select({ id: errorLogs.id })
+        .from(errorLogs)
+        .where(
+          and(
+            eq(errorLogs.source, "resend"),
+            eq(errorLogs.message, alertKey),
+            gte(errorLogs.timestamp, cooldownStart)
+          )
+        )
+        .limit(1);
+
+      if (recentAlert.length === 0) {
+        await ErrorLogger.info("resend", alertKey, { threshold: "90% daily", usage: dailyUsage, cap: dailyCap });
+        console.log(`[ResendTracker] Daily usage at 90%: ${dailyUsage}/${dailyCap}`);
       }
     }
   }

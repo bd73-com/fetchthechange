@@ -22,6 +22,14 @@ vi.mock("../utils/ssrf", () => ({
   ssrfSafeFetch: (...args: any[]) => mockSsrfSafeFetch(...args),
 }));
 
+// Mock logger
+const mockLoggerInfo = vi.fn().mockResolvedValue(undefined);
+vi.mock("./logger", () => ({
+  ErrorLogger: {
+    info: (...args: any[]) => mockLoggerInfo(...args),
+  },
+}));
+
 import { deliverToAutomationSubscriptions } from "./automationDelivery";
 import type { Monitor, MonitorChange, AutomationSubscription } from "@shared/schema";
 
@@ -76,18 +84,15 @@ function makeSub(overrides?: Partial<AutomationSubscription>): AutomationSubscri
 
 describe("deliverToAutomationSubscriptions", () => {
   let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
-  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockIncrementAutomationSubscriptionFailures.mockResolvedValue(1);
     consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   });
 
   afterEach(() => {
     consoleWarnSpy.mockRestore();
-    consoleLogSpy.mockRestore();
   });
 
   it("returns immediately when no active subscriptions", async () => {
@@ -131,15 +136,18 @@ describe("deliverToAutomationSubscriptions", () => {
     expect(mockTouchAndResetAutomationSubscription).toHaveBeenCalledWith(7);
   });
 
-  it("logs success via console.log", async () => {
+  it("logs success via console.log, not ErrorLogger", async () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub()]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: true, status: 200 });
 
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
-    expect(consoleLogSpy).toHaveBeenCalledWith(
+    expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining("[Automation] Delivered successfully"),
     );
+    expect(mockLoggerInfo).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
   });
 
   it("queues durable retry on transient 5xx response (does NOT bump failure counter)", async () => {

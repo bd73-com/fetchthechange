@@ -4,6 +4,7 @@ import { sendNotificationEmail, sendDigestEmail, type EmailResult } from "./emai
 import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery";
 import { deliver as deliverSlack } from "./slackDelivery";
 import { decryptToken } from "../utils/encryption";
+import { ErrorLogger } from "./logger";
 import { evaluateConditions } from "./conditions";
 import { deliverToAutomationSubscriptions } from "./automationDelivery";
 
@@ -320,7 +321,7 @@ async function deliverToChannels(
       } else if (ch.channel === "slack" && !result.slack) {
         result.slack = { success: false, error: msg };
       }
-      console.error(`[notification] Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err.message : String(err), { monitorId: monitor.id, channel: ch.channel });
+      await ErrorLogger.error("email", `Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err : null, { monitorId: monitor.id, channel: ch.channel });
     }
   });
 
@@ -480,7 +481,7 @@ async function deliverDigestToChannels(
       } else if (ch.channel === "slack" && !result.slack) {
         result.slack = { success: false, error: msg };
       }
-      console.error(`[notification] Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err.message : String(err), { monitorId: monitor.id, channel: ch.channel });
+      await ErrorLogger.error("email", `Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err : null, { monitorId: monitor.id, channel: ch.channel });
     }
   });
 
@@ -521,17 +522,21 @@ export async function processChangeNotification(
   try {
     conditions = await storage.getMonitorConditions(monitor.id);
   } catch (err) {
-    console.error(
-      `[scheduler] Failed to load conditions for monitor ${monitor.id}, proceeding with notification`,
-      err instanceof Error ? err.message : String(err),
+    await ErrorLogger.error(
+      "scheduler",
+      `Failed to load conditions for monitor ${monitor.id}, proceeding with notification`,
+      err instanceof Error ? err : new Error(String(err)),
     );
     // Fall through — send notification when conditions cannot be checked
   }
   if (conditions.length > 0) {
     const passes = evaluateConditions(conditions, change.oldValue, change.newValue);
     if (!passes) {
-      console.log(
-        `[scheduler] Conditions blocked notification for monitor "${monitor.name}" (ID ${monitor.id}) — automation subscriptions (Zapier) also skipped`,
+      // Log with monitor name and explicit mention that automation (Zapier) delivery
+      // was also blocked so users investigating silent Zaps can find this entry.
+      await ErrorLogger.info(
+        "scheduler",
+        `Conditions blocked notification for monitor "${monitor.name}" (ID ${monitor.id}) — automation subscriptions (Zapier) also skipped`,
         { monitorId: monitor.id, monitorName: monitor.name, conditionCount: conditions.length, automationBlocked: true },
       );
       return null;
@@ -685,7 +690,7 @@ export async function processQueuedNotifications(): Promise<void> {
         }
       }
     } catch (error) {
-      console.error(`[scheduler] Failed to process queued notifications for monitor ${monitorId}`, error instanceof Error ? error.message : String(error), { monitorId });
+      await ErrorLogger.error("scheduler", `Failed to process queued notifications for monitor ${monitorId}`, error instanceof Error ? error : null, { monitorId });
     }
   }
 
@@ -739,7 +744,7 @@ export async function processDigestCron(): Promise<void> {
         emailsSent++;
       }
     } catch (error) {
-      console.error(`[scheduler] Failed to process digest for monitor ${prefs.monitorId}`, error instanceof Error ? error.message : String(error), { monitorId: prefs.monitorId });
+      await ErrorLogger.error("scheduler", `Failed to process digest for monitor ${prefs.monitorId}`, error instanceof Error ? error : null, { monitorId: prefs.monitorId });
     }
   }
 

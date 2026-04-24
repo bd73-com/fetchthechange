@@ -22,9 +22,12 @@ vi.mock("../replit_integrations/auth/storage", () => ({
 }));
 vi.mock("../utils/ssrf", () => ({ isPrivateUrl: vi.fn().mockResolvedValue(null) }));
 
-// Mock db to break the transitive dependency chain
-// (v1 → monitorValidation → scraper → db)
+// Mock db and logger to break the transitive dependency chain
+// (v1 → monitorValidation → scraper → logger → db)
 vi.mock("../db", () => ({ db: {}, pool: {} }));
+vi.mock("../services/logger", () => ({
+  ErrorLogger: { log: vi.fn(), getRecentErrors: vi.fn(), clearError: vi.fn() },
+}));
 
 // Mock apiKeyAuth to record execution order
 vi.mock("../middleware/apiKeyAuth", () => ({

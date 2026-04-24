@@ -12,8 +12,8 @@ import {
   checkMonitorLimit,
   checkFrequencyTier,
   validateMonitorInput,
-  safeHostname,
 } from "../services/monitorValidation";
+import { safeHostname } from "../utils/urlUtils";
 import { checkMonitor as scraperCheckMonitor } from "../services/scraper";
 import { seedDefaultEmailChannel } from "../services/notification";
 

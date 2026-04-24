@@ -48,6 +48,13 @@ vi.mock("./email", () => ({
   sendDigestEmail: (...args: any[]) => mockSendDigestEmail(...args),
 }));
 
+vi.mock("./logger", () => ({
+  ErrorLogger: {
+    error: vi.fn().mockResolvedValue(undefined),
+    info: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 const mockWebhookDeliver = vi.fn().mockResolvedValue({ success: true, statusCode: 200 });
 vi.mock("./webhookDelivery", () => ({
   deliver: (...args: any[]) => mockWebhookDeliver(...args),
@@ -78,6 +85,8 @@ import {
   getQuietHoursEndDate,
   getNextDigestTime,
 } from "./notification";
+
+import { ErrorLogger } from "./logger";
 
 import type { Monitor, MonitorChange, NotificationPreference } from "@shared/schema";
 
@@ -719,9 +728,17 @@ describe("processQueuedNotifications edge cases", () => {
     mockGetReadyQueueEntries.mockResolvedValueOnce([]);
     const staleEntry = { id: 7, monitorId: 3, changeId: 5, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
     mockGetStaleQueueEntries.mockResolvedValueOnce([staleEntry]);
-
-    await processQueuedNotifications();
-    expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(7);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await processQueuedNotifications();
+      expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(7);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[scheduler] Marked 1 stale notification queue entries"),
+        expect.objectContaining({ count: 1, monitorIds: [3], entryIds: [7] })
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   it("marks multiple stale entries as permanently failed with single summary log", async () => {
@@ -731,26 +748,23 @@ describe("processQueuedNotifications edge cases", () => {
       { id: 8, monitorId: 4, changeId: 6, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() },
     ];
     mockGetStaleQueueEntries.mockResolvedValueOnce(staleEntries);
-
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await processQueuedNotifications();
       expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledTimes(2);
       expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(7);
       expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(8);
-      // Only one summary warning, not one per entry — protects the intent
-      // that the stale-queue path emits a single aggregated log line.
-      const summaryCalls = warnSpy.mock.calls.filter((c) =>
-        String(c[0]).includes("stale notification queue entries"),
+      // Only one summary warning, not one per entry
+      const summaryCalls = consoleWarnSpy.mock.calls.filter((c) =>
+        typeof c[0] === "string" && c[0].includes("stale notification queue entries")
       );
-      expect(summaryCalls.length).toBe(1);
-      expect(String(summaryCalls[0][0])).toContain("2 stale notification queue entries");
-      expect(summaryCalls[0][1]).toEqual(
-        expect.objectContaining({ count: 2, monitorIds: expect.arrayContaining([3, 4]) }),
+      expect(summaryCalls).toHaveLength(1);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[scheduler] Marked 2 stale notification queue entries"),
+        expect.objectContaining({ count: 2, monitorIds: expect.arrayContaining([3, 4]) })
       );
     } finally {
-      warnSpy.mockRestore();
+      consoleWarnSpy.mockRestore();
     }
   });
 
@@ -788,6 +802,20 @@ describe("processQueuedNotifications edge cases", () => {
     expect(mockMarkQueueEntryDelivered).not.toHaveBeenCalled();
   });
 
+  it("handles errors in individual monitor processing gracefully", async () => {
+    const entry = { id: 1, monitorId: 1, changeId: 10, reason: "quiet_hours", scheduledFor: new Date(), delivered: false, deliveredAt: null, createdAt: new Date() };
+    mockGetReadyQueueEntries.mockResolvedValueOnce([entry]);
+    mockGetStaleQueueEntries.mockResolvedValueOnce([]);
+    mockGetMonitor.mockRejectedValueOnce(new Error("DB connection lost"));
+
+    await processQueuedNotifications();
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("Failed to process queued notifications"),
+      expect.any(Error),
+      expect.objectContaining({ monitorId: 1 })
+    );
+  });
 });
 
 describe("processDigestCron", () => {
@@ -834,6 +862,20 @@ describe("processDigestCron", () => {
     expect(mockGetPendingDigestEntries).not.toHaveBeenCalled();
   });
 
+  it("logs errors for individual monitor digest failures without crashing", async () => {
+    mockGetAllDigestMonitorPreferences.mockResolvedValueOnce([
+      makePrefs({ monitorId: 1, digestMode: true, timezone: "UTC" }),
+    ]);
+    mockGetMonitor.mockRejectedValueOnce(new Error("DB error"));
+
+    await processDigestCron();
+    expect(ErrorLogger.error).toHaveBeenCalledWith(
+      "scheduler",
+      expect.stringContaining("Failed to process digest"),
+      expect.any(Error),
+      expect.objectContaining({ monitorId: 1 })
+    );
+  });
 });
 
 describe("multi-channel delivery", () => {
@@ -1167,6 +1209,16 @@ describe("processChangeNotification with conditions", () => {
     expect(result).toEqual({ success: true });
   });
 
+  it("logs info when conditions block notification", async () => {
+    mockGetMonitorConditions.mockResolvedValue([
+      { id: 1, monitorId: 1, type: "numeric_lt", value: "0", groupIndex: 0, createdAt: new Date() },
+    ]);
+    const monitor = makeMonitor({ emailEnabled: true });
+    const change = makeChange({ oldValue: "$49/mo", newValue: "$59/mo" });
+    await processChangeNotification(monitor, change, false);
+    expect(ErrorLogger.info).toHaveBeenCalled();
+  });
+
   it("proceeds with notification when getMonitorConditions throws", async () => {
     mockGetMonitorConditions.mockRejectedValue(new Error("DB connection failed"));
     const monitor = makeMonitor({ emailEnabled: true });
@@ -1174,6 +1226,7 @@ describe("processChangeNotification with conditions", () => {
     mockSendNotificationEmail.mockResolvedValue({ success: true });
     const result = await processChangeNotification(monitor, change, false);
     expect(result).toEqual({ success: true });
+    expect(ErrorLogger.error).toHaveBeenCalled();
     expect(mockSendNotificationEmail).toHaveBeenCalled();
   });
 });
@@ -1363,13 +1416,22 @@ describe("orphaned queue entry handling", () => {
 
     const monitor = makeMonitor();
     const prefs = makePrefs({ digestMode: true });
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await processDigestBatch(monitor, prefs);
 
-    await processDigestBatch(monitor, prefs);
-
-    // Orphaned entries should be marked delivered
-    expect(mockMarkQueueEntriesDelivered).toHaveBeenCalledWith([2, 3]);
-    // The valid entry should also be marked delivered (in a separate call after successful delivery)
-    expect(mockMarkQueueEntriesDelivered).toHaveBeenCalledWith([1]);
+      // Should log warning about 2 orphaned entries
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("2 queue entries reference deleted changes"),
+        expect.objectContaining({ monitorId: 1, orphanedChangeIds: [11, 12] })
+      );
+      // Orphaned entries should be marked delivered
+      expect(mockMarkQueueEntriesDelivered).toHaveBeenCalledWith([2, 3]);
+      // The valid entry should also be marked delivered (in a separate call after successful delivery)
+      expect(mockMarkQueueEntriesDelivered).toHaveBeenCalledWith([1]);
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   it("processDigestBatch only marks valid entries as delivered on success (not orphaned ones again)", async () => {
@@ -1395,10 +1457,18 @@ describe("orphaned queue entry handling", () => {
     mockGetMonitor.mockResolvedValueOnce(makeMonitor());
     mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
     mockGetMonitorChangesByIds.mockResolvedValueOnce([]);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await processQueuedNotifications();
 
-    await processQueuedNotifications();
-
-    expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(3);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("change 999 not found"),
+        expect.objectContaining({ monitorId: 1, changeId: 999, notificationQueueId: 3 })
+      );
+      expect(mockMarkQueueEntryDelivered).toHaveBeenCalledWith(3);
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 });
 
@@ -1432,10 +1502,18 @@ describe("max-retry limit on failed queue entries", () => {
     mockGetMonitor.mockResolvedValueOnce(makeMonitor());
     mockGetNotificationPreferences.mockResolvedValueOnce(makePrefs());
     mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
-
-    await processQueuedNotifications();
-    expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
-    expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(1);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await processQueuedNotifications();
+      expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
+      expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(1);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("permanently failed after 5 attempts"),
+        expect.objectContaining({ monitorId: 1, notificationQueueId: 1, attempts: 5 })
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 
   it("processQueuedNotifications does not increment attempts on successful delivery", async () => {
@@ -1472,10 +1550,18 @@ describe("max-retry limit on failed queue entries", () => {
     ];
     mockGetPendingDigestEntries.mockResolvedValueOnce(entries);
     mockGetMonitorChangesByIds.mockResolvedValueOnce([makeChange({ id: 10 })]);
-
-    await processDigestBatch(makeMonitor(), makePrefs({ digestMode: true }));
-    expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
-    expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(1);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await processDigestBatch(makeMonitor(), makePrefs({ digestMode: true }));
+      expect(mockIncrementQueueEntryAttempts).toHaveBeenCalledWith(1);
+      expect(mockMarkQueueEntryPermanentlyFailed).toHaveBeenCalledWith(1);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("permanently failed after 5 attempts"),
+        expect.objectContaining({ monitorId: 1, notificationQueueId: 1, attempts: 5 })
+      );
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
   });
 });
 
