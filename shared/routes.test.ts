@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { api, buildUrl, notificationPreferencesInputSchema } from "./routes";
+import { api, buildUrl, notificationPreferencesInputSchema, ERROR_LOG_SOURCES, errorLogSourceSchema } from "./routes";
 
 describe("buildUrl", () => {
   it("replaces a single :param placeholder", () => {
@@ -326,6 +326,19 @@ describe("notificationPreferencesInputSchema", () => {
   });
 });
 
+describe("ERROR_LOG_SOURCES", () => {
+  it("includes browserless as a valid source", () => {
+    expect(ERROR_LOG_SOURCES).toContain("browserless");
+  });
+
+  it("validates browserless via errorLogSourceSchema", () => {
+    expect(errorLogSourceSchema.safeParse("browserless").success).toBe(true);
+  });
+
+  it("rejects unknown source values", () => {
+    expect(errorLogSourceSchema.safeParse("unknown").success).toBe(false);
+  });
+});
 
 describe("slack status response schema", () => {
   const schema = api.integrations.slack.status.responses[200];

@@ -65,6 +65,12 @@ vi.mock("./resendTracker", () => ({
   },
 }));
 
+vi.mock("./logger", () => ({
+  ErrorLogger: {
+    error: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 import {
   resolveRecipients,
   previewRecipients,

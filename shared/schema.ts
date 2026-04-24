@@ -87,6 +87,37 @@ export const monitorMetricsRelations = relations(monitorMetrics, ({ one }) => ({
 
 export type MonitorMetric = typeof monitorMetrics.$inferSelect;
 
+export const errorLogs = pgTable("error_logs", {
+  id: serial("id").primaryKey(),
+  timestamp: timestamp("timestamp").defaultNow().notNull(), // last occurrence
+  level: text("level").notNull(), // 'error' | 'warning' | 'info'
+  source: text("source").notNull(), // see ERROR_LOG_SOURCES in shared/routes.ts
+  errorType: text("error_type"),
+  message: text("message").notNull(),
+  stackTrace: text("stack_trace"),
+  context: jsonb("context"),
+  resolved: boolean("resolved").default(false).notNull(),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: text("resolved_by"),
+  firstOccurrence: timestamp("first_occurrence").defaultNow().notNull(),
+  occurrenceCount: integer("occurrence_count").default(1).notNull(),
+  deletedAt: timestamp("deleted_at"),
+}, (table) => ({
+  levelIdx: index("error_logs_level_idx").on(table.level),
+  sourceIdx: index("error_logs_source_idx").on(table.source),
+  timestampIdx: index("error_logs_timestamp_idx").on(table.timestamp),
+  // Partial unique index collapses the SELECT-then-INSERT dedup race in
+  // ErrorLogger.log: concurrent writers with the same (level, source, message)
+  // while resolved=false deterministically upsert into a single row instead
+  // of racing past a preceding SELECT miss and inserting duplicates. See
+  // GitHub issue #448.
+  unresolvedDedupIdx: uniqueIndex("error_logs_unresolved_dedup_idx")
+    .on(table.level, table.source, table.message)
+    .where(sql`resolved = false`),
+}));
+
+export type ErrorLog = typeof errorLogs.$inferSelect;
+
 export const browserlessUsage = pgTable("browserless_usage", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id),

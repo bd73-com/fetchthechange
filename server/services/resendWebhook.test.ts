@@ -45,6 +45,12 @@ vi.mock("drizzle-orm", () => {
   };
 });
 
+vi.mock("./logger", () => ({
+  ErrorLogger: {
+    error: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 import { verifyResendWebhook, handleResendWebhookEvent } from "./resendWebhook";
 
 function makeEvent(type: string, emailId = "email_abc123") {

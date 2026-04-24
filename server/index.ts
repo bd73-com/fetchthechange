@@ -148,14 +148,18 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
         await WebhookHandlers.processWebhook(req.body as Buffer, sig);
         res.status(200).json({ received: true });
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error ?? '');
+      } catch (error: any) {
+        const msg = error.message || '';
         if (msg.includes('signature') || msg.includes('No signatures found') || msg.includes('timestamp')) {
-          console.error('[stripe] Webhook signature validation failed', msg, { ip: req.ip });
+          const { ErrorLogger } = await import('./services/logger');
+          await ErrorLogger.error('stripe', 'Webhook signature validation failed', error, {
+            ip: req.ip,
+          });
           return res.status(401).json({ error: 'Invalid signature' });
         }
 
-        console.error('[stripe] Webhook processing failed', msg);
+        const { ErrorLogger } = await import('./services/logger');
+        await ErrorLogger.error('stripe', 'Webhook processing failed', error);
         return res.status(500).json({ error: 'Processing failed' });
       }
     }
@@ -176,14 +180,18 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         const event = await verifyResendWebhook(req.body, req.headers as Record<string, string | string[] | undefined>);
         await handleResendWebhookEvent(event);
         res.status(200).json({ received: true });
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error ?? '');
+      } catch (error: any) {
+        const msg = error.message || '';
         if (msg.includes('signature') || msg.includes('timestamp') || msg.includes('No signatures found')) {
-          console.error('[email] Resend webhook signature validation failed', msg, { ip: req.ip });
+          const { ErrorLogger } = await import('./services/logger');
+          await ErrorLogger.error('email', 'Resend webhook signature validation failed', error, {
+            ip: req.ip,
+          });
           return res.status(401).json({ error: 'Invalid signature' });
         }
 
-        console.error('[email] Resend webhook processing failed', msg);
+        const { ErrorLogger } = await import('./services/logger');
+        await ErrorLogger.error('email', 'Resend webhook processing failed', error);
         return res.status(500).json({ error: 'Processing failed' });
       }
     }
@@ -286,6 +294,15 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
       }
     } catch (err) {
       console.error("[Bootstrap] Welcome campaign bootstrap failed:", err);
+      try {
+        const { ErrorLogger } = await import("./services/logger");
+        await ErrorLogger.error("scheduler", "Welcome campaign bootstrap failed",
+          err instanceof Error ? err : null,
+          { errorMessage: err instanceof Error ? err.message : String(err) }
+        ).catch(() => {});
+      } catch {
+        // Logger import failed — already logged to console above
+      }
     }
   })().catch((err) => console.error("[Bootstrap] Unhandled bootstrap error:", err));
 
@@ -293,6 +310,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   // the ensure* migrations release their DB connections first, preventing
   // pool exhaustion that causes connection timeouts.
   const { startScheduler } = await import("./services/scheduler");
+  const { ErrorLogger } = await import("./services/logger");
   (async () => {
     const maxRetries = 5;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -310,7 +328,10 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         }
       }
     }
-    console.error("[CRITICAL] Scheduler failed to start after all retries — monitoring is disabled. Exiting so the platform restarts the process.", { maxRetries });
+    console.error("[CRITICAL] Scheduler failed to start after all retries — monitoring is disabled. Exiting so the platform restarts the process.");
+    try {
+      await ErrorLogger.error("scheduler", "Scheduler failed to start after all retries — monitoring is disabled", null, { maxRetries });
+    } catch { /* DB may be down — already logged to stderr */ }
     process.exit(1);
   })().catch((err) => {
     console.error("[CRITICAL] Scheduler IIFE unhandled error:", err);
@@ -339,17 +360,10 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
 
   startStripeInitWithRetry();
 
-  // Error Handler — log safe fields only; never emit err.stack so DSNs,
-  // bearer tokens, and provider keys embedded in library stack traces
-  // don't land in stdout.
+  // Error Handler
   app.use((err: any, _req: any, res: any, next: any) => {
-    const isErrObj = err !== null && err !== undefined && typeof err === "object";
-    const status = isErrObj ? (err.status || err.statusCode || 500) : 500;
-    console.error("Internal Server Error:", {
-      name: isErrObj && typeof err.name === "string" ? err.name : "NonErrorThrow",
-      code: isErrObj && err.code ? String(err.code) : undefined,
-      message: err instanceof Error ? err.message : String(err ?? "Unhandled error"),
-    });
+    const status = err.status || err.statusCode || 500;
+    console.error("Internal Server Error:", err);
     if (res.headersSent) return next(err);
     return res.status(status).json({ message: "Internal Server Error" });
   });
@@ -389,6 +403,7 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
   const cron = (await import("node-cron")).default;
   const { browserPool } = await import("./services/browserPool");
   const { stopScheduler } = await import("./services/scheduler");
+  const { stopRouteTimers } = await import("./routes");
   const { pool: dbPool } = await import("./db");
   let shuttingDown = false;
   const shutdown = async () => {
@@ -427,6 +442,9 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store';
         }
       }, 9_000).unref();
     });
+    // Stop route timers before closing DB pool
+    console.log("Stopping route timers...");
+    stopRouteTimers();
     // Drain warm browsers
     let cleanupFailed = false;
     console.log("Draining browser pool...");

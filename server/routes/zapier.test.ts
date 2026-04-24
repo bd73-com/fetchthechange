@@ -22,6 +22,16 @@ vi.mock("../utils/encryption", () => ({
   hashUrl: (url: string) => `hash:${url}`,
 }));
 
+// Mock logger
+const mockLoggerInfo = vi.fn().mockResolvedValue(undefined);
+const mockLoggerWarning = vi.fn().mockResolvedValue(undefined);
+vi.mock("../services/logger", () => ({
+  ErrorLogger: {
+    info: (...args: any[]) => mockLoggerInfo(...args),
+    warning: (...args: any[]) => mockLoggerWarning(...args),
+  },
+}));
+
 // Mock db for /changes route
 const mockDbSelect = vi.fn();
 vi.mock("../db", () => ({

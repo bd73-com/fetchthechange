@@ -4,6 +4,7 @@ import { sendNotificationEmail, sendDigestEmail, type EmailResult } from "./emai
 import { deliver as deliverWebhook, type WebhookConfig } from "./webhookDelivery";
 import { deliver as deliverSlack } from "./slackDelivery";
 import { decryptToken } from "../utils/encryption";
+import { ErrorLogger } from "./logger";
 import { evaluateConditions } from "./conditions";
 import { deliverToAutomationSubscriptions } from "./automationDelivery";
 
@@ -320,7 +321,7 @@ async function deliverToChannels(
       } else if (ch.channel === "slack" && !result.slack) {
         result.slack = { success: false, error: msg };
       }
-      console.error(`[notification] Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err.message : String(err), { monitorId: monitor.id, channel: ch.channel });
+      await ErrorLogger.error("email", `Channel delivery failed for ${ch.channel} on monitor ${monitor.id}`, err instanceof Error ? err : null, { monitorId: monitor.id, channel: ch.channel });
     }
   });
 
@@ -480,7 +481,7 @@ async function deliverDigestToChannels(
       } else if (ch.channel === "slack" && !result.slack) {
         result.slack = { success: false, error: msg };
       }
-      console.error(`[notification] Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err.message : String(err), { monitorId: monitor.id, channel: ch.channel });
+      await ErrorLogger.error("email", `Digest channel delivery failed for ${ch.channel}`, err instanceof Error ? err : null, { monitorId: monitor.id, channel: ch.channel });
     }
   });
 
@@ -521,17 +522,21 @@ export async function processChangeNotification(
   try {
     conditions = await storage.getMonitorConditions(monitor.id);
   } catch (err) {
-    console.error(
-      `[scheduler] Failed to load conditions for monitor ${monitor.id}, proceeding with notification`,
-      err instanceof Error ? err.message : String(err),
+    await ErrorLogger.error(
+      "scheduler",
+      `Failed to load conditions for monitor ${monitor.id}, proceeding with notification`,
+      err instanceof Error ? err : new Error(String(err)),
     );
     // Fall through — send notification when conditions cannot be checked
   }
   if (conditions.length > 0) {
     const passes = evaluateConditions(conditions, change.oldValue, change.newValue);
     if (!passes) {
-      console.log(
-        `[scheduler] Conditions blocked notification for monitor "${monitor.name}" (ID ${monitor.id}) — automation subscriptions (Zapier) also skipped`,
+      // Log with monitor name and explicit mention that automation (Zapier) delivery
+      // was also blocked so users investigating silent Zaps can find this entry.
+      await ErrorLogger.info(
+        "scheduler",
+        `Conditions blocked notification for monitor "${monitor.name}" (ID ${monitor.id}) — automation subscriptions (Zapier) also skipped`,
         { monitorId: monitor.id, monitorName: monitor.name, conditionCount: conditions.length, automationBlocked: true },
       );
       return null;
@@ -542,7 +547,7 @@ export async function processChangeNotification(
   // This runs independently of channel checks so Zapier still fires even when
   // all traditional channels (email/webhook/slack) are disabled.
   deliverToAutomationSubscriptions(monitor, change).catch((err) => {
-    console.warn(`[scheduler] Automation delivery failed for monitor "${monitor.name}"`, { monitorId: monitor.id, error: err instanceof Error ? err.message : String(err) });
+    ErrorLogger.warning("scheduler", `Automation delivery failed for monitor "${monitor.name}"`, { monitorId: monitor.id, error: err instanceof Error ? err.message : String(err) }).catch(() => {});
   });
 
   // Check if any traditional channel is active (backwards compat: falls back to emailEnabled)
@@ -603,7 +608,7 @@ export async function processDigestBatch(
   const foundIds = new Set(changes.map((c) => c.id));
   const orphanedEntries = entries.filter((e) => !foundIds.has(e.changeId));
   if (orphanedEntries.length > 0) {
-    console.warn(`[scheduler] Digest batch for monitor ${monitor.id}: ${orphanedEntries.length} queue entries reference deleted changes`, { monitorId: monitor.id, orphanedChangeIds: orphanedEntries.map((e) => e.changeId) });
+    await ErrorLogger.warning("scheduler", `Digest batch for monitor ${monitor.id}: ${orphanedEntries.length} queue entries reference deleted changes`, { monitorId: monitor.id, orphanedChangeIds: orphanedEntries.map((e) => e.changeId) });
     await storage.markQueueEntriesDelivered(orphanedEntries.map((e) => e.id));
   }
 
@@ -623,7 +628,7 @@ export async function processDigestBatch(
       const newAttempts = await storage.incrementQueueEntryAttempts(entry.id);
       if (newAttempts >= MAX_QUEUE_ATTEMPTS) {
         await storage.markQueueEntryPermanentlyFailed(entry.id);
-        console.warn(`[scheduler] Digest queue entry ${entry.id} for monitor ${monitor.id} permanently failed after ${newAttempts} attempts`, { monitorId: monitor.id, notificationQueueId: entry.id, attempts: newAttempts });
+        await ErrorLogger.warning("scheduler", `Digest queue entry ${entry.id} for monitor ${monitor.id} permanently failed after ${newAttempts} attempts`, { monitorId: monitor.id, notificationQueueId: entry.id, attempts: newAttempts });
       }
     }
   }
@@ -668,7 +673,7 @@ export async function processQueuedNotifications(): Promise<void> {
       for (const entry of entries) {
         const change = changesById.get(entry.changeId);
         if (!change) {
-          console.warn(`[scheduler] Queued notification for monitor ${monitorId}: change ${entry.changeId} not found, marking entry ${entry.id} as delivered`, { monitorId, changeId: entry.changeId, notificationQueueId: entry.id });
+          await ErrorLogger.warning("scheduler", `Queued notification for monitor ${monitorId}: change ${entry.changeId} not found, marking entry ${entry.id} as delivered`, { monitorId, changeId: entry.changeId, notificationQueueId: entry.id });
           await storage.markQueueEntryDelivered(entry.id);
           continue;
         }
@@ -680,12 +685,12 @@ export async function processQueuedNotifications(): Promise<void> {
           const newAttempts = await storage.incrementQueueEntryAttempts(entry.id);
           if (newAttempts >= MAX_QUEUE_ATTEMPTS) {
             await storage.markQueueEntryPermanentlyFailed(entry.id);
-            console.warn(`[scheduler] Notification queue entry ${entry.id} for monitor ${monitorId} permanently failed after ${newAttempts} attempts`, { monitorId, notificationQueueId: entry.id, attempts: newAttempts });
+            await ErrorLogger.warning("scheduler", `Notification queue entry ${entry.id} for monitor ${monitorId} permanently failed after ${newAttempts} attempts`, { monitorId, notificationQueueId: entry.id, attempts: newAttempts });
           }
         }
       }
     } catch (error) {
-      console.error(`[scheduler] Failed to process queued notifications for monitor ${monitorId}`, error instanceof Error ? error.message : String(error), { monitorId });
+      await ErrorLogger.error("scheduler", `Failed to process queued notifications for monitor ${monitorId}`, error instanceof Error ? error : null, { monitorId });
     }
   }
 
@@ -697,7 +702,7 @@ export async function processQueuedNotifications(): Promise<void> {
       await storage.markQueueEntryPermanentlyFailed(entry.id);
     }
     const monitorIds = Array.from(new Set(staleEntries.map(e => e.monitorId)));
-    console.warn(`[scheduler] Marked ${staleEntries.length} stale notification queue entries as permanently failed (older than 48 hours)`, { count: staleEntries.length, monitorIds, entryIds: staleEntries.map(e => e.id) });
+    await ErrorLogger.warning("scheduler", `Marked ${staleEntries.length} stale notification queue entries as permanently failed (older than 48 hours)`, { count: staleEntries.length, monitorIds, entryIds: staleEntries.map(e => e.id) });
   }
 }
 
@@ -739,7 +744,7 @@ export async function processDigestCron(): Promise<void> {
         emailsSent++;
       }
     } catch (error) {
-      console.error(`[scheduler] Failed to process digest for monitor ${prefs.monitorId}`, error instanceof Error ? error.message : String(error), { monitorId: prefs.monitorId });
+      await ErrorLogger.error("scheduler", `Failed to process digest for monitor ${prefs.monitorId}`, error instanceof Error ? error : null, { monitorId: prefs.monitorId });
     }
   }
 
@@ -748,6 +753,6 @@ export async function processDigestCron(): Promise<void> {
     console.log(`[Digest] Processed ${monitorsProcessed} monitors, sent ${emailsSent} emails in ${duration}ms`);
   }
   if (duration > 30000) {
-    console.warn(`[scheduler] Digest batch processing slow (${duration}ms)`, { batchSize: digestPrefs.length, duration });
+    await ErrorLogger.warning("scheduler", `Digest batch processing slow (${duration}ms)`, { batchSize: digestPrefs.length, duration });
   }
 }

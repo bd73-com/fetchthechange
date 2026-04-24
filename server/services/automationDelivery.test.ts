@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock storage
 const mockGetActiveAutomationSubscriptions = vi.fn();
@@ -20,6 +20,16 @@ vi.mock("../storage", () => ({
 const mockSsrfSafeFetch = vi.fn();
 vi.mock("../utils/ssrf", () => ({
   ssrfSafeFetch: (...args: any[]) => mockSsrfSafeFetch(...args),
+}));
+
+// Mock logger
+const mockLoggerInfo = vi.fn().mockResolvedValue(undefined);
+const mockLoggerWarning = vi.fn().mockResolvedValue(undefined);
+vi.mock("./logger", () => ({
+  ErrorLogger: {
+    info: (...args: any[]) => mockLoggerInfo(...args),
+    warning: (...args: any[]) => mockLoggerWarning(...args),
+  },
 }));
 
 import { deliverToAutomationSubscriptions } from "./automationDelivery";
@@ -75,19 +85,9 @@ function makeSub(overrides?: Partial<AutomationSubscription>): AutomationSubscri
 }
 
 describe("deliverToAutomationSubscriptions", () => {
-  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
-  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
-
   beforeEach(() => {
     vi.clearAllMocks();
     mockIncrementAutomationSubscriptionFailures.mockResolvedValue(1);
-    consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    consoleWarnSpy.mockRestore();
-    consoleLogSpy.mockRestore();
   });
 
   it("returns immediately when no active subscriptions", async () => {
@@ -131,15 +131,18 @@ describe("deliverToAutomationSubscriptions", () => {
     expect(mockTouchAndResetAutomationSubscription).toHaveBeenCalledWith(7);
   });
 
-  it("logs success via console.log", async () => {
+  it("logs success via console.log, not ErrorLogger", async () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     mockGetActiveAutomationSubscriptions.mockResolvedValue([makeSub()]);
     mockSsrfSafeFetch.mockResolvedValue({ ok: true, status: 200 });
 
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
-    expect(consoleLogSpy).toHaveBeenCalledWith(
+    expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining("[Automation] Delivered successfully"),
     );
+    expect(mockLoggerInfo).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
   });
 
   it("queues durable retry on transient 5xx response (does NOT bump failure counter)", async () => {
@@ -227,7 +230,8 @@ describe("deliverToAutomationSubscriptions", () => {
     await deliverToAutomationSubscriptions(makeMonitor(), makeChange());
 
     expect(mockDeactivateAutomationSubscription).toHaveBeenCalledWith(9, "user1");
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
+    expect(mockLoggerWarning).toHaveBeenCalledWith(
+      "scheduler",
       expect.stringContaining("auto-deactivated"),
       expect.objectContaining({ consecutiveFailures: 15 }),
     );

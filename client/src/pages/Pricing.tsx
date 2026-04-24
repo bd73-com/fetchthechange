@@ -69,6 +69,7 @@ const plans = [
       "JavaScript-rendered pages",
       "Fix Selector tool",
       "Full change history",
+      "Admin event log",
       "REST API access (300 req/min)",
       "Zapier integration (7,000+ apps, no server required)",
     ],

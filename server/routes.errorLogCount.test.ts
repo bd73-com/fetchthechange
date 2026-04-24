@@ -1,13 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
-
-const previousAppOwnerId = process.env.APP_OWNER_ID;
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock variables
 // ---------------------------------------------------------------------------
 const {
   mockGetUser,
-  mockDbExecute,
+  mockGetMonitors,
   mockDbSelect,
   mockLimitFn,
   mockSelectWhereFn,
@@ -19,11 +17,10 @@ const {
   const mockSelectWhereFn = vi.fn(() => ({ limit: mockLimitFn, orderBy: mockOrderByFn }));
   const mockSelectFromFn = vi.fn(() => ({ where: mockSelectWhereFn, orderBy: mockOrderByFn }));
   const mockDbSelect = vi.fn(() => ({ from: mockSelectFromFn }));
-  const mockDbExecute = vi.fn();
 
   return {
     mockGetUser: vi.fn(),
-    mockDbExecute,
+    mockGetMonitors: vi.fn(),
     mockDbSelect,
     mockLimitFn,
     mockSelectWhereFn,
@@ -33,7 +30,7 @@ const {
 });
 
 // ---------------------------------------------------------------------------
-// Module mocks
+// Module mocks (same pattern as deleteErrorLog test)
 // ---------------------------------------------------------------------------
 vi.mock("./replit_integrations/auth", () => ({
   setupAuth: vi.fn().mockResolvedValue(undefined),
@@ -50,21 +47,22 @@ vi.mock("./replit_integrations/auth/storage", () => ({
 vi.mock("./storage", () => ({
   storage: {
     getMonitor: vi.fn(),
-    getMonitors: vi.fn().mockResolvedValue([]),
+    getMonitors: (...args: any[]) => mockGetMonitors(...args),
     getAllActiveMonitors: vi.fn().mockResolvedValue([]),
     deleteMonitor: vi.fn(),
     createMonitor: vi.fn(),
     updateMonitor: vi.fn(),
+    getMonitorCount: vi.fn().mockResolvedValue(0),
   },
 }));
 
 vi.mock("./db", () => ({
   db: {
     select: (...args: any[]) => mockDbSelect(...args),
-    delete: vi.fn(() => ({ where: vi.fn() })),
+    delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
     insert: vi.fn().mockReturnValue({ values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }),
-    update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([]) })) })) })),
-    execute: (...args: any[]) => mockDbExecute(...args),
+    update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }) }) }),
+    execute: vi.fn().mockResolvedValue({ rows: [] }),
   },
 }));
 
@@ -118,16 +116,8 @@ vi.mock("./services/scheduler", () => ({
   startScheduler: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("./services/campaignEmail", () => ({
-  sendTestCampaignEmail: vi.fn(),
-  previewRecipients: vi.fn().mockResolvedValue({ count: 0, users: [] }),
-  resolveRecipients: vi.fn().mockResolvedValue([]),
-  triggerCampaignSend: vi.fn().mockResolvedValue({ totalRecipients: 0 }),
-  cancelCampaign: vi.fn().mockResolvedValue({ sentSoFar: 0, cancelled: 0 }),
-}));
-
 // ---------------------------------------------------------------------------
-// Helpers: capture route handlers from Express mock
+// Helpers
 // ---------------------------------------------------------------------------
 type RouteHandler = (req: any, res: any, next?: any) => Promise<any>;
 const registeredRoutes: Record<string, Record<string, RouteHandler[]>> = {};
@@ -177,26 +167,18 @@ let routesRegistered = false;
 async function ensureRoutes() {
   if (routesRegistered) return;
   process.env.APP_OWNER_ID = "owner-123";
+
   const { registerRoutes } = await import("./routes");
   const app = makeMockApp();
-  const mockHttpServer = {} as any;
-  await registerRoutes(mockHttpServer, app as any);
+  await registerRoutes(app as any, app as any);
   routesRegistered = true;
 }
 
-afterAll(() => {
-  if (previousAppOwnerId === undefined) {
-    delete process.env.APP_OWNER_ID;
-  } else {
-    process.env.APP_OWNER_ID = previousAppOwnerId;
-  }
-});
-
 // ---------------------------------------------------------------------------
-// Tests: GET /api/admin/campaigns/dashboard
+// Tests
 // ---------------------------------------------------------------------------
-describe("GET /api/admin/campaigns/dashboard", () => {
-  const ENDPOINT = "/api/admin/campaigns/dashboard";
+describe("GET /api/admin/error-logs/count", () => {
+  const ENDPOINT = "/api/admin/error-logs/count";
 
   beforeEach(async () => {
     await ensureRoutes();
@@ -204,159 +186,133 @@ describe("GET /api/admin/campaigns/dashboard", () => {
 
     // Reset chain mocks
     mockOrderByFn.mockReturnValue({ limit: mockLimitFn });
+    mockSelectWhereFn.mockReturnValue({ limit: mockLimitFn, orderBy: mockOrderByFn });
     mockSelectFromFn.mockReturnValue({ where: mockSelectWhereFn, orderBy: mockOrderByFn });
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
   });
 
-  it("returns 401 when user is not authenticated", async () => {
+  it("returns 401 with count 0 when user is not authenticated", async () => {
     const req = { user: null };
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(401);
-    expect(res._json).toEqual({ message: "Unauthorized" });
+    expect(res._json).toEqual({ count: 0 });
   });
 
-  it("returns 403 when user is not power tier", async () => {
+  it("returns 403 with count 0 when user is not power tier", async () => {
     mockGetUser.mockResolvedValue({ tier: "pro" });
     const req = { user: { claims: { sub: "user-1" } } };
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(403);
-    expect(res._json).toEqual({ message: "Admin access required" });
+    expect(res._json).toEqual({ count: 0 });
   });
 
-  it("returns 403 when power user is not app owner", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    const req = { user: { claims: { sub: "not-the-owner" } } };
+  it("returns 403 with count 0 when user is null in database", async () => {
+    mockGetUser.mockResolvedValue(null);
+    const req = { user: { claims: { sub: "user-1" } } };
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(403);
-    expect(res._json).toEqual({ message: "Owner access required" });
+    expect(res._json).toEqual({ count: 0 });
   });
 
-  it("returns dashboard stats with correct numeric conversion", async () => {
+  it("returns count of logs visible to app owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
-    // Simulate PostgreSQL returning numeric types as strings (common with raw SQL)
-    mockDbExecute.mockResolvedValue({
-      rows: [{
-        totalCampaigns: "3",
-        totalSent: "150",
-        totalOpened: "45",
-        totalClicked: "12",
-        avgOpenRate: "32.5",
-        avgClickRate: "8.3",
-      }],
-    });
+    mockGetMonitors.mockResolvedValue([]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: null },
+      { id: 2, context: { monitorId: 10 } },
+      { id: 3, context: null },
+    ]);
+
+    const req = { user: { claims: { sub: "owner-123" } } };
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // Owner sees all 3: null context → owner-only, monitorId 10 → not in user monitors but fallback is owner
+    // Actually monitorId 10 is numeric and not in userMonitorIds (empty set), so it's excluded
+    // null context entries fall through to isAppOwner = true
+    expect(res._json).toEqual({ count: 2 });
+  });
+
+  it("returns count filtered to user's monitors for non-owner", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 5 }, { id: 10 }]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: 5 } },
+      { id: 2, context: { monitorId: 10 } },
+      { id: 3, context: { monitorId: 99 } },
+      { id: 4, context: null },
+    ]);
+
+    const req = { user: { claims: { sub: "non-owner-user" } } };
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // Only monitors 5 and 10 match; monitorId 99 excluded, null context excluded (not owner)
+    expect(res._json).toEqual({ count: 2 });
+  });
+
+  it("returns count 0 when no unresolved logs exist", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
     mockLimitFn.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "owner-123" } } };
     const res = await callHandler("get", ENDPOINT, req);
-
     expect(res._status).toBe(200);
-    expect(res._json).toEqual({
-      totalCampaigns: 3,
-      totalSent: 150,
-      totalOpened: 45,
-      totalClicked: 12,
-      avgOpenRate: 32.5,
-      avgClickRate: 8.3,
-      recentCampaigns: [],
-    });
+    expect(res._json).toEqual({ count: 0 });
   });
 
-  it("returns zero rates when no campaigns exist", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockDbExecute.mockResolvedValue({
-      rows: [{
-        totalCampaigns: 0,
-        totalSent: 0,
-        totalOpened: 0,
-        totalClicked: 0,
-        avgOpenRate: "0.0",
-        avgClickRate: "0.0",
-      }],
-    });
-    mockLimitFn.mockResolvedValue([]);
-
-    const req = { user: { claims: { sub: "owner-123" } } };
-    const res = await callHandler("get", ENDPOINT, req);
-
-    expect(res._status).toBe(200);
-    expect(res._json.avgOpenRate).toBe(0);
-    expect(res._json.avgClickRate).toBe(0);
-  });
-
-  it("defaults to zero when stats row has null values", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockDbExecute.mockResolvedValue({
-      rows: [{ totalCampaigns: null, totalSent: null, totalOpened: null, totalClicked: null, avgOpenRate: null, avgClickRate: null }],
-    });
-    mockLimitFn.mockResolvedValue([]);
-
-    const req = { user: { claims: { sub: "owner-123" } } };
-    const res = await callHandler("get", ENDPOINT, req);
-
-    expect(res._status).toBe(200);
-    expect(res._json.totalCampaigns).toBe(0);
-    expect(res._json.totalSent).toBe(0);
-    expect(res._json.avgOpenRate).toBe(0);
-    expect(res._json.avgClickRate).toBe(0);
-  });
-
-  it("defaults to zero when stats row is undefined", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockDbExecute.mockResolvedValue({ rows: [undefined] });
-    mockLimitFn.mockResolvedValue([]);
-
-    const req = { user: { claims: { sub: "owner-123" } } };
-    const res = await callHandler("get", ENDPOINT, req);
-
-    expect(res._status).toBe(200);
-    expect(res._json.totalCampaigns).toBe(0);
-    expect(res._json.avgOpenRate).toBe(0);
-    expect(res._json.avgClickRate).toBe(0);
-  });
-
-  it("defaults to zero when rows array is empty", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockDbExecute.mockResolvedValue({ rows: [] });
-    mockLimitFn.mockResolvedValue([]);
-
-    const req = { user: { claims: { sub: "owner-123" } } };
-    const res = await callHandler("get", ENDPOINT, req);
-
-    expect(res._status).toBe(200);
-    expect(res._json.totalCampaigns).toBe(0);
-    expect(res._json.avgOpenRate).toBe(0);
-    expect(res._json.avgClickRate).toBe(0);
-  });
-
-  it("includes recent campaigns in response", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockDbExecute.mockResolvedValue({
-      rows: [{ totalCampaigns: 2, totalSent: 10, totalOpened: 5, totalClicked: 2, avgOpenRate: "50.0", avgClickRate: "20.0" }],
-    });
-    const mockCampaigns = [
-      { id: 1, name: "Campaign A", status: "sent", sentCount: 5, openedCount: 3, clickedCount: 1 },
-      { id: 2, name: "Campaign B", status: "sent", sentCount: 5, openedCount: 2, clickedCount: 1 },
-    ];
-    mockLimitFn.mockResolvedValue(mockCampaigns);
-
-    const req = { user: { claims: { sub: "owner-123" } } };
-    const res = await callHandler("get", ENDPOINT, req);
-
-    expect(res._status).toBe(200);
-    expect(res._json.recentCampaigns).toEqual(mockCampaigns);
-    expect(res._json.recentCampaigns).toHaveLength(2);
-  });
-
-  it("returns 500 when database throws an error", async () => {
+  it("returns count 0 when database throws an error", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockGetUser.mockResolvedValue({ tier: "power" });
-    mockDbExecute.mockRejectedValue(new Error("DB connection lost"));
+    mockLimitFn.mockRejectedValue(new Error("DB connection lost"));
 
     const req = { user: { claims: { sub: "owner-123" } } };
     const res = await callHandler("get", ENDPOINT, req);
-
-    expect(res._status).toBe(500);
-    expect(res._json).toEqual({ message: "Failed to fetch campaign dashboard" });
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ count: 0 });
     errorSpy.mockRestore();
+  });
+
+  it("treats string monitorId as missing (non-owner gets 0)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 42 }]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: "42" } },
+    ]);
+
+    const req = { user: { claims: { sub: "non-owner" } } };
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    // String "42" is not numeric, treated as absent, non-owner can't see
+    expect(res._json).toEqual({ count: 0 });
+  });
+
+  it("owner sees logs with string monitorId (treated as system log)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: "injected" } },
+    ]);
+
+    const req = { user: { claims: { sub: "owner-123" } } };
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ count: 1 });
+  });
+
+  it("correctly counts mixed context types", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 5 }]);
+    mockLimitFn.mockResolvedValue([
+      { id: 1, context: { monitorId: 5 } },          // numeric, matches
+      { id: 2, context: { monitorId: "5" } },         // string → excluded
+      { id: 3, context: null },                        // null → excluded (non-owner)
+      { id: 4, context: { monitorId: 99 } },          // numeric, no match
+      { id: 5, context: { other: "data" } },           // no monitorId → excluded
+    ]);
+
+    const req = { user: { claims: { sub: "non-owner" } } };
+    const res = await callHandler("get", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ count: 1 });
   });
 });

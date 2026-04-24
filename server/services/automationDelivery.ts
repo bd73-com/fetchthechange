@@ -3,6 +3,7 @@ import { AUTOMATION_SUBSCRIPTION_LIMITS } from "@shared/models/auth";
 import { storage } from "../storage";
 import { ssrfSafeFetch } from "../utils/ssrf";
 import { buildWebhookPayload } from "./webhookDelivery";
+import { ErrorLogger } from "./logger";
 
 export type AutomationDeliveryOutcome =
   | { kind: "success"; statusCode: number }
@@ -142,7 +143,7 @@ async function handleDeliveryFailure(
 
   if (failures >= AUTOMATION_SUBSCRIPTION_LIMITS.failureThreshold) {
     await storage.deactivateAutomationSubscription(subscriptionId, monitor.userId);
-    console.warn(`[scheduler] Automation subscription auto-deactivated after ${failures} consecutive failures for monitor "${monitor.name}"`, {
+    await ErrorLogger.warning("scheduler", `Automation subscription auto-deactivated after ${failures} consecutive failures for monitor "${monitor.name}"`, {
       subscriptionId,
       monitorId: monitor.id,
       platform,
@@ -150,7 +151,7 @@ async function handleDeliveryFailure(
       error,
     });
   } else {
-    console.warn(`[scheduler] Automation delivery failed for monitor "${monitor.name}"`, {
+    await ErrorLogger.warning("scheduler", `Automation delivery failed for monitor "${monitor.name}"`, {
       subscriptionId,
       monitorId: monitor.id,
       platform,

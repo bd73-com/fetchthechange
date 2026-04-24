@@ -18,6 +18,12 @@ vi.mock("./replit_integrations/auth/storage", () => ({
   },
 }));
 
+vi.mock("./services/logger", () => ({
+  ErrorLogger: {
+    error: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
 vi.mock("./storage", () => ({
   storage: {
     downgradeHourlyMonitors: vi.fn().mockResolvedValue({ count: 0, monitorNames: [] }),
