@@ -4,11 +4,15 @@
  * User-supplied URLs can carry credentials in userinfo (`https://user:pw@host`)
  * or query-string (`?api_key=…`). Logging the hostname alone keeps enough
  * triage signal without leaking those secrets to Replit logs or error_logs.context.
+ *
+ * Parse failures return `<invalid-url>` (with angle brackets) rather than a
+ * plain word, so triage can distinguish a malformed URL from a real host whose
+ * name happens to be a common English word (e.g. `http://unknown/path`).
  */
 export function safeHostname(urlString: string): string {
   try {
     return new URL(urlString).hostname;
   } catch {
-    return "unknown";
+    return "<invalid-url>";
   }
 }
