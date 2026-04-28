@@ -91,6 +91,28 @@ export class ErrorLogger {
     const errorType = error?.constructor?.name || null;
     const logMsg = `${prefix} ${sanitizedMessage}`;
 
+    // Denormalize the monitorId out of context so admin error-log endpoints
+    // can filter ownership in SQL via the partial index on `monitor_id`
+    // instead of materializing every row and filtering JSON in JS. Reject
+    // non-integer numbers (NaN, Infinity, decimals) and out-of-range values
+    // — the column is `INTEGER`, so a bad value would fail the INSERT and
+    // ErrorLogger's catch block would silently drop the log row. `typeof
+    // === "number"` alone admits NaN; `Number.isInteger` doesn't. String
+    // `monitorId` (e.g. "injected" sentinel) and other types fall through
+    // to NULL so the dedup bucket and the IN-list join behave consistently
+    // with the route-level type guard. See GitHub issue #465.
+    const rawMonitorId =
+      sanitizedContext && typeof (sanitizedContext as any).monitorId === "number"
+        ? (sanitizedContext as any).monitorId as number
+        : null;
+    const ctxMonitorId =
+      rawMonitorId !== null &&
+      Number.isInteger(rawMonitorId) &&
+      rawMonitorId >= -2147483648 &&
+      rawMonitorId <= 2147483647
+        ? rawMonitorId
+        : null;
+
     if (level === "error") {
       if (error?.message) {
         console.error(logMsg, sanitizeString(error.message));
@@ -103,15 +125,19 @@ export class ErrorLogger {
 
     try {
       // Atomic upsert against the partial unique index
-      // `error_logs_unresolved_dedup_idx` (level, source, message) WHERE
-      // resolved = false. Collapses the read-modify-write window of the old
-      // SELECT-then-INSERT dedup path so concurrent writers with the same
-      // (level, source, message) deterministically land in a single row with
-      // `occurrence_count` bumped by every caller. Without this index +
-      // upsert, concurrent writers with shared messages (e.g. the compacted
-      // "Browserless service unavailable" warning) both miss the SELECT and
-      // both INSERT, producing duplicate rows in the admin UI. See GitHub
-      // issue #448.
+      // `error_logs_unresolved_dedup_idx` (level, source, message, monitor_id)
+      // WHERE resolved = false. NULLS NOT DISTINCT (added in #465) makes two
+      // system-level rows (monitor_id IS NULL) with the same
+      // (level, source, message) collide on the same dedup bucket. Collapses
+      // the read-modify-write window of the old SELECT-then-INSERT dedup path
+      // so concurrent writers with the same dedup tuple deterministically
+      // land in a single row with `occurrence_count` bumped by every caller.
+      // Without this index + upsert, concurrent writers with shared messages
+      // (e.g. the compacted "Browserless service unavailable" warning) both
+      // miss the SELECT and both INSERT, producing duplicate rows in the
+      // admin UI. monitor_id is in the tuple so per-monitor errors with
+      // shared messages get separate rows and the admin UI's per-user
+      // attribution works. See GitHub issues #448 and #465.
       //
       // Stack/context semantics: `COALESCE(EXCLUDED.col, currentTable.col)`
       // is last-writer-wins when the incoming call supplies a non-null value,
@@ -130,12 +156,13 @@ export class ErrorLogger {
           errorType,
           stackTrace: sanitizedStack,
           context: sanitizedContext,
+          monitorId: ctxMonitorId,
           firstOccurrence: now,
           timestamp: now,
           occurrenceCount: 1,
         })
         .onConflictDoUpdate({
-          target: [errorLogs.level, errorLogs.source, errorLogs.message],
+          target: [errorLogs.level, errorLogs.source, errorLogs.message, errorLogs.monitorId],
           targetWhere: sql`resolved = false`,
           set: {
             timestamp: now,

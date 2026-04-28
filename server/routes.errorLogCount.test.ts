@@ -214,44 +214,35 @@ describe("GET /api/admin/error-logs/count", () => {
     expect(res._json).toEqual({ count: 0 });
   });
 
-  it("returns count of logs visible to app owner", async () => {
+  it("returns count of logs visible to app owner (matched rows from SQL)", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: null },
-      { id: 2, context: { monitorId: 10 } },
-      { id: 3, context: null },
-    ]);
+    // Ownership filter is now pushed into SQL (see #465), so the DB hands
+    // back exactly the rows this user is authorized to see — no JS filter.
+    // Owner with zero monitors sees only system logs (monitor_id IS NULL).
+    mockLimitFn.mockResolvedValue([{ id: 1 }, { id: 2 }]);
 
     const req = { user: { claims: { sub: "owner-123" } } };
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(200);
-    // Owner sees all 3: null context → owner-only, monitorId 10 → not in user monitors but fallback is owner
-    // Actually monitorId 10 is numeric and not in userMonitorIds (empty set), so it's excluded
-    // null context entries fall through to isAppOwner = true
     expect(res._json).toEqual({ count: 2 });
   });
 
   it("returns count filtered to user's monitors for non-owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 5 }, { id: 10 }]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: 5 } },
-      { id: 2, context: { monitorId: 10 } },
-      { id: 3, context: { monitorId: 99 } },
-      { id: 4, context: null },
-    ]);
+    // SQL `WHERE monitor_id IN (5, 10)` returns only the user's matches.
+    mockLimitFn.mockResolvedValue([{ id: 1 }, { id: 2 }]);
 
     const req = { user: { claims: { sub: "non-owner-user" } } };
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(200);
-    // Only monitors 5 and 10 match; monitorId 99 excluded, null context excluded (not owner)
     expect(res._json).toEqual({ count: 2 });
   });
 
   it("returns count 0 when no unresolved logs exist", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
-    mockGetMonitors.mockResolvedValue([]);
+    mockGetMonitors.mockResolvedValue([{ id: 1 }]);
     mockLimitFn.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "owner-123" } } };
@@ -263,6 +254,7 @@ describe("GET /api/admin/error-logs/count", () => {
   it("returns count 0 when database throws an error", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 1 }]);
     mockLimitFn.mockRejectedValue(new Error("DB connection lost"));
 
     const req = { user: { claims: { sub: "owner-123" } } };
@@ -272,47 +264,32 @@ describe("GET /api/admin/error-logs/count", () => {
     errorSpy.mockRestore();
   });
 
-  it("treats string monitorId as missing (non-owner gets 0)", async () => {
+  it("non-owner with zero monitors short-circuits without hitting error_logs", async () => {
+    // The fast-path in the route returns count: 0 without issuing the
+    // error_logs SELECT — verifies that polling tabs from a Power-tier user
+    // with no monitors don't amplify into N concurrent DB queries. See #465.
     mockGetUser.mockResolvedValue({ tier: "power" });
-    mockGetMonitors.mockResolvedValue([{ id: 42 }]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: "42" } },
-    ]);
+    mockGetMonitors.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "non-owner" } } };
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(200);
-    // String "42" is not numeric, treated as absent, non-owner can't see
     expect(res._json).toEqual({ count: 0 });
+    // No SELECT on error_logs was performed (LIMIT clause never invoked).
+    expect(mockLimitFn).not.toHaveBeenCalled();
   });
 
-  it("owner sees logs with string monitorId (treated as system log)", async () => {
+  it("owner with zero monitors still queries for system-level logs", async () => {
+    // Owner sees system logs (monitor_id IS NULL) even with no monitors,
+    // so the SELECT must still run — only the ownership predicate narrows.
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: "injected" } },
-    ]);
+    mockLimitFn.mockResolvedValue([{ id: 1 }]);
 
     const req = { user: { claims: { sub: "owner-123" } } };
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(res._json).toEqual({ count: 1 });
-  });
-
-  it("correctly counts mixed context types", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockGetMonitors.mockResolvedValue([{ id: 5 }]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: 5 } },          // numeric, matches
-      { id: 2, context: { monitorId: "5" } },         // string → excluded
-      { id: 3, context: null },                        // null → excluded (non-owner)
-      { id: 4, context: { monitorId: 99 } },          // numeric, no match
-      { id: 5, context: { other: "data" } },           // no monitorId → excluded
-    ]);
-
-    const req = { user: { claims: { sub: "non-owner" } } };
-    const res = await callHandler("get", ENDPOINT, req);
-    expect(res._status).toBe(200);
-    expect(res._json).toEqual({ count: 1 });
+    expect(mockLimitFn).toHaveBeenCalled();
   });
 });
