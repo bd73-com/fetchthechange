@@ -559,6 +559,23 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
+  it("non-owner with zero monitors short-circuits without SELECT (filters path)", async () => {
+    // Symmetric to the ids-path short-circuit. The filters branch returns
+    // hasMore: false so the UI doesn't loop back asking for "more" rows.
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+
+    const req = {
+      user: { claims: { sub: "not-the-owner" } },
+      body: { filters: { level: "error" } },
+    };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "0 entries deleted", count: 0, hasMore: false });
+    expect(mockLimitFn).not.toHaveBeenCalled();
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
   it("soft-deletes entries matching filters for app owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);

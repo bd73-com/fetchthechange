@@ -1604,7 +1604,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/admin/error-logs/:id", isAuthenticated, async (req: any, res) => {
+  app.delete("/api/admin/error-logs/:id", isAuthenticated, adminErrorLogsRateLimiter, async (req: any, res) => {
     try {
       const userId = req.user?.claims?.sub;
       if (!userId) {
@@ -1710,7 +1710,12 @@ export async function registerRoutes(
         }
         res.json({ message: `${entries.length} entries deleted`, count: entries.length });
       } else if (filters) {
-        const conditions = [isNull(errorLogs.deletedAt), ownership];
+        // `resolved = false` mirrors the list view's `WHERE` clause —
+        // without it, "delete filtered" would also wipe resolved rows that
+        // never appeared in the UI the admin is acting on, and `hasMore`
+        // would reflect a different population than what they see. See
+        // CodeRabbit feedback on PR #471.
+        const conditions = [eq(errorLogs.resolved, false), isNull(errorLogs.deletedAt), ownership];
         if (filters.level) {
           conditions.push(eq(errorLogs.level, filters.level));
         }
