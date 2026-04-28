@@ -73,15 +73,16 @@ describe("ensureErrorLogColumns", () => {
     mockExecute.mockReset();
   });
 
-  it("executes ALTERs, monitor_id backfill, pg_indexes check, dedup tx, and CONCURRENTLY index creation without throwing", async () => {
+  it("executes ALTERs, monitor_id backfill, pg_indexes checks, dedup tx, and CONCURRENTLY index creation without throwing", async () => {
     // Default empty rows → no existing valid index, proceed to dedup + create.
     mockExecute.mockResolvedValue({ rows: [] });
     await ensureErrorLogColumns();
     // 4 ALTER TABLE (incl. monitor_id from #465) + 1 UPDATE backfill + 1 DO
-    // block (level CHECK) + 1 pg_indexes check + 4 in-tx (SET LOCAL,
-    // advisory lock, UPDATE, DELETE) + 1 CREATE UNIQUE INDEX CONCURRENTLY
-    // (dedup) + 1 CREATE INDEX CONCURRENTLY (monitor_id) = 13
-    expect(mockExecute).toHaveBeenCalledTimes(13);
+    // block (level CHECK) + 2 pg_indexes checks (dedup_idx + monitor_idx)
+    // + 4 in-tx (SET LOCAL, advisory lock, UPDATE, DELETE) + 1 CREATE
+    // UNIQUE INDEX CONCURRENTLY (dedup) + 1 CREATE INDEX CONCURRENTLY
+    // (monitor_id) = 14. See GitHub issue #465.
+    expect(mockExecute).toHaveBeenCalledTimes(14);
     const stmts = mockExecute.mock.calls.map(([arg]: any) => {
       try { return JSON.stringify(arg); } catch { return String(arg); }
     });
@@ -97,7 +98,14 @@ describe("ensureErrorLogColumns", () => {
       s.includes("'info'") &&
       s.includes("'warning'")
     )).toBe(true);
-    expect(stmts.some((s: string) => s.includes("pg_indexes"))).toBe(true);
+    // Both index probes must run — the dedup-only fast-path silently skipped
+    // creating the per-monitor partial index when the dedup index was healthy
+    // but the monitor index was missing/stale (see CodeRabbit feedback on
+    // PR #471).
+    const pgIndexProbes = stmts.filter((s: string) => s.includes("pg_indexes"));
+    expect(pgIndexProbes.length).toBe(2);
+    expect(stmts.some((s: string) => s.includes("error_logs_unresolved_dedup_idx") && s.includes("pg_indexes"))).toBe(true);
+    expect(stmts.some((s: string) => s.includes("error_logs_monitor_idx") && s.includes("pg_indexes"))).toBe(true);
     expect(stmts.some((s: string) => s.includes("pg_advisory_xact_lock"))).toBe(true);
     expect(stmts.some((s: string) =>
       s.includes("CREATE UNIQUE INDEX") &&
@@ -105,14 +113,21 @@ describe("ensureErrorLogColumns", () => {
       s.includes("error_logs_unresolved_dedup_idx") &&
       s.includes("NULLS NOT DISTINCT")
     )).toBe(true);
-    expect(stmts.some((s: string) => s.includes("error_logs_monitor_idx"))).toBe(true);
+    expect(stmts.some((s: string) =>
+      s.includes("CREATE INDEX") &&
+      s.includes("CONCURRENTLY") &&
+      s.includes("error_logs_monitor_idx")
+    )).toBe(true);
   });
 
-  it("skips DDL entirely when a valid, unique, correctly-shaped index already exists", async () => {
-    // pg_indexes check returns a row that passes all five validity gates
-    // (indisvalid, indisunique, indnullsnotdistinct, indexdef includes the
-    // four-column tuple including monitor_id, and the partial predicate)
-    // → fast-path return. See GitHub issues #448 and #465.
+  it("skips DDL entirely when both indexes are valid and correctly-shaped", async () => {
+    // pg_indexes checks return rows that pass every validity gate for BOTH
+    // the dedup index (indisvalid, indisunique, indnullsnotdistinct, columns
+    // + partial predicate) AND the monitor index (indisvalid + columns +
+    // predicate) → fast-path return. The dedup-only fast-path was a bug
+    // because a deploy that crashed between the two CREATE INDEX
+    // CONCURRENTLY steps would leave the monitor index missing forever.
+    // See GitHub issues #448 and #465 (CodeRabbit feedback on PR #471).
     mockExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER first_occurrence
       .mockResolvedValueOnce({ rows: [] }) // ALTER occurrence_count
@@ -125,9 +140,49 @@ describe("ensureErrorLogColumns", () => {
         indisunique: true,
         indnullsnotdistinct: true,
         indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message, monitor_id) NULLS NOT DISTINCT WHERE (resolved = false)",
-      }] });
+      }] }) // pg_indexes dedup
+      .mockResolvedValueOnce({ rows: [{
+        indisvalid: true,
+        indexdef: "CREATE INDEX error_logs_monitor_idx ON public.error_logs USING btree (monitor_id) WHERE (monitor_id IS NOT NULL)",
+      }] }); // pg_indexes monitor
     await ensureErrorLogColumns();
-    expect(mockExecute).toHaveBeenCalledTimes(7); // ALTERs (4) + UPDATE backfill + DO block + pg_indexes
+    expect(mockExecute).toHaveBeenCalledTimes(8); // ALTERs (4) + UPDATE backfill + DO block + pg_indexes×2
+  });
+
+  it("rebuilds monitor index when it is invalid even if dedup index is healthy", async () => {
+    // Regression test for CodeRabbit feedback on PR #471: a deploy that
+    // crashed between the two CREATE INDEX CONCURRENTLY steps could leave
+    // the dedup index healthy and the monitor index missing/stale. The
+    // fast-path must keep going when only the monitor index is bad.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockExecute
+      .mockResolvedValueOnce({ rows: [] }) // ALTER first_occurrence
+      .mockResolvedValueOnce({ rows: [] }) // ALTER occurrence_count
+      .mockResolvedValueOnce({ rows: [] }) // ALTER deleted_at
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitor_id
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE backfill
+      .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
+      .mockResolvedValueOnce({ rows: [{
+        indisvalid: true,
+        indisunique: true,
+        indnullsnotdistinct: true,
+        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message, monitor_id) NULLS NOT DISTINCT WHERE (resolved = false)",
+      }] }) // pg_indexes dedup — healthy
+      .mockResolvedValueOnce({ rows: [{
+        indisvalid: false, // ← INVALID build
+        indexdef: "CREATE INDEX error_logs_monitor_idx ON public.error_logs USING btree (monitor_id) WHERE (monitor_id IS NOT NULL)",
+      }] }) // pg_indexes monitor — invalid
+      .mockResolvedValue({ rows: [] }); // DROP + tx + CREATE
+    await ensureErrorLogColumns();
+    const stmts = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(stmts.some((s: string) => s.includes("DROP INDEX") && s.includes("error_logs_monitor_idx"))).toBe(true);
+    // Healthy dedup index must NOT be dropped.
+    expect(stmts.some((s: string) => s.includes("DROP INDEX") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(false);
+    // CREATE INDEX for monitor_idx must run.
+    expect(stmts.some((s: string) => s.includes("CREATE INDEX") && s.includes("error_logs_monitor_idx"))).toBe(true);
+    warnSpy.mockRestore();
   });
 
   it("drops and rebuilds when existing index is INVALID", async () => {

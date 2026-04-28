@@ -415,10 +415,10 @@ describe("error_logs dedup column migration at startup", () => {
     vi.clearAllMocks();
     const channelError = new Error("permission denied for schema public");
     // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs
-    // migration succeeds (4 ALTERs + 1 monitor_id backfill UPDATE + 1 DO
-    // block level CHECK + 1 pg_indexes check + 4 in-tx + 1 CREATE UNIQUE
-    // INDEX CONCURRENTLY + 1 CREATE INDEX CONCURRENTLY for monitor_id = 13),
-    // api_keys succeed (2), then channel tables fail
+    // migration succeeds (4 ALTERs incl. monitor_id + 1 UPDATE backfill + 1
+    // DO block level CHECK + 2 pg_indexes checks (dedup + monitor) + 4 in-tx
+    // + 1 CREATE UNIQUE INDEX CONCURRENTLY + 1 CREATE INDEX CONCURRENTLY for
+    // monitor_id = 14), api_keys succeed (2), then channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
@@ -429,7 +429,8 @@ describe("error_logs dedup column migration at startup", () => {
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs monitor_id (#465)
       .mockResolvedValueOnce({ rows: [] }) // UPDATE error_logs monitor_id backfill (#465)
       .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
-      .mockResolvedValueOnce({ rows: [] }) // pg_indexes check (no existing idx)
+      .mockResolvedValueOnce({ rows: [] }) // pg_indexes check dedup (no existing idx)
+      .mockResolvedValueOnce({ rows: [] }) // pg_indexes check monitor (no existing idx)
       .mockResolvedValueOnce({ rows: [] }) // SET LOCAL lock_timeout
       .mockResolvedValueOnce({ rows: [] }) // pg_advisory_xact_lock
       .mockResolvedValueOnce({ rows: [] }) // UPDATE dedup
@@ -469,9 +470,10 @@ describe("error_logs dedup column migration at startup", () => {
     vi.clearAllMocks();
     const channelError = new Error("connection timeout");
     // monitor health ALTERs succeed (2), pending_retry_at (1), error_logs
-    // migration succeeds (3 ALTERs + 1 DO block level CHECK + 1 pg_indexes
-    // check + 4 in-tx + 1 CREATE INDEX CONCURRENTLY = 10), api_keys succeed
-    // (2), channel tables fail
+    // migration succeeds (4 ALTERs incl. monitor_id + 1 UPDATE backfill + 1
+    // DO block level CHECK + 2 pg_indexes checks (dedup + monitor) + 4 in-tx
+    // + 1 CREATE UNIQUE INDEX CONCURRENTLY + 1 CREATE INDEX CONCURRENTLY for
+    // monitor_id = 14), api_keys succeed (2), channel tables fail
     mockDbExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors health_alert_sent_at
       .mockResolvedValueOnce({ rows: [] }) // ALTER monitors last_healthy_at
@@ -479,13 +481,17 @@ describe("error_logs dedup column migration at startup", () => {
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs first_occurrence
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs occurrence_count
       .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs deleted_at
+      .mockResolvedValueOnce({ rows: [] }) // ALTER error_logs monitor_id (#465)
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE error_logs monitor_id backfill (#465)
       .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
-      .mockResolvedValueOnce({ rows: [] }) // pg_indexes check (no existing idx)
+      .mockResolvedValueOnce({ rows: [] }) // pg_indexes check dedup (no existing idx)
+      .mockResolvedValueOnce({ rows: [] }) // pg_indexes check monitor (no existing idx)
       .mockResolvedValueOnce({ rows: [] }) // SET LOCAL lock_timeout
       .mockResolvedValueOnce({ rows: [] }) // pg_advisory_xact_lock
       .mockResolvedValueOnce({ rows: [] }) // UPDATE dedup
       .mockResolvedValueOnce({ rows: [] }) // DELETE dedup
       .mockResolvedValueOnce({ rows: [] }) // CREATE UNIQUE INDEX CONCURRENTLY
+      .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX CONCURRENTLY error_logs_monitor_idx (#465)
       .mockResolvedValueOnce({ rows: [] }) // CREATE api_keys
       .mockResolvedValueOnce({ rows: [] }) // CREATE INDEX api_keys
       .mockRejectedValueOnce(channelError); // notification_channels fails

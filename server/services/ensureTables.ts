@@ -113,17 +113,53 @@ export async function ensureErrorLogColumns(): Promise<void> {
       WHERE ix.indexname = 'error_logs_unresolved_dedup_idx'
     `);
     const rows = (existing as any).rows as Array<{ indisvalid: boolean; indisunique: boolean; indnullsnotdistinct: boolean; indexdef: string }> | undefined;
+    let dedupIdxOk = false;
     if (rows && rows.length > 0) {
       const { indisvalid, indisunique, indnullsnotdistinct, indexdef } = rows[0];
       const defIsCorrect =
         indexdef.includes("(level, source, message, monitor_id)") &&
         /WHERE\s+\(?resolved\s*=\s*false\)?/i.test(indexdef);
-      if (indisvalid && indisunique && indnullsnotdistinct && defIsCorrect) return;
-      console.warn(
-        `[ensureTables] Dropping existing error_logs_unresolved_dedup_idx (valid=${indisvalid} unique=${indisunique} nullsNotDistinct=${indnullsnotdistinct} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
-      );
-      await db.execute(sql`DROP INDEX IF EXISTS error_logs_unresolved_dedup_idx`);
+      dedupIdxOk = indisvalid && indisunique && indnullsnotdistinct && defIsCorrect;
+      if (!dedupIdxOk) {
+        console.warn(
+          `[ensureTables] Dropping existing error_logs_unresolved_dedup_idx (valid=${indisvalid} unique=${indisunique} nullsNotDistinct=${indnullsnotdistinct} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
+        );
+        await db.execute(sql`DROP INDEX IF EXISTS error_logs_unresolved_dedup_idx`);
+      }
     }
+
+    // Validate the per-monitor ownership index in the same fast-path pass —
+    // a deploy that crashed between the two CREATE INDEX CONCURRENTLY steps
+    // can leave a healthy dedup index next to a missing/stale monitor index,
+    // and skipping out here would silently keep the admin endpoints scanning
+    // without the partial index. Drop on shape mismatch (e.g. an unrelated
+    // index reusing the name, or a leftover INVALID build) so the CREATE
+    // INDEX CONCURRENTLY below repairs it. See GitHub issue #465.
+    const monitorExisting = await db.execute(sql`
+      SELECT i.indisvalid, pg_get_indexdef(i.indexrelid) AS indexdef
+      FROM pg_indexes ix
+      JOIN pg_class c ON c.relname = ix.indexname
+      JOIN pg_index i ON i.indexrelid = c.oid
+      WHERE ix.indexname = 'error_logs_monitor_idx'
+    `);
+    const monitorRows = (monitorExisting as any).rows as Array<{ indisvalid: boolean; indexdef: string }> | undefined;
+    let monitorIdxOk = false;
+    if (monitorRows && monitorRows.length > 0) {
+      const { indisvalid, indexdef } = monitorRows[0];
+      const defIsCorrect =
+        indexdef.includes("(monitor_id)") &&
+        /WHERE\s+\(?monitor_id\s+IS\s+NOT\s+NULL\)?/i.test(indexdef);
+      monitorIdxOk = indisvalid && defIsCorrect;
+      if (!monitorIdxOk) {
+        console.warn(
+          `[ensureTables] Dropping existing error_logs_monitor_idx (valid=${indisvalid} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
+        );
+        await db.execute(sql`DROP INDEX IF EXISTS error_logs_monitor_idx`);
+      }
+    }
+
+    // Both indexes are healthy — skip the dedup tx + concurrent index builds.
+    if (dedupIdxOk && monitorIdxOk) return;
 
     // Dedupe pre-existing unresolved rows produced by the old racy
     // SELECT-then-INSERT path or by the pre-#465 dedup bucket that didn't
