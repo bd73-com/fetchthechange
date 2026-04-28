@@ -12,7 +12,7 @@ import { TIER_LIMITS, TAG_LIMITS, TAG_ASSIGNMENT_LIMITS, BROWSERLESS_CAPS, RESEN
 // startScheduler is called from index.ts after registerRoutes completes
 import * as cheerio from "cheerio";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
-import { sql, asc, desc, eq, and, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
+import { sql, asc, desc, eq, and, or, isNull, isNotNull, inArray, notInArray } from "drizzle-orm";
 import { db } from "./db";
 import { sendNotificationEmail } from "./services/email";
 import { ErrorLogger } from "./services/logger";
@@ -64,6 +64,27 @@ export function stopRouteTimers(): void {
     clearInterval(softDeleteCleanupInterval);
     softDeleteCleanupInterval = null;
   }
+}
+
+/**
+ * Build the per-user ownership predicate for admin error-log endpoints. Pushes
+ * the filter into SQL via the denormalized `error_logs.monitor_id` column so
+ * Power-tier badge polls don't trigger a 500-row scan-and-JS-filter on every
+ * request — the IN-list filter is satisfied by the partial index
+ * `error_logs_monitor_idx`. App owner additionally sees system-level logs
+ * (monitor_id IS NULL); non-owner Power users see only logs scoped to their
+ * own monitors. Returns null when the user is provably not authorized to see
+ * any rows (non-owner with zero monitors), letting callers short-circuit
+ * without issuing the SQL at all. See GitHub issue #465.
+ */
+function errorLogOwnershipFilter(userMonitorIds: number[], isAppOwner: boolean) {
+  if (isAppOwner) {
+    return userMonitorIds.length > 0
+      ? or(isNull(errorLogs.monitorId), inArray(errorLogs.monitorId, userMonitorIds))!
+      : isNull(errorLogs.monitorId);
+  }
+  if (userMonitorIds.length === 0) return null;
+  return inArray(errorLogs.monitorId, userMonitorIds);
 }
 
 // ------------------------------------------------------------------
@@ -1495,31 +1516,38 @@ export async function registerRoutes(
       }
 
       const isAppOwner = userId === APP_OWNER_ID;
+      const userMonitorIds = (await storage.getMonitors(userId)).map((m: any) => m.id);
+      const ownership = errorLogOwnershipFilter(userMonitorIds, isAppOwner);
+      // Non-owner Power user with zero monitors: short-circuit without
+      // touching error_logs at all so 5 polling tabs don't fan out into 5
+      // SELECTs that are guaranteed to return zero rows. See GitHub issue
+      // #465.
+      if (ownership === null) {
+        return res.json({ count: 0 });
+      }
 
       // Filter to the same level set the UI dropdown offers so the badge
       // count matches what the admin sees after clicking through. Legacy
       // "warning" rows (from pre-deprecation writes) are still viewable via
       // source-filtered queries but do not inflate the badge.
-      const allResults = await db
-        .select({ id: errorLogs.id, context: errorLogs.context })
+      //
+      // Ownership filter is pushed into SQL via the denormalized monitor_id
+      // column (see #465) — the IN-list filter is satisfied by the partial
+      // index `error_logs_monitor_idx`; the IS NULL branch (owner-only) hits
+      // the standard btree leaf for NULLs. `.limit(500)` caps the COUNT at
+      // 500 because the badge UI renders "99+" for anything > 99 and we don't
+      // want to scan beyond that bound.
+      const result = await db
+        .select({ id: errorLogs.id })
         .from(errorLogs)
-        .where(and(eq(errorLogs.resolved, false), isNull(errorLogs.deletedAt), inArray(errorLogs.level, ["error", "info"])))
+        .where(and(
+          eq(errorLogs.resolved, false),
+          isNull(errorLogs.deletedAt),
+          inArray(errorLogs.level, ["error", "info"]),
+          ownership,
+        ))
         .limit(500);
-
-      const userMonitorIds = new Set(
-        (await storage.getMonitors(userId)).map((m: any) => m.id)
-      );
-
-      const count = allResults.filter((log: any) => {
-        const ctx = log.context as Record<string, unknown> | null;
-        const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
-        if (monitorId !== undefined) {
-          return userMonitorIds.has(monitorId);
-        }
-        return isAppOwner;
-      }).length;
-
-      res.json({ count });
+      res.json({ count: result.length });
     } catch (error: any) {
       console.error("Error fetching error log count:", error);
       res.json({ count: 0 });
@@ -1541,7 +1569,17 @@ export async function registerRoutes(
       const source = req.query.source as string | undefined;
       const limitNum = Math.max(1, Math.min(Number(req.query.limit) || 100, 500));
 
-      const conditions = [eq(errorLogs.resolved, false), isNull(errorLogs.deletedAt)];
+      const isAppOwner = userId === APP_OWNER_ID;
+      const userMonitorIds = (await storage.getMonitors(userId)).map((m: any) => m.id);
+      const ownership = errorLogOwnershipFilter(userMonitorIds, isAppOwner);
+      if (ownership === null) {
+        return res.json([]);
+      }
+      const conditions = [
+        eq(errorLogs.resolved, false),
+        isNull(errorLogs.deletedAt),
+        ownership,
+      ];
       if (level && ["error", "info"].includes(level)) {
         conditions.push(eq(errorLogs.level, level));
       }
@@ -1549,24 +1587,15 @@ export async function registerRoutes(
         conditions.push(eq(errorLogs.source, source));
       }
 
-      let query = db.select().from(errorLogs).where(and(...conditions)).orderBy(desc(errorLogs.timestamp)).limit(limitNum);
-
-      const allResults = await query;
-
-      const isAppOwner = userId === APP_OWNER_ID;
-
-      const userMonitorIds = new Set(
-        (await storage.getMonitors(userId)).map((m: any) => m.id)
-      );
-
-      const filtered = allResults.filter((log: any) => {
-        const ctx = log.context as Record<string, unknown> | null;
-        const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
-        if (monitorId !== undefined) {
-          return userMonitorIds.has(monitorId);
-        }
-        return isAppOwner;
-      });
+      // Ownership filter is in SQL (see #465) so the LIMIT bounds the rows
+      // the user can actually see, not 500 rows of someone else's logs that
+      // get filtered out in JS afterwards.
+      const filtered = await db
+        .select()
+        .from(errorLogs)
+        .where(and(...conditions))
+        .orderBy(desc(errorLogs.timestamp))
+        .limit(limitNum);
 
       res.json(filtered);
     } catch (error: any) {
@@ -1591,19 +1620,27 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invalid log ID" });
       }
 
-      const [log] = await db.select().from(errorLogs).where(and(eq(errorLogs.id, id), isNull(errorLogs.deletedAt))).limit(1);
-      if (!log) {
+      const isAppOwner = userId === APP_OWNER_ID;
+      const userMonitorIds = (await storage.getMonitors(userId)).map((m: any) => m.id);
+      const ownership = errorLogOwnershipFilter(userMonitorIds, isAppOwner);
+      if (ownership === null) {
         return res.status(404).json({ message: "Log entry not found" });
       }
-
-      const isAppOwner = userId === APP_OWNER_ID;
-      const userMonitorIds = new Set(
-        (await storage.getMonitors(userId)).map((m: any) => m.id)
-      );
-      const ctx = log.context as Record<string, unknown> | null;
-      const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
-      if (monitorId !== undefined ? !userMonitorIds.has(monitorId) : !isAppOwner) {
-        return res.status(403).json({ message: "Not authorized to delete this log entry" });
+      // Single SELECT-then-conditional-UPDATE so we don't trip a TOCTOU
+      // window: the SELECT decides whether the row is visible to this user
+      // (ownership pushed into SQL via #465's monitor_id column), and the
+      // UPDATE only proceeds if a row was returned.
+      const [log] = await db
+        .select({ id: errorLogs.id })
+        .from(errorLogs)
+        .where(and(
+          eq(errorLogs.id, id),
+          isNull(errorLogs.deletedAt),
+          ownership,
+        ))
+        .limit(1);
+      if (!log) {
+        return res.status(404).json({ message: "Log entry not found" });
       }
 
       await db.update(errorLogs).set({ deletedAt: new Date() }).where(eq(errorLogs.id, id));
@@ -1651,30 +1688,29 @@ export async function registerRoutes(
       const { ids, filters, excludeIds } = parsed.data;
 
       const isAppOwner = userId === APP_OWNER_ID;
-      const userMonitorIds = new Set(
-        (await storage.getMonitors(userId)).map((m: any) => m.id)
-      );
+      const userMonitorIds = (await storage.getMonitors(userId)).map((m: any) => m.id);
+      const ownership = errorLogOwnershipFilter(userMonitorIds, isAppOwner);
+      if (ownership === null) {
+        return res.json({ message: "0 entries deleted", count: 0, ...(filters ? { hasMore: false } : {}) });
+      }
 
       const now = new Date();
 
       if (ids) {
-        const entries = await db.select().from(errorLogs)
-          .where(and(inArray(errorLogs.id, ids), isNull(errorLogs.deletedAt)));
+        // Ownership filter is pushed into SQL (see #465) so the SELECT only
+        // returns rows this user is authorized to delete — no JS filter step.
+        const entries = await db
+          .select({ id: errorLogs.id })
+          .from(errorLogs)
+          .where(and(inArray(errorLogs.id, ids), isNull(errorLogs.deletedAt), ownership));
 
-        const authorized = entries.filter((log: any) => {
-          const ctx = log.context as Record<string, unknown> | null;
-          const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
-          if (monitorId !== undefined) return userMonitorIds.has(monitorId);
-          return isAppOwner;
-        });
-
-        if (authorized.length > 0) {
-          const authorizedIds = authorized.map((e: any) => e.id);
+        if (entries.length > 0) {
+          const authorizedIds = entries.map((e: any) => e.id);
           await db.update(errorLogs).set({ deletedAt: now }).where(inArray(errorLogs.id, authorizedIds));
         }
-        res.json({ message: `${authorized.length} entries deleted`, count: authorized.length });
+        res.json({ message: `${entries.length} entries deleted`, count: entries.length });
       } else if (filters) {
-        const conditions = [isNull(errorLogs.deletedAt)];
+        const conditions = [isNull(errorLogs.deletedAt), ownership];
         if (filters.level) {
           conditions.push(eq(errorLogs.level, filters.level));
         }
@@ -1689,22 +1725,22 @@ export async function registerRoutes(
         // Newest-first matches the list view (`GET /api/admin/error-logs`
         // orderBy `desc(timestamp)`) and the restore/finalize endpoints so
         // "delete filtered" drains the rows the admin is actually looking at
-        // instead of starving on the oldest 500 matching rows.
-        const entries = await db.select().from(errorLogs).where(and(...conditions)).orderBy(desc(errorLogs.timestamp), desc(errorLogs.id)).limit(500);
+        // instead of starving on the oldest 500 matching rows. Ownership is
+        // in the SQL predicate, so the LIMIT bounds rows this user can see
+        // rather than capping at 500 and losing rows to a JS post-filter.
+        const entries = await db
+          .select({ id: errorLogs.id })
+          .from(errorLogs)
+          .where(and(...conditions))
+          .orderBy(desc(errorLogs.timestamp), desc(errorLogs.id))
+          .limit(500);
 
-        const authorized = entries.filter((log: any) => {
-          const ctx = log.context as Record<string, unknown> | null;
-          const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
-          if (monitorId !== undefined) return userMonitorIds.has(monitorId);
-          return isAppOwner;
-        });
-
-        if (authorized.length > 0) {
-          const authorizedIds = authorized.map((e: any) => e.id);
+        if (entries.length > 0) {
+          const authorizedIds = entries.map((e: any) => e.id);
           await db.update(errorLogs).set({ deletedAt: now }).where(inArray(errorLogs.id, authorizedIds));
         }
         const hasMore = entries.length === 500;
-        res.json({ message: `${authorized.length} entries deleted`, count: authorized.length, hasMore });
+        res.json({ message: `${entries.length} entries deleted`, count: entries.length, hasMore });
       }
     } catch (error: any) {
       console.error("Error batch deleting error logs:", error);
@@ -1725,30 +1761,33 @@ export async function registerRoutes(
       }
 
       const isAppOwner = userId === APP_OWNER_ID;
-      const userMonitorIds = new Set(
-        (await storage.getMonitors(userId)).map((m: any) => m.id)
-      );
+      const userMonitorIds = (await storage.getMonitors(userId)).map((m: any) => m.id);
+      const ownership = errorLogOwnershipFilter(userMonitorIds, isAppOwner);
+      if (ownership === null) {
+        return res.json({ message: "0 entries restored", count: 0, hasMore: false });
+      }
 
       // Order by most-recently-soft-deleted so the user's just-deleted rows
       // (which they're trying to undo) fall inside the 500-row window even
       // when the table has accumulated older soft-deletes from another admin
       // between the 60s safety-net cleanup cycles. The old `asc(id)` scan
       // picked oldest rows first and silently returned count=0 to the user
-      // when their own rows lived past the window. See #468.
-      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).orderBy(desc(errorLogs.deletedAt), desc(errorLogs.id)).limit(500);
-
-      const authorized = softDeleted.filter((log: any) => {
-        const ctx = log.context as Record<string, unknown> | null;
-        const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
-        if (monitorId !== undefined) return userMonitorIds.has(monitorId);
-        return isAppOwner;
-      });
+      // when their own rows lived past the window. See #468. Ownership is
+      // pushed into SQL (see #465) so the LIMIT bounds rows this user can
+      // see — no JS post-filter where another admin's soft-deleted rows
+      // could displace the caller's just-deleted rows.
+      const authorized = await db
+        .select({ id: errorLogs.id })
+        .from(errorLogs)
+        .where(and(isNotNull(errorLogs.deletedAt), ownership))
+        .orderBy(desc(errorLogs.deletedAt), desc(errorLogs.id))
+        .limit(500);
 
       if (authorized.length > 0) {
         const authorizedIds = authorized.map((e: any) => e.id);
         await db.update(errorLogs).set({ deletedAt: null }).where(inArray(errorLogs.id, authorizedIds));
       }
-      const hasMore = softDeleted.length === 500;
+      const hasMore = authorized.length === 500;
       res.json({ message: `${authorized.length} entries restored`, count: authorized.length, hasMore });
     } catch (error: any) {
       console.error("Error restoring error logs:", error);
@@ -1769,28 +1808,28 @@ export async function registerRoutes(
       }
 
       const isAppOwner = userId === APP_OWNER_ID;
-      const userMonitorIds = new Set(
-        (await storage.getMonitors(userId)).map((m: any) => m.id)
-      );
+      const userMonitorIds = (await storage.getMonitors(userId)).map((m: any) => m.id);
+      const ownership = errorLogOwnershipFilter(userMonitorIds, isAppOwner);
+      if (ownership === null) {
+        return res.json({ message: "0 entries finalized", count: 0, hasMore: false });
+      }
 
       // Most-recently-soft-deleted first — symmetric with the restore endpoint
       // above so the user's count reflects their just-deleted rows instead of
       // returning 0 because older soft-deletes from another admin dominate
-      // the 500-row window. See #468.
-      const softDeleted = await db.select().from(errorLogs).where(isNotNull(errorLogs.deletedAt)).orderBy(desc(errorLogs.deletedAt), desc(errorLogs.id)).limit(500);
-
-      const authorized = softDeleted.filter((log: any) => {
-        const ctx = log.context as Record<string, unknown> | null;
-        const monitorId = ctx && typeof ctx.monitorId === "number" ? ctx.monitorId : undefined;
-        if (monitorId !== undefined) return userMonitorIds.has(monitorId);
-        return isAppOwner;
-      });
+      // the 500-row window. See #468. Ownership is in SQL (see #465).
+      const authorized = await db
+        .select({ id: errorLogs.id })
+        .from(errorLogs)
+        .where(and(isNotNull(errorLogs.deletedAt), ownership))
+        .orderBy(desc(errorLogs.deletedAt), desc(errorLogs.id))
+        .limit(500);
 
       if (authorized.length > 0) {
         const authorizedIds = authorized.map((e: any) => e.id);
         await db.delete(errorLogs).where(inArray(errorLogs.id, authorizedIds));
       }
-      const hasMore = softDeleted.length === 500;
+      const hasMore = authorized.length === 500;
       res.json({ message: `${authorized.length} entries finalized`, count: authorized.length, hasMore });
     } catch (error: any) {
       console.error("Error finalizing error logs:", error);

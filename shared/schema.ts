@@ -96,6 +96,11 @@ export const errorLogs = pgTable("error_logs", {
   message: text("message").notNull(),
   stackTrace: text("stack_trace"),
   context: jsonb("context"),
+  // Denormalized from context.monitorId so admin error-log endpoints can push
+  // the per-user ownership filter into SQL instead of materializing 500 rows
+  // and filtering in JS. NULL means a system-level log (no monitor scope) —
+  // visible only to the app owner. See GitHub issue #465.
+  monitorId: integer("monitor_id"),
   resolved: boolean("resolved").default(false).notNull(),
   resolvedAt: timestamp("resolved_at"),
   resolvedBy: text("resolved_by"),
@@ -106,13 +111,30 @@ export const errorLogs = pgTable("error_logs", {
   levelIdx: index("error_logs_level_idx").on(table.level),
   sourceIdx: index("error_logs_source_idx").on(table.source),
   timestampIdx: index("error_logs_timestamp_idx").on(table.timestamp),
+  // Partial index supports the per-user ownership join in the admin
+  // error-log endpoints (`monitor_id IN (SELECT id FROM monitors WHERE …)`)
+  // so the planner can answer the badge-poll filter from a small index slice
+  // instead of scanning 500 rows of jsonb context per request. Partial on
+  // IS NOT NULL because system-level logs (NULL monitor_id) are visible only
+  // to the app owner and don't participate in the per-user join. See
+  // GitHub issue #465.
+  monitorIdx: index("error_logs_monitor_idx")
+    .on(table.monitorId)
+    .where(sql`monitor_id IS NOT NULL`),
   // Partial unique index collapses the SELECT-then-INSERT dedup race in
-  // ErrorLogger.log: concurrent writers with the same (level, source, message)
-  // while resolved=false deterministically upsert into a single row instead
-  // of racing past a preceding SELECT miss and inserting duplicates. See
-  // GitHub issue #448.
+  // ErrorLogger.log: concurrent writers with the same (level, source, message,
+  // monitor_id) while resolved=false deterministically upsert into a single
+  // row instead of racing past a preceding SELECT miss and inserting
+  // duplicates. The runtime DDL in `ensureErrorLogColumns` adds NULLS NOT
+  // DISTINCT (Postgres 15+) so two system-level logs (monitor_id IS NULL)
+  // with the same (level, source, message) collapse into one bucket — the
+  // Drizzle `uniqueIndex` builder doesn't expose that flag yet, so the schema
+  // form here is informational and ensureTables.ts is the source of truth.
+  // monitor_id is part of the tuple so per-monitor errors with shared messages
+  // (e.g. "Failed to fetch") get separate rows and therefore correct per-user
+  // attribution in the admin UI. See GitHub issues #448 and #465.
   unresolvedDedupIdx: uniqueIndex("error_logs_unresolved_dedup_idx")
-    .on(table.level, table.source, table.message)
+    .on(table.level, table.source, table.message, table.monitorId)
     .where(sql`resolved = false`),
 }));
 

@@ -247,6 +247,7 @@ describe("DELETE /api/admin/error-logs/:id", () => {
 
   it("returns 404 when log entry does not exist", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 1 }]);
     mockLimitFn.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "owner-123" } }, params: { id: "99" } };
@@ -258,7 +259,8 @@ describe("DELETE /api/admin/error-logs/:id", () => {
   it("soft-deletes log entry when user is app owner (no monitorId in context)", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockLimitFn.mockResolvedValue([{ id: 5, context: null }]);
+    // SQL ownership filter (#465) returned this row → user is authorized.
+    mockLimitFn.mockResolvedValue([{ id: 5 }]);
 
     const req = { user: { claims: { sub: "owner-123" } }, params: { id: "5" } };
     const res = await callHandler("delete", ENDPOINT, req);
@@ -272,7 +274,7 @@ describe("DELETE /api/admin/error-logs/:id", () => {
   it("deletes log entry when user owns the monitor referenced in context", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 42 }]);
-    mockLimitFn.mockResolvedValue([{ id: 10, context: { monitorId: 42 } }]);
+    mockLimitFn.mockResolvedValue([{ id: 10 }]);
 
     const req = { user: { claims: { sub: "user-power" } }, params: { id: "10" } };
     const res = await callHandler("delete", ENDPOINT, req);
@@ -280,31 +282,40 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     expect(res._json).toEqual({ message: "Deleted" });
   });
 
-  it("returns 403 when non-owner user's monitors don't match the log's monitorId", async () => {
+  it("returns 404 when non-owner user's monitors don't match the log's monitorId", async () => {
+    // Ownership is enforced in SQL via #465 — the filter excludes rows the
+    // user can't see, so the SELECT returns no row and the route reports
+    // 404 ("Log entry not found"). The pre-#465 behavior of returning 403
+    // ("Not authorized") was changed to 404 because distinguishing the two
+    // states leaks the existence of logs scoped to other users' monitors.
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 99 }]);
-    mockLimitFn.mockResolvedValue([{ id: 10, context: { monitorId: 42 } }]);
+    mockLimitFn.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "user-power" } }, params: { id: "10" } };
     const res = await callHandler("delete", ENDPOINT, req);
-    expect(res._status).toBe(403);
-    expect(res._json).toEqual({ message: "Not authorized to delete this log entry" });
+    expect(res._status).toBe(404);
+    expect(res._json).toEqual({ message: "Log entry not found" });
   });
 
-  it("returns 403 when non-owner tries to delete log with no monitorId in context", async () => {
+  it("returns 404 when non-owner has zero monitors (short-circuits before SQL)", async () => {
+    // Helper short-circuits when the user has no monitors and isn't owner —
+    // no SELECT is issued, the response is 404. See #465.
     mockGetUser.mockResolvedValue({ tier: "power" });
-    mockGetMonitors.mockResolvedValue([{ id: 1 }]);
-    mockLimitFn.mockResolvedValue([{ id: 10, context: null }]);
+    mockGetMonitors.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "not-the-owner" } }, params: { id: "10" } };
     const res = await callHandler("delete", ENDPOINT, req);
-    expect(res._status).toBe(403);
-    expect(res._json).toEqual({ message: "Not authorized to delete this log entry" });
+    expect(res._status).toBe(404);
+    expect(res._json).toEqual({ message: "Log entry not found" });
+    // The SELECT was never reached because ownership === null short-circuits.
+    expect(mockLimitFn).not.toHaveBeenCalled();
   });
 
   it("returns 500 when database throws an error", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([{ id: 1 }]);
     mockLimitFn.mockRejectedValue(new Error("DB connection lost"));
 
     const req = { user: { claims: { sub: "owner-123" } }, params: { id: "5" } };
@@ -348,50 +359,17 @@ describe("DELETE /api/admin/error-logs/:id", () => {
     expect(res._json).toEqual({ message: "Invalid log ID" });
   });
 
-  // --- Type guard on context.monitorId ---
-
-  it("treats string monitorId in context as missing (falls back to owner check)", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockGetMonitors.mockResolvedValue([{ id: 42 }]);
-    // monitorId is a string, not a number — the type guard should ignore it
-    mockLimitFn.mockResolvedValue([{ id: 10, context: { monitorId: "42" } }]);
-
-    // Non-owner: should be denied because string monitorId is treated as absent
-    const req = { user: { claims: { sub: "not-the-owner" } }, params: { id: "10" } };
-    const res = await callHandler("delete", ENDPOINT, req);
-    expect(res._status).toBe(403);
-    expect(res._json).toEqual({ message: "Not authorized to delete this log entry" });
-  });
-
-  it("treats boolean monitorId in context as missing (falls back to owner check)", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockGetMonitors.mockResolvedValue([]);
-    mockLimitFn.mockResolvedValue([{ id: 10, context: { monitorId: true } }]);
-
-    // Owner should still be able to delete
-    const req = { user: { claims: { sub: "owner-123" } }, params: { id: "10" } };
-    const res = await callHandler("delete", ENDPOINT, req);
-    expect(res._status).toBe(200);
-    expect(res._json).toEqual({ message: "Deleted" });
-  });
-
-  it("treats context with empty object (no monitorId key) same as null context", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockGetMonitors.mockResolvedValue([]);
-    mockLimitFn.mockResolvedValue([{ id: 10, context: {} }]);
-
-    // Non-owner with no monitorId in context: denied
-    const req = { user: { claims: { sub: "not-the-owner" } }, params: { id: "10" } };
-    const res = await callHandler("delete", ENDPOINT, req);
-    expect(res._status).toBe(403);
-    expect(res._json).toEqual({ message: "Not authorized to delete this log entry" });
-  });
+  // monitorId type-guard semantics moved to ErrorLogger.log (see
+  // server/services/logger.test.ts). At write time, ErrorLogger denormalizes
+  // numeric `context.monitorId` into the dedicated `monitor_id` column and
+  // ignores non-numeric values. The route layer no longer inspects context —
+  // ownership is decided by the SQL filter against `monitor_id`.
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/admin/error-logs — context.monitorId type guard filtering
+// GET /api/admin/error-logs — ownership filter pushed into SQL (#465)
 // ---------------------------------------------------------------------------
-describe("GET /api/admin/error-logs — context type guard filtering", () => {
+describe("GET /api/admin/error-logs — SQL ownership filter", () => {
   const ENDPOINT = "/api/admin/error-logs";
 
   beforeEach(async () => {
@@ -404,80 +382,46 @@ describe("GET /api/admin/error-logs — context type guard filtering", () => {
     mockDbSelect.mockReturnValue({ from: mockSelectFromFn });
   });
 
-  it("includes logs with numeric monitorId matching user's monitors", async () => {
+  it("returns rows the SQL ownership filter handed back (no JS post-filter)", async () => {
+    // After #465, the route trusts the SQL filter — whatever the SELECT
+    // returns IS what the user is authorized to see. The route no longer
+    // re-inspects context.monitorId in JS.
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 10 }]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: 10 } },
-      { id: 2, context: { monitorId: 99 } },
-    ]);
+    mockLimitFn.mockResolvedValue([{ id: 1 }]);
 
     const req = { user: { claims: { sub: "user-power" } }, query: {} };
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(200);
-    // Only log with monitorId 10 should be included
     expect(res._json).toHaveLength(1);
     expect(res._json[0].id).toBe(1);
   });
 
-  it("excludes logs with string monitorId (non-owner user)", async () => {
+  it("non-owner with zero monitors short-circuits to empty array (no SELECT issued)", async () => {
+    // A Power-tier user with no monitors can't own any logs — the helper
+    // returns null and the route bypasses the SELECT entirely. See #465.
     mockGetUser.mockResolvedValue({ tier: "power" });
-    mockGetMonitors.mockResolvedValue([{ id: 42 }]);
-    // monitorId is a string "42" — type guard should treat it as undefined
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: "42" } },
-    ]);
+    mockGetMonitors.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "not-the-owner" } }, query: {} };
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(200);
-    // String monitorId treated as missing → non-owner can't see it
-    expect(res._json).toHaveLength(0);
+    expect(res._json).toEqual([]);
+    expect(mockLimitFn).not.toHaveBeenCalled();
   });
 
-  it("owner sees logs with string monitorId (treated as no-monitor system log)", async () => {
+  it("owner with zero monitors still queries (system-level logs visible)", async () => {
+    // Owner sees system logs (monitor_id IS NULL) even when they own no
+    // monitors, so the SELECT must run.
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    // monitorId is a string — type guard treats it as absent → falls through to isAppOwner
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: "injected" } },
-    ]);
+    mockLimitFn.mockResolvedValue([{ id: 99 }]);
 
     const req = { user: { claims: { sub: "owner-123" } }, query: {} };
     const res = await callHandler("get", ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(res._json).toHaveLength(1);
-  });
-
-  it("excludes logs with boolean monitorId for non-owner", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockGetMonitors.mockResolvedValue([{ id: 1 }]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: true } },
-    ]);
-
-    const req = { user: { claims: { sub: "not-the-owner" } }, query: {} };
-    const res = await callHandler("get", ENDPOINT, req);
-    expect(res._status).toBe(200);
-    expect(res._json).toHaveLength(0);
-  });
-
-  it("correctly filters mixed context types", async () => {
-    mockGetUser.mockResolvedValue({ tier: "power" });
-    mockGetMonitors.mockResolvedValue([{ id: 5 }]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: 5 } },          // numeric, matches → included
-      { id: 2, context: { monitorId: "5" } },         // string → excluded (non-owner)
-      { id: 3, context: null },                        // null context → excluded (non-owner)
-      { id: 4, context: { monitorId: 99 } },          // numeric, doesn't match → excluded
-      { id: 5, context: { other: "data" } },           // no monitorId key → excluded (non-owner)
-    ]);
-
-    const req = { user: { claims: { sub: "not-the-owner" } }, query: {} };
-    const res = await callHandler("get", ENDPOINT, req);
-    expect(res._status).toBe(200);
-    expect(res._json).toHaveLength(1);
-    expect(res._json[0].id).toBe(1);
+    expect(mockLimitFn).toHaveBeenCalled();
   });
 });
 
@@ -567,10 +511,8 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
   it("soft-deletes authorized entries by IDs for app owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockSelectWhereFn.mockResolvedValue([
-      { id: 1, context: null },
-      { id: 2, context: null },
-    ]);
+    // Ownership is in SQL — the SELECT only returns rows the user can act on.
+    mockSelectWhereFn.mockResolvedValue([{ id: 1 }, { id: 2 }]);
 
     const req = { user: { claims: { sub: "owner-123" } }, body: { ids: [1, 2] } };
     const res = await callHandler("post", ENDPOINT, req);
@@ -580,14 +522,12 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     expect(mockUpdateSetFn).toHaveBeenCalled();
   });
 
-  it("excludes unauthorized entries when deleting by IDs (non-owner)", async () => {
+  it("counts only what the SQL ownership filter returned (non-owner)", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 10 }]);
-    mockSelectWhereFn.mockResolvedValue([
-      { id: 1, context: { monitorId: 10 } },  // authorized
-      { id: 2, context: { monitorId: 99 } },  // not authorized
-      { id: 3, context: null },                // no monitorId, non-owner → excluded
-    ]);
+    // Of the requested ids [1,2,3], only id=1 belongs to a monitor this user
+    // owns; the SQL filter handed back exactly that row.
+    mockSelectWhereFn.mockResolvedValue([{ id: 1 }]);
 
     const req = { user: { claims: { sub: "not-the-owner" } }, body: { ids: [1, 2, 3] } };
     const res = await callHandler("post", ENDPOINT, req);
@@ -598,9 +538,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
   it("returns count 0 when no entries are authorized", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 10 }]);
-    mockSelectWhereFn.mockResolvedValue([
-      { id: 1, context: { monitorId: 99 } },
-    ]);
+    mockSelectWhereFn.mockResolvedValue([]);
 
     const req = { user: { claims: { sub: "not-the-owner" } }, body: { ids: [1] } };
     const res = await callHandler("post", ENDPOINT, req);
@@ -609,14 +547,22 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
+  it("non-owner with zero monitors short-circuits without SELECT (ids path)", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, body: { ids: [1, 2, 3] } };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "0 entries deleted", count: 0 });
+    expect(mockSelectWhereFn).not.toHaveBeenCalled();
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
   it("soft-deletes entries matching filters for app owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: null },
-      { id: 2, context: null },
-      { id: 3, context: null },
-    ]);
+    mockLimitFn.mockResolvedValue([{ id: 1 }, { id: 2 }, { id: 3 }]);
 
     const req = { user: { claims: { sub: "owner-123" } }, body: { filters: { level: "error" } } };
     const res = await callHandler("post", ENDPOINT, req);
@@ -628,10 +574,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
   it("soft-deletes with filter and excludeIds", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: null },
-      { id: 3, context: null },
-    ]);
+    mockLimitFn.mockResolvedValue([{ id: 1 }, { id: 3 }]);
 
     const req = {
       user: { claims: { sub: "owner-123" } },
@@ -664,10 +607,8 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
   it("applies ownership filtering with filters mode", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 10 }]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: 10 } },
-      { id: 2, context: null },
-    ]);
+    // SQL filter narrows to authorized rows.
+    mockLimitFn.mockResolvedValue([{ id: 1 }]);
 
     const req = { user: { claims: { sub: "not-the-owner" } }, body: { filters: { level: "error" } } };
     const res = await callHandler("post", ENDPOINT, req);
@@ -679,7 +620,7 @@ describe("POST /api/admin/error-logs/batch-delete", () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
     // Simulate exactly 500 rows returned (the limit)
-    const entries = Array.from({ length: 500 }, (_, i) => ({ id: i + 1, context: null }));
+    const entries = Array.from({ length: 500 }, (_, i) => ({ id: i + 1 }));
     mockLimitFn.mockResolvedValue(entries);
 
     const req = { user: { claims: { sub: "owner-123" } }, body: { filters: { level: "error" } } };
@@ -807,10 +748,8 @@ describe("POST /api/admin/error-logs/restore", () => {
   it("restores authorized soft-deleted entries for app owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: null, deletedAt: new Date() },
-      { id: 2, context: null, deletedAt: new Date() },
-    ]);
+    // SQL ownership filter (#465) returns only the rows the user owns.
+    mockLimitFn.mockResolvedValue([{ id: 1 }, { id: 2 }]);
 
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
@@ -820,19 +759,28 @@ describe("POST /api/admin/error-logs/restore", () => {
     expect(mockUpdateSetFn).toHaveBeenCalled();
   });
 
-  it("excludes entries not owned by non-owner user", async () => {
+  it("counts only what the SQL ownership filter returned (non-owner)", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 10 }]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: 10 }, deletedAt: new Date() },
-      { id: 2, context: { monitorId: 99 }, deletedAt: new Date() },
-      { id: 3, context: null, deletedAt: new Date() },
-    ]);
+    // SQL filter returned only the row scoped to monitor 10.
+    mockLimitFn.mockResolvedValue([{ id: 1 }]);
 
     const req = { user: { claims: { sub: "not-the-owner" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(res._json).toEqual({ message: "1 entries restored", count: 1, hasMore: false });
+  });
+
+  it("non-owner with zero monitors short-circuits without SELECT", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "0 entries restored", count: 0, hasMore: false });
+    expect(mockLimitFn).not.toHaveBeenCalled();
+    expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
   it("returns count 0 when no soft-deleted entries exist", async () => {
@@ -900,10 +848,7 @@ describe("POST /api/admin/error-logs/finalize", () => {
   it("hard-deletes authorized soft-deleted entries for app owner", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: null, deletedAt: new Date() },
-      { id: 2, context: null, deletedAt: new Date() },
-    ]);
+    mockLimitFn.mockResolvedValue([{ id: 1 }, { id: 2 }]);
 
     const req = { user: { claims: { sub: "owner-123" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
@@ -913,19 +858,28 @@ describe("POST /api/admin/error-logs/finalize", () => {
     expect(mockDeleteWhereFn).toHaveBeenCalled();
   });
 
-  it("excludes entries not owned by non-owner user", async () => {
+  it("counts only what the SQL ownership filter returned (non-owner)", async () => {
     mockGetUser.mockResolvedValue({ tier: "power" });
     mockGetMonitors.mockResolvedValue([{ id: 5 }]);
-    mockLimitFn.mockResolvedValue([
-      { id: 1, context: { monitorId: 5 }, deletedAt: new Date() },
-      { id: 2, context: { monitorId: 99 }, deletedAt: new Date() },
-      { id: 3, context: null, deletedAt: new Date() },
-    ]);
+    // SQL filter returned only the row scoped to monitor 5.
+    mockLimitFn.mockResolvedValue([{ id: 1 }]);
 
     const req = { user: { claims: { sub: "not-the-owner" } }, body: {} };
     const res = await callHandler("post", ENDPOINT, req);
     expect(res._status).toBe(200);
     expect(res._json).toEqual({ message: "1 entries finalized", count: 1, hasMore: false });
+  });
+
+  it("non-owner with zero monitors short-circuits without SELECT", async () => {
+    mockGetUser.mockResolvedValue({ tier: "power" });
+    mockGetMonitors.mockResolvedValue([]);
+
+    const req = { user: { claims: { sub: "not-the-owner" } }, body: {} };
+    const res = await callHandler("post", ENDPOINT, req);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ message: "0 entries finalized", count: 0, hasMore: false });
+    expect(mockLimitFn).not.toHaveBeenCalled();
+    expect(mockDbDelete).not.toHaveBeenCalled();
   });
 
   it("returns count 0 when no soft-deleted entries exist", async () => {

@@ -32,6 +32,27 @@ export async function ensureErrorLogColumns(): Promise<void> {
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS first_occurrence TIMESTAMP NOT NULL DEFAULT NOW()`);
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS occurrence_count INTEGER NOT NULL DEFAULT 1`);
     await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP`);
+    // Denormalized ownership column — let admin error-log endpoints push the
+    // per-user filter (`monitor_id IN (SELECT id FROM monitors WHERE user_id =
+    // $1)`) into SQL instead of scanning 500 rows of jsonb context per request.
+    // Backfill below keeps historical rows usable; new writes are populated by
+    // ErrorLogger.log. See GitHub issue #465.
+    await db.execute(sql`ALTER TABLE error_logs ADD COLUMN IF NOT EXISTS monitor_id INTEGER`);
+    // Backfill historical rows from context.monitorId. Bounded predicate so
+    // this is a no-op once rows have been backfilled (idempotent on repeated
+    // boots), and skips strings/non-numeric values which match the runtime
+    // sanitization in ErrorLogger.log. The numeric cast is range-checked so a
+    // pathological `(context->>'monitorId')` larger than INT32_MAX falls
+    // through to NULL rather than crashing the migration.
+    await db.execute(sql`
+      UPDATE error_logs
+      SET monitor_id = (context->>'monitorId')::int
+      WHERE monitor_id IS NULL
+        AND context IS NOT NULL
+        AND jsonb_typeof(context->'monitorId') = 'number'
+        AND (context->>'monitorId') ~ '^-?[0-9]+$'
+        AND (context->>'monitorId')::bigint BETWEEN -2147483648 AND 2147483647
+    `);
 
     // Enforce the level enum at the DB layer so a direct SQL INSERT or a
     // caller that bypasses the TypeScript union (e.g. `db.execute(sql\`INSERT
@@ -69,47 +90,54 @@ export async function ensureErrorLogColumns(): Promise<void> {
     `);
 
     // Check if a VALID, UNIQUE, correctly-shaped index already exists — skip
-    // DDL entirely if so. Validates four invariants simultaneously:
+    // DDL entirely if so. Validates five invariants simultaneously:
     //   1. `indisvalid` — not a leftover INVALID build
     //   2. `indisunique` — ON CONFLICT inference requires uniqueness
-    //   3. `pg_get_indexdef` exposes the column tuple + predicate so we can
-    //      assert the index covers (level, source, message) with the
-    //      `WHERE resolved = false` partial predicate
+    //   3. `indnullsnotdistinct` — without it, two system-level rows
+    //      (monitor_id IS NULL) with identical (level, source, message) bypass
+    //      the unique constraint and the upsert silently inserts duplicates
+    //   4-5. `pg_get_indexdef` exposes the column tuple + predicate so we can
+    //      assert the index covers (level, source, message, monitor_id) with
+    //      the `WHERE resolved = false` partial predicate
     // A stale index with the same name but a different definition (wrong
-    // columns, non-unique, missing predicate) fails this check and is
-    // dropped and rebuilt. Without the definition check, a drifted index
-    // would pass the fast path and ON CONFLICT would fail silently at
-    // runtime, swallowed by ErrorLogger.log's catch block.
+    // columns, non-unique, missing predicate, missing NULLS NOT DISTINCT)
+    // fails this check and is dropped and rebuilt. Without the definition
+    // check, a drifted index would pass the fast path and ON CONFLICT would
+    // fail silently at runtime, swallowed by ErrorLogger.log's catch block.
+    // See GitHub issues #448 and #465.
     const existing = await db.execute(sql`
-      SELECT i.indisvalid, i.indisunique, pg_get_indexdef(i.indexrelid) AS indexdef
+      SELECT i.indisvalid, i.indisunique, i.indnullsnotdistinct, pg_get_indexdef(i.indexrelid) AS indexdef
       FROM pg_indexes ix
       JOIN pg_class c ON c.relname = ix.indexname
       JOIN pg_index i ON i.indexrelid = c.oid
       WHERE ix.indexname = 'error_logs_unresolved_dedup_idx'
     `);
-    const rows = (existing as any).rows as Array<{ indisvalid: boolean; indisunique: boolean; indexdef: string }> | undefined;
+    const rows = (existing as any).rows as Array<{ indisvalid: boolean; indisunique: boolean; indnullsnotdistinct: boolean; indexdef: string }> | undefined;
     if (rows && rows.length > 0) {
-      const { indisvalid, indisunique, indexdef } = rows[0];
+      const { indisvalid, indisunique, indnullsnotdistinct, indexdef } = rows[0];
       const defIsCorrect =
-        indexdef.includes("(level, source, message)") &&
+        indexdef.includes("(level, source, message, monitor_id)") &&
         /WHERE\s+\(?resolved\s*=\s*false\)?/i.test(indexdef);
-      if (indisvalid && indisunique && defIsCorrect) return;
+      if (indisvalid && indisunique && indnullsnotdistinct && defIsCorrect) return;
       console.warn(
-        `[ensureTables] Dropping existing error_logs_unresolved_dedup_idx (valid=${indisvalid} unique=${indisunique} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
+        `[ensureTables] Dropping existing error_logs_unresolved_dedup_idx (valid=${indisvalid} unique=${indisunique} nullsNotDistinct=${indnullsnotdistinct} defMatch=${defIsCorrect}) so it can be rebuilt with the expected shape`,
       );
       await db.execute(sql`DROP INDEX IF EXISTS error_logs_unresolved_dedup_idx`);
     }
 
     // Dedupe pre-existing unresolved rows produced by the old racy
-    // SELECT-then-INSERT path. Keep the newest row per
-    // (level, source, message) group and roll up `occurrence_count` into it
-    // so the dedup bucket's total event count is preserved. The advisory
-    // xact lock serializes concurrent boots in a rolling deploy so only one
-    // instance performs the dedup at a time; follow-up boots find nothing
-    // to merge and fall through to the idempotent CONCURRENTLY step below.
-    // LEAST(INT32_MAX, SUM) caps the rolled-up count so a site with many
-    // already-huge duplicate rows doesn't blow past integer range and
-    // rollback the whole transaction.
+    // SELECT-then-INSERT path or by the pre-#465 dedup bucket that didn't
+    // include monitor_id. Keep the newest row per
+    // (level, source, message, monitor_id) group and roll up `occurrence_count`
+    // into it so the dedup bucket's total event count is preserved. NULL
+    // monitor_id values are partitioned together (Postgres window-function
+    // PARTITION BY treats NULLs as equal), matching the NULLS NOT DISTINCT
+    // semantics of the rebuilt index. The advisory xact lock serializes
+    // concurrent boots in a rolling deploy so only one instance performs the
+    // dedup at a time; follow-up boots find nothing to merge and fall through
+    // to the idempotent CONCURRENTLY step below. LEAST(INT32_MAX, SUM) caps
+    // the rolled-up count so a site with many already-huge duplicate rows
+    // doesn't blow past integer range and rollback the whole transaction.
     await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL lock_timeout = '10s'`);
       // Advisory lock key is a stable 64-bit hash of the migration identifier.
@@ -118,11 +146,11 @@ export async function ensureErrorLogColumns(): Promise<void> {
         WITH dups AS (
           SELECT id,
                  ROW_NUMBER() OVER (
-                   PARTITION BY level, source, message
+                   PARTITION BY level, source, message, monitor_id
                    ORDER BY timestamp DESC, id DESC
                  ) AS rn,
                  LEAST(2147483647, SUM(occurrence_count) OVER (
-                   PARTITION BY level, source, message
+                   PARTITION BY level, source, message, monitor_id
                  ))::int AS total_count
           FROM error_logs
           WHERE resolved = false
@@ -137,7 +165,7 @@ export async function ensureErrorLogColumns(): Promise<void> {
         WHERE id IN (
           SELECT id FROM (
             SELECT id, ROW_NUMBER() OVER (
-              PARTITION BY level, source, message
+              PARTITION BY level, source, message, monitor_id
               ORDER BY timestamp DESC, id DESC
             ) AS rn
             FROM error_logs WHERE resolved = false
@@ -148,11 +176,28 @@ export async function ensureErrorLogColumns(): Promise<void> {
 
     // CONCURRENTLY cannot run inside a transaction. IF NOT EXISTS makes this
     // safe if another rolling-deploy instance beat us to it between the
-    // dedup tx above and this statement.
+    // dedup tx above and this statement. NULLS NOT DISTINCT is required so
+    // two system-level rows (monitor_id IS NULL) with the same
+    // (level, source, message) collapse into one bucket — without it,
+    // Postgres treats every NULL as distinct and the upsert ON CONFLICT path
+    // silently inserts duplicates. Requires Postgres 15+. See GitHub issue
+    // #465.
     await db.execute(sql`
       CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS error_logs_unresolved_dedup_idx
-      ON error_logs(level, source, message)
+      ON error_logs(level, source, message, monitor_id)
+      NULLS NOT DISTINCT
       WHERE resolved = false
+    `);
+
+    // Partial index on monitor_id supports the per-user ownership join in the
+    // admin error-log endpoints. Partial on IS NOT NULL because system-level
+    // logs (NULL monitor_id) are visible only to the app owner and don't
+    // participate in the IN-list join. CONCURRENTLY + IF NOT EXISTS keeps
+    // this idempotent across rolling deploys. See GitHub issue #465.
+    await db.execute(sql`
+      CREATE INDEX CONCURRENTLY IF NOT EXISTS error_logs_monitor_idx
+      ON error_logs(monitor_id)
+      WHERE monitor_id IS NOT NULL
     `);
   } catch (e) {
     console.warn("Could not ensure error_logs columns/index:", e);

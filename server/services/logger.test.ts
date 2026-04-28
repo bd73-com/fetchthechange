@@ -84,9 +84,11 @@ describe("ErrorLogger atomic upsert", () => {
     await ErrorLogger.error("scraper", "Browserless service unavailable — preserving last known values", null, { monitorId: 1 });
 
     const conflictConfig = mockOnConflictDoUpdateFn.mock.calls[0][0];
-    // target must be the three-column tuple matching the unique index
+    // target must be the four-column tuple matching the unique index
+    // (level, source, message, monitor_id) — monitor_id was added in #465 so
+    // per-monitor errors with shared messages get separate dedup buckets.
     expect(Array.isArray(conflictConfig.target)).toBe(true);
-    expect(conflictConfig.target).toHaveLength(3);
+    expect(conflictConfig.target).toHaveLength(4);
     // targetWhere must encode the `resolved = false` partial predicate —
     // without it Postgres rejects the ON CONFLICT on a partial index.
     expect(conflictConfig.targetWhere).toBeDefined();
@@ -95,6 +97,29 @@ describe("ErrorLogger atomic upsert", () => {
     expect(conflictConfig.set.occurrenceCount).toBeDefined();
     expect(conflictConfig.set.stackTrace).toBeDefined();
     expect(conflictConfig.set.context).toBeDefined();
+  });
+
+  it("denormalizes context.monitorId into the inserted monitor_id column", async () => {
+    // Numeric monitorId in context must land in the dedicated column so admin
+    // error-log endpoints can filter ownership in SQL via the partial index
+    // on monitor_id. See GitHub issue #465.
+    await ErrorLogger.error("scraper", "Failed to fetch", null, { monitorId: 42 });
+    expect(mockInsertValuesFn.mock.calls[0][0].monitorId).toBe(42);
+  });
+
+  it("treats non-numeric context.monitorId as system-level (NULL monitor_id)", async () => {
+    // String/undefined/null monitorId values must NOT be coerced — they map
+    // to NULL so the dedup bucket and the IN-list ownership filter behave
+    // consistently with the route-level numeric typeof check.
+    await ErrorLogger.error("api", "Something failed", null, { monitorId: "not-a-number" });
+    expect(mockInsertValuesFn.mock.calls[0][0].monitorId).toBeNull();
+
+    vi.clearAllMocks();
+    mockInsertValuesFn.mockReturnValue({ onConflictDoUpdate: mockOnConflictDoUpdateFn });
+    mockDbInsert.mockReturnValue({ values: mockInsertValuesFn });
+
+    await ErrorLogger.error("api", "Plain message");
+    expect(mockInsertValuesFn.mock.calls[0][0].monitorId).toBeNull();
   });
 
   it("inserts new entry with correct fields for info level", async () => {

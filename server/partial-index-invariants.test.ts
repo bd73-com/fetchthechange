@@ -216,13 +216,15 @@ describe("error_logs_unresolved_dedup_idx predicate matches ErrorLogger upsert t
     expect(loggerPredicate).toBe(indexPredicate);
   });
 
-  it("schema index .on(...) and ErrorLogger target [...] both list exactly (level, source, message)", () => {
+  it("schema index .on(...) and ErrorLogger target [...] both list exactly (level, source, message, monitorId)", () => {
     // Match the exact .on(...) column list for the unresolved-dedup index.
     // If new columns are added or the order changes, the ErrorLogger upsert's
-    // `target: [errorLogs.level, errorLogs.source, errorLogs.message]` tuple
-    // must be updated in lockstep or Postgres rejects the conflict spec. We
-    // assert both sides match the canonical tuple AND each other, so schema-
-    // only or logger-only drift both fail the test.
+    // `target: [errorLogs.level, errorLogs.source, errorLogs.message, errorLogs.monitorId]`
+    // tuple must be updated in lockstep or Postgres rejects the conflict spec.
+    // We assert both sides match the canonical tuple AND each other, so
+    // schema-only or logger-only drift both fail the test. monitorId was
+    // added in #465 so per-monitor errors with shared messages get separate
+    // dedup buckets and the admin UI's per-user attribution works.
     const m = SCHEMA_SRC.match(
       /unresolvedDedupIdx[\s\S]*?\.on\(([^)]+)\)/,
     );
@@ -232,7 +234,7 @@ describe("error_logs_unresolved_dedup_idx predicate matches ErrorLogger upsert t
       .map((c) => c.trim().replace(/^table\./, ""))
       .filter(Boolean);
     const loggerColumns = extractLoggerConflictTargetColumns();
-    expect(schemaColumns).toEqual(["level", "source", "message"]);
+    expect(schemaColumns).toEqual(["level", "source", "message", "monitorId"]);
     expect(loggerColumns).toEqual(schemaColumns);
   });
 });

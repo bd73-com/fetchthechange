@@ -73,19 +73,22 @@ describe("ensureErrorLogColumns", () => {
     mockExecute.mockReset();
   });
 
-  it("executes ALTERs, pg_indexes check, dedup tx, and CONCURRENTLY index creation without throwing", async () => {
+  it("executes ALTERs, monitor_id backfill, pg_indexes check, dedup tx, and CONCURRENTLY index creation without throwing", async () => {
     // Default empty rows → no existing valid index, proceed to dedup + create.
     mockExecute.mockResolvedValue({ rows: [] });
     await ensureErrorLogColumns();
-    // 3 ALTER TABLE + 1 DO block (level CHECK) + 1 pg_indexes check + 4 in-tx
-    // (SET LOCAL, advisory lock, UPDATE, DELETE) + 1 CREATE UNIQUE INDEX
-    // CONCURRENTLY = 10
-    expect(mockExecute).toHaveBeenCalledTimes(10);
+    // 4 ALTER TABLE (incl. monitor_id from #465) + 1 UPDATE backfill + 1 DO
+    // block (level CHECK) + 1 pg_indexes check + 4 in-tx (SET LOCAL,
+    // advisory lock, UPDATE, DELETE) + 1 CREATE UNIQUE INDEX CONCURRENTLY
+    // (dedup) + 1 CREATE INDEX CONCURRENTLY (monitor_id) = 13
+    expect(mockExecute).toHaveBeenCalledTimes(13);
     const stmts = mockExecute.mock.calls.map(([arg]: any) => {
       try { return JSON.stringify(arg); } catch { return String(arg); }
     });
     expect(stmts.some((s: string) => s.includes("first_occurrence"))).toBe(true);
     expect(stmts.some((s: string) => s.includes("occurrence_count"))).toBe(true);
+    expect(stmts.some((s: string) => s.includes("monitor_id") && s.includes("ALTER TABLE error_logs"))).toBe(true);
+    expect(stmts.some((s: string) => s.includes("UPDATE error_logs") && s.includes("monitor_id"))).toBe(true);
     // Lock in the exact allowed-values tuple so an accidental widening or
     // narrowing of the level set is caught at CI rather than at runtime.
     expect(stmts.some((s: string) =>
@@ -96,25 +99,35 @@ describe("ensureErrorLogColumns", () => {
     )).toBe(true);
     expect(stmts.some((s: string) => s.includes("pg_indexes"))).toBe(true);
     expect(stmts.some((s: string) => s.includes("pg_advisory_xact_lock"))).toBe(true);
-    expect(stmts.some((s: string) => s.includes("CREATE UNIQUE INDEX") && s.includes("CONCURRENTLY") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(true);
+    expect(stmts.some((s: string) =>
+      s.includes("CREATE UNIQUE INDEX") &&
+      s.includes("CONCURRENTLY") &&
+      s.includes("error_logs_unresolved_dedup_idx") &&
+      s.includes("NULLS NOT DISTINCT")
+    )).toBe(true);
+    expect(stmts.some((s: string) => s.includes("error_logs_monitor_idx"))).toBe(true);
   });
 
   it("skips DDL entirely when a valid, unique, correctly-shaped index already exists", async () => {
-    // pg_indexes check returns a row that passes all three validity gates
-    // (indisvalid, indisunique, indexdef includes both the expected column
-    // tuple and the partial predicate) → fast-path return.
+    // pg_indexes check returns a row that passes all five validity gates
+    // (indisvalid, indisunique, indnullsnotdistinct, indexdef includes the
+    // four-column tuple including monitor_id, and the partial predicate)
+    // → fast-path return. See GitHub issues #448 and #465.
     mockExecute
       .mockResolvedValueOnce({ rows: [] }) // ALTER first_occurrence
       .mockResolvedValueOnce({ rows: [] }) // ALTER occurrence_count
       .mockResolvedValueOnce({ rows: [] }) // ALTER deleted_at
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitor_id
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE backfill
       .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
       .mockResolvedValueOnce({ rows: [{
         indisvalid: true,
         indisunique: true,
-        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message) WHERE (resolved = false)",
+        indnullsnotdistinct: true,
+        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message, monitor_id) NULLS NOT DISTINCT WHERE (resolved = false)",
       }] });
     await ensureErrorLogColumns();
-    expect(mockExecute).toHaveBeenCalledTimes(5); // ALTERs + CHECK DO block + pg_indexes only
+    expect(mockExecute).toHaveBeenCalledTimes(7); // ALTERs (4) + UPDATE backfill + DO block + pg_indexes
   });
 
   it("drops and rebuilds when existing index is INVALID", async () => {
@@ -123,11 +136,14 @@ describe("ensureErrorLogColumns", () => {
       .mockResolvedValueOnce({ rows: [] }) // ALTER first_occurrence
       .mockResolvedValueOnce({ rows: [] }) // ALTER occurrence_count
       .mockResolvedValueOnce({ rows: [] }) // ALTER deleted_at
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitor_id
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE backfill
       .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
       .mockResolvedValueOnce({ rows: [{
         indisvalid: false,
         indisunique: true,
-        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message) WHERE (resolved = false)",
+        indnullsnotdistinct: true,
+        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message, monitor_id) NULLS NOT DISTINCT WHERE (resolved = false)",
       }] })
       .mockResolvedValue({ rows: [] }); // DROP + tx statements + CREATE
     await ensureErrorLogColumns();
@@ -146,11 +162,14 @@ describe("ensureErrorLogColumns", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitor_id
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE backfill
       .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
       .mockResolvedValueOnce({ rows: [{
         indisvalid: true,
         indisunique: false, // ← the drift we're guarding against
-        indexdef: "CREATE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message) WHERE (resolved = false)",
+        indnullsnotdistinct: true,
+        indexdef: "CREATE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message, monitor_id) WHERE (resolved = false)",
       }] })
       .mockResolvedValue({ rows: [] });
     await ensureErrorLogColumns();
@@ -167,12 +186,43 @@ describe("ensureErrorLogColumns", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitor_id
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE backfill
       .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
       .mockResolvedValueOnce({ rows: [{
         indisvalid: true,
         indisunique: true,
-        // Wrong column tuple — missing message, no WHERE predicate.
-        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source)",
+        indnullsnotdistinct: true,
+        // Wrong column tuple — pre-#465 shape (missing monitor_id), no WHERE predicate.
+        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message)",
+      }] })
+      .mockResolvedValue({ rows: [] });
+    await ensureErrorLogColumns();
+    const stmts = mockExecute.mock.calls.map(([arg]: any) => {
+      try { return JSON.stringify(arg); } catch { return String(arg); }
+    });
+    expect(stmts.some((s: string) => s.includes("DROP INDEX") && s.includes("error_logs_unresolved_dedup_idx"))).toBe(true);
+    warnSpy.mockRestore();
+  });
+
+  it("drops and rebuilds when existing index lacks NULLS NOT DISTINCT (pre-#465 shape)", async () => {
+    // Without NULLS NOT DISTINCT, two system-level rows (monitor_id IS NULL)
+    // with identical (level, source, message) bypass the unique constraint
+    // and the upsert silently inserts duplicates. Indexes built before #465
+    // shipped won't have this flag set.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockExecute
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] }) // ALTER monitor_id
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE backfill
+      .mockResolvedValueOnce({ rows: [] }) // DO block level CHECK
+      .mockResolvedValueOnce({ rows: [{
+        indisvalid: true,
+        indisunique: true,
+        indnullsnotdistinct: false, // ← the drift we're guarding against
+        indexdef: "CREATE UNIQUE INDEX error_logs_unresolved_dedup_idx ON public.error_logs USING btree (level, source, message, monitor_id) WHERE (resolved = false)",
       }] })
       .mockResolvedValue({ rows: [] });
     await ensureErrorLogColumns();

@@ -91,6 +91,17 @@ export class ErrorLogger {
     const errorType = error?.constructor?.name || null;
     const logMsg = `${prefix} ${sanitizedMessage}`;
 
+    // Denormalize the monitorId out of context so admin error-log endpoints
+    // can filter ownership in SQL via the partial index on `monitor_id`
+    // instead of materializing every row and filtering JSON in JS. Only
+    // accept numeric values — string `monitorId` (e.g. "injected" sentinel)
+    // is treated as a system-level log so the dedup bucket and the IN-list
+    // join behave consistently. See GitHub issue #465.
+    const ctxMonitorId =
+      sanitizedContext && typeof (sanitizedContext as any).monitorId === "number"
+        ? (sanitizedContext as any).monitorId
+        : null;
+
     if (level === "error") {
       if (error?.message) {
         console.error(logMsg, sanitizeString(error.message));
@@ -130,12 +141,13 @@ export class ErrorLogger {
           errorType,
           stackTrace: sanitizedStack,
           context: sanitizedContext,
+          monitorId: ctxMonitorId,
           firstOccurrence: now,
           timestamp: now,
           occurrenceCount: 1,
         })
         .onConflictDoUpdate({
-          target: [errorLogs.level, errorLogs.source, errorLogs.message],
+          target: [errorLogs.level, errorLogs.source, errorLogs.message, errorLogs.monitorId],
           targetWhere: sql`resolved = false`,
           set: {
             timestamp: now,
