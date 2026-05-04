@@ -532,6 +532,24 @@ export async function ensureMonitorChangesIndexes(): Promise<void> {
 }
 
 /**
+ * Ensures the `campaigns.type` column exists. Added to shared/schema.ts when
+ * automated campaigns landed; pre-existing campaigns tables that were created
+ * before that change are missing the column, which makes both the welcome
+ * anti-join (`c.type = 'automated'` in resolveRecipients) and the
+ * campaigns_type_automated_idx partial-index bootstrap fail at runtime with
+ * `column "type" does not exist`. Must run before ensureCampaignPartialIndexes.
+ */
+export async function ensureCampaignTypeColumn(): Promise<boolean> {
+  try {
+    await db.execute(sql`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'manual'`);
+    return true;
+  } catch (e) {
+    console.error("Could not ensure campaigns.type column:", e);
+    return false;
+  }
+}
+
+/**
  * Ensures the partial indexes on `campaigns(id) WHERE type='automated'` and
  * `campaign_recipients(user_id, campaign_id) WHERE status IN (<active>)` exist
  * (PR #447). Without them, the welcome-exclusion anti-join in
