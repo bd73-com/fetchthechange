@@ -182,6 +182,7 @@ vi.mock("./services/ensureTables", () => ({
   ensureAutomationSubscriptionsTable: vi.fn().mockResolvedValue(true),
   ensureMonitorChangesIndexes: vi.fn().mockResolvedValue(undefined),
   ensureCampaignPartialIndexes: vi.fn().mockResolvedValue(undefined),
+  ensureCampaignTypeColumn: vi.fn().mockResolvedValue(true),
 }));
 
 // ---------------------------------------------------------------------------

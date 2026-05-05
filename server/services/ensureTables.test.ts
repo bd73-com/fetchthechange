@@ -24,7 +24,7 @@ vi.mock("../utils/encryption", () => ({
   isEncryptionAvailable: () => true,
 }));
 
-import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes } from "./ensureTables";
+import { ensureMonitorHealthColumns, ensureErrorLogColumns, ensureApiKeysTable, ensureChannelTables, ensureMonitorConditionsTable, ensureNotificationQueueColumns, ensureAutomatedCampaignConfigsTable, ensureMonitorPendingRetryColumn, ensureAutomationSubscriptionsTable, ensureMonitorChangesIndexes, ensureCampaignTypeColumn } from "./ensureTables";
 
 describe("ensureMonitorHealthColumns", () => {
   beforeEach(() => {
@@ -519,6 +519,42 @@ describe("ensureMonitorPendingRetryColumn", () => {
     await ensureMonitorPendingRetryColumn();
     expect(errorSpy).toHaveBeenCalledWith(
       "Could not ensure monitors.pending_retry_at column:",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
+});
+
+describe("ensureCampaignTypeColumn", () => {
+  beforeEach(() => {
+    mockExecute.mockReset();
+  });
+
+  it("executes 1 ALTER TABLE statement and returns true", async () => {
+    mockExecute.mockResolvedValue([]);
+    const result = await ensureCampaignTypeColumn();
+    expect(result).toBe(true);
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits idempotent ADD COLUMN IF NOT EXISTS DDL with default 'manual'", async () => {
+    mockExecute.mockResolvedValue([]);
+    await ensureCampaignTypeColumn();
+    const stmt = JSON.stringify(mockExecute.mock.calls[0][0]);
+    expect(stmt).toContain("ALTER TABLE campaigns");
+    expect(stmt).toContain("ADD COLUMN IF NOT EXISTS");
+    expect(stmt).toContain("type");
+    expect(stmt).toContain("'manual'");
+    expect(stmt).toContain("NOT NULL");
+  });
+
+  it("returns false and logs error when ALTER TABLE fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockExecute.mockRejectedValue(new Error("permission denied"));
+    const result = await ensureCampaignTypeColumn();
+    expect(result).toBe(false);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Could not ensure campaigns.type column:",
       expect.any(Error),
     );
     errorSpy.mockRestore();
